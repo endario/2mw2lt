@@ -29,52 +29,97 @@ Bare invocation and `--help` show usage without installing:
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" --help
 ```
 
-Run it with the Bash tool and let it run to the end. The person acts only where it pauses:
+Its pauses outlast a foreground command: it waits up to 30 minutes for the sign-in, 15 for the
+grant and 10 for a new team's silo. In Claude Code, run it with Bash `run_in_background: true` and
+read its output as it goes; you are told when it exits. In Codex, give the command a timeout of
+at least 60 minutes, or poll its running session for output until it exits. The person acts only
+where it pauses:
 
 - **`sign in`**: it prints a console address and a code, and opens the page. The person signs in
   there and approves.
 - **`github`**: it prints the workspace's desk address and opens it. The person chooses **Connect
   GitHub** in the account menu, which installs the 2mw2lt App on the repository or authorizes the
   existing installation. Only the team's owner, signed in with GitHub, has that item; anyone else
-  asks the owner to choose it.
+  asks the owner to choose it. A team that already holds an installation has no such item: the
+  engine then prints GitHub's page where the owner adds the repository to it.
 
-A team new to the platform prints a `team` line while its silo is made; that needs no one.
+A team new to the platform prints `team` lines while its silo is made, naming the host's state
+and the time waited; that needs no one. `waiting on the host's enrolment watcher` is still
+progress: tell the person, and keep waiting. A line ending `; retrying` is a console or door that
+did not answer; the engine asks again on its own.
 
 At each pause, tell the person in one line what to click, then keep waiting. The engine polls on
 its own and carries on once the grant lands. Do not ask the person to confirm they have done it.
 
-A run on a finished install signs nobody in and opens no page.
+A run on a finished install signs nobody in and opens no page. A run stopped after `machine`
+resumes at the grant, with no second sign-in.
 
 Its last line is a JSON object: `{workspace, door, port, tracks, tracks_missing}`.
 
 When it stops, its last line names the step and the remedy. Do what that line says, then run the
 engine again. These are the stops that need a person:
 
-- **`the team's silo was refused: …`**: the platform would not make the new team's silo. Tell
-  the person the reason, and stop: the operator settles it.
+- **`the team's silo was refused: …`**, **`the team's silo would not hold <repo>: …`**,
+  **`this team has no silo yet`** or **`this team's silo serves no workspace`**: the platform
+  will not make or use the team's silo. Tell the person the reason, and stop: the operator
+  settles it.
 - **`only the team's owner installs a repository`**: the person who signed in does not own the
   team. Someone who does must run the install.
+- **`you are in no team`**: the account that signed in belongs to no team. Tell the person,
+  and stop: they sign in with the account that owns the team, or the operator settles it.
+- **`you own no team by that id`**: `--team` named a team the person does not own. Run again
+  with an id from the `you own several teams` line, or without `--team`.
+- **`a new team's silo is made for a team of its one owner`**: a new team gets its silo only
+  while its owner is its one member. Stop: the operator settles it.
 - **`you own several teams; name one with --team: …`**: the line lists each team's id and name.
   Ask the person which team the repository belongs to, then run the engine again with
   `--team <id>`.
+- **`several GitHub logins can read <repository>; name one with --gh-account: …`**: this
+  machine's `gh` is signed in as more than one login that can read the repository. Ask the
+  person which login the workspace's workers act as, then run the engine again with
+  `--gh-account <login>`. The choice is recorded, so later runs need no flag.
+- **`the agent is started by launchd, and this machine runs …`**: only macOS installs here. A
+  Linux host is provisioned by the operator with `steering/host/provision-agent-host.sh`.
 
-The other stops, and what to do:
+Other stops, and what to do; one not listed here names its own remedy:
 
 - **`has no GitHub origin`**: the checkout names no `origin` on GitHub. Add it, then run again.
+- **`install the GitHub CLI (gh)`**: install `gh`, then run again.
+- **`gh is signed in to no GitHub account`**: run `gh auth login`, then run again.
+- **`no gh account can read <repository>`**: run `gh auth login` as a login that can.
+- **`<login> cannot read <repository>; name one of …`**: `--gh-account` named a login that cannot
+  read the repository. Run again with one of the logins the line names.
+- **`<checkout> is bound to <workspace>, which serves …`**: the checkout's origin moved away from
+  the repository its workspace serves. Run `install.py uninstall` here, then install again.
+- **`gh could not check whether <login> reads <repository> (…)`**: GitHub refused for a reason
+  other than the repository being unseen, such as SAML single sign-on or a rate limit. Run the
+  `gh api` the line names to see it, settle it, then run again.
+- **`<the console or door> at <address> did not answer (…)`**: the network or the platform is
+  down. Check the network, then run again.
+- **`the device token is not a live session`**: the sign-in lapsed mid-run. Run again.
 - **`sign-in ended: …`** or **`the sign-in code expired`**: the person denied the sign-in, or took
   over 30 minutes. Run again for a fresh code.
 - **`the team's silo is still being made`**: the new team's silo took over ten minutes to start.
   Run again: it waits on the same request.
-- **`the team's silo would not hold <repo>: …`**: the platform refused to add the repository.
-  Tell the person the answer that follows, and stop: the operator settles it.
 - **`the console would not admit this machine`**: enrolling the machine failed. Run again; if it
   repeats, the operator reads the console's log.
-- **`the agent release could not be installed: …`**: fetching or building the agent failed, and
-  the rest of the line says why. For `the agent needs uv`, install uv; otherwise read the error.
-- **`the agent is started by launchd, and this machine runs …`**: only macOS has a launcher yet.
+- **`this machine's credential was refused: …`**: the console would not exchange the secret it
+  just issued. Run again; if it repeats, give the operator the line.
+- **`the workspace's door answered <status> …`**: the door is up and erring. Run again; if it
+  repeats, give the operator the line.
+- **`the App does not reach <repository> yet`**: the grant took over 15 minutes. Run again once
+  the owner has chosen Connect GitHub or added the repository.
+- **`the workspace's door states no agent release`**: the operator deploys one.
+- **`the agent release could not be installed: …`** or **`the agent release's installer
+  failed: …`**: fetching, building or installing the agent failed, and the rest of the line says
+  why. For `the agent needs uv`, install uv; otherwise read the error.
+- **`127.0.0.1:<port> answers, but not as this machine's 2mw2lt agent`**: another program holds
+  the agent's port. Stop it, then run again.
 - **`the agent did not answer on 127.0.0.1:<port>`**: the machine's agent did not serve the
   workspace within a minute. Read `~/Library/Logs/2mw2lt/`; the workspace's `.env` must name the
   door its entry in `~/.config/2mw2lt/workspaces/` names.
+- **`stopped at <step>…`**: the run was interrupted, or a local file could not be written. Settle
+  what the line names, then run again: it resumes.
 
 If the `/device` page says `Invalid user code`, run the engine again for a fresh code. If it says
 `Too many requests`, wait a minute.
@@ -102,7 +147,10 @@ The workspace works without lanes, and its board says it has none yet. Give it l
    ```
 
 4. Show the person the lanes in a few lines each: the name, the outcome and the Not boundary.
-   Then ask with your question tool: accept, or say what to change. Revise until they accept.
+   Then ask with your question tool: accept, say what to change, or not now. Revise until they
+   accept. On not now, delete the drafted document, commit nothing, and go on to
+   [Connect](#3-connect): the board waits for a document at that path, and the next run of this
+   skill drafts the lanes again.
 5. Give the repository a canon when it has none: somewhere its decisions and lessons live. Set
    `index` in the tracks document to the repository's documentation index, or to
    `.2mw2lt/README.md` beside the tracks document when it has none. Unless the index already

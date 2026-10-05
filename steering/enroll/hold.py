@@ -450,22 +450,22 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                         if until:
                             return 0
             except urllib.error.HTTPError as e:
+                try:
+                    body = json.loads((e.read() or b"{}").decode(errors="replace"))
+                except ValueError:
+                    body = {}
+                if not isinstance(body, dict):
+                    body = {"refused": body}
+                why = body.get("refused")
                 if e.code == 403:
-                    try:
-                        body = json.loads((e.read() or b"{}").decode(errors="replace"))
-                    except ValueError:
-                        body = {}
-                    if not isinstance(body, dict):
-                        body = {"refused": body}
                     serves = f" The agent serves {body['serves']}." if body.get("serves") else ""
-                    why = body.get("refused")
                     print(f"refused 403{f': {why}' if why else ''}.{serves} "
                           f"nothing this loop retries will change that; run /2mw2lt:connect, "
                           f"then hold this stream again")
                     return 1
                 if not quiet:
-                    print(f"the stream at 127.0.0.1:{port} was refused {e.code}; reopening",
-                          file=sys.stderr)
+                    print(f"the stream at 127.0.0.1:{port} was refused {e.code}"
+                          f"{f': {why}' if why else ''}; reopening", file=sys.stderr)
                     quiet = True
             except Exception as e:
                 if not quiet:

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """`/2mw2lt:install`'s engine (doc 129): a repository becomes a working, observed workspace.
 
-    install.py [workspace] [--codex] [--team <id>]
+    install.py [workspace] [--codex] [--team <id>] [--gh-account <login>]
                                         install, or resume one half done; --codex writes no hooks;
-                                        --team names the team when the person owns several
+                                        --team names the team when the person owns several;
+                                        --gh-account names the workspace's GitHub login when
+                                        several signed-in logins can read the repository
     install.py uninstall [workspace]    remove what an install added here
     install.py uninstall --workspace    and have the platform retire the workspace too
 
@@ -15,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import getpass
+import http.client
 import json
 import os
 import platform
@@ -58,7 +61,12 @@ class Stop(SystemExit):
     """A step that cannot go on, and what the person does about it."""
 
 
+_at = ""  # the step last shown, which a stop names
+
+
 def say(step: str, text: str) -> None:
+    global _at
+    _at = step or _at
     print(f"{step:<10}  {text}", flush=True)
 
 
@@ -73,8 +81,43 @@ def platform_url() -> str:
 
 # --- HTTP, with the agent's own opener: no proxy, no redirect, a user agent Cloudflare admits
 
-def call(method: str, url: str, body: dict | None = None, token: str | None = None,
-         timeout: float = 60) -> tuple[int, dict]:
+TRANSIENT = frozenset({502, 503, 504})  # a gateway's answer while what is behind it restarts
+
+
+class Unanswered(Exception):
+    """The console or a door did not answer, or a gateway answered for it: worth asking again."""
+
+    def __init__(self, reason: str, after: float | None = None):
+        super().__init__(reason)
+        self.after = after
+
+
+def _who(url: str) -> str:
+    return "the console" if url.startswith(f"{platform_url()}/api/") else "the workspace's door"
+
+
+def _origin(url: str) -> str:
+    parts = urllib.parse.urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+def _reason(e: BaseException) -> str:
+    r = getattr(e, "reason", e)
+    if isinstance(r, (TimeoutError, socket.timeout)):
+        return "timeout"
+    return str(getattr(r, "strerror", None) or r) or type(r).__name__
+
+
+def _retry_after(headers) -> float | None:
+    try:
+        return max(0.0, float(headers.get("Retry-After"))) if headers is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def ask(method: str, url: str, body: dict | None = None, token: str | None = None,
+        timeout: float = 60) -> tuple[int, dict]:
+    """One request and its answer; `Unanswered` when nothing answered or a gateway answered."""
     req = urllib.request.Request(url, method=method,
                                  data=json.dumps(body).encode() if body is not None else None,
                                  headers={"Content-Type": "application/json", "Accept": "application/json"})
@@ -82,14 +125,57 @@ def call(method: str, url: str, body: dict | None = None, token: str | None = No
         req.add_header("Authorization", f"Bearer {token}")
     try:
         with door_mod.send(req, timeout) as r:
-            return r.status, json.loads(r.read() or b"{}")
+            status, raw = r.status, r.read()
     except urllib.error.HTTPError as e:
         try:
-            return e.code, json.loads(e.read() or b"{}")
+            got = json.loads(e.read() or b"{}")
         except ValueError:
-            return e.code, {}
-    except (urllib.error.URLError, OSError) as e:
-        raise Stop(f"{url} did not answer: {e}") from None
+            got = {}
+        # A gateway's 502-504 carries no reason of its own; the console's own refusal does.
+        if e.code in TRANSIENT and not (isinstance(got, dict) and got.get("error")):
+            raise Unanswered(str(e.code), _retry_after(e.headers)) from None
+        return e.code, got if isinstance(got, dict) else {}
+    except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException) as e:
+        raise Unanswered(_reason(e)) from None
+    except OSError as e:  # `door.send` refusing a credential it holds and cannot use
+        raise Stop(f"{_who(url)} at {_origin(url)} was not asked: {e}; run install again to admit "
+                   "this machine afresh") from None
+    try:
+        got = json.loads(raw or b"{}")
+    except ValueError:
+        got = None
+    if not isinstance(got, dict):
+        raise Stop(f"{_who(url)} at {_origin(url)} answered {status} with something that is not a JSON object; "
+                   "run install again, or ask the operator if it repeats")
+    return status, got
+
+
+def call(method: str, url: str, body: dict | None = None, token: str | None = None,
+         timeout: float = 60) -> tuple[int, dict]:
+    """A request outside any wait: one that goes unanswered stops the run."""
+    try:
+        return ask(method, url, body, token, timeout)
+    except Unanswered as e:
+        raise Stop(f"{_who(url)} at {_origin(url)} did not answer ({e}); "
+                   "check the network, then run install again") from None
+
+
+def waited(method: str, url: str, deadline: float, body: dict | None = None,
+           token: str | None = None) -> tuple[int, dict]:
+    """A request inside a wait: one that goes unanswered is asked again, with backoff, until
+    `deadline`, and each retry is shown rather than ending the run."""
+    delay = POLL
+    while True:
+        try:
+            return ask(method, url, body, token)
+        except Unanswered as e:
+            pause = max(delay, e.after or 0)
+            if time.monotonic() + pause > deadline:
+                raise Stop(f"{_who(url)} at {_origin(url)} did not answer ({e}); "
+                           "check the network, then run install again") from None
+            say("", f"{_who(url)} did not answer ({e}); retrying")
+            time.sleep(pause)
+            delay = min(delay * 2, 60.0)
 
 
 def open_page(url: str) -> None:
@@ -139,8 +225,8 @@ def sign_in(console: str, repo: str, label: str) -> str:
     interval, deadline = float(got.get("interval") or POLL), time.monotonic() + float(got.get("expires_in") or 1800)
     while time.monotonic() < deadline:
         time.sleep(interval)
-        status, answer = call("POST", f"{console}/api/auth/device/token",
-                              {"grant_type": DEVICE_GRANT, "device_code": got["device_code"], "client_id": CLIENT})
+        status, answer = waited("POST", f"{console}/api/auth/device/token", deadline,
+                                {"grant_type": DEVICE_GRANT, "device_code": got["device_code"], "client_id": CLIENT})
         if status == 200 and answer.get("access_token"):
             return answer["access_token"]
         error = answer.get("error")
@@ -151,27 +237,36 @@ def sign_in(console: str, repo: str, label: str) -> str:
     raise Stop("the sign-in code expired; run this again")
 
 
+HOST_STATES = {"pending": "waiting for the host to allocate it", "allocated": "starting the silo"}
+WATCHER = 120.0  # how long a request may sit pending before the host's watcher is the likely cause
+
+
 def workspace(console: str, token: str, repo: str, source: str, team: str | None = None) -> dict:
     """The workspace for `repo`. A team with no silo is enrolled first: the console answers
     `enrolling` until its silo serves, and the same request is asked again until then."""
     body = {"repo": repo, "tracks_source": source, **({"team": team} if team else {})}
-    told, deadline = False, time.monotonic() + ENROLMENT
+    start = time.monotonic()
+    deadline, shown, told, watched = start + ENROLMENT, None, -60.0, False
     while True:
-        status, got = call("POST", f"{console}/api/install/workspace", body, token)
+        status, got = waited("POST", f"{console}/api/install/workspace", deadline, body, token)
         if status != 200:
-            if told:
-                print(flush=True)
             raise Stop(f"the console would not make the workspace ({status}): {got.get('error') or got}")
         enrolling = got.get("enrolling")
         if not isinstance(enrolling, dict):
-            if told:
-                print(" ready", flush=True)
+            if shown is not None:
+                say("team", "its silo is ready")
             return got
-        if not told:
-            print(f"{'team':<10}  {enrolling.get('team')} is new here; making its silo…", end="", flush=True)
-            told = True
+        state, waited_for = enrolling.get("state"), time.monotonic() - start
+        if state != shown or waited_for - told >= 60:
+            say("team", f"{enrolling.get('team')} is new here; {HOST_STATES.get(state, state)} "
+                        f"({int(waited_for) // 60}m{int(waited_for) % 60:02d}s)")
+            shown, told = state, waited_for
+        since = enrolling.get("since")
+        if (not watched and state == "pending" and isinstance(since, (int, float))
+                and time.time() - since > WATCHER):
+            say("", "waiting on the host's enrolment watcher; if this lasts, ask the operator")
+            watched = True
         if time.monotonic() > deadline:
-            print(flush=True)
             raise Stop("the team's silo is still being made; run this again to wait for it")
         time.sleep(POLL)
 
@@ -220,34 +315,39 @@ def admit_machine(console: str, token: str, door: str, wid: str, label: str) -> 
         raise Stop(f"this machine's credential was refused: {e}") from None
 
 
-def admitted(door: str) -> bool:
-    """Whether this machine holds a credential the door takes for this workspace."""
+def authorities(door: str) -> dict | None:
+    """The door's authorities view on this machine's credential, or None when this machine is not
+    admitted to the workspace: it holds no credential for the door, or the door refuses it."""
     try:
         if not credential.for_url(f"{door}/steering/authorities"):
-            return False
-    except credential.NoCredential:
-        return False
-    try:
-        status, _ = call("GET", f"{door}/steering/authorities")
-    except Stop:
-        return False
-    return status == 200
-
-
-def serves(door: str) -> str | None:
-    """The repository the door's workspace serves, as its authorities view names it."""
-    try:
-        status, got = call("GET", f"{door}/steering/authorities")
-    except Stop:
+            return None
+    except credential.NoCredential as e:
+        say("machine", f"this machine's credential is not usable ({e}); admitting it again")
         return None
-    rows = got.get("authorities") if status == 200 and isinstance(got, dict) else None
+    status, got = call("GET", f"{door}/steering/authorities")
+    if status in (401, 403):
+        say("machine", f"the workspace's door refused this machine ({status}); admitting it again")
+        return None
+    if status != 200:
+        raise Stop(f"the workspace's door answered {status} for its authorities: {got.get('error') or got}; "
+                   "run install again, or ask the operator if it repeats")
+    return got
+
+
+def serves(view: dict) -> str | None:
+    """The repository the door's workspace serves, as its authorities view names it."""
+    rows = view.get("authorities")
     return rows[0].get("repo") if isinstance(rows, list) and len(rows) == 1 and isinstance(rows[0], dict) else None
 
 
-def reach(door: str) -> dict:
-    status, got = call("GET", f"{door}/api/v1/forge")
+def reach(door: str, deadline: float | None = None) -> dict:
+    """Whether the App reaches the workspace's repository; a door that does not answer is waited
+    through until `deadline`, a minute when no wait names one."""
+    url = f"{door}/api/v1/forge"
+    status, got = waited("GET", url, deadline if deadline is not None else time.monotonic() + 60)
     if status != 200:
-        raise Stop(f"the platform could not say whether the App reaches the repository ({status}): {got}")
+        raise Stop(f"the platform could not say whether the App reaches the repository ({status}): "
+                   f"{got.get('error') or got}; run install again, or ask the operator if it repeats")
     return got
 
 
@@ -262,9 +362,13 @@ def wait_for_grant(door: str, got: dict, repo: str, console: str, authority: str
     say("", f"open {desk}")
     say("", "and choose Connect GitHub in the account menu (opened in your browser; waiting…)")
     say("", "only the team's owner, signed in with GitHub, has it: anyone else asks them to")
+    if isinstance(got.get("grant"), str):
+        # The desk offers Connect GitHub only to a team holding no installation; one that holds
+        # an installation adds the repository to it on GitHub's own page.
+        say("", f"no Connect GitHub there means the team's App is installed: add {repo} to it at {got['grant']}")
     open_page(desk)
     deadline = time.monotonic() + GRANT
-    while not (got := reach(door)).get("covered"):
+    while not (got := reach(door, deadline)).get("covered"):
         if time.monotonic() >= deadline:
             raise Stop(f"the App does not reach {repo} yet: the team's owner, signed in with GitHub, chooses "
                        f"Connect GitHub on {desk}; then run this again")
@@ -273,14 +377,29 @@ def wait_for_grant(door: str, got: dict, repo: str, console: str, authority: str
 
 
 def agent_answers(port: int, root: Path) -> bool:
-    """Whether the agent on `port` serves this workspace, among however many it serves."""
+    """Whether the agent on `port` serves this workspace, among however many it serves; False
+    when nothing listens there. Anything else on the port is a stop naming what answered."""
     try:
         req = urllib.request.Request(f"http://127.0.0.1:{port}/status")
         with door_mod.send(req, 3) as r:
-            served = json.loads(r.read() or b"{}").get("workspaces") or []
-        return any(Path(w).resolve() == root.resolve() for w in served)
-    except (OSError, ValueError, urllib.error.URLError):
-        return False
+            served = json.loads(r.read() or b"{}").get("workspaces")
+    except urllib.error.HTTPError as e:
+        raise Stop(f"127.0.0.1:{port} answered {e.code} to /status, which this machine's 2mw2lt agent "
+                   f"does not; stop what holds the port, then run install again") from None
+    except urllib.error.URLError as e:
+        if isinstance(e.reason, ConnectionRefusedError):
+            return False
+        raise Stop(f"the agent on 127.0.0.1:{port} did not answer ({_reason(e)}); "
+                   "its log is under ~/Library/Logs/2mw2lt/") from None
+    except (TimeoutError, ConnectionError, http.client.HTTPException) as e:
+        raise Stop(f"the agent on 127.0.0.1:{port} did not answer ({_reason(e)}); "
+                   "its log is under ~/Library/Logs/2mw2lt/") from None
+    except (ValueError, AttributeError):
+        served = None
+    if not isinstance(served, list):
+        raise Stop(f"127.0.0.1:{port} answers, but not as this machine's 2mw2lt agent; "
+                   "stop what holds the port, then run install again")
+    return any(Path(w).resolve() == root.resolve() for w in served)
 
 
 def machine_port() -> int:
@@ -306,7 +425,8 @@ def release(door: str) -> Path:
     if status == 404:
         raise Stop("the workspace's door states no agent release; ask its operator to deploy one")
     if status != 200 or not selfupdate.valid(target):
-        raise Stop(f"the workspace's door answered {status} for its agent release")
+        raise Stop(f"the workspace's door answered {status} for its agent release; run install again, "
+                   "or ask the operator if it repeats")
     base = agentjob.root(Path.home())
     found = selfupdate.built(base, target["sha"])
     if found is None:
@@ -369,72 +489,89 @@ def ensure_agent(root: Path, authority: str, door: str) -> int:
         write_agent_port(root, str(port))
         return port
     if platform.system() != "Darwin":
-        raise Stop(f"the agent is started by launchd, and this machine runs {platform.system()}; "
-                   f"only macOS is supported so far")
+        raise unsupported()
     # The job is written by the installer of the release it runs, not by this plugin's copy.
     run_installer(release(door), root, door, port)
     write_agent_port(root, str(port))
     end = time.monotonic() + 60
-    while not agent_answers(port, root):
+    while True:
+        try:
+            if agent_answers(port, root):
+                return port
+            why = None
+        except Stop as e:  # an agent starting up may drop a connection before it serves
+            why = e
         if time.monotonic() > end:
-            raise Stop(f"the agent did not answer on 127.0.0.1:{port}; its log is under ~/Library/Logs/2mw2lt/")
+            raise why or Stop(f"the agent did not answer on 127.0.0.1:{port}; its log is under ~/Library/Logs/2mw2lt/")
         time.sleep(1)
-    return port
 
 
-def wire(root: Path, door: str, authority: str, codex: bool = False) -> None:
-    """`STEERING_DOOR`, the workspace's id and Claude's hook pack; nothing else local. Codex runs
-    no hooks: its sessions share only the enrolment tokens' directory."""
-    import hooks
+def unsupported() -> Stop:
+    return Stop(f"the agent is started by launchd, and this machine runs {platform.system()}; only macOS "
+                "installs here. A Linux host is provisioned with steering/host/provision-agent-host.sh")
+
+
+def record(root: Path, door: str, authority: str) -> None:
+    """`STEERING_DOOR` and the workspace's id, written once the machine is admitted, so a run
+    stopped after that resumes there rather than signing in and admitting it again."""
     env = root / ".env"
     lines = env.read_text().splitlines() if env.exists() else []
     lines = [line for line in lines if not line.startswith("STEERING_DOOR=")] + [f"STEERING_DOOR={door}"]
     spool.write_atomic(env, "\n".join(lines) + "\n", mode=0o600)
     checkout_binding.bind(root, authority)
     os.environ["STEERING_DOOR"] = door
+
+
+def wire(root: Path, door: str, authority: str, codex: bool = False) -> None:
+    """The door and id `record` writes, and Claude's hook pack; nothing else local. Codex runs
+    no hooks: its sessions share only the enrolment tokens' directory."""
+    import hooks
+    record(root, door, authority)
     if codex:
         hooks.tokens_directory(root)
     else:
         hooks.hooks_install(root, local=False, workspace_id=authority)
 
 
-def github_account(root: Path, repo: str) -> str:
+def github_account(root: Path, repo: str, chosen: str | None = None) -> str:
     try:
         names = ghauth.readable_accounts(repo)
     except ghauth.NoIdentity as e:
         raise Stop(str(e)) from None
     if not names:
         raise Stop(f"no gh account can read {repo}; run `gh auth login` with an account that can, then install again")
+    if chosen is not None:
+        if chosen not in names:
+            raise Stop(f"{chosen} cannot read {repo}; name one of {', '.join(names)} with --gh-account")
+        return chosen
     held = machine_workspaces.at(root)
     if held and held.gh_account in names:
         return held.gh_account
     if len(names) == 1:
         return names[0]
-    say("github", f"accounts that can read {repo}: {', '.join(names)}")
-    try:
-        name = input("GitHub login for this workspace: ").strip()
-    except (EOFError, KeyboardInterrupt):
-        raise Stop("choose a GitHub login in a terminal, then run install again") from None
-    if name not in names:
-        raise Stop(f"choose one of {', '.join(names)}, then run install again")
-    return name
+    # The engine runs under an agent's shell, where no prompt can be answered.
+    raise Stop(f"several GitHub logins can read {repo}; name one with --gh-account: {', '.join(names)}")
 
 
-def install(root: Path, codex: bool = False, team: str | None = None) -> int:
+def install(root: Path, codex: bool = False, team: str | None = None,
+            gh_account: str | None = None) -> int:
     console = platform_url()
     repo = repository(root)
     say("repository", repo)
-    name = github_account(root, repo)
+    if platform.system() != "Darwin" and not agent_answers(machine_port(), root):
+        raise unsupported()
+    name = github_account(root, repo, gh_account)
     label = f"{socket.gethostname().split('.')[0]} as {getpass.getuser()}"
     bound = checkout_binding.id_at(root)
     door = recorded_door(root, bound) if bound else None
     got: dict | None = None
-    if door and admitted(door) and (other := serves(door)) != repo:
+    view = authorities(door) if door else None
+    if view is not None and (other := serves(view)) != repo:
         # Before any write: a checkout whose origin moved would otherwise keep reporting to the
         # workspace of the repository it came from (#2618).
         raise Stop(f"{root} is bound to {bound}, which serves {other or 'no repository it names'}, and its "
                    f"origin is {repo}; run `install.py uninstall` here, then install again")
-    if not (door and admitted(door)):
+    if view is None:
         source = tracks_source(root, repo)
         token = sign_in(console, repo, label)
         try:
@@ -443,8 +580,12 @@ def install(root: Path, codex: bool = False, team: str | None = None) -> int:
             if not isinstance(authority, str):
                 raise Stop("the workspace answer carried no id")
             door = checked_door(got.get("door"), authority)
+            for step, said in (("signed in", got.get("user")), ("team", got.get("team"))):
+                if isinstance(said, str):
+                    say(step, said)
             say("workspace", f"{authority} {'created' if got.get('created') else 'found'}")
             admit_machine(console, token, door, authority, label)
+            record(root, door, authority)
             say("machine", f"this machine is admitted to {authority}")
         finally:
             end_session(console, token)
@@ -522,6 +663,7 @@ def main(argv: list[str]) -> int:
     retire = False
     codex = False
     team = None
+    gh_account = None
     paths: list[str] = []
     i = 0
     while i < len(args):
@@ -542,10 +684,18 @@ def main(argv: list[str]) -> int:
             if team is not None:
                 return verb_help.error("install", "team may appear once")
             team = args[i + 1]; i += 2; continue
+        if arg == "--gh-account":
+            if action != "install":
+                return verb_help.error("install", "--gh-account is only for install")
+            if i + 1 >= len(args) or args[i + 1].startswith("-"):
+                return verb_help.error("install", "missing gh-account value")
+            if gh_account is not None:
+                return verb_help.error("install", "gh-account may appear once")
+            gh_account = args[i + 1]; i += 2; continue
         if arg.startswith("-"):
             return verb_help.error("install", f"unknown option {arg!r}")
         paths.append(arg); i += 1
-    if action == "uninstall" and (codex or team is not None):
+    if action == "uninstall" and (codex or team is not None or gh_account is not None):
         return verb_help.error("install", "uninstall does not accept install options")
     if len(paths) > 1:
         return verb_help.error("install", "too many workspace paths")
@@ -562,7 +712,19 @@ def main(argv: list[str]) -> int:
         # sibling's hooks and door (#3431).
         raise Stop(f"{anchor} is a linked worktree; {action} acts on the checkout its worktrees "
                    f"share, so run it from {root}")
-    return uninstall(root, retire) if action == "uninstall" else install(root, codex, team)
+    global _at
+    _at = ""
+    try:
+        return uninstall(root, retire) if action == "uninstall" else install(root, codex, team, gh_account)
+    except KeyboardInterrupt:
+        raise Stop(f"stopped at {_at or action}; run {action} again to resume") from None
+    except subprocess.TimeoutExpired as e:
+        raise Stop(f"stopped at {_at or action}: {Path(str(e.cmd[0])).name} did not answer in "
+                   f"{e.timeout:g}s; run {action} again") from None
+    except OSError as e:
+        where = f" ({e.filename})" if e.filename else ""
+        raise Stop(f"stopped at {_at or action}: {e.strerror or e}{where}; "
+                   f"fix that, then run {action} again") from None
 
 
 if __name__ == "__main__":

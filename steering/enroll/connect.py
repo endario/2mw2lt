@@ -164,7 +164,7 @@ def own_enrolment(ws: Path, psession: str, session: str | None = None) -> tuple[
     if session and name in known and not minted_for and len(known) > 1:
         # Stored by hand, with nothing saying whose it is, beside records that are somebody's.
         raise Refused(f"{name} was stored without the session it belongs to, so nothing shows it is "
-                      f"yours: store it again with ack.py --store {name} <token> --provider-session <id>")
+                      f"yours: store it again with ack.py --store {name} --provider-session <id>, the token on stdin")
     if name is None:
         if len(known) == 1:
             name = next(iter(known))
@@ -491,13 +491,20 @@ def plugin_line(provider: str | None, mine_file: Path = HERE.parent.parent / "ve
         mine = mine_file.read_text().strip()
     except OSError:
         return None
+    # After a bind that succeeded, a failed comparison must not read as a failed connect, nor
+    # as a plugin that is current: it names why it could not compare.
     try:
         code, body = door.get("/steering/authorities", timeout=5)
         release = json.loads(body).get("release") if code == 200 else None
-    except Exception:  # after a bind that succeeded: a failed comparison must not read as a failed connect
-        release = None
+        why = None if code == 200 else f"the door answered {code}"
+    except Exception as e:
+        release, why = None, f"{type(e).__name__}: {e}"
     a, b = _release(mine), _release(str(release or ""))
-    if a is not None and b is not None and a < b:
+    if a is None or b is None:
+        why = why or ("the door names no release" if release is None
+                      else f"cannot read {(mine if a is None else release)!r} as a release")
+        return f"plugin: {mine} (could not compare with the release: {why})"
+    if a < b:
         fix = UPDATE.get(provider or "")
         return (f"plugin: {mine} is behind the orchestrator's {release}"
                 + (f"; update it: {fix}" if fix else ""))
@@ -531,7 +538,7 @@ def main(argv: list[str]) -> int:
         wired = any(hooks.wired_by(entry)
                     for entries in settings.get("hooks", {}).values() for entry in entries)
         if not wired:
-            print(f"this workspace has no observe hook; run python3 {HERE / 'hooks.py'} install {ws}",
+            print(f"this workspace has no observe hook; run /2mw2lt:install in {ws} to wire it",
                   file=sys.stderr)
             return 1
     try:

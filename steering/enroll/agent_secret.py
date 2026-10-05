@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""`agent_secret.py <console> <secret>`: enrol this OS user on this machine for the workspace's
-remote door, with the secret the owner was shown once by `pnpm enrol-agent` (doc 85 §3).
+"""`agent_secret.py <console>`: enrol this OS user on this machine for the workspace's remote door,
+with the secret the owner was shown once by `pnpm enrol-agent` (doc 85 §3).
 
-`agent_secret.py --review-host <console> <door base> <secret>`: declare this OS user a review host
-for its team, with the secret `pnpm enrol-review-host` showed once (doc 136 §5). Its agent then
-serves every workspace of the team for gates, from any directory.
+`agent_secret.py --review-host <console> <door base>`: declare this OS user a review host for its
+team, with the secret `pnpm enrol-review-host` showed once (doc 136 §5). Its agent then serves
+every workspace of the team for gates, from any directory.
+
+Either way the secret is one line on stdin, never an argument.
 
 It states this machine's hardware (doc 143 §2) and this OS user's node at the first exchange, and
 the console fixes the pair to the secret. From then on the agent and the door scripts present a
@@ -22,6 +24,7 @@ sys.path.insert(0, str(HERE))
 import credential  # noqa: E402
 import verb_help  # noqa: E402
 from door import door  # noqa: E402
+from secret_input import read_secret  # noqa: E402
 
 
 def review_host(console: str, door_base: str, secret: str) -> int:
@@ -46,10 +49,11 @@ def main(argv: list[str]) -> int:
     args = argv[1:] if review else argv
     if any(arg.startswith("-") for arg in args):
         return verb_help.error("agent_secret", "unknown option; only --review-host is supported")
-    if len(args) != (3 if review else 2):
-        return verb_help.error("agent_secret", "--review-host requires console, door base and secret" if review
-                               else "enrollment requires console and secret")
-    urls = zip(("console", "door base"), args[:2]) if review else [("console", args[0])]
+    if len(args) != (2 if review else 1):
+        return verb_help.error("agent_secret", "--review-host requires console and door base, and the "
+                               "secret on stdin" if review else "enrollment requires the console, and "
+                               "the secret on stdin")
+    urls = zip(("console", "door base"), args)
     for label, value in urls:
         try:
             parsed = urllib.parse.urlsplit(value)
@@ -58,19 +62,21 @@ def main(argv: list[str]) -> int:
             valid = False
         if not valid:
             return verb_help.error("agent_secret", f"{label} requires an http or https URL with a host")
-    if not args[-1].strip():
-        return verb_help.error("agent_secret", "missing secret")
+    if not review:
+        base, remote = door()
+        if not remote:
+            print(f"this workspace's door is {base}, on this machine; a credential is for a remote door. "
+                  "Local doors need no agent credential; for remote enrollment, set this workspace's "
+                  "STEERING_DOOR to its remote door and run again.", file=sys.stderr)
+            print(verb_help.script_help("agent_secret", topic="secret"), file=sys.stderr)
+            return 1
+    secret = read_secret("secret: ")
+    if not secret:
+        return verb_help.error("agent_secret", "missing secret: it is read from stdin")
     if review:
-        return review_host(*args)
-    base, remote = door()
-    if not remote:
-        print(f"this workspace's door is {base}, on this machine; a credential is for a remote door. "
-              "Local doors need no agent credential; for remote enrollment, set this workspace's "
-              "STEERING_DOOR to its remote door and run again.", file=sys.stderr)
-        print(verb_help.script_help("agent_secret", topic="secret"), file=sys.stderr)
-        return 1
+        return review_host(*args, secret)
     try:
-        d = credential.enrol(base, argv[0], argv[1])
+        d = credential.enrol(base, args[0], secret)
     except credential.NoCredential as e:
         print(f"not enrolled: {e}", file=sys.stderr)
         return 1

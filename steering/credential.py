@@ -26,7 +26,12 @@ HEADER = "X-Steering-Agent-Credential"   # the door's `principal.AGENT_HEADER`
 
 class NoCredential(Exception):
     """This pair is enrolled and has no usable credential. The request is not sent: sent bare
-    it would reach whois and succeed, and the broken renewal would say nothing (doc 85 §3)."""
+    it would reach whois and succeed, and the broken renewal would say nothing (doc 85 §3).
+    `status` is the console's, when it answered with a refusal."""
+
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
 
 
 def home() -> Path:
@@ -97,7 +102,7 @@ def post(console: str, path: str, body: dict, timeout: float = 10.0) -> dict:
             got = json.loads(r.read())
     except urllib.error.HTTPError as e:
         why = e.read().decode(errors="replace")[:200]
-        raise NoCredential(f"the console refused {path} ({e.code}): {why}")
+        raise NoCredential(f"the console refused {path} ({e.code}): {why}", e.code)
     except (urllib.error.URLError, OSError, ValueError) as e:
         raise NoCredential(f"the console did not answer {path}: {e}")
     if not isinstance(got, dict):

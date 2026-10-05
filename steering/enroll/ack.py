@@ -66,6 +66,7 @@ def minted_for(ws: Path, provider_session: object) -> str | None:
     return mine[0]["token"] if mine else None
 
 
+from secret_input import read_secret  # noqa: E402
 from verb_help import error, help_requested, script_help  # noqa: E402
 
 
@@ -74,16 +75,18 @@ def main(argv: list[str]) -> int:
         print(script_help("ack", topic=argv[0] if len(argv) == 2 else None))
         return 0
     if argv[:1] == ["--store"]:
-        if not (len(argv) == 3 or (len(argv) == 5 and argv[3] == "--provider-session")):
-            return error("ack", "--store requires a session and token, with optional --provider-session <id>")
+        if not (len(argv) == 2 or (len(argv) == 4 and argv[2] == "--provider-session")):
+            return error("ack", "--store requires a session, with optional --provider-session <id>, "
+                         "and the token on stdin")
         if not valid_token(argv[1]) or argv[1].startswith("-"):
             return error("ack", "--store requires a session name")
-        if not valid_token(argv[2]):
-            return error("ack", "--store requires a non-whitespace token read from the enrol reply")
-        if len(argv) == 5 and (not valid_token(argv[4]) or argv[4].startswith("-")):
+        if len(argv) == 4 and (not valid_token(argv[3]) or argv[3].startswith("-")):
             return error("ack", "--provider-session requires an id")
+        token = read_secret("token: ")
+        if not valid_token(token):
+            return error("ack", "--store requires a non-whitespace token on stdin, read from the enrol reply")
         ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
-        print(f"stored: {store(ws, argv[1], argv[2], argv[4] if len(argv) == 5 else None)}"); return 0
+        print(f"stored: {store(ws, argv[1], token, argv[3] if len(argv) == 4 else None)}"); return 0
     if len(argv) != 2:
         return error("ack", "ack requires a session and directive id")
     if any(arg.startswith("-") for arg in argv):

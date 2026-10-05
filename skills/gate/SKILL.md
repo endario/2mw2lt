@@ -98,6 +98,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> carry <pr
 It is refused for a rebase, a resolved conflict, or a commit this checkout did not make: commission
 a round instead. A docs-only pull request needs a review too, since a critique sets no status.
 
+When the answer is lost, the carry says it may have landed: send the same command again with the
+`--retry=<id>` it printed, and the door answers from its record rather than carrying twice.
+
 Discovered the artifact a round is running against is wrong before it answers? Withdraw it —
 this succeeds only while the run is still out, refused as too late otherwise:
 

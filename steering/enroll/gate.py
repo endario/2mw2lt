@@ -18,13 +18,17 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 from bind import Refused  # noqa: E402
 from connect import branch, head, speaker_flags, speaking_as  # noqa: E402
-from door import display_reply, occurrence, remote, retry_args, say  # noqa: E402
+from door import UNSENT, display_reply, occurrence, outcome, remote, retry_args, say  # noqa: E402
 import requestlog  # noqa: E402
 from local_workspace import origin_slug, required_workspace_root  # noqa: E402
 
 # A client that gives up before the daemon has pinned sends the line again, and a commission it
 # was told failed may stand.
 PIN_WAIT = 330.0
+# The other gate verbs read GitHub or wait on the mirror's lock on the daemon's side, so they are
+# given longer than a plain verb's send: a client that gives up first reports a write that landed
+# as one that failed.
+VERB_WAIT = 60.0
 # A reflog subject that records a commit this checkout made, rather than one it was handed by a
 # fetch, a fast-forward or a reset. `HEAD`'s reflog holds each rebase step; a branch's, only the tip.
 # A merge that needed resolving (`commit (merge)`) is unreviewed code and takes a round (doc 08).
@@ -100,12 +104,12 @@ def main(argv: list[str]) -> int:
             return error("gate", f"gate {kind} requires a commission id")
     if not what or what.startswith("-") or re.search(r"\s", what):
         return error("gate", f"gate {kind} requires its argument")
-    if retry_id is not None and kind not in ("review", "critic"):
+    if retry_id is not None and kind not in ("review", "critic", "carry"):
         return error("gate", f"gate {kind} does not take --retry=<id>")
     if extra and kind not in ("review", "critic"):
         return error("gate", f"gate {kind} does not take commission flags")
     if kind == "carry":
-        return carry(session, flags, what.lstrip("#"))
+        return carry(session, flags, what.lstrip("#"), retry_id)
     if kind in ("status", "cancel", "pr"):
         # A harness that holds no stream is never told how its gate ended; it asks (#1405).
         # A cancel needs no stream either, and is answered synchronously the same way (doc 98).
@@ -116,7 +120,7 @@ def main(argv: list[str]) -> int:
             print(str(why), file=sys.stderr)
             return 1
         # `pr` asks what was ever commissioned for a pull request, by any session here (#1986).
-        reply = say(f"gate: {kind} {what.lstrip('#') if kind == 'pr' else what} token {token}")
+        reply = say(f"gate: {kind} {what.lstrip('#') if kind == 'pr' else what} token {token}", timeout=VERB_WAIT)
         print(reply)
         return 1 if reply.startswith("REJECTED") else 0
     ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
@@ -171,7 +175,7 @@ def _git(here: Path, *args: str) -> str:
     return p.stdout.strip() if p.returncode == 0 else ""
 
 
-def carry(session: str, flags, pr: str) -> int:
+def carry(session: str, flags, pr: str, retry_id: str | None = None) -> int:
     """Carry the newest pass on `pr` to this checkout's `HEAD` (doc 162 §3). Sent only when every
     commit after the judged one, and not on `origin/main`, was made in this checkout: advisory,
     since the daemon cannot see it, and the reason a branch handed over takes a new round."""
@@ -191,7 +195,7 @@ def carry(session: str, flags, pr: str) -> int:
     except Refused as why:
         print(str(why), file=sys.stderr)
         return 1
-    answer = say(f"gate: pr {pr} token {token}")
+    answer = say(f"gate: pr {pr} token {token}", timeout=VERB_WAIT)
     if answer.startswith("REJECTED"):
         print(display_reply(answer), file=sys.stderr)   # the door's refusal, not a round that did not ship
         return 1
@@ -211,8 +215,14 @@ def carry(session: str, flags, pr: str) -> int:
         print(f"not carried: {', '.join(c[:12] for c in foreign)} came into this checkout rather than being made "
               f"in it; commission a round instead", file=sys.stderr)
         return 1
-    reply = say(f"gate: carry {pr} head {at} token {token}", occurrence_id=occurrence())
+    this = retry_id or occurrence()
+    print(f"id {this}", file=sys.stderr)
+    state, reply = outcome(f"gate: carry {pr} head {at} token {token}", VERB_WAIT, this)
     print(display_reply(reply))
+    if state == UNSENT:
+        # The door may have carried it and lost only the answer: a resend under the same id is
+        # answered from its record, or makes the carry once if it never arrived.
+        print(f"the carry may have landed: send it again with --retry={this} to learn which", file=sys.stderr)
     return 1 if reply.startswith("REJECTED") else 0
 
 

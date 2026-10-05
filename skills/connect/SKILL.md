@@ -93,8 +93,9 @@ When work needs a card and has neither an owning issue nor a gate yet, declare i
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/declare.py" <session> "<work>" resolves:<issue>
 ```
 
-When the card you execute turns out to wait on another card or issue, or to contribute to a goal,
-say so; end the edge when it no longer holds:
+When you take work, and whenever the card you execute turns out to wait on another card or issue
+or to contribute to a goal, say so; end the edge when it no longer holds. The seat reviews the
+board's links too, but you know your own card's edges first:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/edge.py" <session> link <card> requires|part-of <card>|<owner>/<name>#<n> "<why>"

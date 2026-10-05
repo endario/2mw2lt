@@ -107,17 +107,17 @@ _COMMISSION_USAGE = "[--tier standard|heavy] [--sandbox|--full] [--exclude <vend
 TOOLS = {
     "ack": {"verb": "ack", "forms": [
         {"topic": "send", "usage": "<session> <ulid>", "example": "ack violet 010101010101010101010101"},
-        {"topic": "store", "usage": "--store <session> <token> [--provider-session <id>]", "example": "ack --store violet <t>"},
+        {"topic": "store", "usage": "--store <session> [--provider-session <id>] < <token-file>", "example": "ack --store violet < token.txt"},
     ]},
     "agent_secret": {"forms": [
-        {"topic": "secret", "usage": "<console> <secret>", "example": "agent_secret https://console.example secret"},
-        {"topic": "--review-host", "usage": "--review-host <console> <door-base> <secret>", "example": "agent_secret --review-host https://console.example https://door.example secret"},
+        {"topic": "secret", "usage": "<console> < <secret-file>", "example": "agent_secret https://console.example < secret.txt"},
+        {"topic": "--review-host", "usage": "--review-host <console> <door-base> < <secret-file>", "example": "agent_secret --review-host https://console.example https://door.example < secret.txt"},
     ]},
     "bind": {"verb": "bind", "current": True, "forms": [
         {"topic": None, "usage": "[--provider <provider>] [--provider-session <id>] [--pid <pid>] [session]", "example": "bind --current"},
     ]},
     "card": {"verb": "card", "bare": False, "forms": [
-        {"topic": None, "usage": "--token <t> <verb> <args…>", "example": "card --token - reclassify 010101010101010101010101 state live"},
+        {"topic": None, "usage": "--token - <verb> <args…> < <token-file>", "example": "card --token - reclassify 010101010101010101010101 state live"},
     ]},
     "checkpoint": {"verb": "checkpoint", "forms": [
         {"topic": None, "usage": "<session> <boundary> <note-url> [--learned-file <json-file>] [--retry=<id>]", "example": "checkpoint violet unit-done https://github.com/example/repo/pull/1#issuecomment-1"},
@@ -150,7 +150,7 @@ TOOLS = {
         {"topic": "status", "usage": _SPEAKER_USAGE + " <session> status <commission>", "example": "gate violet status 010101010101010101010101"},
         {"topic": "cancel", "usage": _SPEAKER_USAGE + " <session> cancel <commission>", "example": "gate violet cancel 010101010101010101010101"},
         {"topic": "pr", "usage": _SPEAKER_USAGE + " <session> pr <pr>", "example": "gate violet pr 1"},
-        {"topic": "carry", "usage": _SPEAKER_USAGE + " <session> carry <pr>", "example": "gate violet carry 1"},
+        {"topic": "carry", "usage": _SPEAKER_USAGE + " <session> carry <pr> [--retry=<id>]", "example": "gate violet carry 1"},
     ]},
     "hold": {"current": True, "forms": [
         {"topic": "--frame-path", "usage": "--frame-path <session>", "example": "hold --frame-path violet"},
@@ -167,7 +167,7 @@ TOOLS = {
         {"topic": "show", "usage": "show [workspace]", "example": "hooks show"},
     ]},
     "install": {"forms": [
-        {"topic": "install", "usage": "[workspace] [--codex] [--team <id>]", "example": "install ."},
+        {"topic": "install", "usage": "[workspace] [--codex] [--team <id>] [--gh-account <login>]", "example": "install ."},
         {"topic": "uninstall", "usage": "uninstall [workspace] [--workspace]", "example": "install uninstall ."},
     ]},
     "rest": {"forms": [

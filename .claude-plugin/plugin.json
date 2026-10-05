@@ -1,14 +1,27 @@
 {
   "name": "2mw2lt",
-  "description": "Steering: wire a workspace to the one brain, connect and disconnect its sessions, and take the steering role",
-  "version": "0.8.7",
+  "description": "Connect your Claude Code and Codex sessions to a 2mw2lt workspace: one steering partner that coordinates them, gates their work with independent review, and keeps what they learn.",
+  "version": "0.8.9",
   "author": {
-    "name": "endario"
+    "name": "2mw2lt",
+    "email": "hello@2mw2lt.com",
+    "url": "https://2mw2lt.com"
   },
+  "homepage": "https://2mw2lt.com",
   "repository": "https://github.com/endario/2mw2lt",
+  "license": "PolyForm-Strict-1.0.0",
+  "keywords": [
+    "ai-agents",
+    "coordination",
+    "steering",
+    "code-review",
+    "claude-code",
+    "codex",
+    "multi-agent"
+  ],
   "interface": {
     "displayName": "2mw2lt Steering",
-    "shortDescription": "Hooks and skills that enrol this session with your 2mw2lt workspace",
+    "shortDescription": "Connect this session to your 2mw2lt workspace",
     "developerName": "2mw2lt",
     "composerIcon": "./chatgpt/plugins/2mw2lt/assets/icon.png",
     "logo": "./chatgpt/plugins/2mw2lt/assets/logo.png",

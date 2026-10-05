@@ -1,13 +1,15 @@
 {
   "name": "2mw2lt",
   "owner": {
-    "name": "endario"
+    "name": "2mw2lt",
+    "email": "hello@2mw2lt.com",
+    "url": "https://2mw2lt.com"
   },
   "plugins": [
     {
       "name": "2mw2lt",
       "source": "./",
-      "description": "Steering: join a machine and its workspaces to the one brain, enroll and bind sessions"
+      "description": "Connect your Claude Code and Codex sessions to a 2mw2lt workspace: one steering partner that coordinates them, gates their work with independent review, and keeps what they learn."
     }
   ]
 }

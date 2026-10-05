@@ -170,6 +170,11 @@ def script_for(name: str, config: Path) -> Path | None:
     return own if own.is_file() else None
 
 
+def missing(name: str, config: Path) -> str:
+    return (f"steering-launch: no 2mw2lt plugin under {config} carries {name}; "
+            f"install the 2mw2lt plugin (claude plugin install {PLUGIN})")
+
+
 def main_exec(argv: list[str]) -> int:
     """`exec <name> [args...]`: run the current install's `<name>.py` directly, argv and exit
     code passed straight through. Not a hook — nothing here is entitled to swallow a failure
@@ -180,7 +185,7 @@ def main_exec(argv: list[str]) -> int:
     config = config_dir_of(None) or Path(os.environ.get("HOME", "~")).expanduser() / ".claude"
     script = script_for(name, config)
     if script is None:
-        print(f"no complete 2mw2lt install found to run {name} from; run /2mw2lt:connect", file=sys.stderr)
+        print(missing(name, config), file=sys.stderr)
         return 1
     os.execv(sys.executable, [sys.executable, str(script), *rest])
 
@@ -208,6 +213,7 @@ def main() -> int:
         or Path(os.environ.get("HOME", "~")).expanduser() / ".claude"
     script = script_for(sys.argv[1], config)
     if script is None:
+        print(missing(sys.argv[1], config), file=sys.stderr)
         return 0
     # A file and not a pipe: a payload larger than the pipe buffer would block here forever,
     # and there is no reader until after the exec.

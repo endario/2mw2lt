@@ -33,6 +33,15 @@ _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedire
 USER_AGENT = "2mw2lt-agent/1"
 
 
+class CredentialRefused(OSError):
+    """The console refused to issue this machine's agent credential: re-admitting the machine is
+    the remedy, not a resend."""
+
+    def __init__(self, reason: str):
+        super().__init__(f"{reason}; run /2mw2lt:install to admit this machine again")
+        self.reason = reason
+
+
 def send(req: urllib.request.Request, timeout: float):
     """Every request an enroll-side script makes, with this OS user's credential when it holds
     one for the door the request is to (doc 85 §1). One held and not usable raises rather than
@@ -45,6 +54,10 @@ def send(req: urllib.request.Request, timeout: float):
         try:
             token = credential.for_url(req.full_url)
         except credential.NoCredential as e:
+            # The console refusing this machine's enrolment (revoked, bound elsewhere) is not
+            # changed by sending again; a console that did not answer, or throttled, may be.
+            if e.status is not None and 400 <= e.status < 500 and e.status != 429:
+                raise CredentialRefused(f"the console refused this machine's agent credential: {e}") from None
             raise OSError(f"no usable agent credential: {e}") from None
         if token:
             req.add_header(credential.HEADER, token)
@@ -196,7 +209,7 @@ def seat_route(kind: str) -> tuple[str, dict] | None:
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from refusal import PREFIX as REJECTED, reason_of, retry  # noqa: E402
+from refusal import PREFIX as REJECTED, reason_of, retry, wire_up  # noqa: E402
 from verb_help import error, help_requested, script_help  # noqa: E402
 import requestlog  # noqa: E402
 
@@ -318,6 +331,12 @@ PERMANENT = frozenset({400, 405, 410, 413, 414, 422})
 # Refusals `remote.py` makes of a request that never fully arrived: the same request sent whole
 # again can be admitted, whatever status they carry.
 TRANSIENT = frozenset({"client left", "body did not arrive in time"})
+# The remote door's refusal of a request that carried no agent credential (`remote.py`): this
+# machine holds none for the door, which only admitting it gives.
+# remote.py writes this refusal; door_retry_test pins the two halves together.
+NO_CREDENTIAL = "an agent credential is required"
+# What the gateway answers when the silo behind it does not.
+SILO_DOWN = frozenset({502, 503, 504})
 
 
 def _refused(code: int) -> str:
@@ -349,7 +368,8 @@ def outcome(line: str, timeout: float = SEND_TIMEOUT,
     if occurrence_id is not None and not OCCURRENCE.fullmatch(occurrence_id):
         raise ValueError(f"an occurrence is 16 to 64 letters, digits or dashes, not {occurrence_id!r}")
     key = occurrence_id or occurrence()
-    if remote():
+    far = remote()
+    if far:
         req = urllib.request.Request(f"{base}/steering/door", data=json.dumps({"text": line, "id": key}).encode(),
                                      headers={"Content-Type": "application/json",
                                               requestlog.HEADER: requestlog.of_key(key)}, method="POST")
@@ -370,23 +390,46 @@ def outcome(line: str, timeout: float = SEND_TIMEOUT,
             try:
                 parsed = json.loads(body or "{}")
             except ValueError:
-                return _refused(e.code), retry(f"{e.code} from the door")
+                parsed = None
             # The remote door's own reason for a refusal it answers without a reply: a limit, its
             # admission, a restart. Dropped, it reads as the door having said nothing.
             why = parsed.get("refused") if isinstance(parsed, dict) else None
             if _dig(parsed, "reply") is None and isinstance(why, str) and why.strip():
                 why = why.strip()
+                if why == NO_CREDENTIAL:
+                    return UNSENT, wire_up(f"the door at {base} answered {e.code}: {why}, and this machine holds none for it")
                 reason = reason_of(why)
                 state = UNSENT if (reason if reason is not None else why) in TRANSIENT else _refused(e.code)
                 if reason is not None:
                     return state, why
                 return state, retry(f"{e.code} from the door: {why[:200]}")
-            text = answer(parsed)
-            return (SETTLED if text != NO_ANSWER else _refused(e.code)), text
+            if parsed is not None:
+                text = answer(parsed)
+                if text != NO_ANSWER:
+                    return SETTLED, text
+            # Answered without the daemon's word: the gateway in front of a remote door, or a
+            # route the daemon does not have.
+            text = body.strip() if parsed is None else ""
+            detail = f"{e.code} at {base}" + (f": {text[:200]}" if text else "")
+            if e.code == 404:
+                return _refused(e.code), wire_up(f"the door does not know this workspace ({detail})")
+            if far and e.code in SILO_DOWN:
+                if wait is None:
+                    return UNSENT, retry(f"the team's silo did not answer behind the door ({detail})")
+                print(f"door: the team's silo did not answer behind the door ({detail}); retrying",
+                      file=sys.stderr, flush=True)
+                time.sleep(wait)
+                continue
+            return _refused(e.code), retry(f"the door answered {detail} with no reply")
         except ValueError as e:
             return UNSENT, retry(f"the door at {base} did not answer: {e}")
+        except CredentialRefused as e:
+            return UNSENT, wire_up(e.reason)
         except (urllib.error.URLError, OSError) as e:
             if wait is None:
+                if not configured_door():
+                    return UNSENT, wire_up(f"this checkout names no STEERING_DOOR, and no loopback daemon "
+                                           f"answered at {base} ({e})")
                 return UNSENT, retry(f"the door at {base} did not answer: {e}")
             time.sleep(wait)
 

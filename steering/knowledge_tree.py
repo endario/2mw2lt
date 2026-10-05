@@ -59,6 +59,24 @@ class Repository:
         except UnicodeDecodeError:
             return None
 
+    def unread(self, path: str) -> str | None:
+        """Why `text(path)` is None: what is at `path` instead, or None when nothing is."""
+        entries = self._entries(path, recurse=False)
+        if not entries:
+            return None
+        if len(entries) != 1 or entries[0][1] == "tree":
+            return "a directory"
+        if entries[0][0] == "120000":
+            return "a symlink"
+        if entries[0][0] not in _REGULAR or entries[0][1] != "blob":
+            return "not a regular file"
+        got = self._git("cat-file", "blob", f"{self.head}:{entries[0][2]}", text=False)
+        try:
+            got.stdout.decode()
+        except UnicodeDecodeError:
+            return "not UTF-8"
+        return "unreadable" if got.returncode != 0 else "readable"
+
     def files(self, path: str) -> list[str]:
         return sorted(name for mode, kind, name in self._entries(path, recurse=True)
                       if kind == "blob" and mode in _REGULAR)

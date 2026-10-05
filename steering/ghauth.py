@@ -62,25 +62,43 @@ def pin_into(env: dict, root: Path | None = None) -> str | None:
 
 
 def readable_accounts(repo: str) -> list[str]:
-    """Signed-in GitHub logins whose own token can read `repo`, without switching gh's login."""
+    """Signed-in GitHub logins whose own token can read `repo`, without switching gh's login.
+    GitHub answers 404 for a repository a login cannot see; any other failure is not an answer
+    about the repository, so it is raised naming the login and what gh said."""
     try:
         got = subprocess.run(["gh", "auth", "status", "--hostname", "github.com", "--json", "hosts"],
                              capture_output=True, text=True, timeout=30,
                              env={k: v for k, v in os.environ.items() if k not in ("GH_TOKEN", "GITHUB_TOKEN")})
         if got.returncode:
-            raise NoIdentity("gh could not list its accounts; run `gh auth status`")
+            raise NoIdentity(f"gh could not list its accounts ({_said(got)}); run `gh auth status`")
         rows = json.loads(got.stdout)["hosts"].get("github.com", [])
         names = list(dict.fromkeys(row["login"] for row in rows if row.get("login")))
+        if not names:
+            raise NoIdentity("gh is signed in to no GitHub account; run `gh auth login`, then run install again")
         readable = []
         for name in names:
             try:
                 token = pinned_token(name)
-            except NoIdentity:
-                continue
+            except NoIdentity as e:
+                raise NoIdentity(f"{e}; run `gh auth login` for {name}, or `gh auth logout -u {name}`") from None
             result = subprocess.run(["gh", "api", "--hostname", "github.com", f"repos/{repo}"], capture_output=True, text=True,
                                     timeout=30, env={**os.environ, "GH_TOKEN": token})
             if result.returncode == 0:
                 readable.append(name)
+            elif "HTTP 404" not in result.stderr:
+                raise NoIdentity(f"gh could not check whether {name} reads {repo} ({_said(result)}); "
+                                 f"run `gh api repos/{repo}` as {name} to see why, then run install again")
         return readable
-    except (OSError, subprocess.SubprocessError, ValueError, KeyError) as e:
-        raise NoIdentity(f"GitHub accounts could not be checked ({type(e).__name__}); run `gh auth status`") from None
+    except FileNotFoundError:
+        raise NoIdentity("install the GitHub CLI (gh), then run install again") from None
+    except subprocess.TimeoutExpired as e:
+        raise NoIdentity(f"gh did not answer within {e.timeout:.0f}s ({' '.join(e.cmd[:3])}); "
+                         "check the network, then run install again") from None
+    except (OSError, ValueError, KeyError) as e:
+        raise NoIdentity(f"GitHub accounts could not be checked ({type(e).__name__}: {e}); run `gh auth status`") from None
+
+
+def _said(done: subprocess.CompletedProcess) -> str:
+    """gh's own last line of complaint, or its exit status when it printed none."""
+    lines = (done.stderr or "").strip().splitlines()
+    return lines[-1] if lines else f"exit {done.returncode}"
