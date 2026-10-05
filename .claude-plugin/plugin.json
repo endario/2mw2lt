@@ -1,0 +1,17 @@
+{
+  "name": "2mw2lt",
+  "description": "Steering: wire a workspace to the one brain, connect and disconnect its sessions, and take the steering role",
+  "version": "0.8.6",
+  "author": {
+    "name": "endario"
+  },
+  "repository": "https://github.com/endario/2mw2lt",
+  "interface": {
+    "displayName": "2mw2lt Steering",
+    "shortDescription": "Hooks and skills that enrol this session with your 2mw2lt workspace",
+    "developerName": "2mw2lt",
+    "composerIcon": "./chatgpt/plugins/2mw2lt/assets/icon.png",
+    "logo": "./chatgpt/plugins/2mw2lt/assets/logo.png",
+    "brandColor": "#084DDD"
+  }
+}

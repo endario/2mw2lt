@@ -1,0 +1,13 @@
+{
+  "name": "2mw2lt",
+  "owner": {
+    "name": "endario"
+  },
+  "plugins": [
+    {
+      "name": "2mw2lt",
+      "source": "./",
+      "description": "Steering: join a machine and its workspaces to the one brain, enroll and bind sessions"
+    }
+  ]
+}

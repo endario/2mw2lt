@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -z \"${PLUGIN_ROOT:-}\" ]; then exit 0; fi; exec python3 \"${PLUGIN_ROOT}/steering/enroll/codex_observe.py\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}
