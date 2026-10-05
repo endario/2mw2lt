@@ -79,7 +79,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> status <c
 
 When every eligible reviewer is busy, the commission waits instead of being refused: you are
 told `queued: <id> <priority>, <n> ahead`, and it is offered, highest priority first and then the
-oldest, as reviewers free (doc 133).
+oldest, as reviewers free.
 Do not commission it again: a second commission on that series is refused while it waits. One
 still queued after an hour is refused, and `cancel` withdraws a queued one.
 
@@ -89,7 +89,7 @@ the owner hears it: build or decompose.
 
 `main` merges only a head holding the App's `2mw2lt/review`, which a pass sets on the commit it
 judged. After pushing the round's own fixes past `ship it`, carry the pass to the new head, from
-the branch's worktree (doc 162):
+the branch's worktree:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> carry <pr number>
@@ -99,7 +99,7 @@ It is refused for a rebase, a resolved conflict, or a commit this checkout did n
 a round instead. A docs-only pull request needs a review too, since a critique sets no status.
 
 Discovered the artifact a round is running against is wrong before it answers? Withdraw it —
-this succeeds only while the run is still out, refused as too late otherwise (doc 98):
+this succeeds only while the run is still out, refused as too late otherwise:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> cancel <commission id>

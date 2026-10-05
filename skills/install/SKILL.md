@@ -103,8 +103,7 @@ The workspace works without lanes, and its board says it has none yet. Give it l
 
 4. Show the person the lanes in a few lines each: the name, the outcome and the Not boundary.
    Then ask with your question tool: accept, or say what to change. Revise until they accept.
-5. Give the repository a canon when it has none: somewhere its decisions and lessons live
-   (doc 148 §3). Set
+5. Give the repository a canon when it has none: somewhere its decisions and lessons live. Set
    `index` in the tracks document to the repository's documentation index, or to
    `.2mw2lt/README.md` beside the tracks document when it has none. Unless the index already
    links a `decisions/` and a `lessons/` index, add `decisions/README.md` and

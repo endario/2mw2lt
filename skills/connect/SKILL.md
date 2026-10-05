@@ -128,8 +128,7 @@ and the words are spooled for the hold that returns. Neither needs resending. `<
 refusal, because nothing under that name will hold again.
 
 A send whose answer was lost is not a second say either: `say.py` prints `id <id>` as `verb.py`
-does, and the same line again with `--retry=<that id>` is answered from the record
-(doc 73) — where a
+does, and the same line again with `--retry=<that id>` is answered from the record — where a
 plain resend delivered the seat the same words two and three times over (2026-10-01).
 
 **So do not improvise a place for a peer's words.** Two sessions once met the refusal this

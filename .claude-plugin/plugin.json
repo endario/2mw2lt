@@ -1,7 +1,7 @@
 {
   "name": "2mw2lt",
   "description": "Steering: wire a workspace to the one brain, connect and disconnect its sessions, and take the steering role",
-  "version": "0.8.6",
+  "version": "0.8.7",
   "author": {
     "name": "endario"
   },

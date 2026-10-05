@@ -8,7 +8,7 @@ the daemon's own resident brain. This puts them through to **this** session, wit
 From any machine: the seat is taken through the door this workspace is wired to, which names
 the workspace (`STEERING_DOOR` carries `/w/<workspace>` where the daemon serves more than one).
 You take it only while it is vacant: nobody holds it, its holder's enrolment has ended, or its
-holder has stopped answering its kicks and lapsed (doc 131 §4). A holder that is answering keeps
+holder has stopped answering its kicks and lapsed. A holder that is answering keeps
 it, and `promote.py` then says who holds it; the owner hands it on from the console, or the holder
 hands it on itself. The owner can hand it to another session or reclaim it from the console at
 any time, and the next thing you send on your lease token then answers
@@ -93,7 +93,7 @@ Each row carries the session's `model`, `effort`, `machine` (its host name) and 
 account's, as in the `fleet` frame), each `null` when nothing has been read: place by those, and
 never ask a session its level, since it cannot read its own.
 `data: {"kind": "kick", "idle": [...], "executing": [...], "finished": [...], "changed": {...}, "turn": …, "placement": {...}, "gates": {...}, "missed": …}`
-is the daemon's timer, not a person (doc 70).
+is the daemon's timer, not a person.
 It arrives every interval because silence sends nothing else, and on the next poll that is
 neither `quiet`, `debounced` nor `refused` once a session finishes a turn. `finished` is the daemon's own reading of who is waiting for work — do not ask
 the fleet to report it, and do not read its absence for a harness that posts no turn end as
@@ -112,14 +112,14 @@ that has not yet announced it: its account has room, and it runs at the level th
 asks for. Relay it with
 `relay: token <lease token> to <session> <the directive, naming the card>`, which needs no
 clearance, and once the session announces the branch, write `card-session <session> executor`.
-If no card fits, do nothing (doc 79). Never
+If no card fits, do nothing. Never
 report to the owner because a kick arrived. Any turn you take answers it;
 three unanswered kicks raise the owner. A turn that answers a frame changing nothing the owner
 knows — a kick with nothing to place, a routine say — is one line at most, and no line when
 nothing in it is new to them.
 
 `data: {"kind": "fleet", "accounts": [{"account", "provider", "vendor", "verdict", "tightest", "sessions"}]}`
-is every account's verdict (doc 117),
+is every account's verdict,
 sent when you take the seat, when you hold, and whenever any account's verdict or rank moves; the
 kick carries the same rows under `usage`. The daemon ranks; you follow the ranking and quote it,
 and do not weigh room yourself. New work goes to a session whose account ranks highest among its
@@ -131,7 +131,7 @@ recommend an account to the owner, name its forecast — `used`, `at_reset`, `re
 never a band.
 
 A system reminder from the `observe` hook saying you hold the seat and no stream is held for you
-is the daemon's (doc 71):
+is the daemon's:
 nothing sent to the seat reaches you until you do what it names.
 `data: {"kind": "closed", "why": "uplink" | "revoked"}` is the last frame of a stream the
 agent ends; the script reopens.
@@ -232,8 +232,7 @@ and read the refusal.
 
 ## Keep a room
 
-A room is where the owner, steering and an outside collaborator talk
-(doc 156). When
+A room is where the owner, steering and an outside collaborator talk. When
 someone else posts in one, your stream carries `{"kind": "room", "room", "seq", "author_kind"}`:
 where to read, never what was said. Read it and speak in it on the lease token:
 
@@ -264,7 +263,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/holds.py" <their session> <branch
 
 **Recording a claim is not taking exclusive hold of anything.** `taking.py` appends the claim and
 answers `registered: taking <issue> by <session>`; it does not report other claimants and nothing
-releases a claim (doc 68 §4, §10). So
+releases a claim. So
 asking is a separate act: `holds.py`, or the registry, before handing the work out. Two sessions
 that both record a claim and neither ask is the collision this exists to prevent, not one it
 prevents by itself.
@@ -285,8 +284,7 @@ registry.
 ## Make placed work a card
 
 Work becomes a card at the first of three signs: it is declared, a gate is commissioned on it, or
-its pull request resolves, subsumes or advances an issue
-(doc 125 §2).
+its pull request resolves, subsumes or advances an issue.
 When you place major work, scope its card so it is on the board before its first gate, and name
 the session as its executor. A session may also declare its own card with `declare.py`, without
 asking you.
@@ -296,8 +294,7 @@ printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" -
 printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --token - session <card> <session> executor
 ```
 
-Placing a card is also when you say what it waits on and which goal it serves
-(doc 167); a goal is a major
+Placing a card is also when you say what it waits on and which goal it serves; a goal is a major
 card whose acceptance criteria are numbered lines. Name the plan's sentence as `--source` when an
 edge comes from one:
 
@@ -342,14 +339,12 @@ handed it at once, and one not held gets it at its next hold. A session still an
 earlier envelope is `busy: <ulid>`, followed by what the slot is doing and for how long —
 whether it was claimed or is still queued, whether a hand-over already failed, and whether the
 session has been heard from since. That is what decides between waiting and resolving it. A send that times out is resent under one key and settled
-once; sending the line again yourself is a second directive
-(doc 74 §7).
+once; sending the line again yourself is a second directive.
 
 ## Start a worker
 
 Start one only when a card fits no session on the board and a machine has room for another
-worker, and choose the harness knowing whose quota it spends
-(doc 79 §7):
+worker, and choose the harness knowing whose quota it spends:
 
 ```bash
 say "launch: token $TOKEN <goose|opencode> on <the machine's machine_id> because <why>"
@@ -363,13 +358,11 @@ an `opencode-go/…` or `commandcode/…` model, and the daemon picks the machin
 that vendor ranks first, naming the account and the forecast in its reply; name one only to
 override that. With no model, or another provider's, it refuses: nothing it reads is what that
 worker spends.
-The seat, the daemon and the agents sit on different machines as a matter of course
-(doc 93), so there is no
+The seat, the daemon and the agents sit on different machines as a matter of course, so there is no
 machine of your own to default to. `loopback` is the orchestrator's node, not yours: use it
 only to target an agent running there, and a launch on a node holding no uplink is refused.
 
-An opencode worker runs confined, in a clone of its own, and its branch is pushed by its agent
-(doc 88).
+An opencode worker runs confined, in a clone of its own, and its branch is pushed by its agent.
 `launching: <id> <harness> on <node>` means the agent there was handed it. Read how it ended
 through the API, from any machine: `requested`, `refused`, `lapsed`, `launched` naming the
 session, or `launch-refused` with the agent's reason.
@@ -398,8 +391,7 @@ that vendor's account, as the usage frames number it, or refuses; it never falls
 whenever the model is that vendor's: passed to another vendor's endpoint, a model name may be
 mapped to that vendor's own model without a word. `worker-launched` names the vendor and
 launcher the session runs on; the agent starts it in tmux through that launcher, answers the
-folder-trust prompt, and answers the launch once the session has connected itself
-(doc 121). A machine
+folder-trust prompt, and answers the launch once the session has connected itself. A machine
 offers this only for the launchers it declares in `STEERING_CLAUDE_LAUNCHERS`. End one with
 `retire: token $TOKEN <tmux session> on <node>`, the `2mw2lt-launch-…` name `worker-launched`
 carries.
@@ -428,8 +420,7 @@ say "wake: token $TOKEN <session> because <why>"
 ```
 
 The agent on its machine types into its VS Code tab, or into its tmux pane when it connected from
-one, after reading that the pane shows an idle composer
-(doc 118).
+one, after reading that the pane shows an idle composer.
 Every wake and launch is recorded with its reason and what came of it; never type into a session
 or its pane yourself.
 
@@ -465,8 +456,7 @@ say "control: token $TOKEN <session> compact without checkpoint because <why>"  
 ```
 
 The agent drives the pane's `/effort` slider or `/model` picker and presses `s`, or types
-`/compact` (doc 120,
-doc 134); a
+`/compact`; a
 draft in the composer, or a screen it does not recognise, is a refusal. A compact spends a
 summarising turn on the session's account. You are told how each ended, as a say `from: action
 <id>`: the agent's `typed`, `refused` or `uncertain`, then the daemon's verdict from the session's
@@ -475,8 +465,7 @@ refused until the verdict. A wake or retire you asked for is told the same way. 
 retired and a `confirmed` verdict ask nothing of you, so the hold records them without ending;
 read them in the recording when you want them.
 
-The row also shows what a session has written down
-(doc 154):
+The row also shows what a session has written down:
 `checkpoint` is its last `{boundary, note, at, current}`, current until it next acknowledges a
 directive, and `compacted` its last `{at, trigger, skipped}`. You are told each checkpoint as a say
 `from: checkpoint <id>`. You are told each compaction made with no current checkpoint as a say
@@ -514,8 +503,7 @@ usage frame moves its account. Name the evidence in `because`: the fill, the ver
 
 ## Hand work on when an account runs out
 
-Ask a session to pack up only when both hold (doc 75
-§7, doc 117 §5): its
+Ask a session to pack up only when both hold: its
 account's verdict is `excluded`, or its `runway` in your `fleet` rows is shorter than the unit
 still needs, with the exclusion lifting (`until`) later than the work can wait — **and** the work blocks others
 (another card or session waits on its branch or issue). Work that blocks nothing is left to
@@ -547,12 +535,12 @@ Use `/2mw2lt:tracks` before placing or correcting a track, or changing a workspa
 
 The band above the board lists only the cards carrying an unusual fact. It is the seat's to
 work: nothing else on the page assigns a card to anyone, and a row nobody reads is a row that
-may as well not be derived (doc 43 §4).
+may as well not be derived.
 
 One kind is yours to close rather than merely to read. **`conclusion-unwitnessed`** is a card a
 session declared done where the observed plane cannot corroborate it — it holds no branch, and
 no merged pull request closes an issue only it claims to resolve. It is not a dispute: there is
-nothing to disagree with (doc 48).
+nothing to disagree with.
 Read the row, decide which is true, and write it with the lease token `promote.py` printed:
 
 ```bash
@@ -567,8 +555,7 @@ printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" -
 Ask the session named in the row before withdrawing its conclusion. It concluded on evidence
 the fold cannot read, and that evidence usually names the branch the card was missing.
 
-**A card in the wrong lane, or not a card at all, is corrected, not rescoped**
-(doc 125 §5).
+**A card in the wrong lane, or not a card at all, is corrected, not rescoped**.
 Each correction records what the board showed before it and why, and the latest one outranks
 every derived signal, the classifier's included. The `placement:` row in your Needs You lists
 the cards placed on a low-confidence answer; confirming one in the lane it is already in is a
@@ -607,7 +594,7 @@ confirmed, or once a session is live there again.
 read its own level back, so asking one to raise itself asks for nothing. That holds for every
 session without a pane you can control, such as OpenCode or Goose; a tmux-hosted Claude Code
 session you set with `control:` (above). What you can do is read
-what a session is running at and hand accordingly (doc 64).
+what a session is running at and hand accordingly.
 
 The level is on the registry's row for each session, folded from the harness's own transcript.
 
@@ -633,7 +620,7 @@ already running.
   it, send no `needs: … effort high` for it, and never ask the owner to raise it.
 - Mechanical fixes, doc edits and guard backfills at `medium`, and on a frontier model at
   `low`: Opus and the latest GPT Sol at `low` are at least a lesser model's `high` (the
-  owner's ruling, 2026-09-20; its carries are dated in doc 64). A level is a
+  owner's ruling, 2026-09-20). A level is a
   dial on one model, not a rank across them, and that includes GPT Sol against GPT Luna: no
   session-hand-out tie-break singles either out (the short-lived Luna-first rule was withdrawn
   the same day it shipped, owner's ruling, 2026-09-23). The gate's own reviewer choice has an
@@ -665,8 +652,7 @@ say "authorship: token $TOKEN establish <session> epoch <n> model <model> becaus
 
 Keep the evidence credential-free. The fact records the target session/epoch separately from
 its investigating seat (`by`, `by_epoch`, `attachment_id`) and retains prior model evidence.
-See the recovery contract
-for unmapped/synthetic evidence and ambiguous legacy launches. Establishment neither detaches
+Establishment neither detaches
 nor revokes a session.
 
 If the evidence cannot establish the model, abandon that epoch as invalid (the owner's ruling,
@@ -686,7 +672,7 @@ which is a session's own handover.
 ## Lift a gate at its ceiling
 
 A commission past its round cap refuses and raises the owner once, naming the pull request and
-the ceiling (doc 72 §3). The owner's
+the ceiling. The owner's
 ruling, 2026-09-24 (#2056): **the lift is yours to judge, not the owner's — raise to them only
 when you cannot judge it.** Read the round's findings and the prior verdicts the needs-you row
 names. If another round is genuinely warranted — the findings are converging, not repeating, a
@@ -697,7 +683,7 @@ say "lift: token $TOKEN review <owner/repo> pr <n> <why one more round is warran
 say "lift: token $TOKEN critic <owner/repo> branch <branch> <why one more round is warranted>"
 ```
 
-It admits exactly one more round on that series — `(review, repo, pr)`, or `(critic, repo, branch)` (doc 115);
+It admits exactly one more round on that series — `(review, repo, pr)`, or `(critic, repo, branch)`;
 call it again for a second. Once any lift stands, the owner is not raised again for that series,
 so your reason is the record of why the round ran: a published review names the round it buys as
 lifted, with it, and a critic round, which is not published, carries it on its commission fact.
@@ -732,8 +718,7 @@ that are not there already, so they survive this session.
   timeline. A stale one is closed the same way, naming what settled it. One you cannot decide
   goes to the owner with `promote: token <lease token> <id> <reason>`; if they dismiss it, it
   comes back to you (a waiting dialog is closed instead, and you are told), and you promote it again only with a fresh reason. The owner's rows
-  (questions, rulings) are not yours to close
-  (doc 119).
+  (questions, rulings) are not yours to close.
 - **Check the issue is still open before you brief it.** Search merged pull requests for it
   first. A brief for work that has already landed wastes a session's turn.
 - **Brief a pull request to stay a draft until `ship it`.** Each push to a ready one is a full

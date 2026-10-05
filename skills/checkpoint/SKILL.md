@@ -2,8 +2,7 @@
 description: Write down what this session knows before it forgets — before a compact, a handover or leaving — as a note on the card's pull request or issue, and record it with steering.
 ---
 
-A checkpoint puts the work where it lives and indexes it with one note
-(doc 154 §4).
+A checkpoint puts the work where it lives and indexes it with one note.
 The note is not a second copy of the work.
 
 **When.** At each boundary: `design-settled` once your critic converges; `unit-done` when the
