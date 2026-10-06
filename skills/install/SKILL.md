@@ -25,7 +25,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" "<repository-path>" -
 
 An invitation code (`2MW-` and four groups of four) is passed through as given, beside the path or
 alone: the engine takes it as the code, and the sign-in carries it to GitHub. It admits the GitHub
-account it was made for, once.
+account it was made for, by login or by verified email, once. A code is optional: the sign-in also
+carries the workspace's GitHub login, and an invite waiting for the account that signs in admits it.
+When the person means to sign in as another GitHub account than the workspace's, pass
+`--login <login>`.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" . 2MW-7KQ4-XN2D-9HTB-M3PC
@@ -77,9 +80,13 @@ engine again. These are the stops that need a person:
   will not make or use the team's silo. Tell the person the reason, and stop: the operator
   settles it.
 - **`sign-in ended: That invitation code …`** or **`sign-in ended: The console does not know that invitation code …`**: the line says whether the code is unknown, used,
-  lapsed or for a different GitHub account, and what to do. Tell the person that line; a code for
-  a different account runs again with the same code once they are signed in to GitHub as the
-  right one, and the others need a new code from whoever sent it.
+  lapsed or for a different GitHub account or address, and what to do. Tell the person that line; a
+  code for a different account runs again with the same code once they are signed in to GitHub as
+  the right one, and the others need a new code from whoever sent it.
+- **`sign-in ended: GitHub signed you in as a different account than the one this machine uses …`**:
+  an invite waits for the login the line names, and the browser's GitHub account is another that
+  nothing waits for. Tell the person to sign in to GitHub as the named login in the browser, then
+  run again.
 - **`only the team's owner installs a repository`**: the person who signed in does not own the
   team. Someone who does must run the install.
 - **`you are in no team`**: the account that signed in belongs to no team. Tell the person,

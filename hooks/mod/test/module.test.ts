@@ -501,3 +501,38 @@ test('a pointer the session refused to take as a prompt is appended instead', as
   expect(w.appends).toEqual([POINTER])
   expect(w.state.get('pointed')).toBe(true)
 })
+
+test('a hold refused after a connect gives the stream back to the recipe, so connecting again cannot loop', async ($, on) => {
+  const w = world(on, { enrolled: false, rounds: [
+    { lines: [{ stderr: 'refused 403: a Claude stream must declare event\n' }], code: 1 },
+    { lines: [], code: 1 },
+  ] })
+  await begin($)
+  await w.clock.settle()
+  w.enrolled = true
+  await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/enroll/connect.py --current' } as never)
+  await w.clock.settle()
+  expect(w.submits).toEqual([CONNECT_AGAIN])
+  expect(JSON.parse(w.writes[w.writes.length - 1]?.text ?? '{}').at).toBe(0)   // connect now prints today's reply
+  const written = w.writes.length
+  await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/enroll/connect.py --current' } as never)
+  await w.clock.settle()
+  await w.clock.advance(300_000)
+  expect(w.spawns.length).toBe(1)                       // the model's own hold is the holder now
+  expect(w.submits).toEqual([CONNECT_AGAIN])
+  expect(w.writes.length).toBe(written)                 // and the refresh does not claim it back
+})
+
+test('a /clear after the stream was handed back claims nothing for the new id', async ($, on) => {
+  const w = world(on, { enrolled: false, rounds: [{ lines: [], code: 1 }] })
+  await begin($)
+  await w.clock.settle()
+  w.enrolled = true
+  await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/enroll/connect.py --current' } as never)
+  await w.clock.settle()
+  await $.session.end({ reason: 'clear', sessionId: 'ps-1' } as never)
+  w.psession = 'ps-2'
+  await $.classic.SessionStart({ source: 'clear', session_id: 'ps-2' } as never)
+  await w.clock.advance(120_000)
+  expect(w.writes.filter(x => x.path.endsWith('/ps-2.json'))).toEqual([])
+})

@@ -174,9 +174,37 @@ def _prefix(p: str) -> str:
     return posixpath.normpath(p.rstrip("/")) if p.strip("/") else ""
 
 
+_CLASS = re.compile(r"^(.+)/\*(\.[A-Za-z0-9]+)$")
+
+
+def _scoped(p: str) -> tuple[str, str] | None:
+    """A `dir/*.ext` entry as `(dir, ext)`: a class of file, not a path (#3944)."""
+    m = _CLASS.match(p.rstrip("/"))
+    return (posixpath.normpath(m[1]), m[2]) if m else None
+
+
 def overlap(a: str, b: str) -> bool:
     """Whether one path lies under the other, at a directory boundary: `steering/test/` holds
-    `steering/test/x.py`, and a query for the directory reaches a unit scoped to one file in it."""
+    `steering/test/x.py`, and a query for the directory reaches a unit scoped to one file in it.
+
+    A `dir/*.ext` entry names a class instead: the files under `dir` whose names end `.ext`,
+    and nothing else in that directory — so a contract scoped `desk/*.tsx` is moved by the
+    components and copy a person sees, not by the logic, loaders, tests and types that sit
+    beside them, while a plain directory entry still holds everything under it (#3944)."""
+    sa, sb = _scoped(a), _scoped(b)
+    if sa and sb:
+        return sa[1] == sb[1] and overlap(sa[0], sb[0])
+    if sa or sb:
+        (d, ext), plain = (sa or sb), (b if sa else a)
+        p = _prefix(plain)
+        if not p:
+            return False
+        if p.endswith(ext):
+            return overlap(d, p)
+        # Only a directory query reaches a class from outside it: an extensionless entry
+        # holds the class as it holds a file scoped inside it; a named file of another
+        # class holds nothing of this one.
+        return "." not in posixpath.basename(p) and overlap(d, p)
     a, b = _prefix(a), _prefix(b)
     return bool(a and b) and (a == b or a.startswith(b + "/") or b.startswith(a + "/"))
 

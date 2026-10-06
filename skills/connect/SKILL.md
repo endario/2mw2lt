@@ -181,9 +181,10 @@ recommendation, rather than an owner ask.
 
 Push first, keep the pull request draft, and run the applicable suite before each round where
 you judge it cheapest: the focused guards for what changed always, and a full run only when the
-change warrants one, locally (a machine many sessions share) or on the hosted lane
+change warrants one: locally first, and on a runner only when that is genuinely needed. A dispatch
 (`gh workflow run steering.yml -R <repo> --ref <branch>`, `<repo>` being the `repo:` line connect
-printed; paid Actions minutes — that workflow exists only in the platform's own repository). From the branch's worktree:
+printed — that workflow exists only in the platform's own repository) runs on the mini;
+`-f lane=hosted` bills paid Actions minutes and is for a change the mini cannot verify. From the branch's worktree:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> branch

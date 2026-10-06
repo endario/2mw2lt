@@ -117,8 +117,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> pr <pr nu
 
 Keep the pull request a draft through every round. A draft runs no steering suite, so before each
 round run the focused guards for what changed, and a full suite only when the change warrants one,
-locally (a machine many sessions share) or on the hosted lane (`gh workflow run steering.yml -R <repo> --ref
-<branch>`, `<repo>` being the `repo:` line connect printed, paid Actions minutes). Mark it ready only after `ship it`: that is its one required CI
+locally first, and on a runner only when that is genuinely needed. A dispatch
+(`gh workflow run steering.yml -R <repo> --ref <branch>`, `<repo>` being the `repo:` line connect
+printed) runs on the mini; `-f lane=hosted` bills paid Actions minutes and is for a change the mini cannot verify. Mark it ready only after `ship it`: that is its one required CI
 run, then the merge.
 
 `REJECTED … does not hold <branch>` — claim it with `taking.py`, above. `unresolved: …` — no

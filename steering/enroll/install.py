@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """`/2mw2lt:install`'s engine (doc 129): a repository becomes a working, observed workspace.
 
-    install.py [workspace] [--codex] [--team <id>] [--gh-account <login>]
+    install.py [workspace] [invite-code] [--codex] [--team <id>] [--gh-account <login>] [--login <login>]
                                         install, or resume one half done; --codex writes no hooks;
                                         --team names the team when the person owns several;
                                         --gh-account names the workspace's GitHub login when
-                                        several signed-in logins can read the repository
+                                        several signed-in logins can read the repository;
+                                        --login names the GitHub account to sign in as, when it
+                                        is not the workspace's
     install.py lanes [workspace] [--merge] [--gh-account <login>]
                                         the open lanes pull request and how it would merge;
                                         --merge merges it as the workspace's login, then waits
@@ -234,9 +236,18 @@ def refusal_proof(device_code: str) -> str:
 
 # An invitation code as the console mints it (console/src/lib/invite.ts), typed in any case (#3930).
 INVITE = re.compile(r"2MW(-[2-9A-HJKMNP-TV-Z]{4}){4}", re.IGNORECASE)
+# A GitHub login, as the console reads the one install carries (#3954).
+LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}")
 
 
-def sign_in(console: str, repo: str, label: str, invite: str | None = None) -> str:
+def ended(said: object, login: str | None) -> str:
+    """The console's words for an ended sign-in. Its refusal for another account than the machine's
+    cannot name the login (#3954), which this run carried, so it is named here."""
+    said = str(said)
+    return f"{said} This machine uses @{login}." if login and "than the one this machine uses" in said else said
+
+
+def sign_in(console: str, repo: str, label: str, invite: str | None = None, login: str | None = None) -> str:
     """A console session from a device grant, held in memory for this run only."""
     status, got = call("POST", f"{console}/api/auth/device/code",
                        {"client_id": CLIENT, "scope": f"install {repo} on {label}"})
@@ -244,16 +255,21 @@ def sign_in(console: str, repo: str, label: str, invite: str | None = None) -> s
         raise Stop(f"the console would not start a sign-in ({status}): {got}")
     page = got.get("verification_uri_complete") or got["verification_uri"]
     say("sign in", f"open {got['verification_uri']} and enter {got['user_code']}")
-    say("", "(opened in your browser; waiting…)")
+    say("", f"(opened in your browser; sign in to GitHub as @{login}; waiting…)" if login else "(opened in your browser; waiting…)")
     # Only the browser opened here holds the proof, so only it can end this grant when its sign-in
     # is refused (#3586). It is never printed: a printed proof is as public as the user code.
     # An invitation code rides the same fragment, for the sign-in door to carry to GitHub; like the
-    # proof, a fragment reaches no server log.
-    carried = f"&invite={invite.upper()}" if invite else ""
+    # proof, a fragment reaches no server log. So does the login this machine signs in as (#3954),
+    # which lets an invite waiting for that account admit it with no code.
+    carried = (f"&invite={invite.upper()}" if invite else "") + (f"&login={login}" if login else "")
     open_page(f"{page}#refusal={refusal_proof(got['device_code'])}{carried}")
     interval, deadline = float(got.get("interval") or POLL), time.monotonic() + float(got.get("expires_in") or 1800)
+    start = told = time.monotonic()
     while time.monotonic() < deadline:
         time.sleep(interval)
+        if time.monotonic() - told >= PROGRESS:
+            told = time.monotonic()
+            say("", f"waiting for the sign-in to be approved ({elapsed(told - start)})")
         status, answer = waited("POST", f"{console}/api/auth/device/token", deadline,
                                 {"grant_type": DEVICE_GRANT, "device_code": got["device_code"], "client_id": CLIENT})
         if status == 200 and answer.get("access_token"):
@@ -262,12 +278,17 @@ def sign_in(console: str, repo: str, label: str, invite: str | None = None) -> s
         if error == "slow_down":
             interval += 5
         elif error != "authorization_pending":
-            raise Stop(f"sign-in ended: {answer.get('error_description') or error or status}")
+            raise Stop(f"sign-in ended: {ended(answer.get('error_description') or error or status, login)}")
     raise Stop("the sign-in code expired; run this again")
 
 
 HOST_STATES = {"pending": "waiting for the host to allocate it", "allocated": "starting the silo"}
+PROGRESS = 60.0  # how often a wait that needs a person says it is still waiting
 WATCHER = 120.0  # how long a request may sit pending before the host's watcher is the likely cause
+
+
+def elapsed(seconds: float) -> str:
+    return f"{int(seconds) // 60}m{int(seconds) % 60:02d}s"
 
 
 def workspace(console: str, token: str, repo: str, source: str, team: str | None = None) -> dict:
@@ -286,9 +307,9 @@ def workspace(console: str, token: str, repo: str, source: str, team: str | None
                 say("team", "its silo is ready")
             return got
         state, waited_for = enrolling.get("state"), time.monotonic() - start
-        if state != shown or waited_for - told >= 60:
+        if state != shown or waited_for - told >= PROGRESS:
             say("team", f"{enrolling.get('team')} is new here; {HOST_STATES.get(state, state)} "
-                        f"({int(waited_for) // 60}m{int(waited_for) % 60:02d}s)")
+                        f"({elapsed(waited_for)})")
             shown, told = state, waited_for
         since = enrolling.get("since")
         if (not watched and state == "pending" and isinstance(since, (int, float))
@@ -406,8 +427,12 @@ def wait_for_grant(door: str, got: dict, repo: str, desk: str, authority: str, a
         say("", f"if the team's App is installed already, add {repo} to it at {got['grant']}")
     if not approved_here:
         open_page(desk)
-    deadline = time.monotonic() + GRANT
+    start = told = time.monotonic()
+    deadline = start + GRANT
     while not (got := reach(door, deadline)).get("covered"):
+        if time.monotonic() - told >= PROGRESS:
+            told = time.monotonic()
+            say("", f"waiting for the App to reach {repo} ({elapsed(told - start)})")
         if time.monotonic() >= deadline:
             raise Stop(f"the App does not reach {repo} yet: the team's owner, signed in with GitHub, chooses "
                        f"Connect GitHub on {desk}; then run this again")
@@ -593,7 +618,7 @@ def github_account(root: Path, repo: str, chosen: str | None = None) -> str:
 
 
 def install(root: Path, codex: bool = False, team: str | None = None,
-            gh_account: str | None = None, invite: str | None = None) -> int:
+            gh_account: str | None = None, invite: str | None = None, login: str | None = None) -> int:
     console = platform_url()
     repo = repository(root)
     say("repository", repo)
@@ -612,7 +637,8 @@ def install(root: Path, codex: bool = False, team: str | None = None,
                    f"origin is {repo}; run `install.py uninstall` here, then install again")
     if view is None:
         source = tracks_source(root, repo)
-        token = sign_in(console, repo, label, invite)
+        # The workspace's GitHub login is the account the person most likely signs in as (#3954).
+        token = sign_in(console, repo, label, invite, login or name)
         try:
             got = workspace(console, token, repo, source, team)
             authority = got.get("id")
@@ -892,6 +918,7 @@ def main(argv: list[str]) -> int:
     team = None
     gh_account = None
     invite = None
+    login = None
     paths: list[str] = []
     i = 0
     while i < len(args):
@@ -924,6 +951,14 @@ def main(argv: list[str]) -> int:
             if gh_account is not None:
                 return verb_help.error("install", "gh-account may appear once")
             gh_account = args[i + 1]; i += 2; continue
+        if arg == "--login":
+            if action != "install":
+                return verb_help.error("install", "--login is only for install")
+            if i + 1 >= len(args) or not LOGIN.fullmatch(args[i + 1].removeprefix("@")):
+                return verb_help.error("install", "--login takes a GitHub login")
+            if login is not None:
+                return verb_help.error("install", "login may appear once")
+            login = args[i + 1].removeprefix("@"); i += 2; continue
         if arg.startswith("-"):
             return verb_help.error("install", f"unknown option {arg!r}")
         # An invitation code is taken as one wherever it stands, so `/2mw2lt:install <code>` runs as typed.
@@ -954,7 +989,7 @@ def main(argv: list[str]) -> int:
     try:
         if action == "lanes":
             return adopt_lanes(root, merge, gh_account)
-        return uninstall(root, retire) if action == "uninstall" else install(root, codex, team, gh_account, invite)
+        return uninstall(root, retire) if action == "uninstall" else install(root, codex, team, gh_account, invite, login)
     except KeyboardInterrupt:
         raise Stop(f"stopped at {_at or action}; run {action} again to resume") from None
     except subprocess.TimeoutExpired as e:

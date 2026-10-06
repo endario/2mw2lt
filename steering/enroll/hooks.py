@@ -15,6 +15,7 @@ needs the ownership manifest (#138).
 """
 from __future__ import annotations
 
+import ast
 import contextlib
 import fcntl
 import json
@@ -62,7 +63,7 @@ def handler(workspace: Path, verb: str) -> dict:
 # `<…>/plugins/cache/<marketplace>/<plugin>/<version>/steering/enroll/<script>.py`. Everything
 # before the version names one plugin install; the version directory under it is what
 # `claude plugin update` replaces.
-_PLUGIN = re.compile(r"^(?P<install>.*/plugins/cache/[^/]+/[^/]+)/[^/]+/steering/enroll/[^/]+\.py$")
+_PLUGIN = re.compile(r"^(?P<install>.*/plugins/cache/[^/]+/[^/]+)/(?P<version>[^/]+)/steering/enroll/[^/]+\.py$")
 
 
 def plugin_install(path: Path) -> str | None:
@@ -199,7 +200,56 @@ def launcher_stale(doc: dict, workspace: Path, sender: Path = SENDER) -> bool:
     if not any(has_ours(e, sender) for groups in doc.get("hooks", {}).values() for e in groups):
         return False
     p = launcher_path(workspace)
-    return not p.is_file() or p.read_text() != LAUNCHER.read_text().replace('SOURCE = ""', f"SOURCE = {str(HERE)!r}", 1)
+    if not p.is_file():
+        return True
+    return p.read_text() != LAUNCHER.read_text().replace('SOURCE = ""', f"SOURCE = {str(HERE)!r}", 1)
+
+
+_SOURCE = re.compile(r"^SOURCE = (?P<value>.+)$", re.M)
+
+
+def launcher_source(text: str) -> str | None:
+    """The pack a workspace's launcher was written from, as it records it; None when unreadable."""
+    m = _SOURCE.search(text)
+    try:
+        value = ast.literal_eval(m["value"]) if m else None
+    except (ValueError, SyntaxError):
+        return None
+    return value if isinstance(value, str) and value else None
+
+
+def _cached(source: str | Path) -> tuple[int, ...] | None | bool:
+    """A cached pack's version, None when it does not read as one, False for a checkout."""
+    m = _PLUGIN.match(str(Path(source) / LAUNCHER.name))
+    if not m:
+        return False
+    try:
+        return tuple(int(x) for x in m["version"].split("."))
+    except ValueError:
+        return None
+
+
+def may_replace(theirs: str | None, mine: Path = HERE) -> bool:
+    """Whether the pack at `mine` may rewrite a workspace launcher written from `theirs`.
+
+    Every session in a workspace runs its hooks through that one file, and repin runs on each
+    hook event, so the rule decides who it follows. A launcher this pack wrote, or one that
+    records no source, is refreshed. A checkout (a `--plugin-dir` session) never takes over
+    another pack's launcher: the whole workspace followed a throwaway worktree until a sibling's
+    connect pointed it back (#3969). A cached pack heals one a checkout wrote, and never moves
+    one back to an earlier version of its own install, which two sessions on two versions
+    otherwise traded on every hook, from one config home or two. A launcher whose pack is gone
+    serves nothing, so anyone may replace it.
+    """
+    if theirs is None or Path(theirs) == mine or not Path(theirs).is_dir():
+        return True
+    ours = _cached(mine)
+    if ours is False:
+        return False
+    other = _cached(theirs)
+    if other is False or other is None or ours is None:
+        return True
+    return other < ours
 
 
 def repin(workspace: Path, sender: Path = SENDER) -> Path | None:
@@ -213,6 +263,9 @@ def repin(workspace: Path, sender: Path = SENDER) -> Path | None:
         doc = load(p)
         if not stale_pins(doc, sender) and not short(doc, workspace, sender) \
                 and not launcher_stale(doc, workspace, sender):
+            return None
+        held = launcher_path(workspace)
+        if held.is_file() and not may_replace(launcher_source(held.read_text())):
             return None
         install_launcher(workspace)
         write(p, merge(doc, workspace, sender))

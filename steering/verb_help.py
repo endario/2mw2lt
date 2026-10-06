@@ -169,7 +169,7 @@ TOOLS = {
         {"topic": "show", "usage": "show [workspace]", "example": "hooks show"},
     ]},
     "install": {"forms": [
-        {"topic": "install", "usage": "[workspace] [invite-code] [--codex] [--team <id>] [--gh-account <login>]", "example": "install . 2MW-7KQ4-XN2D-9HTB-M3PC"},
+        {"topic": "install", "usage": "[workspace] [invite-code] [--codex] [--team <id>] [--gh-account <login>] [--login <login>]", "example": "install . 2MW-7KQ4-XN2D-9HTB-M3PC"},
         {"topic": "lanes", "usage": "lanes [workspace] [--merge] [--gh-account <login>]", "example": "install lanes . --merge"},
         {"topic": "uninstall", "usage": "uninstall [workspace] [--workspace]", "example": "install uninstall ."},
     ]},

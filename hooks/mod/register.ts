@@ -108,6 +108,9 @@ let claimed: { id: string; path: string } | undefined
 let version = ''
 let generation = 0
 let refresh: Timer | undefined
+// Set when a hold is refused after a connect: connecting did not repair it, so the module hands the
+// stream back to the model-run recipe for the rest of this process rather than loop on it.
+let yielded = false
 let child: HookStream<ProcessSpawnChunk, ProcessSpawnResult> | undefined
 
 function stop() {
@@ -163,7 +166,13 @@ async function holdLoop($: EngineInterface, session: string, gen: number) {
     // 3: the stream was revoked. 1: the hold was refused. Neither is retried; connecting again
     // is the recipe's repair. A refusal before this process ever connected adds no row: the
     // recipe is about to connect anyway. Any other end (4: its recording failed) is held again.
-    if (code === 3 || (code === 1 && (await $.state.get(CONNECTED)).value)) {
+    const connected = (await $.state.get(CONNECTED)).value
+    if (code === 1 && connected) {
+      yielded = true
+      refresh?.cancel()
+      await claim($, false).catch(() => undefined)   // connect now prints today's reply: arm a hold
+    }
+    if (code === 3 || (code === 1 && connected)) {
       await tell($, CONNECT_AGAIN)
     }
     if (code === 1 || code === 3) return
@@ -189,7 +198,7 @@ export const register: Register = on => {
     refresh?.cancel()
     // The root is fixed for the session: where no claim path is named (a project that is no
     // workspace), asking again every minute would only fail again.
-    if (await claim($, true)) refresh = $.clock.every(REFRESH_MS, () => { void claim($, true).catch(() => undefined) })
+    if (await claim($, true)) refresh = $.clock.every(REFRESH_MS, () => { if (!yielded) void claim($, true).catch(() => undefined) })
     await $.tool.register({
       name: 'frames',
       description: 'Read the steering frames waiting for this session, each with its daemon-written from: line. Acknowledges the envelopes it returns.',
@@ -232,7 +241,7 @@ export const register: Register = on => {
     const result = await next(e)
     // The completed call is a trigger only; its output is never parsed (design D3).
     if (!root || result.deny !== undefined || result.isError) return result
-    if (invokes(e.command, 'connect')) {
+    if (!yielded && invokes(e.command, 'connect')) {
       const session = await sessionOf($)
       if (session) {
         await $.state.set(CONNECTED, true)
@@ -286,7 +295,7 @@ export const register: Register = on => {
         await $.state.set(PENDING, [])
         await $.state.set(POINTED, false)
       })
-      await claim($, true, e.session_id)
+      if (!yielded) await claim($, true, e.session_id)
     }
     return next(e)
   }).catch(($, e, next) => next(e))
