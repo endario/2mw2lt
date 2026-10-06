@@ -1,7 +1,9 @@
 // What the module reads and writes as text: hold.py's frame lines, the frame recording, the
 // fixed rows it may append, and the version floor. Nothing here touches `$`.
 
-export type Line = { id: string | null; kind: string; wakes: boolean }
+// `routine` rides a kick the daemon says moved nothing: the module answers it without a model turn.
+export type Routine = { at: string; interval: number }
+export type Line = { id: string | null; kind: string; wakes: boolean; routine?: Routine }
 
 export const POINTER = 'A steering frame is waiting. Call mcp__2mw2lt__frames to read it.'
 export const CHECKPOINT = 'Compaction is near. Write your checkpoint (/2mw2lt:checkpoint) now.'
@@ -28,6 +30,13 @@ export function atLeast(version: string, floor: readonly number[] = FLOOR): bool
     if (have !== want) return have > want
   }
   return true
+}
+
+// Whether a routine kick may be answered at `now`: not while the turn running has been going longer
+// than the kick's own interval, which is the silence doc 70 §3 counts. A turn whose start was never
+// seen (a reload mid-turn) is not known to be that long.
+export function answerable(busy: boolean, turnStart: number | undefined, now: number, intervalS: number): boolean {
+  return !busy || turnStart === undefined || now - turnStart <= intervalS * 1000
 }
 
 // The recording holds `data: {json}` lines. Every frame carries the daemon's `id`, which hold.py

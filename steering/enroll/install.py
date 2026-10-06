@@ -14,6 +14,8 @@
                                         for the daemon to sync the merged lanes
     install.py uninstall [workspace]    remove what an install added here
     install.py uninstall --workspace    and have the platform retire the workspace too
+    install.py retire <workspace id>    have the platform retire a workspace by its id, for one
+                                        no checkout here is bound to (#3742)
 
 The person acts only where a grant is theirs to give: signing in, and giving the App
 the repository. For each it prints the page, opens it, and waits.
@@ -238,6 +240,8 @@ def refusal_proof(device_code: str) -> str:
 INVITE = re.compile(r"2MW(-[2-9A-HJKMNP-TV-Z]{4}){4}", re.IGNORECASE)
 # A GitHub login, as the console reads the one install carries (#3954).
 LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}")
+# A workspace id, as the console mints one (console/src/lib/workspace-id.ts): one path segment.
+WORKSPACE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,31}")
 
 
 def ended(said: object, login: str | None) -> str:
@@ -247,21 +251,30 @@ def ended(said: object, login: str | None) -> str:
     return f"{said} This machine uses @{login}." if login and "than the one this machine uses" in said else said
 
 
-def sign_in(console: str, repo: str, label: str, invite: str | None = None, login: str | None = None) -> str:
-    """A console session from a device grant, held in memory for this run only."""
+def sign_in(console: str, scope: str, invite: str | None = None, login: str | None = None,
+            named: bool = False) -> str:
+    """A console session from a device grant, held in memory for this run only. `scope` is what
+    the /device page shows the person this grant does."""
     status, got = call("POST", f"{console}/api/auth/device/code",
-                       {"client_id": CLIENT, "scope": f"install {repo} on {label}"})
+                       {"client_id": CLIENT, "scope": scope})
     if status != 200 or "device_code" not in got:
         raise Stop(f"the console would not start a sign-in ({status}): {got}")
     page = got.get("verification_uri_complete") or got["verification_uri"]
     say("sign in", f"open {got['verification_uri']} and enter {got['user_code']}")
-    say("", f"(opened in your browser; sign in to GitHub as @{login}; waiting…)" if login else "(opened in your browser; waiting…)")
+    if invite:
+        # An invitation makes a team of the person's own; joining another's is not one yet (#4015).
+        say("invite", "this creates a team of your own")
+    # An invitation decides the account; the machine's own login is only a guess at it (#4015).
+    who = f"@{login}" if login and (named or not invite) else "the account your invitation is for" if invite else None
+    say("", f"(opened in your browser; sign in to GitHub as {who}; waiting…)" if who else "(opened in your browser; waiting…)")
     # Only the browser opened here holds the proof, so only it can end this grant when its sign-in
     # is refused (#3586). It is never printed: a printed proof is as public as the user code.
     # An invitation code rides the same fragment, for the sign-in door to carry to GitHub; like the
     # proof, a fragment reaches no server log. So does the login this machine signs in as (#3954),
-    # which lets an invite waiting for that account admit it with no code.
-    carried = (f"&invite={invite.upper()}" if invite else "") + (f"&login={login}" if login else "")
+    # which lets an invite waiting for that account admit it with no code. A login the person named
+    # with --login is marked, so the approval page refuses another account outright (#4015).
+    carried = (f"&invite={invite.upper()}" if invite else "") + (f"&login={login}" if login else "") \
+        + ("&named=1" if login and named else "")
     open_page(f"{page}#refusal={refusal_proof(got['device_code'])}{carried}")
     interval, deadline = float(got.get("interval") or POLL), time.monotonic() + float(got.get("expires_in") or 1800)
     start = told = time.monotonic()
@@ -638,7 +651,7 @@ def install(root: Path, codex: bool = False, team: str | None = None,
     if view is None:
         source = tracks_source(root, repo)
         # The workspace's GitHub login is the account the person most likely signs in as (#3954).
-        token = sign_in(console, repo, label, invite, login or name)
+        token = sign_in(console, f"install {repo} on {label}", invite, login or name, named=login is not None)
         try:
             got = workspace(console, token, repo, source, team)
             authority = got.get("id")
@@ -878,7 +891,8 @@ def uninstall(root: Path, retire: bool) -> int:
         door = None
         say("credential", f"kept: {e}")
     if retire and bound:
-        token = sign_in(console, repository(root), f"retire {bound}")
+        # Its own scope: an install's carries the approval page on to GitHub for the repository (#4015).
+        token = sign_in(console, f"retire {bound}")
         try:
             status, got = call("DELETE", f"{console}/api/install/workspace/{bound}", token=token)
             if status != 200:
@@ -886,6 +900,9 @@ def uninstall(root: Path, retire: bool) -> int:
             say("workspace", f"{bound} retired; its state is kept on the platform")
         finally:
             end_session(console, token)
+    elif retire:
+        say("workspace", "not retired: this checkout is bound to no workspace; "
+                         "name the workspace with `install.py retire <id>`")
     hooks.uninstall(root)
     say("hooks", "removed")
     env = root / ".env"
@@ -905,11 +922,26 @@ def uninstall(root: Path, retire: bool) -> int:
     return 0
 
 
+def retire_workspace(wid: str) -> int:
+    """Retire a workspace by its id, the way to reach one no checkout here is bound to (#3742).
+    What an install added on a machine is still that machine's `uninstall` to remove."""
+    console = platform_url()
+    token = sign_in(console, f"retire {wid}")
+    try:
+        status, got = call("DELETE", f"{console}/api/install/workspace/{wid}", token=token)
+        if status != 200:
+            raise Stop(f"the console would not retire {wid} ({status}): {got.get('error') or got}")
+        say("workspace", f"{wid} retired; its state is kept on the platform")
+    finally:
+        end_session(console, token)
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if verb_help.help_requested("install", argv):
         print(verb_help.script_help("install", topic=argv[0] if len(argv) == 2 else None)); return 0
     args = list(argv)
-    action = args[0] if args[:1] in (["uninstall"], ["lanes"]) else "install"
+    action = args[0] if args[:1] in (["uninstall"], ["lanes"], ["retire"]) else "install"
     if action != "install":
         args.pop(0)
     retire = False
@@ -967,26 +999,32 @@ def main(argv: list[str]) -> int:
                 return verb_help.error("install", "invite code may appear once")
             invite = arg; i += 1; continue
         paths.append(arg); i += 1
-    if action != "install" and (codex or team is not None or (action == "uninstall" and gh_account is not None)):
+    if action != "install" and (codex or team is not None
+                                or (action in ("uninstall", "retire") and gh_account is not None)):
         return verb_help.error("install", f"{action} does not accept install options")
     if len(paths) > 1:
         return verb_help.error("install", "too many workspace paths")
-    anchor = Path(paths[0]) if paths else Path.cwd()
-    try:
-        root = common_root(anchor, timeout=5)
-        dirs = subprocess.run(["git", "-C", str(anchor), "rev-parse", "--path-format=absolute",
-                               "--git-dir", "--git-common-dir"], capture_output=True, text=True,
-                              check=True, timeout=5).stdout.splitlines()
-    except Exception:
-        raise Stop("this is not a Git checkout; run it from the repository to install") from None
-    if Path(dirs[0]).resolve() != Path(dirs[1]).resolve():
-        # What either writes is the shared checkout's, so one worktree's uninstall took every
-        # sibling's hooks and door (#3431).
-        raise Stop(f"{anchor} is a linked worktree; {action} acts on the checkout its worktrees "
-                   f"share, so run it from {root}")
+    if action == "retire" and (len(paths) != 1 or not WORKSPACE_ID.fullmatch(paths[0])):
+        return verb_help.error("install", "retire takes one workspace id, as the install answer printed it")
+    if action != "retire":
+        anchor = Path(paths[0]) if paths else Path.cwd()
+        try:
+            root = common_root(anchor, timeout=5)
+            dirs = subprocess.run(["git", "-C", str(anchor), "rev-parse", "--path-format=absolute",
+                                   "--git-dir", "--git-common-dir"], capture_output=True, text=True,
+                                  check=True, timeout=5).stdout.splitlines()
+        except Exception:
+            raise Stop("this is not a Git checkout; run it from the repository to install") from None
+        if Path(dirs[0]).resolve() != Path(dirs[1]).resolve():
+            # What either writes is the shared checkout's, so one worktree's uninstall took every
+            # sibling's hooks and door (#3431).
+            raise Stop(f"{anchor} is a linked worktree; {action} acts on the checkout its worktrees "
+                       f"share, so run it from {root}")
     global _at
     _at = ""
     try:
+        if action == "retire":
+            return retire_workspace(paths[0])
         if action == "lanes":
             return adopt_lanes(root, merge, gh_account)
         return uninstall(root, retire) if action == "uninstall" else install(root, codex, team, gh_account, invite, login)

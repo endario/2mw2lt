@@ -237,6 +237,16 @@ It removes what the install added on this machine:
 With `--workspace`, it also has the platform retire the workspace, after one more sign-in. The
 platform keeps the workspace's state rather than deleting it.
 
+A workspace no checkout here is bound to — it was provisioned from another machine, or its
+checkout was never wired — is retired by its id, from anywhere:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" retire <id>
+```
+
+After one more sign-in, the platform retires it and keeps its state, as above. Nothing on this
+machine is touched: what an install added here is still `uninstall`'s to remove.
+
 Install the plugin itself at user scope, from a directory that is not your home. From `~`,
 `--scope project` writes into `~/.claude/settings.json`, which every repository under it then
 inherits.

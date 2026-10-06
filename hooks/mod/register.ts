@@ -1,5 +1,6 @@
 import type { Register, EngineInterface, Timer, HookStream, ProcessSpawnChunk, ProcessSpawnResult } from 'claude-code'
-import { lines, atLeast, pick, invokes, POINTER, CHECKPOINT, CONNECT_AGAIN } from './frames'
+import { lines, atLeast, pick, invokes, answerable, POINTER, CHECKPOINT, CONNECT_AGAIN } from './frames'
+import type { Routine } from './frames'
 
 // The plugin's hooks module (#3872): it holds a connected Claude session's steering stream through
 // hold.py's `--wake plugin` mode, wakes the session with a fixed pointer, and hands the frames to
@@ -8,14 +9,17 @@ import { lines, atLeast, pick, invokes, POINTER, CHECKPOINT, CONNECT_AGAIN } fro
 // holder claim and the session keeps the model-run recipe.
 
 const BUSY = { plugin: '2mw2lt', key: 'busy' } as const
+const TURN_AT = { plugin: '2mw2lt', key: 'turnAt' } as const
 const PENDING = { plugin: '2mw2lt', key: 'pending' } as const
 const POINTED = { plugin: '2mw2lt', key: 'pointed' } as const
+const APPENDED = { plugin: '2mw2lt', key: 'appended' } as const
 const WARNED = { plugin: '2mw2lt', key: 'warned' } as const
 const SESSION = { plugin: '2mw2lt', key: 'session' } as const
 const CONNECTED = { plugin: '2mw2lt', key: 'connected' } as const
 
 const TOOL = 'mcp__2mw2lt__frames'
 const REFRESH_MS = 60_000
+const REPOINT_MS = 1500
 const STDERR_TAIL = 2000
 
 // Always this plugin version's own clients, never the launcher: it resolves the recorded install,
@@ -82,16 +86,37 @@ async function point($: EngineInterface) {
   const { value: pointed = false } = await $.state.get(POINTED)
   if (pointed) return
   await $.state.set(POINTED, true)
-  await tell($, POINTER)
+  await $.state.set(APPENDED, await tell($, POINTER))
+}
+
+// A pointer appended into a running turn is read only if that turn makes another request, and a
+// turn about to end does not: the row stays unread, POINTED stays set, and no pointer is ever sent
+// again. So a turn that ended with its pointer unanswered gets one as a prompt of its own,
+// once the session is idle.
+async function repoint($: EngineInterface) {
+  await locked(async () => {
+    if (!(await $.state.get(APPENDED)).value) return
+    if ((await $.state.get(BUSY)).value) return            // the next turn's end asks again
+    await unpoint($)
+    // Nothing is owed a pointer once the module no longer holds the stream.
+    if (!yielded && (await $.state.get(SESSION)).value && ((await $.state.get(PENDING)).value ?? []).length) await point($)
+  })
+}
+
+// The pointer is no longer outstanding: the model read the frames, or the session starts over.
+async function unpoint($: EngineInterface) {
+  await $.state.set(POINTED, false)
+  await $.state.set(APPENDED, false)
 }
 
 // A fixed text the model must read: a turn of its own on an idle session, a row in the running
 // turn on a busy one. A prompt the session will not take is appended instead, to be read at its
-// next request.
-async function tell($: EngineInterface, text: string) {
+// next request. Whether it went into a running turn.
+async function tell($: EngineInterface, text: string): Promise<boolean> {
   const { value: busy = false } = await $.state.get(BUSY)
   if (busy) await append($, text)
   else void $.prompt.submit({ text }).catch(() => append($, text))
+  return busy
 }
 
 async function sessionOf($: EngineInterface): Promise<string> {
@@ -119,6 +144,24 @@ function stop() {
   child = undefined
 }
 
+// A routine kick (#3995): the daemon counts it answered by any evidence of the session later than
+// the kick, which a turn's end gives and an idle session's does not, so the answer is posted here,
+// with no model turn. Not while the running turn is older than the kick's interval: that kick goes
+// unanswered and counts as it always has.
+async function answerKick($: EngineInterface, ps: string, session: string, kick: Routine, gen: number) {
+  const { value: busy = false } = await $.state.get(BUSY)
+  const { value: began } = await $.state.get(TURN_AT)
+  if (!answerable(busy, began, await $.clock.now(), kick.interval)) {
+    $.ui.log(`2mw2lt: the kick at ${kick.at} goes unanswered: a turn has run past ${kick.interval} s`, { to: 'debug' })
+    return
+  }
+  if (gen !== generation) return
+  const r = await $.process.run(
+    ['python3', script($, 'hold.py'), '--answer-kick', kick.at, '--provider', 'claude', '--provider-session', ps, session],
+    { cwd: root })
+  if (r.exitCode !== 0) $.ui.log(`2mw2lt: answering the kick at ${kick.at} exited ${r.exitCode}: ${r.stderr.trim()}`, { to: 'debug' })
+}
+
 // One child, read to its end: its exit code, and whether a frame it gave woke the session.
 async function holdOnce($: EngineInterface, ps: string, session: string, gen: number) {
   const held = $.process.spawn({
@@ -135,6 +178,10 @@ async function holdOnce($: EngineInterface, ps: string, session: string, gen: nu
     const { complete, rest } = lines(buffer + text)
     buffer = rest
     for (const l of complete) {
+      if (l.routine && !l.wakes) {
+        void answerKick($, ps, session, l.routine, gen).catch(err => $.ui.log(`2mw2lt: answering a kick broke: ${String(err)}`, { to: 'debug' }))
+        continue
+      }
       if (!l.wakes || l.kind === 'closed') continue
       woke = true
       await locked(async () => {
@@ -231,7 +278,7 @@ export const register: Register = on => {
       const { value: now = [] } = await $.state.get(PENDING)
       const left = now.filter(id => !found.includes(id))
       await $.state.set(PENDING, left)
-      await $.state.set(POINTED, false)
+      await unpoint($)
       if (left.some(id => !pending.includes(id))) await point($)
     })
     return { result: text || 'No steering frame is waiting.' }
@@ -258,12 +305,17 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('turn.start', async ($, e, next) => {
+    // A subagent's turn starts inside ours, and the run is the outer turn's.
+    if (!(await $.state.get(BUSY)).value) await $.state.set(TURN_AT, await $.clock.now())
     await $.state.set(BUSY, true)
     return next(e)
   })
 
   on('turn.complete', async ($, e, next) => {
-    if (e.agentId === undefined) await $.state.set(BUSY, false)   // a subagent's turn ends inside ours
+    if (e.agentId === undefined) {                                 // a subagent's turn ends inside ours
+      await $.state.set(BUSY, false)
+      if ((await $.state.get(APPENDED)).value) $.clock.after(REPOINT_MS, () => { void repoint($).catch(() => undefined) })
+    }
     return next(e)
   })
 
@@ -293,7 +345,7 @@ export const register: Register = on => {
     if (root && e.source === 'clear') {
       await locked(async () => {
         await $.state.set(PENDING, [])
-        await $.state.set(POINTED, false)
+        await unpoint($)
       })
       if (!yielded) await claim($, true, e.session_id)
     }
@@ -304,6 +356,7 @@ export const register: Register = on => {
   // left going would spawn another mid-shutdown. All of it shares a 1.5 s bound.
   on('session.end', async ($, e, next) => {
     stop()
+    await $.state.set(APPENDED, false)   // a turn ending now has nothing to be pointed again for
     if (e.reason !== 'clear') refresh?.cancel()
     if (root) await claim($, false, e.sessionId)
     return next(e)

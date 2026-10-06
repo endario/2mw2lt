@@ -96,10 +96,11 @@ you last received is the answer — there is nothing to accumulate and nothing t
 Each row carries the session's `model`, `effort`, `machine` (its host name) and `verdict` (its own
 account's, as in the `fleet` frame), each `null` when nothing has been read: place by those, and
 never ask a session its level, since it cannot read its own.
-`data: {"kind": "kick", "idle": [...], "executing": [...], "finished": [...], "changed": {...}, "turn": …, "placement": {...}, "gates": {...}, "missed": …}`
+`data: {"kind": "kick", "idle": [...], "executing": [...], "finished": [...], "changed": {...}, "turn": …, "placement": {...}, "gates": {...}, "moved": …, "missed": …}`
 is the daemon's timer, not a person.
 It arrives every interval because silence sends nothing else, and on the next poll that is
-neither `quiet`, `debounced` nor `refused` once a session finishes a turn. `finished` is the daemon's own reading of who is waiting for work — do not ask
+neither `quiet`, `debounced` nor `refused` once a session finishes a turn. `moved` is the daemon's verdict that this kick carries a fleet
+change or a stalled gate; a kick that has neither wakes no model turn for a seat the plugin holds. `finished` is the daemon's own reading of who is waiting for work — do not ask
 the fleet to report it, and do not read its absence for a harness that posts no turn end as
 busy. It overlaps `executing`, because a session that has just finished is still recently heard.
 `placement` is each reachable session's `{model, effort, machine, verdict}`, so a quiet seat is
@@ -473,8 +474,11 @@ The row also shows what a session has written down:
 `checkpoint` is its last `{boundary, note, at, current}`, current until it next acknowledges a
 directive, and `compacted` its last `{at, trigger, skipped}`. You are told each checkpoint as a say
 `from: checkpoint <id>`. You are told each compaction made with no current checkpoint as a say
-`from: compaction <session>`: that session lost what it had not written down, so give it the
-card's context again in its next directive.
+`from: compaction <session>`. After a compaction you ordered with `control:`, the next directive
+re-briefs it with the card's context, as below. An automatic compaction is a notice, not a reason
+to re-brief: give the card's context again only when the session shows it lost some — it asks what
+it was doing, repeats finished work, or acts against a ruling it was given (the owner's ruling,
+2026-10-06).
 
 Apply these at a unit boundary: after a session's `done:`, before its next directive, and when a
 usage frame moves its account. Name the evidence in `because`: the fill, the verdict, the card.

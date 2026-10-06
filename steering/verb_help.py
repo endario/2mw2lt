@@ -156,6 +156,7 @@ TOOLS = {
         {"topic": "--frame-path", "usage": "--frame-path <session>", "example": "hold --frame-path violet"},
         {"topic": "--claim-path", "usage": "--claim-path <provider-session>", "example": "hold --claim-path 0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"},
         {"topic": "--session-of", "usage": "--session-of <provider-session>", "example": "hold --session-of 0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"},
+        {"topic": "--answer-kick", "usage": "--answer-kick <at> [--provider <provider>] [--provider-session <id>] [--pid <pid>] [session]", "example": "hold --answer-kick 2026-10-06T08:00:00Z"},
         {"topic": "stream", "usage": "[--until-event|--service|--wake plugin] [--provider <provider>] [--provider-session <id>] [--pid <pid>] [session]", "example": "hold --current"},
     ]},
     "holds": {"verb": "holds", "forms": [
@@ -172,6 +173,7 @@ TOOLS = {
         {"topic": "install", "usage": "[workspace] [invite-code] [--codex] [--team <id>] [--gh-account <login>] [--login <login>]", "example": "install . 2MW-7KQ4-XN2D-9HTB-M3PC"},
         {"topic": "lanes", "usage": "lanes [workspace] [--merge] [--gh-account <login>]", "example": "install lanes . --merge"},
         {"topic": "uninstall", "usage": "uninstall [workspace] [--workspace]", "example": "install uninstall ."},
+        {"topic": "retire", "usage": "retire <workspace id>", "example": "install retire workspace-1"},
     ]},
     "rest": {"forms": [
         {"topic": None, "usage": _SPEAKER_USAGE + " [--post [--json <body>] [--key <key>]] <api-v1-path> [--all]", "example": "rest /openapi.json"},

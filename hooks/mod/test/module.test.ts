@@ -1,6 +1,6 @@
 import type { On } from 'claude-code'
 import { test, expect, mock } from 'claude-code/testing'
-import { lines, atLeast, pick, invokes, POINTER, CHECKPOINT, CONNECT_AGAIN } from '../frames'
+import { lines, atLeast, pick, invokes, answerable, POINTER, CHECKPOINT, CONNECT_AGAIN } from '../frames'
 
 test('lines are whole only once their newline arrives', async () => {
   const a = lines('{"id":"f1","kind":"say","wakes":true}\n{"id":"f2","ki')
@@ -90,6 +90,7 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
   on('session.root', async () => ({ value: ROOT }))
   on('session.id', async () => ({ value: w.psession }))
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async ($, e) => ({ text: e.text }))
   on('fs.read', async ($, e) => {
     if (e.path.endsWith('/.claude-plugin/plugin.json')) {
       w.root = e.path.slice(0, -'/.claude-plugin/plugin.json'.length)
@@ -166,6 +167,59 @@ test('a frame that does not wake submits nothing', async ($, on) => {
   expect(w.spawns.length).toBe(1)
   expect(w.submits).toEqual([])
   expect(w.appends).toEqual([])
+})
+
+const KICK = { at: '2026-10-06T08:00:00Z', interval: 1800 }
+const routine = (id: string) => JSON.stringify({ id, kind: 'kick', wakes: false, routine: KICK }) + '\n'
+const answers = (w: { runs: string[][] }) => w.runs.filter(argv => argv.includes('--answer-kick'))
+
+test('a routine kick is answered by the client, with no turn bought', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [routine('k1')], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  expect(answers(w)).toEqual([['python3', `${w.root}/steering/enroll/hold.py`, '--answer-kick', KICK.at,
+                               '--provider', 'claude', '--provider-session', 'ps-1', 's1']])
+  expect(w.submits).toEqual([])
+  expect(w.appends).toEqual([])
+})
+
+test('a kick that moved something wakes the session and is not answered by the module', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [line('k1', 'kick', true)], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  expect(w.submits).toEqual([POINTER])
+  expect(answers(w)).toEqual([])
+})
+
+// A kick arrives after a turn has been running for `ran` ms.
+async function kickedAfter($: any, on: On, ran: number) {
+  let arrive!: () => void
+  const gate = new Promise<void>(r => { arrive = r })
+  const w = world(on, { rounds: [{ lines: [gate, routine('k1')], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  await $.turn.start({ text: 'working', turnId: 't-1' } as never)
+  await w.clock.advance(ran)
+  arrive()
+  await w.clock.settle()
+  return w
+}
+
+test('a routine kick is answered in a turn that has run less than its interval', async ($, on) => {
+  expect(answers(await kickedAfter($, on, (KICK.interval - 1) * 1000)).length).toBe(1)
+})
+
+test('a routine kick is not answered in a turn that has run past its interval', async ($, on) => {
+  const w = await kickedAfter($, on, (KICK.interval + 1) * 1000)
+  expect(answers(w)).toEqual([])
+  expect(w.logs.some(l => l.includes('goes unanswered'))).toBe(true)
+})
+
+test('answerable: a turn is hung once it has run past the interval, and an idle session never is', async () => {
+  expect(answerable(true, 0, 1800_000, 1800)).toBe(true)
+  expect(answerable(true, 0, 1801_000, 1800)).toBe(false)
+  expect(answerable(false, 0, 99_999_000, 1800)).toBe(true)
+  expect(answerable(true, undefined, 99_999_000, 1800)).toBe(true)
 })
 
 test('envelopes are acked only after the frames tool, once each, and the tool returns them verbatim', async ($, on) => {
@@ -412,6 +466,70 @@ test('a frame that arrives while the tool runs gets its own pointer', async ($, 
   await w.clock.settle()
   expect(w.submits).toEqual([POINTER])
   expect(w.appends).toEqual([POINTER])
+})
+
+// A frame arrives in a turn that is running, and the pointer is appended to it.
+async function arrivesInTurn($: any, on: On, recording = '') {
+  let arrive!: () => void
+  const gate = new Promise<void>(r => { arrive = r })
+  const w = world(on, { rounds: [{ lines: [gate, line('e1', 'envelope', true)], code: 0, hold: never }], recording })
+  await begin($)
+  await w.clock.settle()
+  await $.turn.start({ text: 'connecting', turnId: 't-1' } as never)
+  arrive()
+  await w.clock.settle()
+  return w
+}
+
+test('a pointer appended into a turn that ends without reading it is sent again as a prompt, once', async ($, on) => {
+  const w = await arrivesInTurn($, on)
+  expect(w.appends).toEqual([POINTER])
+  await $.turn.complete({ turnId: 't-1', text: 'done' } as never)
+  await w.clock.advance(2_000)
+  expect(w.submits).toEqual([POINTER])
+  await $.turn.start({ text: 'the pointer', turnId: 't-2' } as never)   // the model ignores this one too
+  await $.turn.complete({ turnId: 't-2', text: 'done' } as never)
+  await w.clock.advance(2_000)
+  expect(w.submits).toEqual([POINTER])
+})
+
+test('a pointer is sent again only once the session is idle, and not after the session disconnected', async ($, on) => {
+  const w = await arrivesInTurn($, on)
+  await $.turn.complete({ turnId: 't-1', text: 'done' } as never)
+  await $.turn.start({ text: 'the person typed', turnId: 't-2' } as never)   // a turn starts inside the window
+  await w.clock.advance(2_000)
+  expect(w.submits).toEqual([])
+  expect(w.appends).toEqual([POINTER])   // nothing new is put into the turn that began
+  await $.turn.complete({ turnId: 't-2', text: 'done' } as never)
+  await w.clock.advance(2_000)
+  expect(w.submits).toEqual([POINTER])
+})
+
+test('a pointer appended into a turn is not sent again after the session disconnected', async ($, on) => {
+  const w = await arrivesInTurn($, on)
+  await $.tool.call({ tool: 'Bash', command: 'python3 "/p/steering/enroll/disconnect.py" s1' } as never)
+  await $.turn.complete({ turnId: 't-1', text: 'done' } as never)
+  await w.clock.advance(2_000)
+  expect(w.submits).toEqual([])
+})
+
+test('a turn that read its appended pointer sends nothing more', async ($, on) => {
+  const w = await arrivesInTurn($, on, 'data: {"kind":"envelope","id":"e1","ulid":"01JENV"}\n')
+  await $.tool.call({ tool: TOOL } as never)
+  await $.turn.complete({ turnId: 't-1', text: 'done' } as never)
+  await w.clock.advance(2_000)
+  expect(w.submits).toEqual([])
+})
+
+test('a pointer submitted as a prompt is not sent again by the turn it started', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [line('e1', 'envelope', true)], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  expect(w.submits).toEqual([POINTER])
+  await $.turn.start({ text: POINTER, turnId: 't-1' } as never)
+  await $.turn.complete({ turnId: 't-1', text: 'done' } as never)
+  await w.clock.advance(2_000)
+  expect(w.submits).toEqual([POINTER])
 })
 
 test('a pending frame the recording does not hold yet stays pending', async ($, on) => {

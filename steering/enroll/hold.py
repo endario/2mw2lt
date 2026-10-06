@@ -37,7 +37,7 @@ import os
 import time
 import urllib.request
 import urllib.error
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 HERE = Path(__file__).resolve().parent
@@ -158,6 +158,19 @@ def acts(line: str, seen: datetime | str | None = None) -> bool:
     return frame.get("kind") in ACTS or (frame.get("kind") == "closed" and frame.get("why") == "revoked")
 
 
+def routine(frame: dict) -> dict | None:
+    """What the module needs to answer this frame without a model turn: `{"at", "interval"}` of a
+    kick the daemon says moved nothing (`moved` false), else None. A kick without a verdict, from
+    a daemon that stamps none, or with a malformed `at` or `interval`, is not routine and wakes
+    as it always has (#3995)."""
+    at, interval = frame.get("at"), frame.get("interval")
+    if (frame.get("kind") != "kick" or frame.get("moved") is not False or not isinstance(at, str)
+            or isinstance(interval, bool) or not isinstance(interval, (int, float))
+            or moment(at) is None):
+        return None
+    return {"at": at, "interval": interval}
+
+
 def last_exclusion(frames: Path) -> datetime | str | None:
     """The exclusion an earlier run already woke the session for, since each `--until-event` run
     is a new process: the newest one recorded, or None when a lifted one came after it."""
@@ -218,26 +231,59 @@ def who(ws: Path, h: harness_mod.Harness, psession: str | None, pid: int | None,
     return name, token, rid, psession
 
 
-def restate(ws: Path, rid: str, psession: str, config: Path) -> None:
-    """Send the reading this session's last turn end sent, read again from its transcript.
+def restate(ws: Path, rid: str, psession: str, config: Path, answering: str | None = None) -> bool:
+    """Send the reading this session's last turn end sent, read again from its transcript; whether
+    the daemon took it.
 
     The daemon keeps readings in memory (doc 30 §6), so a restart blanks each one until the
     session's next `Stop`, and a session idling in its hold has none coming: it showed no model,
     effort or machine to the seat that would place work on it (#2665). A restart ends every hold
     through the agent's uplink, so the reopened hold is where the reading is restated.
 
+    `answering` is the `at` of a routine kick (#3995): the reading is then stated as of now, the
+    session being alive now, and never stamped before that kick, because the daemon counts a kick
+    answered only by evidence later than it, to the second (doc 70 §3).
+
     Found by the session id alone: the hold may run from a directory other than the one the
     session's transcripts are kept under."""
     found = harness_mod.claude_transcript_path(config, psession)
     rec = found and readout.build({"session_id": psession, "transcript_path": str(found)},
-                                   restated=True)
+                                   restated=answering is None)
     if rec is None:
-        return
+        if answering is not None:
+            print(f"no reading to answer the kick: no assistant entry in a transcript of {psession}",
+                  file=sys.stderr)
+        return False
     rec["runtime_id"] = rid
+    if answering is not None:
+        rec["observed_at"] = max(rec["observed_at"], (moment(answering) + timedelta(seconds=1))
+                                 .strftime("%Y-%m-%dT%H:%M:%SZ"))
     try:
         observe_post.post(rec, ws, 2.0)
     except (Exception, SystemExit) as e:  # a door it cannot name exits; the next turn end restates it
         door.record("hold", f"restating the reading failed: {door.failure(e)}", ws)
+        return False
+    return True
+
+
+def answer_kick(args: list[str]) -> int:
+    """`--answer-kick <at> <the hold's own flags and session>`: the reading that answers the routine
+    kick sent at `at`, for the module to run on a kick it will not wake a model for (#3995). Exits
+    0 when the daemon took it."""
+    at = args[1] if len(args) > 1 else ""
+    if not at or at.startswith("-") or moment(at) is None:
+        return error("hold", "--answer-kick takes the kick's `at`")
+    try:
+        provider, psession, pid, session = options(args[2:])
+        h = harness_of(provider)
+        ws = required_workspace_root(project_dir(), timeout=2.0)
+        _, _, rid, psession = who(ws, h, psession, pid or plugin_pid(h, psession), session)
+    except (Refused, Undetermined) as why:
+        print(str(why), file=sys.stderr)
+        return 1
+    if h.provider != "claude":
+        return error("hold", "--answer-kick answers for a Claude session")
+    return 0 if restate(ws, rid, psession, h.config_dir(), answering=at) else 1
 
 
 def frame_path(ws: Path, session: str) -> Path:
@@ -497,8 +543,12 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                             # `id` is stamped on every frame the orchestrator hands an agent, of
                             # every kind; a `closed` frame may carry none.
                             kind = frame.get("kind")
+                            # A routine kick wakes nothing: the module answers it itself, and a
+                            # model turn would buy only the answer (#3995).
+                            answers = routine(frame)
                             sys.stdout.write(json.dumps({"id": frame.get("id"), "kind": kind,
-                                                         "wakes": wakes}) + "\n")
+                                                         "wakes": wakes and answers is None,
+                                                         **({"routine": answers} if answers else {})}) + "\n")
                             sys.stdout.flush()
                             if kind == "closed" and frame.get("why") == "revoked":
                                 return 3
@@ -589,6 +639,8 @@ def main(argv: list[str]) -> int:
                                 lambda ws, ps: minted_name(records(ws), ps))):
         if args[:1] == [flag]:
             return workspace_answer(args, what, answer)
+    if args[:1] == ["--answer-kick"]:
+        return answer_kick(args)
     try:
         wake, args = wake_mode(args)
     except Refused as why:
