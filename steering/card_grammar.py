@@ -34,6 +34,9 @@ SIGNIFICANCE = ("card", "minor")
 # How soon a card's work is wanted (#2510), highest first; `normal` until a correction says else.
 PRIORITY = ("high", "normal", "low")
 EVIDENCE_MAX = 300
+
+# A conclusion's word that a held branch with no merged pull request is still the work (doc 48 §8).
+KEEP_BRANCH = "--branch-is-the-work"
 NAME_MAX = 80
 
 # An edge's kinds and how one ends (doc 167). `requires` is acyclic; `part-of` is not a wait.
@@ -93,6 +96,8 @@ def validate(fact: dict) -> str | None:
             return "by must name who concluded it"
         if not _text(fact.get("evidence"), EVIDENCE_MAX):
             return f"evidence must be one line of at most {EVIDENCE_MAX} characters"
+        if "kept" in fact and fact["kept"] is not True:
+            return "kept is true where the conclusion says its branch is the work"
     elif state == "card-unsession":
         if not _text(fact.get("session"), 120):
             return "session is required"
@@ -248,8 +253,11 @@ def built(verb: str, rest: list[str]) -> tuple[list[dict], str | None]:
             return [_fact("card-session", rest[0], session=rest[1], role=rest[2])], None
         if verb == "unsession" and len(rest) == 2:
             return [_fact("card-unsession", rest[0], session=rest[1])], None
-        if verb == "conclude" and len(rest) == 3:
-            return [_fact("card-concluded", rest[0], by=rest[1], evidence=rest[2])], None
+        if verb == "conclude" and len(rest) in (3, 4):
+            if len(rest) == 4 and rest[3] != KEEP_BRANCH:
+                return [], USAGE_REFUSAL
+            return [_fact("card-concluded", rest[0], by=rest[1], evidence=rest[2],
+                          **({"kept": True} if len(rest) == 4 else {}))], None
         if verb == "unconclude" and len(rest) == 1:
             return [_fact("card-unconcluded", rest[0])], None
         if verb == "retire" and len(rest) == 2:

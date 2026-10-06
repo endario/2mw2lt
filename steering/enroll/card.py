@@ -25,7 +25,7 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
              "       card.py --token - branch|unbranch <card> <repo> <branch>\n"
              "       card.py --token - session <card> <session> executor|planned\n"
              "       card.py --token - unsession <card> <session>\n"
-             "       card.py --token - conclude <card> <by> <evidence>\n"
+             "       card.py --token - conclude <card> <by> <evidence> [--branch-is-the-work]\n"
              "       card.py --token - unconclude <card>\n"
              "       card.py --token - retire <card> <why>\n"
              "       card.py --token - reclassify <card> track <lane>|off-track <why>\n"

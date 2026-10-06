@@ -262,8 +262,8 @@ def sign_in(console: str, scope: str, invite: str | None = None, login: str | No
     page = got.get("verification_uri_complete") or got["verification_uri"]
     say("sign in", f"open {got['verification_uri']} and enter {got['user_code']}")
     if invite:
-        # An invitation makes a team of the person's own; joining another's is not one yet (#4015).
-        say("invite", "this creates a team of your own")
+        # The approval page says which this invitation is, a team of their own or a seat in another's (doc 176).
+        say("invite", "the approval page says whether it makes your own team or joins you to one")
     # An invitation decides the account; the machine's own login is only a guess at it (#4015).
     who = f"@{login}" if login and (named or not invite) else "the account your invitation is for" if invite else None
     say("", f"(opened in your browser; sign in to GitHub as {who}; waiting…)" if who else "(opened in your browser; waiting…)")
@@ -660,7 +660,8 @@ def install(root: Path, codex: bool = False, team: str | None = None,
             door = checked_door(got.get("door"), authority)
             for step, said in (("signed in", got.get("user")), ("team", got.get("team"))):
                 if isinstance(said, str):
-                    say(step, said)
+                    say(step, f"{said} (you joined it; installing a new repository is its owner's)"
+                        if step == "team" and got.get("member") is True else said)
             say("workspace", f"{authority} {'created' if got.get('created') else 'found'}")
             admit_machine(console, token, door, authority, label)
             record(root, door, authority)
