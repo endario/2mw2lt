@@ -86,19 +86,17 @@ def post(console: str, path: str, body: dict, timeout: float = 10.0) -> dict:
     make it. `NoCredential` on any refusal or silence."""
     req = urllib.request.Request(f"{console.rstrip('/')}{path}", data=json.dumps(body).encode(), method="POST",
                                  headers={"Content-Type": "application/json"})
-    # The door's rule for what is this machine, so a loopback console skips the proxy. Not
-    # `keyset`'s copy: the door scripts run on the system Python, which has no `jwt`.
+    # The door's opener, which never takes a proxy: a system proxy drops TLS to the console and
+    # the exchange then reads as no usable credential. Not `keyset`'s copy: the door scripts run
+    # on the system Python, which has no `jwt`.
     import sys
     enroll_dir = str(Path(__file__).resolve().parent / "enroll")
     if enroll_dir not in sys.path:
         sys.path.insert(0, enroll_dir)
-    from door import USER_AGENT, is_loopback
+    from door import USER_AGENT, open_direct
     req.add_header("User-Agent", USER_AGENT)
-    host = urllib.parse.urlsplit(console).hostname or ""
-    opener = (urllib.request.build_opener(urllib.request.ProxyHandler({})) if is_loopback(host)
-              else urllib.request.build_opener())
     try:
-        with opener.open(req, timeout=timeout) as r:
+        with open_direct(req, timeout) as r:
             got = json.loads(r.read())
     except urllib.error.HTTPError as e:
         why = e.read().decode(errors="replace")[:200]

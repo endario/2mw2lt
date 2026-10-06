@@ -25,8 +25,9 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None  # a redirect would carry the door's headers to another origin
 
 
-# The proxy environment on a developer machine hijacks loopback and tailnet traffic (doc 08);
-# the door is always reached directly, like the mirror's homeserver.
+# The proxy environment on a developer machine hijacks loopback and tailnet traffic (doc 08), and
+# a system proxy drops TLS to the console's own hosts; so the door and the console are always
+# reached directly, like the mirror's homeserver. Every client of either uses this opener.
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
 # A door or console behind Cloudflare refuses urllib's default `Python-urllib/<version>` with a
 # 403 (`error code: 1010`) before the request reaches it.
@@ -40,6 +41,12 @@ class CredentialRefused(OSError):
     def __init__(self, reason: str):
         super().__init__(f"{reason}; run /2mw2lt:install to admit this machine again")
         self.reason = reason
+
+
+def open_direct(req: urllib.request.Request, timeout: float):
+    """A request to the door or console on this module's opener, with no credential added: the
+    exchange that mints one cannot present one."""
+    return _OPENER.open(req, timeout=timeout)
 
 
 def send(req: urllib.request.Request, timeout: float):
@@ -62,7 +69,7 @@ def send(req: urllib.request.Request, timeout: float):
         if token:
             req.add_header(credential.HEADER, token)
     req.add_header("User-Agent", USER_AGENT)
-    return _OPENER.open(req, timeout=timeout)
+    return open_direct(req, timeout)
 
 
 def is_loopback(host: str) -> bool:

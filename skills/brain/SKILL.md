@@ -541,6 +541,25 @@ The band above the board lists only the cards carrying an unusual fact. It is th
 work: nothing else on the page assigns a card to anyone, and a row nobody reads is a row that
 may as well not be derived.
 
+**The daemon finds, you judge, the ledger records**. These band kinds reach
+you as lines in the `board:` row, each carrying its verb:
+
+| Line | Answer |
+|---|---|
+| `stale` | the card's pull request closed unmerged and no session holds it: `retire` it, citing the closing comment, or `rescope` it to the work that continues |
+| `unattended` | a machine holds a dirty or unpushed branch with no session there: rescue it to a `wip/` branch and push. Never discard it |
+| `stale-pass` | a review passed at a head the pull request has moved past: its author carries the pass or commissions a round |
+| `ceiling` | a gate failed at its round ceiling: build it or decompose it, never another round |
+| `unlaned` | a card is filed under a track no lane names: `reclassify` its track, or `retire` it |
+
+**Delegate the row; do not work it by hand.** When a kick finds a `board:` row standing, hand the
+row's lines to one routine-tier worker, with the lease writes it may make. The worker verifies
+each line against the ledger and GitHub, writes what it can with a one-line why, never discards
+work, and returns the judgement calls. Answer those, then `dispose:` the row. A disposed line
+returns only when what it names changes. Promote to the owner only what is the owner's to decide.
+
+Health is the owner's mirror of what you have not yet disposed, not a queue for the owner.
+
 One kind is yours to close rather than merely to read. **`conclusion-unwitnessed`** is a card a
 session declared done where the observed plane cannot corroborate it — it holds no branch, and
 no merged pull request closes an issue only it claims to resolve. It is not a dispute: there is
