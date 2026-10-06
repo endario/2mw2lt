@@ -14,9 +14,19 @@ the repository. For each it prints the page, opens it, and waits.
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+import python_floor  # noqa: E402
+
+python_floor.require()
+
 import asyncio
+import base64
 import contextlib
 import getpass
+import hashlib
 import http.client
 import json
 import os
@@ -24,13 +34,11 @@ import platform
 import socket
 import subprocess
 import tarfile
-import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
-from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 STEERING = HERE.parent
@@ -212,6 +220,13 @@ def tracks_source(root: Path, repo: str) -> str:
     return DEFAULT_TRACKS
 
 
+def refusal_proof(device_code: str) -> str:
+    """The proof the console's refusal route checks against this grant's device code
+    (console/src/lib/device-refusal.ts)."""
+    digest = hashlib.sha256(b"2mw2lt device refusal v1\0" + device_code.encode()).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
+
 def sign_in(console: str, repo: str, label: str) -> str:
     """A console session from a device grant, held in memory for this run only."""
     status, got = call("POST", f"{console}/api/auth/device/code",
@@ -221,7 +236,9 @@ def sign_in(console: str, repo: str, label: str) -> str:
     page = got.get("verification_uri_complete") or got["verification_uri"]
     say("sign in", f"open {got['verification_uri']} and enter {got['user_code']}")
     say("", "(opened in your browser; waiting…)")
-    open_page(page)
+    # Only the browser opened here holds the proof, so only it can end this grant when its sign-in
+    # is refused (#3586). It is never printed: a printed proof is as public as the user code.
+    open_page(f"{page}#refusal={refusal_proof(got['device_code'])}")
     interval, deadline = float(got.get("interval") or POLL), time.monotonic() + float(got.get("expires_in") or 1800)
     while time.monotonic() < deadline:
         time.sleep(interval)

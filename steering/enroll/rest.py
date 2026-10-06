@@ -14,12 +14,18 @@ Exits 0 with the JSON on stdout; otherwise 1, with the problem's title and remed
 """
 from __future__ import annotations
 
-import json
 import sys
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+import python_floor  # noqa: E402
+
+python_floor.require()
+
+import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import connect  # noqa: E402

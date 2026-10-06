@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import python_floor
+
+python_floor.require()
+
 import os
 import sys
 from pathlib import Path

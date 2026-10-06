@@ -29,6 +29,9 @@ Bare invocation and `--help` show usage without installing:
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" --help
 ```
 
+It needs Python 3.11 or later. An older `python3` stops at once with a line saying so: the person
+installs a newer one (`brew install python` on macOS), then run it again.
+
 Its pauses outlast a foreground command: it waits up to 30 minutes for the sign-in, 15 for the
 grant and 10 for a new team's silo. In Claude Code, run it with Bash `run_in_background: true` and
 read its output as it goes; you are told when it exits. In Codex, give the command a timeout of

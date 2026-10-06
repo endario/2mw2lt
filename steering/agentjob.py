@@ -1,6 +1,10 @@
 """The immutable release and the launchd or systemd jobs of this machine's steering agents."""
 from __future__ import annotations
 
+import python_floor
+
+python_floor.require()
+
 import contextlib
 import fcntl
 import os

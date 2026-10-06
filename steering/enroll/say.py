@@ -6,9 +6,15 @@ the seat's Needs You when nobody holds the seat, never the resident brain (#3381
 workspace minted for another session is refused (#1077)."""
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+import python_floor  # noqa: E402
+
+python_floor.require()
+
+import os
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))

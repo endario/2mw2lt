@@ -8,10 +8,16 @@ project checkout's branch, and a gate is commissioned only on a branch its sessi
 """
 from __future__ import annotations
 
-import os
-import shlex
 import sys
 from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+import python_floor  # noqa: E402
+
+python_floor.require()
+
+import os
+import shlex
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
