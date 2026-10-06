@@ -2,12 +2,17 @@
 """The `SessionStart` hook for `compact` and `clear` (doc 154 §8): point the session back at its
 last checkpoint note. A pointer and never the note itself, because what a hook adds to the
 context is capped at 10,000 characters. It reads nothing but files in the workspace, and it
-always exits 0: a hook never fails the start it is attached to."""
+always exits 0: a hook never fails the start it is attached to.
+
+`--keep <session>` is the plugin's hooks module asking, at a compaction, for the line it adds to
+the summariser's instructions (#3872 D5). It reads the same files, and answers even when it can
+read none of them."""
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -25,6 +30,8 @@ def _help_or_error() -> int | None:
     argv = sys.argv[1:]
     if help_requested("rebrief", argv, bare=False):
         print(script_help("rebrief")); return 0
+    if len(argv) == 2 and argv[0] == "--keep" and not argv[1].startswith("-"):
+        return None
     if argv:
         return error("rebrief", f"unexpected arguments: {' '.join(argv)}")
     return None
@@ -116,10 +123,33 @@ def context(payload: dict, ws: Path, records: dict[str, dict]) -> str | None:
             f"is {last['note']}. Read it, and any directive you acknowledged after it, then act.")[:CAP]
 
 
+def keep(session: str, cwd: Path) -> str:
+    """What a compaction's summary must keep verbatim: the session, its branch and its last
+    checkpoint. The card, its pull request and the lease are the daemon's, and the rebrief after
+    the compaction restates them."""
+    try:
+        r = subprocess.run(["git", "symbolic-ref", "--short", "HEAD"], cwd=cwd,
+                           capture_output=True, text=True, timeout=2)
+        branch = r.stdout.strip() if r.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        branch = ""
+    try:
+        from local_workspace import workspace_root
+        ws = workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or cwd), timeout=1.0)
+        last = _last(ws, session) if ws else None
+    except Exception:  # noqa: BLE001 — what cannot be read is said to be unknown
+        last = None
+    return (f"Keep verbatim: steering session {session}; branch {branch or 'unknown'}; "
+            f"last checkpoint {last['note'] if last else 'none recorded'}.")
+
+
 def main() -> int:
     result = _help_or_error()
     if result is not None:
         return result
+    if sys.argv[1:2] == ["--keep"]:
+        print(keep(sys.argv[2], Path.cwd()))
+        return 0
     try:
         payload = json.loads(sys.stdin.read() or "{}")
         from bind import records

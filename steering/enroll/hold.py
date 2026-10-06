@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""`hold.py [--until-event|--service] [--provider <harness>] [--provider-session <id>] [--pid <pid>] [<session>]`:
+"""`hold.py [--until-event|--service|--wake plugin] [--provider <harness>] [--provider-session <id>] [--pid <pid>] [<session>]`:
 hold this session's stream at its agent.
 
 `--until-event` exits 0 once it has printed the first frame the session must act on, so a
 harness that wakes an idle session when a background command ends is woken by that frame — no
 watch deadline to re-arm (#231).
+
+`--wake plugin` is the plugin's hooks module holding the stream for the life of the process
+(#3872 D3). It holds through every frame and prints, for each, only its id, its kind and
+whether it wakes the session: the frame's text stays in the recording, which the module hands the
+model through a tool, so it never reaches a row the person could have typed. It runs only while
+the module's holder claim is fresh.
 
 Every value the hold needs is read, not carried: the token from the enrollment's own store,
 the runtime id derived from the running process the way `bind:` pinned it, the session name
@@ -38,11 +44,12 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 import action_notice  # noqa: E402
+import holder  # noqa: E402
 from local_workspace import agent_port, required_workspace_root, workspace_header  # noqa: E402
 from moments import moment  # noqa: E402
 import door  # noqa: E402
 from bind import Refused, incarnation, pid_arg  # noqa: E402
-from connect import agent_says, harness_of, own_enrolment, project_dir  # noqa: E402
+from connect import agent_says, harness_of, minted_name, own_enrolment, project_dir, records  # noqa: E402
 import machine_harness as harness_mod  # noqa: E402
 from process_probe import Undetermined  # noqa: E402
 import observe_post  # noqa: E402
@@ -164,6 +171,16 @@ def last_exclusion(frames: Path) -> datetime | str | None:
         if (found := exclusion(line)) is not None:
             return found
     return None
+
+
+def wake_mode(argv: list[str]) -> tuple[str | None, list[str]]:
+    """(`plugin` when `--wake plugin` is given, else None; the arguments without it)."""
+    if "--wake" not in argv:
+        return None, argv
+    i = argv.index("--wake")
+    if argv[i + 1:i + 2] != ["plugin"]:
+        raise Refused("--wake takes plugin")
+    return "plugin", argv[:i] + argv[i + 2:]
 
 
 def options(argv: list[str]) -> tuple[str | None, str | None, int | None, str | None]:
@@ -402,6 +419,17 @@ def record(recorded, frames: Path, raw: bytes):
     return recorded
 
 
+def recording_lost(plugin: bool) -> int | None:
+    """What a hold does when its recording gives up part-way: another hold carries on, since the
+    record is only recovery evidence; a plugin hold exits 4, because the module's tool reads its
+    frames from the record and would be pointed at frames it cannot find."""
+    if not plugin:
+        return None
+    print("the recording of stream frames stopped; a plugin hold ends for its module to start "
+          "another", file=sys.stderr)
+    return 4
+
+
 def close_recording(recorded) -> None:
     try:
         recorded.close()
@@ -411,7 +439,8 @@ def close_recording(recorded) -> None:
 
 def hold(port: str, session: str, token: str, rid: str, frames: Path, until: bool = False,
          service: bool = False, workspace: Path | None = None,
-         connected: Callable[[], None] | None = None) -> int:
+         connected: Callable[[], None] | None = None, plugin: bool = False,
+         lapsed: Callable[[], str | None] | None = None) -> int:
     """Open the stream and yield its frames, until a 403 says no reopen would help.
 
     A 403 is the one answer this loop cannot retry: the token, the node or the incarnation is
@@ -419,17 +448,23 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
     (no uplink) and a dead connection clear on their own, so they reopen — said once, when
     the failure begins, and not on every attempt while it lasts.
 
-    `connected` is called on each open the agent admits.
+    `connected` is called on each open the agent admits. `plugin` prints a line per frame in
+    place of the frame, returns 3 on a revoked hold, and refuses to hold without a recording.
+    `lapsed` is asked on every line read, keepalives included, and a reason it gives ends the
+    hold with 1.
     """
     url = f"http://127.0.0.1:{port}/steering/session/{session}/stream"
     quiet = False    # the standing failure has been named; naming it again every 2s is noise
     seen = last_exclusion(frames)
     recorded = recording(frames)
+    if plugin and recorded is None:
+        return 1     # `recording` said why; the frames tool would have nothing to read
     try:
         while True:
             req = urllib.request.Request(url, headers={"X-Steering-Session": token,
                                                        "X-Steering-Runtime": rid,
-                                                       "X-Steering-Wake": ("service" if service else
+                                                       "X-Steering-Wake": ("plugin" if plugin else
+                                                                           "service" if service else
                                                                            "event" if until else "monitor"),
                                                        **(workspace_header(workspace) if workspace else {})})
             try:
@@ -437,8 +472,14 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                     quiet = False   # a fresh open: the next failure is worth naming again
                     for raw in r:
                         line = raw.decode(errors="replace")   # the response iterates as bytes
+                        why = lapsed() if lapsed else None
+                        if why:
+                            print(why, file=sys.stderr)
+                            return 1
                         if raw.startswith(b"data: ") and recorded:
                             recorded = record(recorded, frames, raw)
+                            if recorded is None and (lost := recording_lost(plugin)):
+                                return lost
                             # After the record, so a receipt is never sent for a say this
                             # machine did not keep.
                             say_read(port, session, raw)
@@ -448,6 +489,20 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                             continue
                         wakes, found = acts(line, seen), exclusion(line)
                         seen = None if lifted(line) else seen if found is None else found
+                        if plugin:
+                            frame = _frame(line)
+                            if frame is None:
+                                print(line, end="", file=sys.stderr, flush=True)
+                                continue
+                            # `id` is stamped on every frame the orchestrator hands an agent, of
+                            # every kind; a `closed` frame may carry none.
+                            kind = frame.get("kind")
+                            sys.stdout.write(json.dumps({"id": frame.get("id"), "kind": kind,
+                                                         "wakes": wakes}) + "\n")
+                            sys.stdout.flush()
+                            if kind == "closed" and frame.get("why") == "revoked":
+                                return 3
+                            continue
                         if until and not wakes:
                             print(line, end="", file=sys.stderr, flush=True)
                             continue
@@ -467,7 +522,7 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                     serves = f" The agent serves {body['serves']}." if body.get("serves") else ""
                     print(f"refused 403{f': {why}' if why else ''}.{serves} "
                           f"nothing this loop retries will change that; run /2mw2lt:connect, "
-                          f"then hold this stream again")
+                          f"then hold this stream again", file=sys.stderr if plugin else sys.stdout)
                     return 1
                 if not quiet:
                     print(f"the stream at 127.0.0.1:{port} was refused {e.code}"
@@ -484,6 +539,40 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
             close_recording(recorded)
 
 
+def workspace_answer(args: list[str], what: str,
+                     answer: Callable[[Path, str], object]) -> int:
+    """`<flag> <value>`: print what `answer` says of the workspace this client resolves, and
+    nothing when it says nothing."""
+    if len(args) != 2:
+        return error("hold", f"{args[0]} takes one {what}")
+    if args[1].startswith("-"):
+        return error("hold", f"no such flag: {args[1]}")
+    try:
+        ws = required_workspace_root(project_dir(), timeout=2.0)
+    except Refused as why:
+        print(str(why), file=sys.stderr)
+        return 1
+    try:
+        found = answer(ws, args[1])
+    except ValueError as why:
+        return error("hold", str(why))
+    if found:
+        print(found)
+    return 0
+
+
+def plugin_pid(h: harness_mod.Harness, psession: str | None) -> int:
+    """The harness process for a plugin hold: the one the harness names, as any hold reads it,
+    and otherwise this process's parent, since the module spawns this hold directly."""
+    try:
+        _, pid = h.whoami()
+        if pid is None and psession and h.harness_pid is not None:
+            pid = h.harness_pid(psession)
+    except Undetermined:
+        pid = None
+    return pid or os.getppid()
+
+
 def main(argv: list[str]) -> int:
     try:
         args = current_args("hold", argv)
@@ -492,20 +581,21 @@ def main(argv: list[str]) -> int:
     if help_requested("hold", argv):
         print(script_help("hold", topic=argv[0] if len(argv) == 2 else None))
         return 0
-    if args[:1] == ["--frame-path"]:
-        if len(args) != 2:
-            return error("hold", "--frame-path takes one session name")
-        if args[1].startswith("-"):
-            return error("hold", f"no such flag: {args[1]}")
-        try:
-            ws = required_workspace_root(project_dir(), timeout=2.0)
-        except Refused as why:
-            print(str(why), file=sys.stderr)
-            return 1
-        print(frame_path(ws, args[1]))
-        return 0
-    if "--until-event" in args and "--service" in args:
-        return error("hold", "--until-event and --service are alternatives")
+    # Each names a fact of the workspace this client resolves, so the module keeps no copy of
+    # the rule: the recording, the holder claim's path, and the enrolment of a provider session.
+    for flag, what, answer in (("--frame-path", "session name", frame_path),
+                               ("--claim-path", "provider session", holder.claim_path),
+                               ("--session-of", "provider session",
+                                lambda ws, ps: minted_name(records(ws), ps))):
+        if args[:1] == [flag]:
+            return workspace_answer(args, what, answer)
+    try:
+        wake, args = wake_mode(args)
+    except Refused as why:
+        return error("hold", str(why))
+    plugin = wake == "plugin"
+    if sum(("--until-event" in args, "--service" in args, plugin)) > 1:
+        return error("hold", "--until-event, --service and --wake plugin are alternatives")
     try:
         provider, psession, pid, session = options(args)
         h = harness_of(provider)   # the provider named, or the one that says this is its session
@@ -517,7 +607,12 @@ def main(argv: list[str]) -> int:
             if not h.holds:
                 raise Refused(f"a {h.provider} session is reached by injection; do not hold a stream")
             ws = required_workspace_root(project, timeout=2.0)
-            session, token, rid, psession = who(ws, h, psession, pid, session)
+            session, token, rid, psession = who(ws, h, psession,
+                                                pid or (plugin_pid(h, psession) if plugin else None),
+                                                session)
+            if plugin and not holder.fresh(ws, psession):
+                raise Refused(f"refused: no fresh holder claim for {psession}; "
+                              f"the plugin's module starts this hold")
             # Announced as soon as there is a session to announce, and before the agent is
             # asked anything: a `Stop` firing in that window would otherwise refuse a turn
             # that had already armed this hold, and be answered with a second one.
@@ -530,13 +625,16 @@ def main(argv: list[str]) -> int:
             return 1
         until = "--until-event" in args
         service = "--service" in args
-        said = sys.stderr if until else sys.stdout
+        said = sys.stderr if until or plugin else sys.stdout
         print(f"holding {session} at 127.0.0.1:{port} as {rid}", file=said)
         frames = frame_path(ws, session)
         print(f"frames: {frames}", file=said)
+        lapsed = (lambda: None if holder.fresh(ws, psession) else
+                  f"the holder claim for {psession} is no longer fresh; the plugin's module that "
+                  f"started this hold is gone, so it ends") if plugin else None
         return hold(port, session, token, rid, frames, until, service, ws,
                     (lambda: restate(ws, rid, psession, h.config_dir()))
-                    if h.provider == "claude" else None)
+                    if h.provider == "claude" else None, plugin, lapsed)
 
 
 if __name__ == "__main__":

@@ -48,6 +48,12 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/connect.py" --help
 
 **Codex:** delivery is injected into your thread; connect asserts that reach. Skip the hold.
 
+**Claude Code with the plugin's module:** when connect's `plugin:` line ends
+`the plugin holds this session's stream, so arm no hold`, arm nothing. A waiting frame starts a
+turn, or arrives during one, as `A steering frame is waiting`. Call `mcp__2mw2lt__frames` then:
+it returns each frame with its daemon-written `from:` line, and acknowledges the envelopes it
+returned.
+
 **Claude Code:** connection is not finished here. Arm this with Bash `run_in_background: true`
 in this turn. A shell `&` does not give the harness a completion notification. The stable
 launcher resolves the current plugin when called; a cached plugin path can disappear during a

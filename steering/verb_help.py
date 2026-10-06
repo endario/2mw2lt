@@ -154,7 +154,9 @@ TOOLS = {
     ]},
     "hold": {"current": True, "forms": [
         {"topic": "--frame-path", "usage": "--frame-path <session>", "example": "hold --frame-path violet"},
-        {"topic": "stream", "usage": "[--until-event|--service] [--provider <provider>] [--provider-session <id>] [--pid <pid>] [session]", "example": "hold --current"},
+        {"topic": "--claim-path", "usage": "--claim-path <provider-session>", "example": "hold --claim-path 0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"},
+        {"topic": "--session-of", "usage": "--session-of <provider-session>", "example": "hold --session-of 0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"},
+        {"topic": "stream", "usage": "[--until-event|--service|--wake plugin] [--provider <provider>] [--provider-session <id>] [--pid <pid>] [session]", "example": "hold --current"},
     ]},
     "holds": {"verb": "holds", "forms": [
         {"topic": "branch", "usage": _SPEAKER_USAGE + " <session> <branch>", "example": "holds violet feat/help"},
@@ -167,7 +169,8 @@ TOOLS = {
         {"topic": "show", "usage": "show [workspace]", "example": "hooks show"},
     ]},
     "install": {"forms": [
-        {"topic": "install", "usage": "[workspace] [--codex] [--team <id>] [--gh-account <login>]", "example": "install ."},
+        {"topic": "install", "usage": "[workspace] [invite-code] [--codex] [--team <id>] [--gh-account <login>]", "example": "install . 2MW-7KQ4-XN2D-9HTB-M3PC"},
+        {"topic": "lanes", "usage": "lanes [workspace] [--merge] [--gh-account <login>]", "example": "install lanes . --merge"},
         {"topic": "uninstall", "usage": "uninstall [workspace] [--workspace]", "example": "install uninstall ."},
     ]},
     "rest": {"forms": [
@@ -201,9 +204,11 @@ TOOLS = {
     ]},
     "armed": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "armed --help"}]},
     "codex_observe": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "codex_observe --help"}]},
+    "delete_guard": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "delete_guard --help"}]},
     "observe": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "observe --help"}]},
     "readout": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "readout --help"}]},
-    "rebrief": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "rebrief --help"}]},
+    "rebrief": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "rebrief --help"},
+                                         {"topic": "--keep", "usage": "--keep <session>", "example": "rebrief --keep violet"}]},
 }
 
 EXEMPTIONS = {"outbox": "library", "witness": "library", "probe-stop": "fixture"}

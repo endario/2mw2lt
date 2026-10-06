@@ -23,6 +23,14 @@ spaces. For example:
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" "<repository-path>" --codex
 ```
 
+An invitation code (`2MW-` and four groups of four) is passed through as given, beside the path or
+alone: the engine takes it as the code, and the sign-in carries it to GitHub. It admits the GitHub
+account it was made for, once.
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" . 2MW-7KQ4-XN2D-9HTB-M3PC
+```
+
 Bare invocation and `--help` show usage without installing:
 
 ```bash
@@ -39,12 +47,14 @@ at least 60 minutes, or poll its running session for output until it exits. The 
 where it pauses:
 
 - **`sign in`**: it prints a console address and a code, and opens the page. The person signs in
-  there and approves.
-- **`github`**: it prints the workspace's desk address and opens it. The person chooses **Connect
-  GitHub** in the account menu, which installs the 2mw2lt App on the repository or authorizes the
-  existing installation. Only the team's owner, signed in with GitHub, has that item; anyone else
-  asks the owner to choose it. A team that already holds an installation has no such item: the
-  engine then prints GitHub's page where the owner adds the repository to it.
+  there and approves. After approving, that browser carries on by itself: it waits for the
+  workspace, then opens GitHub's page for the 2mw2lt App.
+- **`github`**: the person installs the App on GitHub's page, which the browser has opened, or
+  authorizes the existing installation. GitHub then sends them to a page that says whether it
+  connected; when it did, they return to the terminal. Only the team's owner, signed in with GitHub,
+  can do this; anyone else asks the owner. From another browser, the desk's **Connect GitHub** in
+  the account menu is the same step, and the engine prints that address. A team that already holds an
+  installation is not asked: the engine prints GitHub's page where the owner adds the repository.
 
 A team new to the platform prints `team` lines while its silo is made, naming the host's state
 and the time waited; that needs no one. `waiting on the host's enrolment watcher` is still
@@ -66,6 +76,10 @@ engine again. These are the stops that need a person:
   **`this team has no silo yet`** or **`this team's silo serves no workspace`**: the platform
   will not make or use the team's silo. Tell the person the reason, and stop: the operator
   settles it.
+- **`sign-in ended: That invitation code …`** or **`sign-in ended: The console does not know that invitation code …`**: the line says whether the code is unknown, used,
+  lapsed or for a different GitHub account, and what to do. Tell the person that line; a code for
+  a different account runs again with the same code once they are signed in to GitHub as the
+  right one, and the others need a new code from whoever sent it.
 - **`only the team's owner installs a repository`**: the person who signed in does not own the
   team. Someone who does must run the install.
 - **`you are in no team`**: the account that signed in belongs to no team. Tell the person,
@@ -166,8 +180,33 @@ The workspace works without lanes, and its board says it has none yet. Give it l
    python3 "${CLAUDE_PLUGIN_ROOT}/steering/canon.py" --index <index> .
    ```
 
-6. Commit it all on a branch `2mw2lt/tracks` and open a pull request with `gh pr create -R <repo>`. Tell the
-   person it seeds the board once it merges. Do not wait for the merge.
+6. Commit it all on a branch `2mw2lt/tracks`, push it, and open a pull request with
+   `gh pr create -R <repo>`. The person accepting the lanes was the review, so offer to merge it
+   now. Ask the engine how it would merge:
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" lanes .
+   ```
+
+   Its last line is `{pr, url, head, method, auto}`. Ask with your question tool: *merge #<pr>
+   now by <method>, so the board has its lanes before install ends*, or *not yet*. On merge:
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" lanes . --merge
+   ```
+
+   It merges as the workspace's GitHub login, never past a branch rule, then waits up to two
+   minutes for the board to hold the lanes; give the command at least ten. Its last line is
+   `{pr, url, merged, reason?, queued?, synced?}`:
+   - `synced` true: the board shows the lanes.
+   - `merged` true and `synced` false: the lanes are merged and the board shows them once the
+     daemon syncs the repository; with a `reason`, the daemon refused the merged document, and the
+     reason says what to fix.
+   - `merged` false: tell the person the `reason` in one line. `queued` means it merges itself
+     once its checks pass.
+
+   On not yet or a refused merge, the desk's **Adopt your lanes** step links the pull request
+   until it merges. Do not retry the merge or ask the person to.
 
 ## 3. Connect
 

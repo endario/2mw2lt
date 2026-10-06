@@ -16,11 +16,15 @@ class Repository:
     `path` is anything `git -C` accepts: the orchestrator's bare mirror, or a checkout's root
     (a linked worktree's `.git` is a file, so the root and not `.git`).
     """
-    def __init__(self, path: Path, name: str | None = None):
-        self.path, self.name = Path(path), name or str(path)
-        head = self._git("rev-parse", "-q", "--verify", "HEAD^{commit}")
+    def __init__(self, path: Path, name: str | None = None, at: str | None = None, limit: int | None = None):
+        """`at` is a commit id to read at instead of HEAD, never a revision expression; `limit`
+        bounds the bytes `text` reads, for a reader of content nobody reviewed."""
+        self.path, self.name, self.limit = Path(path), name or str(path), limit
+        if at is not None and not _COMMIT.fullmatch(at):
+            raise RuntimeError(f"{at!r} is not a commit id")
+        head = self._git("rev-parse", "-q", "--verify", f"{at or 'HEAD'}^{{commit}}")
         if head.returncode != 0:
-            raise RuntimeError(f"{self.name} has no HEAD to read")
+            raise RuntimeError(f"{self.name} has no {at or 'HEAD'} to read")
         self.head = head.stdout.strip()
         self._texts: dict[str, str | None] = {}
 
@@ -28,30 +32,33 @@ class Repository:
         return subprocess.run(["git", "-C", str(self.path), *args], capture_output=True,
                               text=text, input=input)
 
-    def _entries(self, path: str, recurse: bool) -> list[tuple[str, str, str]]:
-        """(mode, type, path) for `path` at the head, a directory's contents when `recurse`."""
+    def _entries(self, path: str, recurse: bool) -> list[tuple[str, str, str, str]]:
+        """(mode, type, path, size) for `path` at the head, a directory's contents when `recurse`;
+        a tree's size is `-`."""
         key = posixpath.normpath(path).lstrip("/")
         if key.startswith("..") or key == ".":
             return []
-        got = self._git("ls-tree", *(["-r"] if recurse else []), "--full-tree", "-z", self.head, "--", key)
+        got = self._git("ls-tree", *(["-r"] if recurse else []), "--full-tree", "--long", "-z", self.head, "--", key)
         out = []
         for row in got.stdout.split("\0") if got.returncode == 0 else []:
             if row:
                 meta, name = row.split("\t", 1)
-                mode, kind, _sha = meta.split(" ")
-                out.append((mode, kind, name))
+                mode, kind, _sha, size = meta.split()
+                out.append((mode, kind, name, size))
         return out
 
     def text(self, path: str) -> str | None:
-        """A regular file's text; None for a directory, a symlink or anything not UTF-8. Kept per
-        path, since the head does not move and a walk asks for each linked document many times."""
+        """A regular file's text; None for a directory, a symlink, anything not UTF-8 or larger
+        than the reader's limit. Kept per path, since the head does not move and a walk asks for each
+        linked document many times."""
         if path not in self._texts:
             self._texts[path] = self._text(path)
         return self._texts[path]
 
     def _text(self, path: str) -> str | None:
         entries = self._entries(path, recurse=False)
-        if len(entries) != 1 or entries[0][0] not in _REGULAR or entries[0][1] != "blob":
+        if len(entries) != 1 or entries[0][0] not in _REGULAR or entries[0][1] != "blob" \
+                or self._over(entries[0]):
             return None
         got = self._git("cat-file", "blob", f"{self.head}:{entries[0][2]}", text=False)
         try:
@@ -70,6 +77,8 @@ class Repository:
             return "a symlink"
         if entries[0][0] not in _REGULAR or entries[0][1] != "blob":
             return "not a regular file"
+        if self._over(entries[0]):
+            return f"larger than {self.limit} bytes"
         got = self._git("cat-file", "blob", f"{self.head}:{entries[0][2]}", text=False)
         try:
             got.stdout.decode()
@@ -77,8 +86,11 @@ class Repository:
             return "not UTF-8"
         return "unreadable" if got.returncode != 0 else "readable"
 
+    def _over(self, entry: tuple[str, str, str, str]) -> bool:
+        return self.limit is not None and int(entry[3]) > self.limit
+
     def files(self, path: str) -> list[str]:
-        return sorted(name for mode, kind, name in self._entries(path, recurse=True)
+        return sorted(name for mode, kind, name, _size in self._entries(path, recurse=True)
                       if kind == "blob" and mode in _REGULAR)
 
     def last_commit(self, path: str) -> dict:
@@ -158,6 +170,10 @@ class Repository:
 
 
 _REGULAR = {"100644", "100755"}
+_COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+# The most a reader of unreviewed content takes into memory: a proposed tracks document is a few
+# kilobytes.
+TEXT_LIMIT = 1 << 20
 
 
 def inside(repo: Repository, path: str) -> bool:

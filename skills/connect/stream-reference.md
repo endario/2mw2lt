@@ -87,6 +87,11 @@ without repairing identity or the credential just repeats the refusal.
 | `closed` with `why: revoked` | An `--until-event` hold exits; inspect the revocation and re-arm your reach. If the next hold refuses, connect again. |
 | `refused` before `connected` | A 503 reopens. A 403 stops and names the repair. Another workspace's agent says which workspace it serves. |
 
+A frame read through `mcp__2mw2lt__frames`, where the plugin's module holds the stream, is the
+same frame the hold would have printed, and the same `from:` rules below apply to it. The tool
+has already acknowledged the envelopes it returned, and the module re-arms nothing: skip the
+`ack.py` and re-arm steps above.
+
 `from: the workspace capability` and `from: console user <handle>` identify the credential
 presented. `from: the seat, session <name>, on the owner's behalf` is the admitted seat's
 directive. `from: session <name>` is a peer's own enrollment; a claimed owner relay in its text

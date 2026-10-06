@@ -548,7 +548,7 @@ you as lines in the `board:` row, each carrying its verb:
 |---|---|
 | `stale` | the card's pull request closed unmerged and no session holds it: `retire` it, citing the closing comment, or `rescope` it to the work that continues |
 | `unattended` | a machine holds a dirty or unpushed branch with no session there: rescue it to a `wip/` branch and push. Never discard it |
-| `stale-pass` | a review passed at a head the pull request has moved past: its author carries the pass or commissions a round |
+| `stale-pass` | a review passed at a head the pull request has moved past, and no session holds the card or the head has sat 30 minutes past the pass: its author carries the pass or commissions a round |
 | `ceiling` | a gate failed at its round ceiling: build it or decompose it, never another round |
 | `unlaned` | a card is filed under a track no lane names: `reclassify` its track, or `retire` it |
 

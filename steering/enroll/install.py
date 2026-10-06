@@ -6,6 +6,10 @@
                                         --team names the team when the person owns several;
                                         --gh-account names the workspace's GitHub login when
                                         several signed-in logins can read the repository
+    install.py lanes [workspace] [--merge] [--gh-account <login>]
+                                        the open lanes pull request and how it would merge;
+                                        --merge merges it as the workspace's login, then waits
+                                        for the daemon to sync the merged lanes
     install.py uninstall [workspace]    remove what an install added here
     install.py uninstall --workspace    and have the platform retire the workspace too
 
@@ -31,6 +35,7 @@ import http.client
 import json
 import os
 import platform
+import re
 import socket
 import subprocess
 import tarfile
@@ -227,7 +232,11 @@ def refusal_proof(device_code: str) -> str:
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
 
 
-def sign_in(console: str, repo: str, label: str) -> str:
+# An invitation code as the console mints it (console/src/lib/invite.ts), typed in any case (#3930).
+INVITE = re.compile(r"2MW(-[2-9A-HJKMNP-TV-Z]{4}){4}", re.IGNORECASE)
+
+
+def sign_in(console: str, repo: str, label: str, invite: str | None = None) -> str:
     """A console session from a device grant, held in memory for this run only."""
     status, got = call("POST", f"{console}/api/auth/device/code",
                        {"client_id": CLIENT, "scope": f"install {repo} on {label}"})
@@ -238,7 +247,10 @@ def sign_in(console: str, repo: str, label: str) -> str:
     say("", "(opened in your browser; waiting…)")
     # Only the browser opened here holds the proof, so only it can end this grant when its sign-in
     # is refused (#3586). It is never printed: a printed proof is as public as the user code.
-    open_page(f"{page}#refusal={refusal_proof(got['device_code'])}")
+    # An invitation code rides the same fragment, for the sign-in door to carry to GitHub; like the
+    # proof, a fragment reaches no server log.
+    carried = f"&invite={invite.upper()}" if invite else ""
+    open_page(f"{page}#refusal={refusal_proof(got['device_code'])}{carried}")
     interval, deadline = float(got.get("interval") or POLL), time.monotonic() + float(got.get("expires_in") or 1800)
     while time.monotonic() < deadline:
         time.sleep(interval)
@@ -368,22 +380,32 @@ def reach(door: str, deadline: float | None = None) -> dict:
     return got
 
 
-def wait_for_grant(door: str, got: dict, repo: str, console: str, authority: str) -> None:
+def wait_for_grant(door: str, got: dict, repo: str, desk: str, authority: str, approved_here: bool = False) -> None:
+    """`approved_here`: this run's sign-in was approved in a browser, which carries on to GitHub
+    itself (#3930). A run that resumed without one opens the desk instead."""
     if got.get("covered"):
         say("github", f"the 2mw2lt App reaches {repo}")
         return
     # GitHub's own install page records no team, so nothing would bind what it installs to this
-    # one. The desk's Connect GitHub installs the App or authorizes the installation, and claims it.
-    desk = f"{console}/?workspace={urllib.parse.quote(authority, safe='')}"
+    # one. The browser that approved this terminal carries on to the console's claim, which installs
+    # the App or authorizes the installation and claims it (#3930); the desk's Connect GitHub is the
+    # same claim, for a browser that did not.
     say("github", f"the 2mw2lt App cannot read {repo} yet")
-    say("", f"open {desk}")
-    say("", "and choose Connect GitHub in the account menu (opened in your browser; waiting…)")
-    say("", "only the team's owner, signed in with GitHub, has it: anyone else asks them to")
+    # Without the console's answer the desk's address is unknown, and `/` opens the one last shown.
+    where = f"{desk}" + ("" if desk.endswith(f"/{authority}") else f", switch to the workspace {authority}")
+    if approved_here:
+        say("", "your browser carries on to GitHub's App page; install it there (waiting…)")
+        say("", f"from another browser: open {where} and choose Connect GitHub in the account menu")
+    else:
+        say("", f"open {where}")
+        say("", "and choose Connect GitHub in the account menu (opened in your browser; waiting…)")
+    say("", "only the team's owner, signed in with GitHub, can: anyone else asks them to")
     if isinstance(got.get("grant"), str):
-        # The desk offers Connect GitHub only to a team holding no installation; one that holds
-        # an installation adds the repository to it on GitHub's own page.
-        say("", f"no Connect GitHub there means the team's App is installed: add {repo} to it at {got['grant']}")
-    open_page(desk)
+        # The claim is for a team holding no installation; one that holds an installation adds
+        # the repository to it on GitHub's own page.
+        say("", f"if the team's App is installed already, add {repo} to it at {got['grant']}")
+    if not approved_here:
+        open_page(desk)
     deadline = time.monotonic() + GRANT
     while not (got := reach(door, deadline)).get("covered"):
         if time.monotonic() >= deadline:
@@ -571,7 +593,7 @@ def github_account(root: Path, repo: str, chosen: str | None = None) -> str:
 
 
 def install(root: Path, codex: bool = False, team: str | None = None,
-            gh_account: str | None = None) -> int:
+            gh_account: str | None = None, invite: str | None = None) -> int:
     console = platform_url()
     repo = repository(root)
     say("repository", repo)
@@ -590,7 +612,7 @@ def install(root: Path, codex: bool = False, team: str | None = None,
                    f"origin is {repo}; run `install.py uninstall` here, then install again")
     if view is None:
         source = tracks_source(root, repo)
-        token = sign_in(console, repo, label)
+        token = sign_in(console, repo, label, invite)
         try:
             got = workspace(console, token, repo, source, team)
             authority = got.get("id")
@@ -609,7 +631,12 @@ def install(root: Path, codex: bool = False, team: str | None = None,
     authority = door_mod.split(door)[1]
     if authority is None:
         raise Stop("the workspace door names no workspace")
-    wait_for_grant(door, (got or {}).get("forge") or reach(door), repo, console, authority)
+    # The desk's address is the console's to say (desk-address.md); a checkout installed before
+    # has no answer to read it from.
+    desk = (got or {}).get("desk")
+    wait_for_grant(door, (got or {}).get("forge") or reach(door), repo,
+                   desk if isinstance(desk, str) and desk.startswith(console + "/") else f"{console}/", authority,
+                   approved_here=got is not None)
     wire(root, door, authority, codex)
     say("hooks", "none for Codex" if codex else "written")
     held = machine_workspaces.at(root)
@@ -621,6 +648,188 @@ def install(root: Path, codex: bool = False, team: str | None = None,
     say("tracks", f"missing {source}" if not (root / source).exists() else f"{source}")
     print(json.dumps({"workspace": authority, "door": door, "port": port, "tracks": source,
                       "tracks_missing": not (root / source).exists()}))
+    return 0
+
+
+# --- the lanes the person accepted, merged and synced (doc 174 §2–3)
+
+LANES_BRANCH = "2mw2lt/tracks"
+METHODS = (("allow_squash_merge", "squash"), ("allow_merge_commit", "merge"), ("allow_rebase_merge", "rebase"))
+SYNC_WAIT = 120.0
+
+
+def gh(args: list[str], token: str) -> tuple[bool, str]:
+    """`gh` as the workspace's login: (whether it succeeded, what it printed or why it refused)."""
+    try:
+        done = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=60,
+                              env={**os.environ, "GH_TOKEN": token})
+    except subprocess.TimeoutExpired:
+        return False, "gh did not answer in 60s"
+    except OSError as e:
+        return False, f"gh could not run: {e.strerror or e}"
+    said = (done.stdout if done.returncode == 0 else done.stderr or done.stdout).strip()
+    return done.returncode == 0, said
+
+
+def gh_state(args: list[str], token: str) -> dict:
+    """A pull request's state, or {} when gh could not say: once a merge was asked for, what
+    was asked is reported whether or not GitHub then answers."""
+    ok, said = gh(args, token)
+    try:
+        got = json.loads(said) if ok else {}
+    except ValueError:
+        got = {}
+    return got if isinstance(got, dict) else {}
+
+
+def gh_json(args: list[str], token: str) -> object:
+    ok, said = gh(args, token)
+    if not ok:
+        raise Stop(f"gh {' '.join(args[:2])} refused: {said.splitlines()[-1] if said else 'no reason given'}")
+    try:
+        return json.loads(said or "null")
+    except ValueError:
+        raise Stop(f"gh {' '.join(args[:2])} answered something that is not JSON") from None
+
+
+def lanes_plan(root: Path, repo: str, token: str) -> dict:
+    """The open pull request from the repository's own `2mw2lt/tracks`, and how it would merge."""
+    listed = gh_json(["pr", "list", "-R", repo, "--head", LANES_BRANCH, "--state", "open",
+                      "--json", "number,url,headRefOid,isCrossRepository"], token)
+    # A fork's branch of the same name is not the lanes the person drafted here.
+    own = [p for p in listed or [] if isinstance(p, dict) and not p.get("isCrossRepository")]
+    if not own:
+        raise Stop(f"{repo} has no open pull request from {LANES_BRANCH}; draft the lanes again")
+    pr = own[0]
+    local = subprocess.run(["git", "-C", str(root), "rev-parse", "-q", "--verify", f"refs/heads/{LANES_BRANCH}"],
+                           capture_output=True, text=True, timeout=10).stdout.strip()
+    if local and local != pr["headRefOid"]:
+        raise Stop(f"pull request #{pr['number']} holds {pr['headRefOid'][:12]}, not the lanes committed here "
+                   f"({local[:12]}); push {LANES_BRANCH}, then run this again")
+    settings = gh_json(["api", f"repos/{repo}"], token)
+    settings = settings if isinstance(settings, dict) else {}
+    method = next((m for key, m in METHODS if settings.get(key)), None)
+    if method is None:
+        raise Stop(f"{repo} allows no merge method gh can use")
+    return {"pr": pr["number"], "url": pr["url"], "head": pr["headRefOid"], "method": method,
+            "auto": bool(settings.get("allow_auto_merge"))}
+
+
+def merge_refusal(state: dict, said: str) -> tuple[str, bool]:
+    """Why GitHub would not merge, in the person's words, and whether it is only a check still
+    running, the one refusal that passes without a person."""
+    if state.get("reviewDecision") in ("REVIEW_REQUIRED", "CHANGES_REQUESTED"):
+        return "the repository requires an approving review first", False
+    if state.get("mergeable") == "CONFLICTING" or state.get("mergeStateStatus") == "DIRTY":
+        return "it conflicts with the default branch", False
+    checks = [c for c in state.get("statusCheckRollup") or [] if isinstance(c, dict)]
+    failed = any(c.get("conclusion") in ("FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED")
+                 or c.get("state") in ("FAILURE", "ERROR") for c in checks)
+    running = any(c.get("status") not in (None, "COMPLETED") or c.get("state") in ("PENDING", "EXPECTED")
+                  for c in checks)
+    if failed:
+        return "a check failed", False
+    if running and state.get("mergeStateStatus") == "BLOCKED":
+        return "a required check is still running", True
+    last = said.splitlines()[-1] if said else "no reason given"
+    return f"GitHub refused it: {last.removeprefix('X ').strip()}", False
+
+
+def merge_lanes(repo: str, plan: dict, token: str) -> dict:
+    """Merge the lanes the person accepted, never with `--admin`: a protected branch's rule is the
+    team's. A merge waiting on a running check is set to merge itself where the repository allows."""
+    n, method = str(plan["pr"]), f"--{plan['method']}"
+    ok, said = gh(["pr", "merge", n, "-R", repo, method, "--match-head-commit", plan["head"]], token)
+    if not ok:
+        state = gh_state(["pr", "view", n, "-R", repo, "--json",
+                          "reviewDecision,mergeable,mergeStateStatus,statusCheckRollup"], token)
+        reason, running = merge_refusal(state, said)
+        say("lanes", f"#{n} was not merged: {reason}")
+        if not (running and plan["auto"]):
+            return {"merged": False, "reason": reason}
+        ok, said = gh(["pr", "merge", n, "-R", repo, method, "--auto", "--match-head-commit", plan["head"]], token)
+        if not ok:
+            reason = f"{reason}, and it could not be set to merge itself: {merge_refusal({}, said)[0]}"
+            say("lanes", f"#{n} {reason}")
+            return {"merged": False, "reason": reason}
+    state = {}
+    for _ in range(3):
+        state = gh_state(["pr", "view", n, "-R", repo, "--json", "state,mergeCommit"], token)
+        if state:
+            break
+        time.sleep(POLL)
+    if not state:
+        say("lanes", f"#{n} was sent to merge, and GitHub did not say whether it landed")
+        return {"merged": False, "reason": "GitHub did not say whether it merged", "queued": True}
+    if state.get("state") != "MERGED":
+        say("lanes", f"#{n} merges itself once its checks pass")
+        return {"merged": False, "reason": "it merges itself once its checks pass", "queued": True}
+    commit = (state.get("mergeCommit") or {}).get("oid")
+    say("lanes", f"#{n} merged ({plan['method']}) as {str(commit)[:12]}")
+    return {"merged": True, "commit": commit}
+
+
+NO_TRACKS = "the workspace keeps no lanes; its door names no tracks document to sync"
+
+
+def tracks_now(door: str) -> tuple[int | None, dict]:
+    """The daemon's lanes as this machine reads them, with the status; None while it does not answer."""
+    try:
+        status, got = ask("GET", f"{door}/api/v1/tracks", timeout=30)
+    except Unanswered:
+        return None, {}
+    return status, got if status == 200 else {}
+
+
+UNREAD = object()  # the lanes before the merge could not be read, so no later sync is known new
+
+
+def wait_for_lanes(door: str, before, commit: str | None, deadline: float) -> dict:
+    """Until the daemon holds lanes synced at the merge or after it, or refuses the merged document.
+    The mirror and the tracks fold move on GitHub's push; nothing here asks them to."""
+    while True:
+        status, t = tracks_now(door)
+        if status == 404:
+            say("lanes", NO_TRACKS)
+            return {"synced": False, "reason": NO_TRACKS}
+        drift = t.get("drift") or {}
+        if commit and drift.get("commit") == commit:
+            say("lanes", f"the daemon refused the merged document: {drift.get('reason')}")
+            return {"synced": False, "reason": f"the merged document was refused: {drift.get('reason')}"}
+        synced = (t.get("source") or {}).get("commit")
+        if t.get("items") and synced and (synced == commit or before is not UNREAD and synced != before):
+            say("lanes", f"the board holds {len(t['items'])} lanes, synced at {synced[:12]}")
+            return {"synced": True}
+        if time.monotonic() + POLL > deadline:
+            say("lanes", "the lanes are merged; the board shows them once the daemon syncs the repository")
+            return {"synced": False}
+        time.sleep(POLL)
+
+
+def adopt_lanes(root: Path, merge: bool, gh_account: str | None = None) -> int:
+    repo = repository(root)
+    bound = checkout_binding.id_at(root)
+    door = recorded_door(root, bound) if bound else None
+    if door is None:
+        raise Stop(f"{root} is not installed yet; run install first")
+    name = github_account(root, repo, gh_account)
+    try:
+        token = ghauth.pinned_token(name)
+    except ghauth.NoIdentity as e:
+        raise Stop(str(e)) from None
+    plan = lanes_plan(root, repo, token)
+    if not merge:
+        say("lanes", f"#{plan['pr']} would merge by {plan['method']} as {name}")
+        print(json.dumps(plan))
+        return 0
+    status, t = tracks_now(door)
+    if status == 404:
+        raise Stop(NO_TRACKS)
+    before = (t.get("source") or {}).get("commit") if status == 200 else UNREAD
+    out = {"pr": plan["pr"], "url": plan["url"], **merge_lanes(repo, plan, token)}
+    if out["merged"]:
+        out.update(wait_for_lanes(door, before, out["commit"], time.monotonic() + SYNC_WAIT))
+    print(json.dumps(out))
     return 0
 
 
@@ -674,13 +883,15 @@ def main(argv: list[str]) -> int:
     if verb_help.help_requested("install", argv):
         print(verb_help.script_help("install", topic=argv[0] if len(argv) == 2 else None)); return 0
     args = list(argv)
-    action = "uninstall" if args[:1] == ["uninstall"] else "install"
-    if action == "uninstall":
+    action = args[0] if args[:1] in (["uninstall"], ["lanes"]) else "install"
+    if action != "install":
         args.pop(0)
     retire = False
+    merge = False
     codex = False
     team = None
     gh_account = None
+    invite = None
     paths: list[str] = []
     i = 0
     while i < len(args):
@@ -689,6 +900,10 @@ def main(argv: list[str]) -> int:
             if action != "uninstall":
                 return verb_help.error("install", "--workspace is only for uninstall")
             retire = True; i += 1; continue
+        if arg == "--merge":
+            if action != "lanes":
+                return verb_help.error("install", "--merge is only for lanes")
+            merge = True; i += 1; continue
         if arg == "--codex":
             if action != "install":
                 return verb_help.error("install", "--codex is only for install")
@@ -702,8 +917,8 @@ def main(argv: list[str]) -> int:
                 return verb_help.error("install", "team may appear once")
             team = args[i + 1]; i += 2; continue
         if arg == "--gh-account":
-            if action != "install":
-                return verb_help.error("install", "--gh-account is only for install")
+            if action == "uninstall":
+                return verb_help.error("install", "--gh-account is only for install and lanes")
             if i + 1 >= len(args) or args[i + 1].startswith("-"):
                 return verb_help.error("install", "missing gh-account value")
             if gh_account is not None:
@@ -711,9 +926,14 @@ def main(argv: list[str]) -> int:
             gh_account = args[i + 1]; i += 2; continue
         if arg.startswith("-"):
             return verb_help.error("install", f"unknown option {arg!r}")
+        # An invitation code is taken as one wherever it stands, so `/2mw2lt:install <code>` runs as typed.
+        if INVITE.fullmatch(arg) and action == "install":
+            if invite is not None:
+                return verb_help.error("install", "invite code may appear once")
+            invite = arg; i += 1; continue
         paths.append(arg); i += 1
-    if action == "uninstall" and (codex or team is not None or gh_account is not None):
-        return verb_help.error("install", "uninstall does not accept install options")
+    if action != "install" and (codex or team is not None or (action == "uninstall" and gh_account is not None)):
+        return verb_help.error("install", f"{action} does not accept install options")
     if len(paths) > 1:
         return verb_help.error("install", "too many workspace paths")
     anchor = Path(paths[0]) if paths else Path.cwd()
@@ -732,7 +952,9 @@ def main(argv: list[str]) -> int:
     global _at
     _at = ""
     try:
-        return uninstall(root, retire) if action == "uninstall" else install(root, codex, team, gh_account)
+        if action == "lanes":
+            return adopt_lanes(root, merge, gh_account)
+        return uninstall(root, retire) if action == "uninstall" else install(root, codex, team, gh_account, invite)
     except KeyboardInterrupt:
         raise Stop(f"stopped at {_at or action}; run {action} again to resume") from None
     except subprocess.TimeoutExpired as e:

@@ -40,6 +40,7 @@ from transcript_proof import account_of, identify_transcript  # noqa: E402
 import machine_harness as harness_mod  # noqa: E402
 from process_probe import Undetermined  # noqa: E402
 import hooks  # noqa: E402
+import holder  # noqa: E402
 import witness as witness_mod  # noqa: E402
 from verb_help import current_args, error, help_requested, script_help  # noqa: E402
 
@@ -517,6 +518,21 @@ def plugin_line(provider: str | None, mine_file: Path = HERE.parent.parent / "ve
     return f"plugin: {mine}"
 
 
+def holder_note(ws: Path, psession: str | None) -> str:
+    """What the `plugin:` line adds when the plugin's module holds this session's stream: with a
+    fresh holder claim the model arms no hold of its own (#3872 D2)."""
+    return "; the plugin holds this session's stream, so arm no hold" \
+        if psession and holder.fresh(ws, psession) else ""
+
+
+def plugin_out(line: str, note: str) -> tuple[str | None, str | None]:
+    """(stdout, stderr) for the `plugin:` line. One behind the release is a warning, on stderr;
+    the holder note still reaches stdout, since without it the recipe arms a second hold."""
+    if " is behind " not in line:
+        return line + note, None
+    return (line.split(" is behind ", 1)[0] + note if note else None), line
+
+
 def repo_line(ws: Path) -> str:
     """`repo: owner/name`, the repository this workspace serves as its door names it. A checkout's
     `origin` may be an SSH host alias, which `gh` cannot resolve; `gh -R` with this line does not
@@ -607,7 +623,11 @@ def main(argv: list[str]) -> int:
         print(why, file=sys.stderr)
     line = plugin_line(h.provider)
     if line:
-        print(line, file=sys.stderr if " is behind " in line else sys.stdout)
+        out, warn = plugin_out(line, holder_note(ws, psession))
+        if warn:
+            print(warn, file=sys.stderr)
+        if out:
+            print(out)
     if not h.holds:
         print(reached(session, psession, ws) if port else
               f"reach: not asserted, there being no agent here for {ws}; "
