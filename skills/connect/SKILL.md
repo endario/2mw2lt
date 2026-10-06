@@ -10,7 +10,7 @@ Run from the wired repository or its worktree:
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/connect.py" --current
 ```
 
-The reply names your session, account and binding. Use that **session** and printed
+The reply names your session, account, binding and `repo:`, the workspace's repository for `gh -R`. Use that **session** and printed
 **account** below; replace each `<…>` placeholder before running a command. Clients read the
 stored enrollment credential themselves.
 
@@ -175,8 +175,9 @@ recommendation, rather than an owner ask.
 
 Push first, keep the pull request draft, and run the applicable suite before each round where
 you judge it cheapest: the focused guards for what changed always, and a full run only when the
-change warrants one, locally (a machine many sessions share) or on the hosted lane (`gh workflow
-run steering.yml --ref <branch>`, paid Actions minutes — that workflow exists only in the platform's own repository). From the branch's worktree:
+change warrants one, locally (a machine many sessions share) or on the hosted lane
+(`gh workflow run steering.yml -R <repo> --ref <branch>`, `<repo>` being the `repo:` line connect
+printed; paid Actions minutes — that workflow exists only in the platform's own repository). From the branch's worktree:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> branch

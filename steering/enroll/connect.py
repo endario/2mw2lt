@@ -517,6 +517,31 @@ def plugin_line(provider: str | None, mine_file: Path = HERE.parent.parent / "ve
     return f"plugin: {mine}"
 
 
+def repo_line(ws: Path) -> str:
+    """`repo: owner/name`, the repository this workspace serves as its door names it. A checkout's
+    `origin` may be an SSH host alias, which `gh` cannot resolve; `gh -R` with this line does not
+    read `origin`."""
+    try:
+        code, body = door.get("/steering/authorities", timeout=5)
+        if code != 200:
+            return f"repo: unknown (the door answered {code})"
+        rows = json.loads(body).get("authorities") or []
+    except Exception as e:
+        return f"repo: unknown ({type(e).__name__}: {e})"
+    try:
+        wid = (ws / ".claude" / "steering-workspace").read_text().strip() or None
+    except OSError:
+        wid = None
+    if wid is None:
+        return "repo: unknown (this checkout is bound to no workspace)"
+    mine = [r for r in rows if isinstance(r, dict) and r.get("id") == wid]
+    if len(mine) != 1:
+        return f"repo: unknown (the door does not list the workspace {wid} this checkout is bound to)"
+    if not mine[0].get("repo"):
+        return f"repo: unknown (the door names no repository for the workspace {wid})"
+    return f"repo: {mine[0]['repo']}"
+
+
 def main(argv: list[str]) -> int:
     try:
         args = current_args("connect", argv)
@@ -561,6 +586,7 @@ def main(argv: list[str]) -> int:
     if acct:
         print(f"account: {acct}")
     print(f"speak: {say_invocation(h, psession, session)}")
+    print(repo_line(ws))
     # The stream this session holds at its agent names the incarnation it belongs to, and this
     # is the only place the recipe derives it.
     print(f"STEERING_RUNTIME_ID={rid}")

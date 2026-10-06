@@ -132,7 +132,7 @@ If the `/device` page says `Invalid user code`, run the engine again for a fresh
 The workspace works without lanes, and its board says it has none yet. Give it lanes now.
 
 1. Read the track principles in the `tracks` skill, the repository's
-   README, its top-level layout and its open issues (`gh issue list --limit 50`).
+   README, its top-level layout and its open issues (`gh issue list -R <repo> --limit 50`, `<repo>` being the repository the engine printed).
 2. Draft a tracks document at the path in `tracks`. It needs at least:
    - `repo`: the workspace's repository;
    - `lanes`: 3 to 7 product capabilities.
@@ -166,7 +166,7 @@ The workspace works without lanes, and its board says it has none yet. Give it l
    python3 "${CLAUDE_PLUGIN_ROOT}/steering/canon.py" --index <index> .
    ```
 
-6. Commit it all on a branch `2mw2lt/tracks` and open a pull request with `gh pr create`. Tell the
+6. Commit it all on a branch `2mw2lt/tracks` and open a pull request with `gh pr create -R <repo>`. Tell the
    person it seeds the board once it merges. Do not wait for the merge.
 
 ## 3. Connect
