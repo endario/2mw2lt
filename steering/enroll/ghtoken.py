@@ -78,6 +78,7 @@ def token(ws: Path, now=time.time, asked=ask) -> str:
     path = cache_path(ws, session)
     kept = _kept(path, now())
     if kept:
+        _configure(kept)
         return kept
     status, out = asked(enrolment)
     minted, life = out.get("token"), out.get("fresh_for")
@@ -85,7 +86,30 @@ def token(ws: Path, now=time.time, asked=ask) -> str:
         raise Refused(f"the door minted no GitHub token for {session} ({status}): "
                       f"{out.get('refused') or out.get('error') or 'no reason given'}")
     _keep(path, minted, now() + life - MARGIN)
+    _configure(minted)
     return minted
+
+
+def _configure(minted: str) -> None:
+    """The token in the worker's own `gh` configuration (`GH_CONFIG_DIR`), as the only login there,
+    so a `gh` found ahead of the wrapper acts as the App, or is refused once the token is stale."""
+    d = os.environ.get("GH_CONFIG_DIR")
+    if not d:
+        return
+    d = Path(d)
+    d.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # Written already migrated: gh migrates a bare token by asking `/user`, which an installation
+    # token cannot read.
+    for name, text in (("config.yml", 'version: "1"\n'),
+                       ("hosts.yml", "github.com:\n    users:\n        x-access-token:\n"
+                                     f"            oauth_token: {minted}\n    git_protocol: https\n"
+                                     f"    oauth_token: {minted}\n    user: x-access-token\n")):
+        try:
+            if (d / name).read_text() == text:
+                continue
+        except OSError:
+            pass
+        spool.write_atomic(d / name, text, mode=0o600)
 
 
 def main(argv: list[str]) -> int:

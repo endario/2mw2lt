@@ -95,8 +95,12 @@ the branch's worktree:
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> carry <pr number>
 ```
 
-It is refused for a rebase, a resolved conflict, or a commit this checkout did not make: commission
-a round instead. A docs-only pull request needs a review too, since a critique sets no status.
+A clean rebase, a merge of `main`, or a conflict-only update after `ship it` carries the pass; run
+`carry` rather than commissioning another round. Commission one when judgment warrants it. A docs-only
+pull request needs a review too, since a critique sets no status. A refusal because aggregate
+replay cannot establish a serial de-conflict is tracked in
+#4287; it is not an instruction to
+commission another round solely for the update.
 
 When the answer is lost, the carry says it may have landed: send the same command again with the
 `--retry=<id>` it printed, and the door answers from its record rather than carrying twice.
@@ -131,9 +135,17 @@ gh pr merge <pr number> -R <repo> --squash --auto --match-head-commit <head sha>
 GitHub queues it the moment its head holds every required status, so there is nothing to poll
 for. Never arm a pull request whose base is another branch: it would merge into that branch. Do
 not poll GitHub to learn what happens next either. The pull request's moves come to you as a
-`say` frame `from: forge #<n>`: it entered the queue, left it and why, merged, closed, or its base
-moved to `main` (your cue to carry the pass and arm it). A `gh` loop that waits is the failure
-mode: every session on a machine shares one person's GitHub limit (#4203).
+`say` frame `from: forge #<n>`: it entered the queue, left it and why (with the check its group
+failed, when the daemon read one), merged, closed, its base moved to `main` (your cue to carry the
+pass and arm it), or, once it is ready, its checks passed or failed. A pull request you never
+gated is told to the session whose `taking: branch` holds its branch. A `gh` loop that waits is the
+failure mode: every session on a machine shares one person's GitHub limit (#4203).
+
+To read where it stands now, ask the daemon, which read it through the App for every session: its draft, queue entry and position, and each check on its head.
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" /pulls/<pr number> </dev/null
+```
 
 `REJECTED … does not hold <branch>` — claim it with `taking.py`, above. `unresolved: …` — no
 reviewer could take it; report the blocker rather than reviewing your own work:

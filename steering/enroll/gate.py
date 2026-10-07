@@ -37,13 +37,14 @@ PIN_WAIT = 330.0
 VERB_WAIT = 60.0
 # A reflog subject that records a commit this checkout made, rather than one it was handed by a
 # fetch, a fast-forward or a reset. `HEAD`'s reflog holds each rebase step; a branch's, only the tip.
-# A merge that needed resolving (`commit (merge)`) is unreviewed code and takes a round (doc 08).
+# A resolved merge and a continued rebase are locally made, while the daemon proves their replay.
 # Not `rebase (finish)`: it names the tip whatever made it, and a rebase that only moves forward
 # makes it another writer's commit.
-MADE = re.compile(r"^(?:commit(?! \(merge\))|cherry-pick|revert)\b|\((?:pick|reword|edit|squash|fixup)\)|: Merge made by ")
+MADE = re.compile(r"^(?:commit(?: \((?:amend|merge)\))?:|cherry-pick:|revert:|"
+                  r"rebase \((?:pick|reword|edit|squash|fixup|continue)\):|merge [^:]+: Merge made by )")
 # A row of `gate: pr`'s answer whose round shipped: `<id> round <n>/<cap> at <sha12> <ts> <by>: ship it, by …`.
 # A derived pass whose reviewer said otherwise reads `ship it (the reviewer said …)` (doc 150 §4.1).
-SHIPPED = re.compile(r"^\S+ round \d+/\d+ at (?P<sha>[0-9a-f]{12}) \S+ [^:]*: ship it(?: \([^)]*\))?, by ")
+SHIPPED = re.compile(r"^\S+ round \d+/\d+ at (?P<sha>[0-9a-f]{12}) \S+ [^:]*: ship it(?: \([^)]*\))?, by .*?(?:; source (?P<source>[0-9a-f]{40}))?$")
 
 
 def gate_flags(argv: list[str]) -> tuple[list[str], str] | None:
@@ -164,11 +165,22 @@ def main(argv: list[str]) -> int:
     return 1 if reply.startswith("REJECTED") else 0
 
 
+def shipped(answer: str) -> re.Match[str] | None:
+    """The newest shipped review row in `gate: pr`'s answer."""
+    rows = [line for line in answer.splitlines() if " round " in line]
+    return SHIPPED.match(rows[-1]) if rows else None
+
+
 def judged(answer: str) -> str | None:
     """The abbreviated sha the newest round judged, from `gate: pr`'s answer, when it shipped."""
-    rows = [l for l in answer.splitlines() if " round " in l]
-    m = SHIPPED.match(rows[-1]) if rows else None
-    return m["sha"] if m else None
+    match = shipped(answer)
+    return match["sha"] if match else None
+
+
+def accepted_source(answer: str) -> str | None:
+    """The newest accepted carry source, or the judged sha before a carry exists."""
+    match = shipped(answer)
+    return (match["source"] or match["sha"]) if match else None
 
 
 def made_here(reflog: str) -> set[str]:
@@ -176,15 +188,23 @@ def made_here(reflog: str) -> set[str]:
     return {sha for sha, _, subject in (l.partition(" ") for l in reflog.splitlines()) if MADE.search(subject)}
 
 
+def _git_result(here: Path, *args: str) -> tuple[bool, str]:
+    try:
+        p = subprocess.run(["git", "-C", str(here), *args], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return False, ""
+    return p.returncode == 0, p.stdout.strip()
+
+
 def _git(here: Path, *args: str) -> str:
-    p = subprocess.run(["git", "-C", str(here), *args], capture_output=True, text=True, timeout=30)
-    return p.stdout.strip() if p.returncode == 0 else ""
+    ok, output = _git_result(here, *args)
+    return output if ok else ""
 
 
 def carry(session: str, flags, pr: str, retry_id: str | None = None) -> int:
-    """Carry the newest pass on `pr` to this checkout's `HEAD` (doc 162 §3). Sent only when every
-    commit after the judged one, and not on `origin/main`, was made in this checkout: advisory,
-    since the daemon cannot see it, and the reason a branch handed over takes a new round."""
+    """Carry the newest pass on `pr` to this checkout's `HEAD` (doc 162 §3). Locally made
+    follow-ups retain the author-attested path; history from elsewhere asks the daemon to prove
+    equivalence."""
     ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
     here = Path.cwd()
     on, at = branch(here), head(here)
@@ -206,24 +226,20 @@ def carry(session: str, flags, pr: str, retry_id: str | None = None) -> int:
         print(display_reply(answer), file=sys.stderr)   # the door's refusal, not a round that did not ship
         return 1
     short = judged(answer)
-    if short is None:
+    source = accepted_source(answer)
+    if short is None or source is None:
         print(f"the newest review of #{pr} did not ship, so there is no pass to carry", file=sys.stderr)
         return 1
-    full = _git(here, "rev-parse", "-q", "--verify", f"{short}^{{commit}}")
-    if not full:
-        print(f"the judged commit {short} is not in this checkout", file=sys.stderr)
-        return 1
-    after = _git(here, "rev-list", at, f"^{full}", *(["^origin/main"] if _git(here, "rev-parse", "-q", "--verify", "origin/main") else []))
-    made = made_here(_git(here, "reflog", "--format=%H %gs", f"refs/heads/{on}") + "\n"
-                     + _git(here, "reflog", "--format=%H %gs", "HEAD"))
-    foreign = [c for c in after.split() if c not in made]
-    if foreign:
-        print(f"not carried: {', '.join(c[:12] for c in foreign)} came into this checkout rather than being made "
-              f"in it; commission a round instead", file=sys.stderr)
-        return 1
+    full = _git(here, "rev-parse", "-q", "--verify", f"{source}^{{commit}}")
+    equivalent = not full
+    if full:
+        walked, after = _git_result(here, "rev-list", at, f"^{full}")
+        made = made_here(_git(here, "reflog", "--format=%H %gs", "HEAD"))
+        equivalent = not walked or any(c not in made for c in after.split())
     this = retry_id or occurrence()
     print(f"id {this}", file=sys.stderr)
-    state, reply = outcome(f"gate: carry {pr} head {at} token {token}", VERB_WAIT, this)
+    state, reply = outcome(f"gate: carry {pr} head {at}{' equivalent' if equivalent else ''} token {token}",
+                           VERB_WAIT, this)
     print(display_reply(reply))
     if state == UNSENT:
         # The door may have carried it and lost only the answer: a resend under the same id is

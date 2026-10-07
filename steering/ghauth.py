@@ -18,11 +18,11 @@ class NoIdentity(RuntimeError):
 GIT_HELPER = "!gh auth git-credential"
 
 
-def only_helper(scope: str = "") -> list[tuple[str, str]]:
-    """git config entries making `GIT_HELPER` the one helper git asks, for `scope` (a URL, or every
+def only_helper(scope: str = "", helper: str = GIT_HELPER) -> list[tuple[str, str]]:
+    """git config entries making `helper` the one helper git asks, for `scope` (a URL, or every
     host): the empty value first resets every helper configured before it, the machine's included."""
     key = f"credential.{scope}.helper" if scope else "credential.helper"
-    return [(key, ""), (key, GIT_HELPER)]
+    return [(key, ""), (key, helper)]
 
 
 def account() -> str:

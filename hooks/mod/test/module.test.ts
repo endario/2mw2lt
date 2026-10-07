@@ -56,7 +56,7 @@ const ROOT = '/ws/checkout'
 const line = (id: string | null, kind: string, wakes: boolean) => JSON.stringify({ id, kind, wakes }) + '\n'
 
 function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording = '', keep = 'Keep verbatim: steering session s1; branch b; checkpoint https://github.com/example-org/example-repo/pull/1.\n',
-                         enrolled = true, submitRejects = false,
+                         enrolled = true, submitRejects = false, ackFails = false,
                          // The engine's own answer to `$.session.usage({ breakdown })`: the window it measures
                          // against, the token count it auto-compacts at, and who settled the window.
                          context = { point: 167_000 as number | undefined, raw: 200_000, source: 'auto', model: 'claude-test' } } = {}) {
@@ -114,7 +114,7 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
       : e.argv.includes('--claim-path') ? (w.claimFails ? '' : `/ws/.claude/steering-holders/${e.argv[3]}.json\n`)
       : e.argv.includes('--frame-path') ? `${FRAME_PATH}\n`
       : e.argv.includes('--keep') ? keep : ''
-    const exitCode = e.argv.includes('--claim-path') && w.claimFails ? 1 : 0
+    const exitCode = (e.argv.includes('--claim-path') && w.claimFails) || (e.argv.some(a => a.endsWith('/ack.py')) && ackFails) ? 1 : 0
     return { value: { exitCode, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('process.spawn', async function* ($, e) {
@@ -181,6 +181,66 @@ test('a frame that does not wake submits nothing', async ($, on) => {
   expect(w.spawns.length).toBe(1)
   expect(w.submits).toEqual([])
   expect(w.appends).toEqual([])
+})
+
+test('presence, fleet and usage frames alone submit no pointer', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [line('p1', 'presence', false), line('g1', 'fleet', false), line('u1', 'usage', false), line('u2', 'usage', false)], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  expect(w.submits).toEqual([])
+  expect(w.appends).toEqual([])
+  expect(w.state.get('pending') ?? []).toEqual([])
+})
+
+test('a waking frame with no id submits nothing: the tool finds frames by id and would answer empty', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [line(null, 'say', true)], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  expect(w.submits).toEqual([])
+  expect(w.state.get('pending') ?? []).toEqual([])
+})
+
+// The stream reopens and the daemon replays the frames it still holds, so one id arrives again.
+async function replays($: any, on: On, first: string, opts: { ackFails?: boolean } = {}) {
+  let again!: () => void
+  const w = world(on, {
+    ...opts,
+    rounds: [{ lines: [line('f1', first, true), new Promise<void>(r => { again = r }), line('f1', first, true)], code: 0, hold: never }],
+    recording: `data: {"kind":"${first}","id":"f1","ulid":"U1"}\n`,
+  })
+  await begin($)
+  await w.clock.settle()
+  const read = await $.tool.call({ tool: TOOL } as never)
+  again()
+  await w.clock.settle()
+  return { w, read: (read as { result: unknown }).result }
+}
+
+test('a frame replayed after the model read it submits no pointer', async ($, on) => {
+  const { w, read } = await replays($, on, 'say')
+  expect(read).toBe('{"kind":"say","id":"f1","ulid":"U1"}')
+  expect(w.submits).toEqual([POINTER])
+  expect(w.state.get('pending')).toEqual([])
+})
+
+test('an envelope whose ack failed is not read: its replay wakes the session again', async ($, on) => {
+  const { w } = await replays($, on, 'envelope', { ackFails: true })
+  expect(w.submits).toEqual([POINTER, POINTER])
+})
+
+test('an envelope replayed after its ack landed submits no pointer', async ($, on) => {
+  const { w } = await replays($, on, 'envelope')
+  expect(w.submits).toEqual([POINTER])
+})
+
+test('a frame replayed while it is still pending is added once and pointed once', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [line('f1', 'say', true), line('f1', 'say', true)], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  await $.tool.call({ tool: TOOL } as never)       // the recording does not hold it yet: unpointed, still pending
+  await w.clock.settle()
+  expect(w.state.get('pending')).toEqual(['f1'])
+  expect(w.submits).toEqual([POINTER])
 })
 
 const KICK = { at: '2026-10-06T08:00:00Z', interval: 1800 }
@@ -393,6 +453,7 @@ test('/clear releases the old claim, claims the new id and forgets what was pend
   expect(ats(CLAIM_PATH).slice(-1)).toEqual([0])
   expect(ats('/ws/.claude/steering-holders/ps-2.json')).toEqual([1000])
   expect(w.state.get('pending')).toEqual([])
+  expect(w.state.get('read')).toEqual([])
   expect(w.state.get('pointed')).toBe(false)
   await w.clock.advance(60_000)
   expect(ats('/ws/.claude/steering-holders/ps-2.json').length).toBe(2)   // the refresh goes on for the new id

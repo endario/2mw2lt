@@ -12,6 +12,7 @@ with a reason rather than read two ways.
 from __future__ import annotations
 
 import argparse
+import functools
 import posixpath
 import re
 import sys
@@ -167,6 +168,9 @@ def texts(repo, index: str) -> dict[str, str]:
             if p.endswith(".md") and (t := repo.text(p)) is not None}
 
 
+# `overlap` is asked of every owned path against every path of a brief, for every card the work
+# fold folds, on each refresh; the two string readers it leans on are pure.
+@functools.lru_cache(maxsize=1 << 16)
 def _prefix(p: str) -> str:
     """A path or a directory pattern as the prefix it names: `a/`, `a/**` and `a` are one."""
     for tail in ("/**", "/*"):
@@ -177,6 +181,7 @@ def _prefix(p: str) -> str:
 _CLASS = re.compile(r"^(.+)/\*(\.[A-Za-z0-9]+)$")
 
 
+@functools.lru_cache(maxsize=1 << 16)
 def _scoped(p: str) -> tuple[str, str] | None:
     """A `dir/*.ext` entry as `(dir, ext)`: a class of file, not a path (#3944)."""
     m = _CLASS.match(p.rstrip("/"))

@@ -47,6 +47,13 @@ def main(argv: list[str]) -> int:
         session = mine[0]
     if session not in known:
         print(f"no stored token for {session} in {ws}", file=sys.stderr); return 1
+    # A machine's sessions share the workspace's token store, and a brain once ended a peer's
+    # enrolment this way while the peer was waiting on a review round (#4295). The rule is
+    # `connect.own_enrolment`'s; a process whose session is not named here cannot be told from a peer.
+    minted = known[session].get("provider_session")
+    if psession and (minted != psession if minted else len(known) > 1):
+        print(f"{session} is not this session's enrolment: disconnect ends only its own; "
+              "the brain ends another session with `retire:`", file=sys.stderr); return 1
     import session_routes  # noqa: E402
     if session_routes.on_coordination(ws):
         answer = session_routes.detach(session, known[session]["token"])

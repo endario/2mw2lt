@@ -1,5 +1,5 @@
 import type { Register, EngineInterface, Timer, HookStream, ProcessSpawnChunk, ProcessSpawnResult } from 'claude-code'
-import { lines, atLeast, pick, invokes, answerable, tokensOf, due, POINTER, CHECKPOINT, CONNECT_AGAIN } from './frames'
+import { lines, atLeast, pick, invokes, answerable, tokensOf, due, owed, READ_KEPT, POINTER, CHECKPOINT, CONNECT_AGAIN } from './frames'
 import type { Routine } from './frames'
 
 // The plugin's hooks module (#3872): it holds a connected Claude session's steering stream through
@@ -11,6 +11,7 @@ import type { Routine } from './frames'
 const BUSY = { plugin: '2mw2lt', key: 'busy' } as const
 const TURN_AT = { plugin: '2mw2lt', key: 'turnAt' } as const
 const PENDING = { plugin: '2mw2lt', key: 'pending' } as const
+const READ = { plugin: '2mw2lt', key: 'read' } as const
 const POINTED = { plugin: '2mw2lt', key: 'pointed' } as const
 const APPENDED = { plugin: '2mw2lt', key: 'appended' } as const
 const WARNED = { plugin: '2mw2lt', key: 'warned' } as const
@@ -221,7 +222,12 @@ async function holdOnce($: EngineInterface, ps: string, session: string, gen: nu
       woke = true
       await locked(async () => {
         const { value: pending = [] } = await $.state.get(PENDING)
-        if (l.id) await $.state.set(PENDING, [...pending, l.id])
+        const { value: read = [] } = await $.state.get(READ)
+        if (!owed(l.id, pending, read)) {
+          $.ui.log(`2mw2lt: a ${l.kind} frame ${l.id ? `${l.id} is already pending or read` : 'carries no id'}; no pointer`, { to: 'debug' })
+          return
+        }
+        await $.state.set(PENDING, [...pending, l.id])
         await point($)
       })
     }
@@ -301,10 +307,13 @@ export const register: Register = on => {
       const at = await $.process.run(['python3', script($, 'hold.py'), '--frame-path', session], { cwd: root })
       if (at.exitCode === 0) recording = String(await $.fs.read(at.stdout.trim()).catch(() => ''))
     }
-    const { text, envelopes, found } = pick(recording, pending)
+    const { text, envelopes, envelopeIds, found } = pick(recording, pending)
+    // An envelope whose ack failed is replayed until it lands, and its replay must still wake.
+    const unacked = new Set<string>()
     // Answering the tool is the ack: "acked" keeps meaning the model has the envelope.
-    for (const ulid of envelopes) {
+    for (const [i, ulid] of envelopes.entries()) {
       const acked = await $.process.run(['python3', script($, 'ack.py'), session, ulid], { cwd: root })
+      if (acked.exitCode !== 0) unacked.add(envelopeIds[i] ?? '')
       if (acked.exitCode !== 0) $.ui.log(`2mw2lt: ack.py ${ulid} exited ${acked.exitCode}: ${acked.stderr.trim()}`, { to: 'debug' })
     }
     // Only what was returned leaves PENDING: an id the recording does not hold yet stays, and does
@@ -313,6 +322,8 @@ export const register: Register = on => {
       const { value: now = [] } = await $.state.get(PENDING)
       const left = now.filter(id => !found.includes(id))
       await $.state.set(PENDING, left)
+      const { value: read = [] } = await $.state.get(READ)
+      await $.state.set(READ, [...read, ...found.filter(id => !unacked.has(id))].slice(-READ_KEPT))
       await unpoint($)
       if (left.some(id => !pending.includes(id))) await point($)
     })
@@ -385,6 +396,7 @@ export const register: Register = on => {
     if (root && e.source === 'clear') {
       await locked(async () => {
         await $.state.set(PENDING, [])
+        await $.state.set(READ, [])                  // a fresh context has read nothing
         await $.state.set(WARNED, false)             // a fresh context is owed its own prompt
         await unpoint($)
       })

@@ -56,10 +56,11 @@ export function answerable(busy: boolean, turnStart: number | undefined, now: nu
 
 // The recording holds `data: {json}` lines. Every frame carries the daemon's `id`, which hold.py
 // prints; return the pending ones verbatim and in order, with each envelope's ulid for ack.py.
-export function pick(recording: string, pending: readonly string[]): { text: string; envelopes: string[]; found: string[] } {
+export function pick(recording: string, pending: readonly string[]): { text: string; envelopes: string[]; envelopeIds: string[]; found: string[] } {
   const want = new Set(pending)
   const out: string[] = []
   const envelopes: string[] = []
+  const envelopeIds: string[] = []
   const found: string[] = []
   for (const raw of recording.split('\n')) {
     if (!raw.startsWith('data: ')) continue
@@ -69,9 +70,19 @@ export function pick(recording: string, pending: readonly string[]): { text: str
     want.delete(f.id)
     found.push(f.id)
     out.push(raw.slice(6))
-    if (f.kind === 'envelope' && typeof f.ulid === 'string') envelopes.push(f.ulid)
+    if (f.kind === 'envelope' && typeof f.ulid === 'string') { envelopes.push(f.ulid); envelopeIds.push(f.id) }
   }
-  return { text: out.join('\n'), envelopes, found }
+  return { text: out.join('\n'), envelopes, envelopeIds, found }
+}
+
+// How many ids of frames the model has read are kept to recognise a replay by.
+export const READ_KEPT = 256
+
+// Whether a frame that wakes the session earns a pointer: only one the `frames` tool can hand over
+// (it finds frames by id) and that the session has neither been pointed at nor read. The stream
+// reopens and the daemon replays frames it holds, so the same id arrives again and again.
+export function owed(id: string | null, pending: readonly string[], read: readonly string[]): id is string {
+  return id !== null && !pending.includes(id) && !read.includes(id)
 }
 
 // That a Bash command runs the named client: python3 (or python) on a path ending

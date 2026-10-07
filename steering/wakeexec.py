@@ -27,7 +27,6 @@ import composer
 import runtime_id
 import targeting
 import wake_states
-import wirenames
 
 CODE = "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
 
@@ -374,7 +373,7 @@ def execute(frame: dict, *, typist=None, ps=None, lock_path: str | None = None,
             # nothing (`refused`, as `_failed` keeps it) hands the wake to the tab route.
             if via_pane["state"] != wake_states.REFUSED:
                 return via_pane
-    if wirenames.current(wirenames.WAKE_ROLE, frame.get("role")) == "brain":
+    if frame.get("role") == "brain":
         # The tab route opens a window through the instance's CLI and a `vscode://` URI. For the
         # brain on 2026-09-24 that started a second main process on the brain's own user-data-dir,
         # which resumed the brain's session in a new window behind a URI consent dialog, beside the
@@ -588,7 +587,7 @@ def execute_tmux(frame: dict, *, pane=None, still_offered=None, lock_dir: str | 
                     # Not pressed again: the stash is a toggle whose effect here is not known,
                     # and a second press could move the draft rather than restore it.
                     return refused("the composer held a draft the stash did not clear")
-            text = BRAIN_WAKE_TEXT if wirenames.current(wirenames.WAKE_ROLE, frame.get("role")) == "brain" else WAKE_TEXT
+            text = BRAIN_WAKE_TEXT if frame.get("role") == "brain" else WAKE_TEXT
             typed = True             # from here on a paste may have reached the composer
             t.paste(text.format(nonce=nonce), f"steering-wake-{attempt}")
             t.submit()

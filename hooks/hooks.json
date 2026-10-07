@@ -1,5 +1,16 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -n \"${STEERING_FORGEBIN:-}\" ] && [ -n \"${CLAUDE_ENV_FILE:-}\" ]; then q=$(printf %s \"$STEERING_FORGEBIN\" | sed \"s/'/'\\\\\\\\''/g\"); printf \"export PATH='%s':\\\"\\$PATH\\\"\\n\" \"$q\" >> \"$CLAUDE_ENV_FILE\"; fi; exit 0",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

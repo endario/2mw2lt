@@ -46,7 +46,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/connect.py" --help
 
 ## Keep your reach open
 
-**Codex:** delivery is injected into your thread; connect asserts that reach. Skip the hold.
+**Codex:** delivery is injected into your thread; connect asserts that reach. Skip the hold. A
+peer's or the seat's words arrive as `steering say <key>`: read them, and acknowledge nothing.
 
 **Claude Code with the plugin's module:** when connect's `plugin:` line ends
 `the plugin holds this session's stream, so arm no hold`, arm nothing. A waiting frame starts a
@@ -201,7 +202,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <session> status <commis
 Load `/2mw2lt:gate` for the round/ceiling, cancellation, publication and pass-carry rules.
 Steering commissions the independent judgment; a queued commission is not a reason to send
 another one. Fix verified findings, push and commission the next round. `ship it` closes the
-gate; mark ready only then.
+gate; mark ready only then. After a clean rebase, a merge of `main`, or a conflict-only update,
+carry the pass rather than commissioning another round; commission one when judgment warrants it.
 
 ## Checkpoint and leave
 

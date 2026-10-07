@@ -37,12 +37,13 @@ _RAW_FORMS = {
     "wake": ["wake: token <lease token> <session> because <reason>"],
     "control": ["control: token <lease token> <session> effort <level> because <reason>", "control: token <lease token> <session> model <name>-<version> because <reason>", "control: token <lease token> <session> compact [without checkpoint] because <reason>"],
     "roster": ["roster: token <lease token> [with gone]"],
-    "gate": ["gate: review <repo> <branch> pr <n> [head <sha>] [tier <tier>] [harness <harness>] [exclude <vendor>[,<vendor>]] [final] token <t>", "gate: critic <repo> <branch> doc <path> [head <sha>] [tier <tier>] [harness <harness>] [exclude <vendor>[,<vendor>]] [final] token <t>", "gate: status <commission> token <t>", "gate: cancel <commission> token <t>", "gate: pr <n> token <t>", "gate: carry <n> head <sha> token <t>"],
+    "gate": ["gate: review <repo> <branch> pr <n> [head <sha>] [tier <tier>] [harness <harness>] [exclude <vendor>[,<vendor>]] [final] token <t>", "gate: critic <repo> <branch> doc <path> [head <sha>] [tier <tier>] [harness <harness>] [exclude <vendor>[,<vendor>]] [final] token <t>", "gate: status <commission> token <t>", "gate: cancel <commission> token <t>", "gate: pr <n> token <t>", "gate: carry <n> head <sha> [equivalent] token <t>"],
     "lift": ["lift: token <lease token> review <repo> pr <n> <reason>", "lift: token <lease token> critic <repo> branch <branch> <reason>", "lift: token <lease token> bench <vendor> <model> <reason>"],
     "authorship": ["authorship: token <lease token> establish <session> epoch <n> model <model> because <evidence>", "authorship: token <lease token> abandon <session> epoch <n> because <reason>"],
     "dispose": ["dispose: token <lease token> <item id> <reason>"],
     "promote": ["promote: token <lease token> <item id> <reason>"],
     "backlog": ["backlog: token <lease token>"],
+    "fasttrack": ["fasttrack: token <lease token> lowered <grant> ruleset <id> <bypass actors before, as JSON>", "fasttrack: token <lease token> merging <grant> pr <n> head <sha>", "fasttrack: token <lease token> merged <grant> pr <n> head <sha> as <merge sha>", "fasttrack: token <lease token> refused <grant> pr <n> <why>", "fasttrack: token <lease token> restored <grant> ruleset <id>", "fasttrack: token <lease token> ended <grant> <why>"],
     "detach": ["detach: <session> token <t> [handover <url> or abandon <reason>]"],
     "rebind": ["rebind: <session> machine_id <stable id>"],
     "supersede": ["supersede: <wrong session> to <right session> provider-session <id> runtime <runtime_id>"],
@@ -50,7 +51,7 @@ _RAW_FORMS = {
 
 _AUDIENCE = {
     **{verb: "session" for verb in ("announce", "blocked", "done", "recommend", "ask", "claim", "taking", "declare", "checkpoint", "holds", "enroll", "bind", "ack", "say", "detach", "gate")},
-    **{verb: "seat" for verb in ("note", "launch", "relay", "retire", "card", "needs", "wake", "control", "roster", "lift", "authorship", "dispose", "promote", "backlog")},
+    **{verb: "seat" for verb in ("note", "launch", "relay", "retire", "card", "needs", "wake", "control", "roster", "lift", "authorship", "dispose", "promote", "backlog", "fasttrack")},
     "rebind": "operator",
     "supersede": "operator",
 }
@@ -88,6 +89,7 @@ _EXAMPLES = {
     "dispose": ["dispose: token <lease token> 010101010101010101010101 handled"],
     "promote": ["promote: token <lease token> 010101010101010101010101 owner decision needed"],
     "backlog": ["backlog: token <lease token>"],
+    "fasttrack": ["fasttrack: token <lease token> lowered grant-0a1b ruleset 24244017 [{\"actor_id\": 4859647}]", "fasttrack: token <lease token> merging grant-0a1b pr 1 head aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "fasttrack: token <lease token> merged grant-0a1b pr 1 head aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa as bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "fasttrack: token <lease token> refused grant-0a1b pr 2 conflicts with main", "fasttrack: token <lease token> restored grant-0a1b ruleset 24244017", "fasttrack: token <lease token> ended grant-0a1b batch done"],
     "detach": ["detach: violet token <t> handover https://github.com/example/repo/pull/1"],
     "rebind": ["rebind: violet machine_id macbook"],
     "supersede": [f"supersede: wrong to right provider-session provider-1 runtime {_EXAMPLE_RUNTIME}"],
@@ -210,6 +212,12 @@ TOOLS = {
     "ghtoken": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "ghtoken --help"}]},
     "observe": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "observe --help"}]},
     "readout": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "readout --help"}]},
+    "fast-track": {"bare": False, "forms": [
+        {"topic": None, "usage": "--repo <owner/name> --grant <grant> [--ruleset <id>] [--end] <pr>... (TOKEN in the environment)",
+         "example": "fast-track --repo example/repo --grant grant-0a1b --end 12 13"},
+        {"topic": "--restore", "usage": "--repo <owner/name> --grant <grant> [--ruleset <id>] --restore",
+         "example": "fast-track --repo example/repo --grant grant-0a1b --restore"},
+    ]},
     "rebrief": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "rebrief --help"},
                                          {"topic": "--keep", "usage": "--keep <session>", "example": "rebrief --keep violet"}]},
 }

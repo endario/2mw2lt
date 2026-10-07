@@ -208,9 +208,8 @@ def brain_route(kind: str) -> tuple[str, dict] | None:
     route on the agent that launched it, named by the bearer and address its invocation carries
     (`seathost.argv`), since the cage denies it the machine's own credential the direct path
     needs (#1427). None for an ordinary session's hook, which posts to the door as it always has."""
-    import wirenames
-    nonce = wirenames.env("STEERING_BRAIN_NONCE")
-    base = wirenames.env("STEERING_BRAIN_AGENT")
+    nonce = os.environ.get("STEERING_BRAIN_NONCE")
+    base = os.environ.get("STEERING_BRAIN_AGENT")
     if not nonce or not base:
         return None
     return f"{base}/steering/brain/{kind}", {"Authorization": f"Bearer {nonce}"}

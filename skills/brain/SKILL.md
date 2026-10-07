@@ -96,7 +96,7 @@ you last received is the answer — there is nothing to accumulate and nothing t
 Each row carries the session's `model`, `effort`, `machine` (its host name) and `verdict` (its own
 account's, as in the `fleet` frame), each `null` when nothing has been read: place by those, and
 never ask a session its level, since it cannot read its own.
-`data: {"kind": "kick", "idle": [...], "executing": [...], "finished": [...], "changed": {...}, "turn": …, "placement": {...}, "gates": {...}, "queue": {...}, "moved": …, "missed": …}`
+`data: {"kind": "kick", "idle": [...], "executing": [...], "finished": [...], "changed": {...}, "turn": …, "placement": {...}, "advice": {...}, "gates": {...}, "queue": {...}, "moved": …, "missed": …}`
 is the daemon's timer, not a person.
 It arrives every interval because silence sends nothing else, and on the next poll that is
 neither `quiet`, `debounced` nor `refused` once a session finishes a turn. `moved` is the daemon's verdict that this kick carries a fleet
@@ -104,7 +104,15 @@ change, a stalled gate or a backed-up merge queue; a kick that has neither wakes
 the fleet to report it, and do not read its absence for a harness that posts no turn end as
 busy. It overlaps `executing`, because a session that has just finished is still recently heard.
 `placement` is each reachable session's `{model, effort, machine, verdict}`, so a quiet brain is
-re-told rather than left to remember. `gates` counts the open gate commissions by state and
+re-told rather than left to remember. `advice` is the daemon's suggestion for each session that
+has one:
+`concluded` or `orphaned` (its worker still runs, off the board) to `close` (`retire:`), `full`
+to `repurpose`, `free` or `lapsing` to `drive`, and
+`waiting` to `wait` — that session is live on a review round, a card or a branch, so never end it.
+`cache.lapses_at` is when its prompt cache lapses, where its vendor states a lifetime, and
+`cache.lapsing` that it is within fifteen minutes of it. A new `orphaned`, `concluded` or `full`, or a
+cache newly `lapsing`, moves the kick. The suggestion is
+yours to weigh, not an instruction. `gates` counts the open gate commissions by state and
 lists each `stalled` one — waiting ten minutes with no run out, or past its run's deadline — with
 who commissioned it: tell that session to commission it again, or find why nothing takes it.
 `queue` is the merge queue's reading, for a workspace whose tracks document opts in with a
@@ -374,7 +382,9 @@ only to target an agent running there, and a launch on a node holding no uplink 
 An opencode worker runs confined, in a clone of its own, and its branch is pushed by its agent.
 `launching: <id> <harness> on <node>` means the agent there was handed it. Read how it ended
 through the API, from any machine: `requested`, `refused`, `lapsed`, `launched` naming the
-session, or `launch-refused` with the agent's reason.
+session, or `launch-refused` with the agent's reason. A launch refused at the cap names the
+`workers` it counted, each with its `advice`, and `others` for other workspaces': close one and
+launch again.
 
 ```bash
 printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" /launches/<id>
@@ -675,9 +685,27 @@ authors'. In order, with your own `gh` login:
 4. **Escalate** — still backed up after two rounds of 1–3, with the backlog blocking work the
    owner ranks above landing changes no suite has run, ask the owner for a fast-track with a
    structured ask whose `context` is the reading. While that ask is open it is the answer to
-   step 4: do not ask again or re-triage the queue until the owner answers. On a grant, take
-   the fast-track's steps by hand within its scope, with the owner's `gh` login (the owner's
-   ruling of 2026-10-07), until `fast-track.py` lands, and restore the ruleset before anything else.
+   step 4: do not ask again or re-triage the queue until the owner answers. Offer the scopes as
+   the options' labels, exactly — `fast-track: minutes <m>`, `fast-track: next <n>`,
+   `fast-track: until withdrawn` — since only those grant anything. The answer that does writes
+   the grant, named by the digest `ask` printed; the kick's `queue.grants` names every live one,
+   a grant the owner gave from the console included.
+5. **Fast-track** — under a live grant, from a checkout of the repository, with the owner's `gh`
+   login (the owner's ruling of 2026-10-07), merge in queue order:
+
+   ```bash
+   TOKEN=$TOKEN python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/fast-track.py" --repo <owner/name> --grant <grant> [--end] <pr>...
+   ```
+
+   It refuses while `main`'s tip has not passed its suite. It merges only heads whose own suites
+   ran and passed, never a deferred status, and dispatches the suites for the rest: run it again
+   once they pass. It records each act on the ledger, stops at the first pull request that cannot
+   go — hand that one back to its author with the reason it printed — and restores the ruleset as
+   it exits.
+   `--end` ends a scoped grant with the batch; a standing one stays until the owner ends it.
+   Then watch `main`'s push run: a red `main` is fixed forward, and the grant ended, before the
+   next merge. A kick whose `queue` carries `lowered` means a run died before its restore: run
+   `fast-track.py --repo <owner/name> --grant <grant> --restore` before anything else.
 
 ## Share the machines
 
@@ -827,7 +855,9 @@ that are not there already, so they survive this session.
 - **Check the issue is still open before you brief it.** Search merged pull requests for it
   first. A brief for work that has already landed wastes a session's turn.
 - **Brief a pull request to stay a draft until `ship it`.** Each push to a ready one is a full
-  CI run; the suite runs locally between rounds instead.
+  CI run; the suite runs locally between rounds instead. After a clean rebase, a merge of `main`,
+  or a conflict-only update, tell the worker to carry the pass; a round remains available when
+  judgment warrants it.
 - **Rollout is yours.** Deploying merged work, restarting agents and copying credentials is the
   brain's call (owner's ruling, 2026-09-24); a production action still takes your explicit go,
   not the owner's.
