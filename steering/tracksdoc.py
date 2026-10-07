@@ -17,6 +17,8 @@ DEFAULT_SOURCE = ".2mw2lt/tracks.json"
 # No longer than a lane name a card may carry: a card stores its lane's id (`cards.admissible`).
 ID = re.compile(rf"[A-Za-z0-9._-]{{1,{track_shape.TRACK_MAX}}}")
 REPO = re.compile(r"[\w.-]+/[\w.-]+")
+# The merge-queue reading's thresholds and their defaults (doc 180 §2), which a `queue` block overrides.
+QUEUE_DEFAULTS = {"depth": 10, "oldest_minutes": 90, "merged_per_hour_below": 4, "ejected_per_hour": 2}
 
 
 def former(doc: dict) -> tuple[str, ...]:
@@ -89,4 +91,16 @@ def validate(doc: object, repo: str | None) -> list[str]:
                 elif level not in knowledge_shape.LEVELS:
                     why.append(f"`knowledge.{stage}` is {level!r}, not one of "
                                f"{', '.join(knowledge_shape.LEVELS)}")
+    queue = doc.get("queue")
+    if queue is not None:
+        # The merge-queue reading's opt-in and thresholds (doc 180 §2). A typo'd key would leave
+        # its threshold at the default unnoticed, so it is refused here.
+        if not isinstance(queue, dict):
+            why.append("`queue` is not an object")
+        else:
+            for key, value in queue.items():
+                if key not in QUEUE_DEFAULTS:
+                    why.append(f"`queue.{key}` is not a threshold; the thresholds are {', '.join(QUEUE_DEFAULTS)}")
+                elif type(value) is not int or value < 1:
+                    why.append(f"`queue.{key}` is {value!r}, not a positive integer")
     return why

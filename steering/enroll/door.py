@@ -203,16 +203,17 @@ def remote() -> bool:
     return door()[1]
 
 
-def seat_route(kind: str) -> tuple[str, dict] | None:
+def brain_route(kind: str) -> tuple[str, dict] | None:
     """Where a caged brain's hook posts instead of the door directly (#1455): its own loopback
     route on the agent that launched it, named by the bearer and address its invocation carries
     (`seathost.argv`), since the cage denies it the machine's own credential the direct path
     needs (#1427). None for an ordinary session's hook, which posts to the door as it always has."""
-    nonce = os.environ.get("STEERING_SEAT_NONCE")
-    base = os.environ.get("STEERING_SEAT_AGENT")
+    import wirenames
+    nonce = wirenames.env("STEERING_BRAIN_NONCE")
+    base = wirenames.env("STEERING_BRAIN_AGENT")
     if not nonce or not base:
         return None
-    return f"{base}/steering/seat/{kind}", {"Authorization": f"Bearer {nonce}"}
+    return f"{base}/steering/brain/{kind}", {"Authorization": f"Bearer {nonce}"}
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))

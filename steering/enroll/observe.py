@@ -24,7 +24,7 @@ import spool  # noqa: E402
 import supervision  # noqa: E402
 import verb_help  # noqa: E402
 from local_workspace import workspace_root  # noqa: E402
-from door import door_url, failure, record, remote, seat_route, send  # noqa: E402
+from door import door_url, failure, record, remote, brain_route, send  # noqa: E402
 
 
 BUDGET = 4.0  # seconds, end to end
@@ -108,7 +108,7 @@ def main() -> int:
     if left < 0.2:
         record("observe", f"admitted, no time left to send ({left:.2f}s of {BUDGET})", ws)
         return finish()  # admitted; the sweep delivers it
-    seated = seat_route("observe")
+    seated = brain_route("observe")
     base = seated[0] if seated else f"{door_url()}/steering/observe"
     sent_at = time.monotonic(); notice = None
     try:

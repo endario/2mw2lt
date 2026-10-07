@@ -269,3 +269,13 @@ def acknowledge(session: str, token: str, directive: str) -> str:
         return refusal.refuse(f"directive {directive}: {e}",
                               hand_to=("the brain", f"blocked: {session} on directive {directive} refused"))
     return f"acked: {directive} by {session}"
+
+
+def answer(session: str, token: str, request: str, generation: int, text: str) -> dict:
+    """The seat's holder answers a member's request it was given as a say (EL3,
+    go-el3-brain-bootstrap-design.md §2.5), on its own carrier, under the seat generation it held
+    when it was given it. The key is the answer's own, so a retry after a lost answer is answered
+    from the first. Raises `Refused` or `Unsent`."""
+    key = hashlib.sha256(f"answer\n{session}\n{request}\n{generation}".encode()).hexdigest()[:32]
+    return post(f"/brain/requests/{request}/answer", {"session": session, "generation": generation, "answer": text},
+                key, SESSION_CARRIER, token)

@@ -14,6 +14,17 @@ class NoIdentity(RuntimeError):
     """The pinned account named no token, so nothing may run as it."""
 
 
+# git asks `gh` for a GitHub credential, which answers with `GH_TOKEN` when one is set.
+GIT_HELPER = "!gh auth git-credential"
+
+
+def only_helper(scope: str = "") -> list[tuple[str, str]]:
+    """git config entries making `GIT_HELPER` the one helper git asks, for `scope` (a URL, or every
+    host): the empty value first resets every helper configured before it, the machine's included."""
+    key = f"credential.{scope}.helper" if scope else "credential.helper"
+    return [(key, ""), (key, GIT_HELPER)]
+
+
 def account() -> str:
     """The legacy standalone process pin, or an empty string when it pins none."""
     return os.environ.get("STEERING_GH_ACCOUNT", "").strip()

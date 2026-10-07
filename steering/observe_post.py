@@ -13,12 +13,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "enroll"))
 from ack import minted_for  # noqa: E402
-from door import door_url, remote, seat_route, send  # noqa: E402
+from door import door_url, remote, brain_route, send  # noqa: E402
 
 
 def post(rec: dict, workspace: Path | None, timeout: float, route: str = "vitals") -> None:
     headers = {"Content-Type": "application/json"}
-    seated = seat_route(route)
+    seated = brain_route(route)
     if seated:
         url, extra = seated
         headers.update(extra)

@@ -96,17 +96,21 @@ you last received is the answer — there is nothing to accumulate and nothing t
 Each row carries the session's `model`, `effort`, `machine` (its host name) and `verdict` (its own
 account's, as in the `fleet` frame), each `null` when nothing has been read: place by those, and
 never ask a session its level, since it cannot read its own.
-`data: {"kind": "kick", "idle": [...], "executing": [...], "finished": [...], "changed": {...}, "turn": …, "placement": {...}, "gates": {...}, "moved": …, "missed": …}`
+`data: {"kind": "kick", "idle": [...], "executing": [...], "finished": [...], "changed": {...}, "turn": …, "placement": {...}, "gates": {...}, "queue": {...}, "moved": …, "missed": …}`
 is the daemon's timer, not a person.
 It arrives every interval because silence sends nothing else, and on the next poll that is
 neither `quiet`, `debounced` nor `refused` once a session finishes a turn. `moved` is the daemon's verdict that this kick carries a fleet
-change or a stalled gate; a kick that has neither wakes no model turn for a brain the plugin holds. `finished` is the daemon's own reading of who is waiting for work — do not ask
+change, a stalled gate or a backed-up merge queue; a kick that has neither wakes no model turn for a brain the plugin holds. `finished` is the daemon's own reading of who is waiting for work — do not ask
 the fleet to report it, and do not read its absence for a harness that posts no turn end as
 busy. It overlaps `executing`, because a session that has just finished is still recently heard.
 `placement` is each reachable session's `{model, effort, machine, verdict}`, so a quiet brain is
 re-told rather than left to remember. `gates` counts the open gate commissions by state and
 lists each `stalled` one — waiting ten minutes with no run out, or past its run's deadline — with
-who commissioned it: tell that session to commission it again, or find why nothing takes it. The cards themselves are the board's, which a brain on any
+who commissioned it: tell that session to commission it again, or find why nothing takes it.
+`queue` is the merge queue's reading, for a workspace whose tracks document opts in with a
+`queue` block:
+its depth, entries, merges and failure ejections in the last hour, `ready_unqueued` and
+`stale_stacks`, and `backed_up` with `why` — act on it by [Keep the queue moving](#keep-the-queue-moving). The cards themselves are the board's, which a brain on any
 machine reads with
 `python3 <2mw2lt>/steering/enroll/door.py --get /steering/work` — the one read the remote door
 answers, with each reading's working directory omitted. Place from `finished` first and `idle` after it, each session once — the two lists overlap for
@@ -654,6 +658,27 @@ especially throughput and efficiency — is the mission, and placement carries i
   from an account under pressure.
 - A recurring sink is surfaced as a fix, never reported as a status line.
 
+## Keep the queue moving
+
+When the kick's `queue` says `backed_up`, the merge queue is the fleet's bottleneck: every
+session's finished work waits on it. Act only while it says so; otherwise the queue is its
+authors'. In order, with your own `gh` login:
+
+1. **Jump what unblocks the most** — a CI speed-up, which shortens every later round; a stack's
+   base, which frees its dependents; work the owner waits on. Dequeue it, then enqueue it with
+   `jump` (GraphQL `dequeuePullRequest`, then `enqueuePullRequest(jump: true)`; a jump on an
+   entry still queued is refused). One or two at most: each jump rebuilds every group behind it.
+2. **Dequeue what will fail** — an entry ejected twice for one cause, or a head known red, goes
+   back to its author with the cause.
+3. **Queue what is ready** — enqueue each `ready_unqueued`; tell each `stale_stacks` author to
+   retarget to the default branch, or retarget it yourself once the author is gone.
+4. **Escalate** — still backed up after two rounds of 1–3, with the backlog blocking work the
+   owner ranks above landing changes no suite has run, ask the owner for a fast-track with a
+   structured ask whose `context` is the reading. While that ask is open it is the answer to
+   step 4: do not ask again or re-triage the queue until the owner answers. On a grant, take
+   the fast-track's steps by hand within its scope, with the owner's `gh` login (the owner's
+   ruling of 2026-10-07), until `fast-track.py` lands, and restore the ruleset before anything else.
+
 ## Share the machines
 
 The owner's ruling, 2026-10-07
@@ -787,7 +812,7 @@ that are not there already, so they survive this session.
 
 - **Keep your Needs-you rows current.** The daemon classifies every pending item as the owner's
   or the brain's, and the owner's rail draws only the owner's. `backlog: token <lease token>`
-  lists each open one as `<owner|seat> <id> <what>`, from either door. The brain's rows (recommendations, inbox lines, blocks, escalated
+  lists each open one as `<owner|brain> <id> <what>`, from either door. The brain's rows (recommendations, inbox lines, blocks, escalated
   directives, failed deliveries, waiting dialogs, and `unheard:` says a worker sent while nobody held the seat) are yours, and nobody else sees them while you hold the seat.
   A waiting dialog is a session sitting at a question or a permission prompt: wake it, or dispose
   of it citing when its row says the session was last seen, or promote it with the answer you

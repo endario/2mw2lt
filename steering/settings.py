@@ -68,7 +68,7 @@ def validate(data) -> dict:
     routing = data.get("routing", {})
     if not isinstance(routing, dict):
         raise ValueError("[routing] is not a table")
-    extra = set(routing) - {"judges_exclude", "claude_launchers"}
+    extra = set(routing) - {"judges_exclude", "claude_launchers", "worker_forge"}
     if extra:
         raise ValueError(f"[routing] has an unknown key ({', '.join(sorted(extra))})")
     if "judges_exclude" in routing and not (isinstance(routing["judges_exclude"], list)
@@ -79,6 +79,8 @@ def validate(data) -> dict:
     if "claude_launchers" in routing and not (isinstance(routing["claude_launchers"], list)
                                               and routing["claude_launchers"]):
         raise ValueError("[routing].claude_launchers is not a non-empty list")
+    if routing.get("worker_forge", "login") not in ("login", "app"):
+        raise ValueError(f"[routing].worker_forge={routing['worker_forge']!r} is not login or app")
     # Kept beside the limits under keys no `[capacity]` entry can take, so one cache holds them all.
     return {**table, **({"placement": placing} if placing else {}),
             **({"routing": routing} if routing else {})}
@@ -216,3 +218,9 @@ def claude_launchers(path: Path = DEFAULT_PATH) -> list | None:
     """The declared launchers as the file writes them (doc 121 §2), or None when it declares none
     and `STEERING_CLAUDE_LAUNCHERS` decides."""
     return capacity(path).get("routing", {}).get("claude_launchers")
+
+
+def worker_forge(path: Path = DEFAULT_PATH) -> str:
+    """Whose GitHub credential a worker launched here holds (doc 181 §5): `login`, the machine's
+    own, until the App's is proven on one worker; `app` for the App's installation token."""
+    return capacity(path).get("routing", {}).get("worker_forge", "login")

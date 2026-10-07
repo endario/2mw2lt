@@ -207,6 +207,7 @@ TOOLS = {
     "armed": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "armed --help"}]},
     "codex_observe": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "codex_observe --help"}]},
     "delete_guard": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "delete_guard --help"}]},
+    "ghtoken": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "ghtoken --help"}]},
     "observe": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "observe --help"}]},
     "readout": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "readout --help"}]},
     "rebrief": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "rebrief --help"},

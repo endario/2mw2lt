@@ -338,7 +338,8 @@ def environment(env: dict | None = None) -> list[str]:
 
 
 def argv(launcher: dict, workspace: str, model: str, effort: str, name: str, env: dict | None = None,
-         tmux: str = "tmux", scope: list[str] | None = None, *, token_file: Path | None = None) -> list[str]:
+         tmux: str = "tmux", scope: list[str] | None = None, *, token_file: Path | None = None,
+         forge_env: dict[str, str] | None = None) -> list[str]:
     """The `tmux new-session` that starts the session: argv, never a shell line, with its
     environment replaced whole, since a tmux server copies its own into every pane.
 
@@ -353,5 +354,6 @@ def argv(launcher: dict, workspace: str, model: str, effort: str, name: str, env
         "Read(~/Library/Group Containers)", "Read(~/Library/Group Containers/**)",
     ]}})] if sys.platform == "darwin" else []
     return [*scope, tmux, "-L", SOCKET, "new-session", "-d", "-s", name, "-c", workspace, "--",
-            "/usr/bin/env", "-i", *environment(env), *bootstrap,
+            "/usr/bin/env", "-i", *[kv for kv in environment(env) if kv.partition("=")[0] not in (forge_env or {})],
+            *[f"{k}={v}" for k, v in (forge_env or {}).items()], *bootstrap,
             *_claude(launcher), *settings, "--model", model, "--effort", effort, "/2mw2lt:connect"]
