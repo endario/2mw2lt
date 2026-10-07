@@ -30,7 +30,7 @@ _FORMS = ("send `", "wait until ", "only ", _AGAIN)
 
 def _line(line: str, to: str = "session") -> str:
     """`line`, if a reader of audience `to` may send it: a verb of the door, or a `/2mw2lt:` skill.
-    The seat is a session that holds the lease, so it may send both; the operator all three."""
+    The brain is a session that holds the lease, so it may send both; the operator all three."""
     if line.startswith("/2mw2lt:"):
         audience = SKILLS.get(line[len("/2mw2lt:"):].split(" ")[0])
     else:
@@ -118,10 +118,10 @@ def unmatched(text: str) -> str:
     near = difflib.get_close_matches(head.strip().lower(), sessions, n=1) if sep else []
     send = [(VERBS[near[0]]["forms"][0]["grammar"], f"if you meant {near[0]}:")] if near else []
     return refuse("no verb matched this line, and steering queues nothing unaddressed", send=send + [
-        ("say: <session> token <t> <text>", "to speak to the seat"),
+        ("say: <session> token <t> <text>", "to speak to the brain"),
         ("say: <session> to <peer> token <t> <text>", "to speak to a peer"),
         ("ask: <session> token <t> <question>", "for a decision only the owner can make"),
-        ("recommend: <session> token <t> <text>", "for a proposal the seat triages"),
+        ("recommend: <session> token <t> <text>", "for a proposal the brain triages"),
     ])
 
 
@@ -186,7 +186,7 @@ def escalate(reason: str, actor: str = "the operator", to: str = "session") -> s
 
 def conforms(reply: str, to: str = "seat") -> bool:
     """Whether a `REJECTED` answer carries one of the three remedies, and every line it offers is
-    one its reader `to` may send — the seat unless the caller knows better: a string put together by
+    one its reader `to` may send — the brain unless the caller knows better: a string put together by
     hand cannot slip an operator verb past it. The reader is not in the string, so a session-facing
     refusal naming a seat verb passes here, and is caught where it is built, by `refuse`. A door
     answering the operator says so, since its refusals send the operator's own verbs (#2654)."""

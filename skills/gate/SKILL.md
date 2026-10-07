@@ -61,7 +61,7 @@ In a repository 2mw2lt steers this gate replaces `/independent-review` and `/ind
 | tools | full inside a cage that withholds every credential but the reviewer's own; `--sandbox` to read only | full with the host's access; `--sandbox` |
 | persona | the project's, read from the base commit | the project's, read from the checkout |
 | record | a fact per round, published by `2mw2lt[bot]` with a status pinned to the commit | a local artifact, published as the user |
-| rounds | capped centrally, lifted by the seat, briefed with earlier findings | counted by the caller |
+| rounds | capped centrally, lifted by the brain, briefed with earlier findings | counted by the caller |
 | scope | a pushed commit | also a local branch or uncommitted work |
 
 The result comes to you as a `say` frame `from: gate <id>` on the stream you hold: the verdict,
@@ -119,8 +119,21 @@ Keep the pull request a draft through every round. A draft runs no steering suit
 round run the focused guards for what changed, and a full suite only when the change warrants one,
 locally first, and on a runner only when that is genuinely needed. A dispatch
 (`gh workflow run steering.yml -R <repo> --ref <branch>`, `<repo>` being the `repo:` line connect
-printed) runs on the mini; `-f lane=hosted` bills paid Actions minutes and is for a change the mini cannot verify. Mark it ready only after `ship it`: that is its one required CI
+printed) runs on the mini, and only there. Mark it ready only after `ship it`: that is its one required CI
 run, then the merge.
+
+Arm the merge once, when you mark it ready and its base is `main`:
+
+```bash
+gh pr merge <pr number> -R <repo> --squash --auto --match-head-commit <head sha>
+```
+
+GitHub queues it the moment its head holds every required status, so there is nothing to poll
+for. Never arm a pull request whose base is another branch: it would merge into that branch. Do
+not poll GitHub to learn what happens next either. The pull request's moves come to you as a
+`say` frame `from: forge #<n>`: it entered the queue, left it and why, merged, closed, or its base
+moved to `main` (your cue to carry the pass and arm it). A `gh` loop that waits is the failure
+mode: every session on a machine shares one person's GitHub limit (#4203).
 
 `REJECTED … does not hold <branch>` — claim it with `taking.py`, above. `unresolved: …` — no
 reviewer could take it; report the blocker rather than reviewing your own work:

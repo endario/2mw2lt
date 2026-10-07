@@ -1,5 +1,5 @@
 ---
-description: Use when a session finishes or the seat releases it.
+description: Use when a session finishes or the brain releases it.
 ---
 
 Checkpoint at `exit` first (`/2mw2lt:checkpoint`). Using its posted note and the session name

@@ -50,7 +50,7 @@ def process_start(pid: int, timeout: float = 1.0) -> str | None:
                              env={**os.environ, "LC_ALL": "C"}).stdout.strip()
     except (OSError, subprocess.TimeoutExpired):
         out = ""
-    # `ps` is setuid, and a sandboxed process may not exec it: a confined seat's observe hook
+    # `ps` is setuid, and a sandboxed process may not exec it: a confined brain's observe hook
     # could name no runtime (doc 94 §3). The kernel's birth instant, in `ps`'s own `lstart`
     # format, is the same string for a process of this user, so the id derived from it is too.
     return out or _lstart(pid)

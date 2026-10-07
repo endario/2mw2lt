@@ -2,7 +2,7 @@
 """`say.py [--to <session>] [--provider <harness>] [--provider-session <id>] <session> <text|->`:
 say something on this session's own enrollment token — to the session `--to` names, or to whoever
 holds the steering role. From another machine the untargeted form reaches the seated session, or
-the seat's Needs You when nobody holds the seat, never the resident brain (#3381). A name the
+the brain's Needs You when nobody holds the seat, never the resident brain (#3381). A name the
 workspace minted for another session is refused (#1077)."""
 from __future__ import annotations
 

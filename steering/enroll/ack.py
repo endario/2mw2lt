@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import sys
+import uuid
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -97,9 +98,11 @@ def main(argv: list[str]) -> int:
         return error("ack", "unknown ack option")
     if not valid_token(argv[0]):
         return error("ack", "ack requires a session name")
-    if not valid_ulid(argv[1]):
+    if not valid_ulid(argv[1]) and not go_directive(argv[1]):
         return error("ack", "ack requires a valid directive id")
     ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
+    if not valid_directive(ws, argv[1]):
+        return error("ack", "ack requires a valid directive id")
     session, ulid = argv
     try:
         reply = acknowledge(ws, session, ulid)
@@ -109,15 +112,31 @@ def main(argv: list[str]) -> int:
     return 0 if reply.startswith("acked:") else 1
 
 
+def valid_directive(ws: Path, directive: str) -> bool:
+    """A directive's id as its authority mints it: the door's envelope ULID, or Go's UUID."""
+    import session_routes  # noqa: E402
+    return go_directive(directive) if session_routes.on_coordination(ws) else valid_ulid(directive)
+
+
+def go_directive(directive: str) -> bool:
+    try:
+        return str(uuid.UUID(directive)) == directive
+    except ValueError:
+        return False
+
+
 def acknowledge(ws: Path, session: str, ulid: str) -> str:
-    """`ack:` a directive on the session's stored token, answering the door's reply. Raises
-    LookupError when no usable token is stored."""
+    """Acknowledge a directive on the session's stored token: `ack:` to the door, or Go's
+    acknowledgement route. Raises LookupError when no usable token is stored."""
     try:
         token = json.loads(token_path(ws, session).read_text())["token"]
     except (OSError, ValueError, KeyError):
         raise LookupError(f"no stored token for {session}: enroll first") from None
     if not valid_token(token):
         raise LookupError(f"the stored token for {session} is not one: enroll again")
+    import session_routes  # noqa: E402
+    if session_routes.on_coordination(ws):
+        return session_routes.acknowledge(session, token, ulid)
     return say(f"ack: {ulid} token {token}")
 
 

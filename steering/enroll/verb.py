@@ -121,7 +121,7 @@ def main(argv: list[str]) -> int:
         return error("verb", "verb requires a board verb, session, and text")
     verb, session, rest = argv[0], argv[1], argv[2:]
     if verb not in VERBS:
-        return error("verb", f"{verb!r} is not a board verb. To speak to a session or the seat, use say.py")
+        return error("verb", f"{verb!r} is not a board verb. To speak to a session or the brain, use say.py")
     if not ack.valid_token(session) or session.startswith("-"):
         return error("verb", "verb requires a session name")
     # One token, `--retry=<id>`, so nothing has to guess where the text stops. The two-word form

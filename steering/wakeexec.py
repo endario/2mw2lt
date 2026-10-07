@@ -59,10 +59,10 @@ def _bundle_cli(app_pid: int, *, ps=None) -> str | None:
 _WAKE_TRAILER = "Re-arm it with /2mw2lt:connect; this message carries nothing else."
 WAKE_TEXT = "steering wake {nonce}: your hold is down and a directive is waiting. " + _WAKE_TRAILER
 
-# The issue's own wording ask: the holder is told the SEAT has gone silent, not merely that a
+# The issue's own wording ask: the holder is told the BRAIN has gone silent, not merely that a
 # hold is down (#1773) — used only when the frame names role == "seat"; every other frame keeps
 # WAKE_TEXT, including one from before this shipped, which carries no "role" key at all.
-SEAT_WAKE_TEXT = ("steering wake {nonce}: the seat has gone silent and a directive is waiting. "
+SEAT_WAKE_TEXT = ("steering wake {nonce}: the brain has gone silent and a directive is waiting. "
                  + _WAKE_TRAILER)
 
 # The one entrypoint this route addresses. Anything else is refused rather than attempted: the
@@ -375,11 +375,11 @@ def execute(frame: dict, *, typist=None, ps=None, lock_path: str | None = None,
                 return via_pane
     if frame.get("role") == "seat":
         # The tab route opens a window through the instance's CLI and a `vscode://` URI. For the
-        # seat on 2026-09-24 that started a second main process on the seat's own user-data-dir,
-        # which resumed the seat's session in a new window behind a URI consent dialog, beside the
-        # seat still running (#2171). Until the route can show it reaches the running instance,
-        # the seat is not typed into this way; a pane route above is unaffected.
-        why = "the VS Code tab route cannot be shown to reach the seat's running instance (#2171)"
+        # brain on 2026-09-24 that started a second main process on the brain's own user-data-dir,
+        # which resumed the brain's session in a new window behind a URI consent dialog, beside the
+        # brain still running (#2171). Until the route can show it reaches the running instance,
+        # the brain is not typed into this way; a pane route above is unaffected.
+        why = "the VS Code tab route cannot be shown to reach the brain's running instance (#2171)"
         if via_pane is not None:
             why = f"{via_pane['why']}; and as a tab: {why}"
         return {"attempt": attempt, "state": wake_states.REFUSED, "why": why}
@@ -422,7 +422,7 @@ def execute(frame: dict, *, typist=None, ps=None, lock_path: str | None = None,
             # one instance; it cannot say which tab holds focus, which is why the receipt of
             # #1771 is what actually establishes where the text went.
             return f"frontmost is {front}, the session's instance is {tgt['app_pid']}"
-        text = WAKE_TEXT  # the seat is refused above
+        text = WAKE_TEXT  # the brain is refused above
         held = t.take_pasteboard(text.format(nonce=nonce))
         try:
             t.clear_composer()
@@ -693,7 +693,7 @@ def control(frame: dict, *, pane=None, find_pane=None, still_offered=None, lock_
             def past_switch(to: str, done, **kw) -> str | dict:
                 """The screen once `done(screen)` holds or the switch's confirmation is drawn, with
                 that confirmation answered Yes — or the result when it could not be (#3100).
-                Nothing answered it once, and the session sat at the dialog until the seat pressed
+                Nothing answered it once, and the session sat at the dialog until the brain pressed
                 Enter in its pane by hand. The cursor names the row Enter would take, and the trust
                 prompt is answered the same way (§5 of doc 120): Down onto Yes, a read that it is
                 there, then Enter. What confirms the switch is still `done`, so a No here does not

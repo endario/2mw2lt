@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`card.py --token - <verb> <args…>`: a seat's board write (doc 32 §4), sent through the door as a
+"""`card.py --token - <verb> <args…>`: a brain's board write (doc 32 §4), sent through the door as a
 `card:` line on its lease token. `cards.py` is the same command where the ledger is this machine's."""
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
              "       card.py --token - link <card> requires|part-of <card>|<owner>/<name>#<n> [--source <where>] <why>\n"
              "       card.py --token - unlink <card> requires|part-of <card>|<owner>/<name>#<n> resolved|withdrawn <why>\n"
              "\n"
-             "       `major` is the seat's declaration that a card's work is major (doc 148 §5): "
+             "       `major` is the brain's declaration that a card's work is major (doc 148 §5): "
              "a major card owes a design until a critic-passed canon record names it.")
     usage = usage.replace("card.py", prog)
     if prog == "card.py" and help_requested("card", argv, bare=False):

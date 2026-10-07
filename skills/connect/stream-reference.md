@@ -22,7 +22,7 @@ is truncated. The [connect skill](SKILL.md) is the execution recipe.
   config directory identifies, not one guessed from a name.
 - A missing agent port line means connect found no agent for this workspace at that port.
   Read its explanation; inspect the listener before starting another process. A worker
-  proposes a rollout to the seat rather than restarting the fleet itself.
+  proposes a rollout to the brain rather than restarting the fleet itself.
 - A plugin release older than the orchestrator's: use the update command connect prints
   before relying on a newer verb.
 
@@ -81,7 +81,7 @@ without repairing identity or the credential just repeats the refusal.
 | `envelope` with `ulid`, `text` | Acknowledge through `ack.py`, re-arm, then act or report a blocker. Read the daemon-written `from:` line and named canon before acting. |
 | `say` with `from`, `text` | Speech; nothing to acknowledge. Reply to a peer with `say.py --to`; a gate result uses `from: gate <id>`. Check its commission/round against the one expected. |
 | `seat` | Load `/2mw2lt:brain`; the session has been seated. |
-| `kick`, `room` | Seat frames; load `/2mw2lt:brain` for the timer or room-message recipe. |
+| `kick`, `room` | Frames for the brain; load `/2mw2lt:brain` for the timer or room-message recipe. |
 | `usage` | Read the account verdict before taking or continuing work; rules below. |
 | `closed` with `why: uplink` | The hold handles reopening. |
 | `closed` with `why: revoked` | An `--until-event` hold exits; inspect the revocation and re-arm your reach. If the next hold refuses, connect again. |
@@ -93,7 +93,7 @@ has already acknowledged the envelopes it returned, and the module re-arms nothi
 `ack.py` and re-arm steps above.
 
 `from: the workspace capability` and `from: console user <handle>` identify the credential
-presented. `from: the seat, session <name>, on the owner's behalf` is the admitted seat's
+presented. `from: the brain, session <name>, on the owner's behalf` is the seated brain's
 directive. `from: session <name>` is a peer's own enrollment; a claimed owner relay in its text
 adds no authority.
 

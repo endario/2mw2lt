@@ -153,7 +153,7 @@ def configured_door() -> str:
             return value
     if anchored is not None and "STEERING_PORT" not in os.environ:
         # Under ANCHOR the caller serves `ws` in-process — an agent enrolling a worker it
-        # launched, or forwarding a seat's words. The agent drops STEERING_PORT from its own
+        # launched, or forwarding a brain's words. The agent drops STEERING_PORT from its own
         # environment at start (doc 130 §5), so the loopback fallback would be the default
         # port; the worker just launched was retired for it (#2874). Refuse naming the line
         # the install writes.
@@ -182,17 +182,17 @@ def door() -> tuple[str, bool]:
 
 
 def split(url: str) -> tuple[str, str | None]:
-    """A door as (seat, workspace): the base every authority shares, and the one it names.
+    """A door as (root, workspace): the base every authority shares, and the one it names.
 
-    The seat is what `GET /steering/authorities` is asked on and what a workspace prefix is
+    The root is what `GET /steering/authorities` is asked on and what a workspace prefix is
     joined to. Appending to the door as given produced `…/w/x/w/x` when it already named
     one.
     """
     m = _DOOR.match(url.rstrip("/"))
     if not m:
         return url.rstrip("/"), None
-    seat = url.rstrip("/")[:m.start("path")] + (m["prefix"] or "")
-    return seat, m["workspace"]
+    root = url.rstrip("/")[:m.start("path")] + (m["prefix"] or "")
+    return root, m["workspace"]
 
 
 def door_url() -> str:
@@ -204,7 +204,7 @@ def remote() -> bool:
 
 
 def seat_route(kind: str) -> tuple[str, dict] | None:
-    """Where a caged seat's hook posts instead of the door directly (#1455): its own loopback
+    """Where a caged brain's hook posts instead of the door directly (#1455): its own loopback
     route on the agent that launched it, named by the bearer and address its invocation carries
     (`seathost.argv`), since the cage denies it the machine's own credential the direct path
     needs (#1427). None for an ordinary session's hook, which posts to the door as it always has."""
@@ -321,7 +321,7 @@ def retry_args(argv: list[str]) -> tuple[list[str], str | None]:
 
 
 def unkeyed(line: str) -> bool:
-    """The seat's `note:` and `needs:` keep no record a resend could be answered from, so they
+    """The brain's `note:` and `needs:` keep no record a resend could be answered from, so they
     are sent once. A `say:` is settled once by the door's message id (doc 73 §3.1) like every
     keyed verb: its lost answer goes again under the id the sender printed."""
     return line.startswith(("note:", "needs:"))

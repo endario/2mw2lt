@@ -26,7 +26,7 @@ STATES = ("card-scoped", "card-branch", "card-unbranch", "card-session", "card-u
 SIGNS = ("gate", "anchor")
 FIELDS = ("track", "significance", "state", "priority", "major")
 
-# What a correction spells the card's weight in (doc 148 §5): major is the seat's declaration,
+# What a correction spells the card's weight in (doc 148 §5): major is the brain's declaration,
 # which the knowledge stages' `owes-design` reads.
 MAJOR_AFTER = ("major", "ordinary")
 SIGNIFICANCE = ("card", "minor")
@@ -178,7 +178,7 @@ def scoped(name: str, track: str | None, units: list | None = None, card: str | 
 
     `units` is omitted rather than written empty: a card that has not said what its blocks are
     is not a card that has said it has none, and the fold falls back to the PR's task list for
-    the first while the second would erase it. `major` is the seat's declaration (doc 148 §5),
+    the first while the second would erase it. `major` is the brain's declaration (doc 148 §5),
     so it is written only when true: a session's `declare:` never passes it, and absence reads
     as ordinary.
     """

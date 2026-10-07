@@ -59,7 +59,7 @@ def main(argv: list[str]) -> int:
         speaker = [item for flag, value in flags.items() for item in (flag, value)] + [session]
         request = f"Please assign issue {what} to a worker enrolled on the authenticated remote door for this workspace."
         print("this is the brain machine's own door, which does not take issue claims. A worker "
-              "enrolled on this workspace's authenticated remote door can claim it. Ask the seat "
+              "enrolled on this workspace's authenticated remote door can claim it. Ask the brain "
               f"to assign it:\n  {help_invocation('say', None)} {shlex.join(speaker + [request])}",
               file=sys.stderr)
         return 1

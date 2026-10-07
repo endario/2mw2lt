@@ -47,6 +47,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 import webbrowser
 
 HERE = Path(__file__).resolve().parent
@@ -378,6 +379,49 @@ def admit_machine(console: str, token: str, door: str, wid: str, label: str) -> 
         raise Stop(f"this machine's credential was refused: {e}") from None
 
 
+def go_access(console: str, token: str) -> dict | None:
+    """What coordination says the terminal's person may select, or None where the platform does not
+    serve coordination's routes yet: then the console's install routes still decide."""
+    status, got = call("GET", f"{console}/api/v1/access", token=token)
+    if status == 404:
+        return None
+    if status != 200 or not isinstance(got.get("teams"), list):
+        raise Stop(f"coordination refused this terminal's access ({status}): {got.get('code') or got}; "
+                   "run install again to sign in afresh")
+    return got
+
+
+def admit_on_go(console: str, token: str, access: dict, repo: str, team: str | None) -> tuple[str, str]:
+    """This machine admitted to the workspace of the caller's team that already serves `repo`
+    (go-dc2-onboarding-design.md §5, case 1), on the person's terminal session. Its door and alias."""
+    teams = [t for t in access["teams"] if isinstance(t, dict) and (team is None or t.get("id") == team)]
+    if team is not None and not teams:
+        raise Stop(f"you are not a member of team {team}; name one of yours with --team, or leave it out")
+    serving = [(t, w) for t in teams for w in t.get("workspaces") or []
+               if isinstance(w, dict) and w.get("repo") == repo and isinstance(w.get("id"), str)]
+    if len(serving) > 1:
+        raise Stop(f"several of your teams serve {repo}; name one with --team: "
+                   + ", ".join(f"{t['name']} ({t['id']})" for t, _ in serving))
+    if not serving:
+        if not teams:
+            raise Stop("you are in no team yet; redeem your invitation from the desk, then run install again")
+        if not any(t.get("owner") for t in teams):
+            raise Stop(f"none of your teams serves {repo}, and only a team's owner installs a new repository; "
+                       f"ask the owner of {', '.join(t['name'] for t in teams)} to install it")
+        raise Stop(f"none of your teams serves {repo}, and installing a new repository on coordination is not "
+                   "built yet; install a repository your team already serves")
+    t, w = serving[0]
+    say("team", f"{t['name']}{'' if t.get('owner') else ' (you joined it; installing a new repository is its owner’s)'}")
+    say("workspace", f"{w['id']} found")
+    door = f"{console}/w/{w['id']}"
+    try:
+        approval = credential.approve(console, w["id"], token, key=str(uuid.uuid4()))
+        credential.enrol_native(door, console, w["id"], approval["secret"])
+    except credential.NoCredential as e:
+        raise Stop(f"coordination would not admit this machine: {e}") from None
+    return door, w["id"]
+
+
 def authorities(door: str) -> dict | None:
     """The door's authorities view on this machine's credential, or None when this machine is not
     admitted to the workspace: it holds no credential for the door, or the door refuses it."""
@@ -390,6 +434,10 @@ def authorities(door: str) -> dict | None:
     status, got = call("GET", f"{door}/steering/authorities")
     if status in (401, 403):
         say("machine", f"the workspace's door refused this machine ({status}); admitting it again")
+        return None
+    if status == 404:
+        # Coordination serves no authorities view before its cutover: a machine it admitted is asked again.
+        say("machine", "the workspace's door has no authorities view; admitting this machine again")
         return None
     if status != 200:
         raise Stop(f"the workspace's door answered {status} for its authorities: {got.get('error') or got}; "
@@ -653,6 +701,15 @@ def install(root: Path, codex: bool = False, team: str | None = None,
         # The workspace's GitHub login is the account the person most likely signs in as (#3954).
         token = sign_in(console, f"install {repo} on {label}", invite, login or name, named=login is not None)
         try:
+            access = go_access(console, token)
+            if access is not None:
+                door, authority = admit_on_go(console, token, access, repo, team)
+                record(root, door, authority)
+                say("machine", f"this machine is admitted to {authority}")
+                # The agent, its hooks and the GitHub grant join coordination at its cutover.
+                say("agent", "not started: coordination serves this machine's agent from its cutover")
+                print(json.dumps({"workspace": authority, "door": door, "coordination": True}))
+                return 0
             got = workspace(console, token, repo, source, team)
             authority = got.get("id")
             if not isinstance(authority, str):

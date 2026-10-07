@@ -15,7 +15,7 @@ _ANNOUNCE = re.compile(r"^announce:\s*(?P<session>\S+)" + _TOKEN_SLOT + r"\s+as\
 _BLOCKED = re.compile(r"^blocked:\s*(?P<session>\S+)" + _TOKEN_SLOT + r"\s+on\s+(?P<what>.+)$", re.S)
 _DONE = re.compile(r"^done:\s*(?P<session>\S+)" + _TOKEN_SLOT + r"\s*(?P<what>.*)$", re.S)
 
-# The steering seat proposes; the owner clears (doc 13 R-B). Never self-dispatched.
+# The brain proposes; the owner clears (doc 13 R-B). Never self-dispatched.
 _RECOMMEND = re.compile(r"^recommend:\s*(?P<session>\S+)" + _TOKEN_SLOT + r"\s+(?P<text>.+)$", re.S)
 
 # A session's question for the owner (doc 51), on the session's own token as every status verb is.

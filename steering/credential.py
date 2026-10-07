@@ -47,7 +47,10 @@ def _read(p: Path) -> dict | None:
         d = json.loads(p.read_text())
     except (OSError, ValueError):
         return None
-    return d if isinstance(d, dict) and d.get("door") and d.get("secret") else None
+    if not isinstance(d, dict) or not d.get("door"):
+        return None
+    # A native enrolment spends its approval's secret at the exchange and keeps the credential.
+    return d if d.get("secret") or (d.get("native") and d.get("credential")) else None
 
 
 def _write(p: Path, d: dict) -> None:
@@ -72,9 +75,9 @@ def entry_for(url: str) -> Path | None:
         door = d["door"].rstrip("/")
         if not (url == door or url.startswith(door + "/")):
             continue
-        seat, workspace = split(door)
-        seat_path = urllib.parse.urlsplit(seat).path
-        if workspace is None and any(decoded == f"{seat_path}/{namespace}" or decoded.startswith(f"{seat_path}/{namespace}/")
+        root, workspace = split(door)
+        root_path = urllib.parse.urlsplit(root).path
+        if workspace is None and any(decoded == f"{root_path}/{namespace}" or decoded.startswith(f"{root_path}/{namespace}/")
                                      for namespace in ("w", "t")):
             continue
         return p
@@ -135,6 +138,8 @@ def current(p: Path, clock=time.time) -> str:
     d = _read(p)
     if d is None:
         raise NoCredential(f"{p} is not an enrolment")
+    if d.get("native"):
+        return _native_current(p, d, clock)
     if _fresh(d, clock):
         return d["credential"]
     lock = os.open(p.with_suffix(".lock"), os.O_WRONLY | os.O_CREAT, 0o600)
@@ -179,8 +184,16 @@ def _claims(token: str) -> dict:
 
 
 def lifetime(token: str) -> float:
-    """How long a credential is issued for, from its own times: renewed with a third of it left."""
-    c = _claims(token)
+    """How long a credential is issued for, from its own times: renewed with a third of it left. A
+    native credential is opaque, so its times are the ones Go answered with, kept beside it."""
+    try:
+        c = _claims(token)
+    except NoCredential:
+        for f in home().glob("*.json") if home().is_dir() else ():
+            d = _read(f)
+            if d and d.get("native") and d.get("credential") == token and isinstance(d.get("exp"), int) and isinstance(d.get("iat"), int):
+                return d["exp"] - d["iat"]
+        raise
     return c["exp"] - c["iat"]
 
 
@@ -236,3 +249,149 @@ try:
             yield request
 except ImportError:    # the door scripts run on the system Python, which has no httpx
     pass
+
+
+# ---- Go's native lifecycle (go-dc2-onboarding-design.md §5) -------------------------------------
+# A machine is approved by a person (here, the install engine on that person's terminal session),
+# exchanges the approval's one-time secret for its own credential, and renews that credential
+# from `renew_at`. An exchange or renewal carries an idempotency key written to the file before it
+# is sent, so a retry after a lost answer is replayed by Go rather than minting twice.
+
+def _native_post(origin: str, path: str, body: dict, headers: dict, timeout: float = 10.0) -> tuple[int, dict]:
+    """A JSON POST to Go; the status and object for a 200 or 202, `NoCredential` naming Go's own
+    check for a refusal, and its silence for none."""
+    import sys
+    enroll_dir = str(Path(__file__).resolve().parent / "enroll")
+    if enroll_dir not in sys.path:
+        sys.path.insert(0, enroll_dir)
+    from door import USER_AGENT, open_direct
+    req = urllib.request.Request(f"{origin.rstrip('/')}{path}", data=json.dumps(body).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", "User-Agent": USER_AGENT, **headers})
+    try:
+        with open_direct(req, timeout) as r:
+            status, got = r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        try:
+            code = json.loads(e.read()).get("code") or f"status-{e.code}"
+        except ValueError:
+            code = f"status-{e.code}"
+        raise NoCredential(f"coordination refused {path} ({e.code}): {code}", e.code)
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        raise NoCredential(f"coordination did not answer {path}: {e}")
+    if not isinstance(got, dict):
+        raise NoCredential(f"coordination's answer to {path} is not an object")
+    return status, got
+
+
+def _holder() -> dict:
+    import hardware
+    try:
+        return {"hardware": hardware.fingerprint(), "os_node": _own_os_node()}
+    except hardware.Unreadable as e:
+        raise NoCredential(f"this machine's hardware identity cannot be read: {e}")
+
+
+def approve(origin: str, workspace: str, terminal_token: str, key: str, profile: str = "worker", reach: str = "workspace") -> dict:
+    """This machine's approval to `workspace`, asked on the person's terminal session: its
+    `approval_id` and one-time `secret`, which `enrol_native` exchanges. `key` makes a retry the
+    same approval."""
+    body = {**_holder(), "profile": profile, "reach": reach}
+    _, got = _native_post(origin, f"/w/{workspace}/api/v1/device-approvals", body,
+                          {"Authorization": f"Bearer {terminal_token}", "Idempotency-Key": key})
+    if not isinstance(got.get("secret"), str) or not got["secret"]:
+        raise NoCredential("coordination's approval carried no secret")
+    return got
+
+
+def enrol_native(door: str, origin: str, workspace: str, secret: str) -> dict:
+    """Store a native enrolment and make its exchange, which binds this machine's hardware and
+    OS user. An earlier exchange whose answer was lost is resumed on its own key first: Go may
+    have spent that approval on it, and only that key recovers what it issued."""
+    p = path_for(door)
+    held = _read(p)
+    if held and held.get("native") and held.get("workspace") == workspace and held.get("secret") and not held.get("credential"):
+        try:
+            current(p)
+            return _read(p) or {}
+        except NoCredential as e:
+            if not _refused(e):
+                raise
+    _write(p, {"door": door.rstrip("/"), "origin": origin.rstrip("/"), "workspace": workspace, "secret": secret, "native": 1})
+    try:
+        current(p)
+    except NoCredential as e:
+        # Unanswered or failed in Go, the exchange may have been spent: keep its secret and key for the next run.
+        if _refused(e):
+            p.unlink(missing_ok=True)
+        raise
+    return _read(p) or {}
+
+
+def _refused(e: NoCredential) -> bool:
+    """Go judged the request and refused it. Its 5xx is not that: Go commits an issuance before
+    answering it, so the approval may be spent."""
+    return e.status is not None and e.status < 500
+
+
+def _native_report(p: Path, d: dict, why: str) -> None:
+    """A renewal that did not renew while the held credential stands, said once per reason on
+    stderr, which the agent's log keeps (C5): the caller is handed the credential, not the reason."""
+    if d.get("renewal") != why:
+        import sys
+        d["renewal"] = why
+        _write(p, d)
+        print(f"credential for {d['workspace']}: {why}", file=sys.stderr, flush=True)
+
+
+def _native_fresh(d: dict, clock) -> bool:
+    now = clock()
+    return bool(d.get("credential")) and now < d.get("exp", 0) and now < max(d.get("renew_at", 0), d.get("recheck_at", 0))
+
+
+def _native_current(p: Path, d: dict, clock) -> str:
+    if _native_fresh(d, clock):
+        return d["credential"]
+    lock = os.open(p.with_suffix(".lock"), os.O_WRONLY | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        d = _read(p) or d
+        if _native_fresh(d, clock):
+            return d["credential"]
+        holder = _holder()
+        if d.get("os_node") and holder["os_node"] != d["os_node"]:
+            raise NoCredential(f"this OS user's node is {holder['os_node'] or 'unreadable'}, and the enrolment "
+                               f"is bound to {d['os_node']}: enrol again")
+        if not d.get("pending"):
+            import uuid
+            d["pending"] = str(uuid.uuid4())
+            _write(p, d)
+        exchanging = not d.get("credential")
+        path = f"/w/{d['workspace']}/api/v1/" + ("device-exchanges" if exchanging else "machine-renewals")
+        try:
+            status, got = _native_post(d["origin"], path, holder if exchanging else {},
+                                       {HEADER: d["secret"] if exchanging else d["credential"], "Idempotency-Key": d["pending"]})
+        except NoCredential as e:
+            if d.get("credential") and d.get("exp", 0) > clock():
+                _native_report(p, d, f"not renewed, holding the credential until {d['exp']}: {e}")
+                return d["credential"]
+            raise
+        if status == 202:
+            # Not due yet: Go names when to ask again, and the credential held stands until then.
+            d["recheck_at"] = got.get("recheck_at", 0)
+            d.pop("pending", None)
+            _write(p, d)
+            if d.get("credential") and d.get("exp", 0) > clock():
+                _native_report(p, d, f"renewal deferred by coordination ({got.get('reason') or 'no reason given'}) "
+                                     f"until {d['recheck_at']}")
+                return d["credential"]
+            raise NoCredential("coordination deferred the renewal of a credential that has expired")
+        if not isinstance(got.get("credential"), str) or not isinstance(got.get("exp"), int) or not isinstance(got.get("renew_at"), int):
+            raise NoCredential(f"coordination's answer to {path} carried no credential and times")
+        d.update(credential=got["credential"], credential_id=got.get("credential_id"), iat=got.get("iat"), exp=got["exp"],
+                 renew_at=got["renew_at"], machine=got.get("machine") or d.get("machine"), os_node=got.get("os_node") or holder["os_node"])
+        for spent in ("secret", "pending", "recheck_at", "renewal"):
+            d.pop(spent, None)
+        _write(p, d)
+        return d["credential"]
+    finally:
+        os.close(lock)

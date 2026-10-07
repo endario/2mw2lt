@@ -70,7 +70,7 @@ def main(argv: list[str]) -> int:
     # The enrolment `connect.py` stored for this session lives in the workspace this session
     # runs in — on this machine, whichever machine the daemon is on.
     ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
-    # A seat can hold hold.py's `exec` for as long as it runs the fleet without ever running
+    # A brain can hold hold.py's `exec` for as long as it runs the fleet without ever running
     # connect again — the skill only requires it once, on enrolling (#1875 round 2). `repin` is
     # its own no-op on a workspace with no settings to repair, so this costs nothing where the
     # harness carries no hooks. A malformed settings.local.json or unreadable launcher must not

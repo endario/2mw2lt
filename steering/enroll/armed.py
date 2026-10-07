@@ -83,7 +83,7 @@ def reason(session: str, ws: Path) -> str:
             f"true. A shell `&` inside a Bash call is not the same thing: it detaches the "
             f"process from the harness, so its output never wakes the session and the hold is "
             f"no use to you. Do not run it in the foreground either; it does not return.\n\n"
-            f"If you are leaving instead — the seat released you, or your work is done and "
+            f"If you are leaving instead — the brain released you, or your work is done and "
             f"nothing is left for you — run /2mw2lt:disconnect. It ends this session's "
             f"enrolment, and this hook stops asking.")
 

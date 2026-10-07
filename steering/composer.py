@@ -35,7 +35,7 @@ class Composer:
     @property
     def shape(self) -> str:
         """What the composer holds, without a character of it: the owner types here, and a draft
-        can hold anything (the seat's ruling of 2026-09-25), so a refusal carries only this."""
+        can hold anything (the brain's ruling of 2026-09-25), so a refusal carries only this."""
         dim = [n for d, n in self.runs if d]
         undim = [n for d, n in self.runs if not d]
         # A suggestion is drawn wholly dim: one typed character before a dim completion is a draft.

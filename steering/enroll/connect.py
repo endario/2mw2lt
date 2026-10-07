@@ -191,7 +191,7 @@ SPEAKER_FLAGS = ("--provider", "--provider-session")
 
 def say_invocation(h: harness_mod.Harness, psession: str, session: str) -> str:
     """The one `say.py` this machine and this harness can actually run, ready to paste: to the
-    seat, which either door takes (#3381); `--to <session>` reaches a peer instead.
+    brain, which either door takes (#3381); `--to <session>` reaches a peer instead.
 
     The provider pair is named unconditionally rather than only where the harness
     is silent: `speaking_as` accepts the pair that agrees with the process it runs in, and

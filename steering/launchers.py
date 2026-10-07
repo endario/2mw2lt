@@ -32,9 +32,9 @@ LAUNCH_DEADLINE_S = 300.0
 PLUGIN = "2mw2lt@2mw2lt"
 KEYS = {"path", "direct", "proxy", "vendor"}
 VENDOR = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
-# What a launched session inherits (§4): the headless seat's list less its token, and the door.
+# What a launched session inherits (§4): the headless brain's list less its token, and the door.
 KEPT = ("HOME", "USER", "LOGNAME", "SHELL", "PATH", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "TERM",
-        "STEERING_DOOR", "STEERING_PORT")
+        "STEERING_DOOR", "STEERING_PORT", "COORDINATION_PG_PREFIX")
 
 
 class Unread(Exception):
@@ -348,6 +348,10 @@ def argv(launcher: dict, workspace: str, model: str, effort: str, name: str, env
         import agentjob
         scope = agentjob.scope_prefix(name)
     bootstrap = [sys.executable, str(Path(envfile.__file__).resolve()), str(token_file)] if token_file else []
+    settings = ["--settings", json.dumps({"permissions": {"deny": [
+        "Read(~/Library/Containers)", "Read(~/Library/Containers/**)",
+        "Read(~/Library/Group Containers)", "Read(~/Library/Group Containers/**)",
+    ]}})] if sys.platform == "darwin" else []
     return [*scope, tmux, "-L", SOCKET, "new-session", "-d", "-s", name, "-c", workspace, "--",
             "/usr/bin/env", "-i", *environment(env), *bootstrap,
-            *_claude(launcher), "--model", model, "--effort", effort, "/2mw2lt:connect"]
+            *_claude(launcher), *settings, "--model", model, "--effort", effort, "/2mw2lt:connect"]

@@ -8,6 +8,7 @@ carrier; the session binds and detaches on its own, and no request carries both.
 from __future__ import annotations
 
 import email.utils
+import hashlib
 import json
 import os
 import subprocess
@@ -27,9 +28,10 @@ import refusal  # noqa: E402
 COORDINATION = "coordination"
 MACHINE_CARRIER = "X-Steering-Agent-Credential"
 SESSION_CARRIER = "X-Steering-Session-Credential"
-# A refusal of an invalid token: unknown, expired, or one a detachment revoked. Go answers all of
-# them alike, so the client cannot tell which, only that the token can no longer act.
-INVALID_TOKEN = "session-token-locator-read"
+# A refusal of an invalid token: unknown, expired, or one a detachment revoked, which Go answers
+# alike, so the client cannot tell which, only that the token can no longer act; or a stored token
+# not shaped as one, which can never act. Both are repaired by connecting again.
+INVALID_TOKEN = frozenset({"session-token-locator-read", "session-credential-carrier-shape"})
 # How long, and how many times, a throttled or unavailable answer is sent again: past either the
 # refusal is reported rather than held, whatever wait Go asked for.
 RETRY_LIMIT = 30.0
@@ -229,7 +231,7 @@ def bind(session: str, token: str, provider: str, psession: str, runtime: str) -
     except Unsent as e:
         return refusal.retry(str(e))
     except Refused as e:
-        if e.code == INVALID_TOKEN:
+        if e.code in INVALID_TOKEN:
             return refusal.reconnect(f"unknown, detached or stale token for {session}")
         return refusal.reconnect(str(e))
     return f"bound: {psession} to {session}"
@@ -243,7 +245,27 @@ def detach(session: str, token: str, key: str | None = None) -> str:
     except Unsent as e:
         return refusal.retry(str(e))
     except Refused as e:
-        if e.code == INVALID_TOKEN:
+        if e.code in INVALID_TOKEN:
             return refusal.reconnect(f"{session} can no longer act: its token is not valid")
         return refusal.retry(str(e))
     return f"detached: {session}"
+
+
+def acknowledge(session: str, token: str, directive: str) -> str:
+    """The session acknowledges a directive delivered to it; the answer reads as the door's did. The
+    key is the acknowledgement's own, so a retry after a lost answer is answered from the first."""
+    key = hashlib.sha256(f"ack\n{session}\n{directive}".encode()).hexdigest()[:32]
+    try:
+        post(f"/sessions/{session}/directives/{directive}/acknowledgement", {}, key, SESSION_CARRIER, token)
+    except Unsent as e:
+        return refusal.retry(str(e))
+    except Refused as e:
+        if e.code in INVALID_TOKEN:
+            return refusal.reconnect(f"unknown, detached or stale token for {session}")
+        if not settled(e):
+            return refusal.retry(str(e))
+        # Absent, lapsed or another epoch's: settled where sending it again cannot change, and the
+        # brain's to follow up.
+        return refusal.refuse(f"directive {directive}: {e}",
+                              hand_to=("the brain", f"blocked: {session} on directive {directive} refused"))
+    return f"acked: {directive} by {session}"

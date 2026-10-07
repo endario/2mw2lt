@@ -379,12 +379,12 @@ def authorities(base: str, wid: str | None = None) -> dict:
     back 502 — read as an older daemon, which wired an authority as a plain repository,
     tokens and all.
     """
-    seat, _ = door_mod.split(base)
+    root, _ = door_mod.split(base)
     # A remote credential is scoped to one `/w/<id>` and discovers only that authority.
-    # Never fall back from a qualified probe to the seat: that would turn a missing or wrong
+    # Never fall back from a qualified probe to the root: that would turn a missing or wrong
     # credential into foreign discovery. The unqualified form remains for loopback
     # administration and legacy local installation.
-    urls = [f"{seat}/w/{wid}/steering/authorities"] if wid else [f"{seat}/steering/authorities"]
+    urls = [f"{root}/w/{wid}/steering/authorities"] if wid else [f"{root}/steering/authorities"]
     for url in urls:
         req = urllib.request.Request(url)
         try:

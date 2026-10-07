@@ -20,7 +20,7 @@ If work is already assigned, name it at connection:
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/connect.py" --current --doing "<work>"
 ```
 
-With no work, connect without `--doing`, hold your reach, and wait for the seat to place you.
+With no work, connect without `--doing`, hold your reach, and wait for the brain to place you.
 After a process restart, connect again before continuing: the surviving enrollment needs its
 new incarnation bound.
 
@@ -100,7 +100,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/declare.py" <session> "<work>" re
 ```
 
 When you take work, and whenever the card you execute turns out to wait on another card or issue
-or to contribute to a goal, say so; end the edge when it no longer holds. The seat reviews the
+or to contribute to a goal, say so; end the edge when it no longer holds. The brain reviews the
 board's links too, but you know your own card's edges first:
 
 ```bash
@@ -110,25 +110,30 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/edge.py" <session> unlink <card> 
 
 Each script's `--help` gives its forms and examples.
 
+**Never search the whole disk or your home directory** (`find ~`, `find /`, `rg ~`). On a Mac such
+a walk reaches other apps' private data, and macOS stops the session on a permission dialog
+until the owner answers it, hours later. Search the worktree or a directory you can name; the
+coordination fixture's PostgreSQL is already in `COORDINATION_PG_PREFIX` where the host has it.
+
 ## Speak
 
-**Try the seat first.** `say` reaches the seat or a peer; `ask` reaches the owner.
-`recommend` is a proposal the seat triages, not speech and not proof the owner was asked.
+**Try the brain first.** `say` reaches the brain or a peer; `ask` reaches the owner.
+`recommend` is a proposal the brain triages, not speech and not proof the owner was asked.
 
 To say something — a question, an answer, anything that should not wait for the next standup:
 
 ```bash
-# to the seat, from any machine, without knowing who holds it
+# to the brain, from any machine, without knowing who holds it
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/say.py" <your session> "<what you want to say>"
 
 # to another session, by the name the registry shows
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/say.py" --to <their session> <your session> "<text>"
 ```
 
-Both go on your own enrollment token, and your name travels with the words. **To reach the seat,
+Both go on your own enrollment token, and your name travels with the words. **To reach the brain,
 leave `--to` out**: you need no name. The answer names the session that heard you, `the brain
-heard <you>: <holder>`, or `queued for the seat, held by <holder>, which is between holds
-(normal): …` when it is between holds: the words reach it on its next hold. When nobody holds the seat the answer is `nobody holds the seat; kept on its Needs You as unheard:<id>`: the
+heard <you>: <holder>`, or `queued for the brain (<holder>), which is between holds
+(normal): …` when it is between holds: the words reach it on its next hold. When nobody holds the seat the answer is `nobody holds the seat; kept on the brain's Needs You as unheard:<id>`: the
 words are kept for whoever takes it, so do not send them again or post them anywhere else. A peer between
 holds is not a refusal: `--to` answers `queued for <them>, which is between holds (normal): …`,
 and the words are spooled for the hold that returns. Neither needs resending. `<them> has no live enrollment here` is still a
@@ -136,7 +141,7 @@ refusal, because nothing under that name will hold again.
 
 A send whose answer was lost is not a second say either: `say.py` prints `id <id>` as `verb.py`
 does, and the same line again with `--retry=<that id>` is answered from the record — where a
-plain resend delivered the seat the same words two and three times over (2026-10-01).
+plain resend delivered the brain the same words two and three times over (2026-10-01).
 
 **So do not improvise a place for a peer's words.** Two sessions once met the refusal this
 replaced, posted their reports into the inbox instead, and they arrived in the owner's Needs You
@@ -144,7 +149,7 @@ as hashes nobody could read (#1538). `recommend:`
 is still not for this: it draws a Needs You row, and a peer's words are not the owner's to
 settle.
 
-The `speak:` line `connect.py` printed is the say to the seat, with this harness's flags filled
+The `speak:` line `connect.py` printed is the say to the brain, with this harness's flags filled
 in. Add `--to <their session>` after `say.py` to reach a peer instead.
 
 ## Ask the owner
@@ -163,7 +168,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" ask <session> 'json {"qu
 Use a plain-text ask only for an open-ended answer. Choices written inside prose are not
 rendered as buttons, and the word “recommend” in prose does not mark an option.
 
-For a proposal the seat should triage:
+For a proposal the brain should triage:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" recommend <session> "<proposal>"
@@ -174,7 +179,7 @@ directive naming the console user who gave it. Post the ruling's words and date 
 it decides. If unanswered after an hour, raise the same question through your harness's user
 question tool.
 
-Rollouts are the seat's decision: send it the rollout needed, its proving check and your
+Rollouts are the brain's decision: send it the rollout needed, its proving check and your
 recommendation, rather than an owner ask.
 
 ## Gate your work
@@ -183,8 +188,8 @@ Push first, keep the pull request draft, and run the applicable suite before eac
 you judge it cheapest: the focused guards for what changed always, and a full run only when the
 change warrants one: locally first, and on a runner only when that is genuinely needed. A dispatch
 (`gh workflow run steering.yml -R <repo> --ref <branch>`, `<repo>` being the `repo:` line connect
-printed — that workflow exists only in the platform's own repository) runs on the mini;
-`-f lane=hosted` bills paid Actions minutes and is for a change the mini cannot verify. From the branch's worktree:
+printed — that workflow exists only in the platform's own repository) runs on the mini, and only
+there. From the branch's worktree:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> branch
@@ -210,7 +215,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <session> handover
 ```
 
 Use `design-settled` after the critic converges, `context` before compacting and `unit-done`
-when the seat requests it. Before leaving, record `exit` against the note, then disconnect:
+when the brain requests it. Before leaving, record `exit` against the note, then disconnect:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <session> exit <note-url>

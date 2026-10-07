@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """`edge.py <session> link|unlink <card> …`: say what the card this session executes waits on or
 contributes to, or end such an edge (doc 167), on the session's stored token. Any other card's
-edges are the seat's, through `card.py`."""
+edges are the brain's, through `card.py`."""
 from __future__ import annotations
 
 import json

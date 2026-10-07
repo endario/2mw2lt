@@ -63,7 +63,7 @@ MAX_FRAME_RECORD_BYTES = 64 * 1024
 # The frames `--until-event` ends on. Presence, usage and fleet are state a later frame restates,
 # and `closed` for an uplink is reopened here; a revoked hold is the session's to answer. A say that
 # is an action's routine ending is recorded and read like any other, and ends nothing (#2455).
-# A room frame says a room has a message the seat has not read (doc 156 §7).
+# A room frame says a room has a message the brain has not read (doc 156 §7).
 ACTS = frozenset({"envelope", "say", "seat", "kick", "room"})
 # Except a usage frame moving this session's account to this verdict: the pack-up trigger
 # (doc 117 §5).
@@ -237,7 +237,7 @@ def restate(ws: Path, rid: str, psession: str, config: Path, answering: str | No
 
     The daemon keeps readings in memory (doc 30 §6), so a restart blanks each one until the
     session's next `Stop`, and a session idling in its hold has none coming: it showed no model,
-    effort or machine to the seat that would place work on it (#2665). A restart ends every hold
+    effort or machine to the brain that would place work on it (#2665). A restart ends every hold
     through the agent's uplink, so the reopened hold is where the reading is restated.
 
     `answering` is the `at` of a routine kick (#3995): the reading is then stated as of now, the
