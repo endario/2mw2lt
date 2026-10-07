@@ -10,6 +10,21 @@ export const CHECKPOINT = 'Compaction is near. Write your checkpoint (/2mw2lt:ch
 export const CONNECT_AGAIN = 'The steering stream was refused. Run /2mw2lt:connect again.'
 export const FLOOR = [2, 1, 289] as const
 
+// The checkpoint prompt goes this far along the way to the engine's auto-compact point, which its
+// settings, the account and the model decide. It is not a share of the window: a session set to
+// compact at 500k on a 1M model compacts at 47% of it. The window stands in only with auto-compaction off.
+export const CHECKPOINT_AT = 0.85
+
+// What a response was answered over: uncached, cache-written and cache-read input together, the
+// figure the status line reports as the context's tokens.
+export function tokensOf(u: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }): number {
+  return (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0)
+}
+
+export function due(tokens: number | undefined, point: number | undefined): boolean {
+  return tokens !== undefined && point !== undefined && point > 0 && tokens >= point * CHECKPOINT_AT
+}
+
 export function lines(buffer: string): { complete: Line[]; rest: string } {
   const parts = buffer.split('\n')
   const rest = parts.pop() ?? ''

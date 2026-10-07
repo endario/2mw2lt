@@ -169,17 +169,27 @@ KEY_HEADER = "X-Steering-Agent-Key"
 WORKSPACE_HEADER = "X-Steering-Workspace"
 
 
-def workspace_header(root) -> dict[str, str]:
-    """`WORKSPACE_HEADER` naming `root`, its filesystem bytes percent-encoded: a header carries
-    Latin-1 at most, and a path is whatever bytes the filesystem allows."""
+def path_header(path) -> str:
+    """`path` as a header value, its filesystem bytes percent-encoded: a header carries Latin-1 at
+    most, and a path is whatever bytes the filesystem allows."""
     from urllib.parse import quote_from_bytes
-    return {WORKSPACE_HEADER: quote_from_bytes(os.fsencode(root), safe="/")}
+    return quote_from_bytes(os.fsencode(path), safe="/")
+
+
+def header_path(value: str) -> str:
+    """The path a `path_header` value names."""
+    from urllib.parse import unquote_to_bytes
+    return os.fsdecode(unquote_to_bytes(value))
+
+
+def workspace_header(root) -> dict[str, str]:
+    """`WORKSPACE_HEADER` naming `root`."""
+    return {WORKSPACE_HEADER: path_header(root)}
 
 
 def header_workspace(value: str) -> str:
     """The root a `workspace_header` names."""
-    from urllib.parse import unquote_to_bytes
-    return os.fsdecode(unquote_to_bytes(value))
+    return header_path(value)
 
 
 def _key_name(port) -> str:

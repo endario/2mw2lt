@@ -167,6 +167,20 @@ def read(entry: dict | None, hook: dict, observed_at: str, source_version: str) 
     return out
 
 
+def of_entry(entry: dict | None, hook: dict, restated: bool = False) -> dict | None:
+    """The record a transcript's last assistant entry states, or None when there is none.
+
+    `restated` is a reading taken with no turn behind it, so it carries the instant its entry was
+    written rather than now: a reading's instant is the session's evidence of life (#2722)."""
+    if entry is None:
+        return None
+    at = instant_of(entry) if restated else utc()
+    if at is None:
+        return None
+    version = entry.get("version")
+    return read(entry, hook, at, version if isinstance(version, str) and version else "0.0.0")
+
+
 def stated(source: str, facts: dict | None) -> dict | None:
     """A reading of a harness that publishes none of its own, in the record's own shape.
 

@@ -160,6 +160,9 @@ def bind(session: str, token: str, psession: str | None = None,
     because the stream this session holds at its agent carries it too (doc 35 §2), and nothing
     else in the recipe derives it."""
     ps, rid = incarnation(psession, pid, provider)
+    import session_routes  # noqa: E402
+    if session_routes.on_coordination():
+        return session_routes.bind(session, token, provider, ps, rid), rid
     account_id = account_identity(provider)
     suffix = f" account-id {account_id}" if account_id else ""
     return say(f"bind: {session} provider-session {ps} runtime {rid}{suffix} token {token}"), rid

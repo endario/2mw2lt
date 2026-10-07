@@ -41,6 +41,7 @@ import machine_harness as harness_mod  # noqa: E402
 from process_probe import Undetermined  # noqa: E402
 import hooks  # noqa: E402
 import holder  # noqa: E402
+import refusal  # noqa: E402
 import witness as witness_mod  # noqa: E402
 from verb_help import current_args, error, help_requested, script_help  # noqa: E402
 
@@ -286,7 +287,18 @@ def workspace_of(h: harness_mod.Harness, project: Path, path: str) -> Path:
 
 
 def enrol(ws: Path, session: str, account: str, doing: str, psession: str,
-          h: harness_mod.Harness, project: Path | None = None) -> str:
+          h: harness_mod.Harness, project: Path | None = None, rid: str | None = None) -> str:
+    import session_routes  # noqa: E402
+    if session_routes.on_coordination(ws):
+        # Go takes the name and the incarnation; account, branch and work are not enrolment's
+        # (go-c5-session-client-design.md, "What C5 does not build").
+        rid = rid or incarnation(psession, None, h.provider)[1]
+        try:
+            return session_routes.enrol(ws, session, h.provider, psession, rid)["credential"]
+        except session_routes.Refused as e:
+            raise Refused(refusal.reconnect(str(e))) from None
+        except session_routes.Unsent as e:
+            raise Refused(f"{e}\nthe enrolment is kept, and the next connect sends it again") from None
     project = project or project_dir()
     on = branch(project)
     path = transcript(h, psession)
@@ -332,13 +344,18 @@ def connect(ws: Path, session: str | None, account: str, doing: str,
     if minted_for and minted_for != psession:
         raise Refused(f"{session} is another session's enrollment ({minted_for}): pass a name of your own")
     token = rec.get("token")
+    import session_routes  # noqa: E402
+    if session_routes.on_coordination(ws) and session_routes.pending(ws, session):
+        # An enrolment sent and not settled, a rotation's among them, is recovered before the
+        # standing token is used: that token is the one the enrolment was made to end.
+        token = None
     if token is not None:
         answer, rid = bind(session, token, psession, pid, h.provider)
         if not any(why in answer for why in STALE):
             return session, answer, rid, psession
-    if not account:  # only a harness whose account cannot be derived and was not named
+    if not account and not session_routes.on_coordination(ws):  # only a harness whose account cannot be derived and was not named
         raise Refused(f"{session} is not enrolled here: re-run with --as <harness>/<account>")
-    token = enrol(ws, session, account, doing, psession, h, project)
+    token = enrol(ws, session, account, doing, psession, h, project, rid)
     return session, *bind(session, token, psession, pid, h.provider), psession
 
 

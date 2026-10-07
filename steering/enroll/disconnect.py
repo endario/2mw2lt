@@ -47,7 +47,13 @@ def main(argv: list[str]) -> int:
         session = mine[0]
     if session not in known:
         print(f"no stored token for {session} in {ws}", file=sys.stderr); return 1
-    answer = say(f"detach: {session} token {known[session]['token']}" + (f" handover {handover}" if handover else ""))
+    import session_routes  # noqa: E402
+    if session_routes.on_coordination(ws):
+        answer = session_routes.detach(session, known[session]["token"])
+        if handover:
+            print(f"the handover {handover} was not recorded: Go's detachment carries no exit yet (#4076)", file=sys.stderr)
+    else:
+        answer = say(f"detach: {session} token {known[session]['token']}" + (f" handover {handover}" if handover else ""))
     if answer.startswith("detached:"):
         token_path(ws, session).unlink(missing_ok=True)  # the token died with the epoch
     print(f"{session}: {answer}")

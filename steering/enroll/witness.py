@@ -56,6 +56,13 @@ def witness(ws: Path, h: harness_mod.Harness, psession: str, runtime: str,
         # observation posted here would attribute this thread's work to whichever it was.
         raise Unwitnessed(f"the process serving {psession} is not {runtime}")
     o = observation(h, psession, runtime)
+    import session_routes  # noqa: E402
+    if session_routes.on_coordination(ws):
+        try:
+            session_routes.observe(h.provider, psession, runtime)
+        except session_routes.Refused as e:
+            raise Unwitnessed(f"the observation was refused: {e}") from e
+        return o
     spool.admit(ws, o)          # durable first: the sweep delivers whatever the send cannot
     base = door_url()
     headers = {"Content-Type": "application/json"}

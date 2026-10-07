@@ -56,7 +56,10 @@ const ROOT = '/ws/checkout'
 const line = (id: string | null, kind: string, wakes: boolean) => JSON.stringify({ id, kind, wakes }) + '\n'
 
 function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording = '', keep = 'Keep verbatim: steering session s1; branch b; checkpoint https://github.com/example-org/example-repo/pull/1.\n',
-                         enrolled = true, submitRejects = false } = {}) {
+                         enrolled = true, submitRejects = false,
+                         // The engine's own answer to `$.session.usage({ breakdown })`: the window it measures
+                         // against, the token count it auto-compacts at, and who settled the window.
+                         context = { point: 167_000 as number | undefined, raw: 200_000, source: 'auto', model: 'claude-test' } } = {}) {
   const w = {
     clock: mock.clock(on, { now: 1_000_000 }),
     root: '',
@@ -77,6 +80,9 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
     state: new Map<string, unknown>(),
     // The next read of this key is answered with what it held when asked, once `release` runs.
     holdNextGet: undefined as { key: string; release: Promise<void> } | undefined,
+    context,
+    usageCalls: 0,
+    stepUsage: 0,
   }
   on('state.get', async ($, e) => {
     const value = w.state.get(e.key)
@@ -143,6 +149,14 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
     return { messages: [MESSAGE] }
   })
   on('session.measure', async ($, e) => ({ changed: e.changed }))
+  on('session.usage', async () => {
+    w.usageCalls++
+    const c = w.context
+    return { value: { startedAt: 0, context: { window: 1_000_000, breakdown: {
+      autoCompactThreshold: c.point, isAutoCompactEnabled: c.point !== undefined, rawMaxTokens: c.raw,
+      autocompactSource: c.source, model: c.model } } } } as never
+  })
+  on('turn.step', async function* ($, e) { return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage: { model: 'claude-test', input_tokens: 1, output_tokens: 1, cache_read_input_tokens: w.stepUsage - 1, cache_creation_input_tokens: 0 } } as never })
   on('session.end', async ($, e) => ({ sessionId: e.sessionId }))
   on('classic.SessionStart', async () => ({}) as never)
   return w
@@ -399,7 +413,7 @@ test('no row the module writes carries a frame\'s from: line', async ($, on) => 
   await $.turn.start({ text: 'busy', turnId: 't-1' } as never)
   release()
   await w.clock.advance(5_000)
-  await $.session.measure({ context: { window: 200_000, percent: 90 }, rateLimits: [], changed: ['context'] } as never)
+  await $.session.measure({ context: { window: 200_000, tokens: 150_000, percent: 75 }, rateLimits: [], changed: ['context'] } as never)
   expect(String((first as { result: unknown }).result)).toContain('from: session peer')
   expect(w.submits).toEqual([POINTER])
   expect(w.appends).toEqual([POINTER, CONNECT_AGAIN, CHECKPOINT])
@@ -576,7 +590,7 @@ test('the checkpoint prompt goes only to a connected session', async ($, on) => 
   const w = world(on, { enrolled: false })
   await begin($)
   await w.clock.settle()
-  await $.session.measure({ context: { window: 200_000, percent: 90 }, rateLimits: [], changed: ['context'] } as never)
+  await $.session.measure({ context: { window: 200_000, tokens: 150_000, percent: 75 }, rateLimits: [], changed: ['context'] } as never)
   expect(w.appends).toEqual([])
 })
 
@@ -653,4 +667,103 @@ test('a /clear after the stream was handed back claims nothing for the new id', 
   await $.classic.SessionStart({ source: 'clear', session_id: 'ps-2' } as never)
   await w.clock.advance(120_000)
   expect(w.writes.filter(x => x.path.endsWith('/ps-2.json'))).toEqual([])
+})
+
+// The checkpoint prompt is keyed to the engine's own auto-compact point, not to the window: an
+// account that sets CLAUDE_CODE_AUTO_COMPACT_WINDOW=500000 on a 1M model compacts at 47% of the
+// window, and a prompt at 85% of the window never came first (three compactions with no
+// checkpoint, 2026-10-07).
+const HELD = { lines: [], code: 0 as const, hold: never }
+const measure = ($: any, tokens: number, window = 1_000_000) =>
+  $.session.measure({ context: { window, tokens, percent: Math.round(tokens / window * 100) }, rateLimits: [], changed: ['context'] } as never)
+const stepped = async ($: any, w: { stepUsage: number }, tokens: number, agentId?: string) => {
+  w.stepUsage = tokens
+  const input = { turnId: 't-1', index: 0, model: 'claude-test', messageCount: 3, ...(agentId ? { agentId } : {}) }
+  for await (const _ of $.turn.step(input as never)) { void _ }
+}
+
+test('a session that compacts far below its window is asked to checkpoint at 85% of the way to compaction', async ($, on) => {
+  const w = world(on, { rounds: [HELD], context: { point: 467_000, raw: 500_000, source: 'env', model: 'claude-opus' } })
+  await begin($)
+  await w.clock.settle()
+  await measure($, 300_000)                  // 30% of the window, 64% of the way
+  expect(w.appends).toEqual([])
+  await measure($, 400_000)                  // 40% of the window, 86% of the way
+  expect(w.appends).toEqual([CHECKPOINT])
+})
+
+test('the prompt goes once per window and again after a compaction', async ($, on) => {
+  const w = world(on, { rounds: [HELD], context: { point: 467_000, raw: 500_000, source: 'env', model: 'claude-opus' } })
+  await begin($)
+  await w.clock.settle()
+  await measure($, 400_000)
+  await measure($, 420_000)
+  expect(w.appends).toEqual([CHECKPOINT])
+  await $.session.compact({ trigger: 'auto' } as never)
+  await measure($, 400_000)
+  expect(w.appends).toEqual([CHECKPOINT, CHECKPOINT])
+})
+
+test('with auto-compaction off the window itself is the point', async ($, on) => {
+  const w = world(on, { rounds: [HELD], context: { point: undefined, raw: 200_000, source: 'auto', model: 'claude-opus' } })
+  await begin($)
+  await w.clock.settle()
+  await measure($, 160_000, 200_000)
+  expect(w.appends).toEqual([])
+  await measure($, 175_000, 200_000)
+  expect(w.appends).toEqual([CHECKPOINT])
+})
+
+test('a model the engine does not know is named in the log, and the engine\'s point still governs', async ($, on) => {
+  const w = world(on, { rounds: [HELD], context: { point: 967_000, raw: 1_000_000, source: 'unknown-model', model: 'glm-9' } })
+  await begin($)
+  await w.clock.settle()
+  await measure($, 100_000)
+  await measure($, 120_000)
+  const said = w.logs.filter(l => l.includes('glm-9'))
+  expect(said.length).toBe(1)
+  expect(said[0]).toContain('CLAUDE_CODE_AUTO_COMPACT_WINDOW')
+  expect(w.appends).toEqual([])
+})
+
+test('one long turn that passes 85% of the way is caught at its step, not at its end', async ($, on) => {
+  const w = world(on, { rounds: [HELD] })
+  await begin($)
+  await w.clock.settle()
+  await $.turn.start({ text: 'long', turnId: 't-1' } as never)
+  await stepped($, w, 100_000)
+  expect(w.appends).toEqual([])
+  await stepped($, w, 150_000)
+  expect(w.appends).toEqual([CHECKPOINT])
+  await stepped($, w, 160_000)
+  expect(w.appends).toEqual([CHECKPOINT])
+})
+
+test('a subagent\'s step is not the session\'s context', async ($, on) => {
+  const w = world(on, { rounds: [HELD] })
+  await begin($)
+  await w.clock.settle()
+  await stepped($, w, 150_000, 'agent-1')
+  expect(w.appends).toEqual([])
+})
+
+test('a step does not ask the engine for the breakdown once the point is known', async ($, on) => {
+  const w = world(on, { rounds: [HELD] })
+  await begin($)
+  await w.clock.settle()
+  await measure($, 10_000)
+  const asked = w.usageCalls
+  for (let i = 0; i < 5; i++) await stepped($, w, 20_000)
+  expect(w.usageCalls).toBe(asked)
+})
+
+test('a /clear gives the fresh context its own checkpoint prompt', async ($, on) => {
+  const w = world(on, { rounds: [HELD] })
+  await begin($)
+  await w.clock.settle()
+  await measure($, 900_000)
+  expect(w.appends).toEqual([CHECKPOINT])
+  await $.classic.SessionStart({ source: 'clear', session_id: 'ps-2' } as never)
+  await measure($, 900_000)
+  expect(w.appends).toEqual([CHECKPOINT, CHECKPOINT])
 })

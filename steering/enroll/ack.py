@@ -25,13 +25,17 @@ def token_path(ws: Path, session: str) -> Path:
     return ws / ".claude" / "steering-tokens" / hashlib.sha256(session.encode()).hexdigest()[:32]
 
 
-def store(ws: Path, session: str, token: str, provider_session: str | None = None) -> Path:
+def store(ws: Path, session: str, token: str, provider_session: str | None = None,
+          authority: str | None = None, epoch: int | None = None) -> Path:
     """`provider_session` is what the enrollment was minted for; a reader that has one of its own
-    can then tell a name it derived from a name that merely collided with it."""
+    can then tell a name it derived from a name that merely collided with it. `authority` and
+    `epoch` mark a credential Go issued (`session_routes`)."""
     p = token_path(ws, session); p.parent.mkdir(parents=True, exist_ok=True)
     rec = {"session": session, "token": token}
     if provider_session:
         rec["provider_session"] = provider_session
+    if authority:
+        rec["authority"], rec["epoch"] = authority, epoch
     fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write(json.dumps(rec))

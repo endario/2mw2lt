@@ -201,11 +201,12 @@ class Harness:
     # What this harness calls itself and at what version, which an observation carries as its
     # `source_version`. Read from the harness itself rather than written down here.
     version: Callable[[], str | None] | None = None
-    # The reading of a session of this provider, asked of its provider session, for a harness
-    # that publishes none of its own. Where the harness has hooks it states its own vitals every
-    # turn, and reading a transcript behind a session that is telling you itself would be a
-    # second answer to a settled question.
-    reading: Callable[[str], dict | None] | None = None
+    # The reading of a session of this provider, taken by the agent on the session's machine from
+    # the harness's own record, asked of its provider session. A held harness is asked with the
+    # config directory its stream states, since the agent runs outside the session's environment.
+    # What this attests is the model in the harness's own record, read from outside the session.
+    # It does not hold against a session that forges its own transcript.
+    reading: Callable[..., dict | None] | None = None
     # Whether a process currently loads this provider session. A harness whose sessions hold a
     # stream needs none of this: the stream ending is what says the session went. Hookless
     # harnesses also use it when proving which process supplies the runtime identity.
@@ -309,6 +310,22 @@ def claude_transcript_path(config: Path, psession: str, project: Path | None = N
 def _claude_transcript(psession: str):
     config = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude"))
     return claude_transcript_path(config, psession, Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()))
+
+
+def _claude_reading(psession: str, config: str | None = None) -> dict | None:
+    """What the session's transcript under `config` says it last ran, stated as of the entry that
+    says it, so an unchanged transcript reads the same at every poll. `Refused` says why there is
+    none."""
+    import vitals
+    if not config:
+        raise Refused("the session's stream named no Claude config directory")
+    path = claude_transcript_path(Path(config), psession)
+    if path is None:
+        raise Refused(f"no transcript of {psession} under {config}")
+    rec = vitals.of_entry(vitals.last_assistant(vitals.tail(path)), {"session_id": psession}, restated=True)
+    if rec is None:
+        raise Refused(f"no assistant entry with an instant in {path}")
+    return rec
 
 
 def _codex_reading(psession: str) -> dict | None:
@@ -453,7 +470,8 @@ HARNESSES = {h.provider: h for h in (
             transcript_root="projects",
             session_id=_env("CLAUDE_CODE_SESSION_ID"), harness_pid=_claude_pid,
             transcript=_claude_transcript, version=_cli_version("claude", "--version"),
-            shape=_claude_shape, workspace=_claude_workspace, hooks=True),
+            shape=_claude_shape, workspace=_claude_workspace, hooks=True,
+            reading=_claude_reading),
     Harness("codex", agent="codex", config=".codex", config_env="CODEX_HOME",
             transcript_root="sessions",
             session_id=_env("CODEX_THREAD_ID", "CODEX_SESSION_ID"), harness_pid=_codex_pid,

@@ -1,5 +1,5 @@
 import type { Register, EngineInterface, Timer, HookStream, ProcessSpawnChunk, ProcessSpawnResult } from 'claude-code'
-import { lines, atLeast, pick, invokes, answerable, POINTER, CHECKPOINT, CONNECT_AGAIN } from './frames'
+import { lines, atLeast, pick, invokes, answerable, tokensOf, due, POINTER, CHECKPOINT, CONNECT_AGAIN } from './frames'
 import type { Routine } from './frames'
 
 // The plugin's hooks module (#3872): it holds a connected Claude session's steering stream through
@@ -14,6 +14,7 @@ const PENDING = { plugin: '2mw2lt', key: 'pending' } as const
 const POINTED = { plugin: '2mw2lt', key: 'pointed' } as const
 const APPENDED = { plugin: '2mw2lt', key: 'appended' } as const
 const WARNED = { plugin: '2mw2lt', key: 'warned' } as const
+const POINT = { plugin: '2mw2lt', key: 'point' } as const
 const SESSION = { plugin: '2mw2lt', key: 'session' } as const
 const CONNECTED = { plugin: '2mw2lt', key: 'connected' } as const
 
@@ -119,6 +120,38 @@ async function tell($: EngineInterface, text: string): Promise<boolean> {
   return busy
 }
 
+// The token count the engine auto-compacts at, read from its own breakdown; the window where it
+// has auto-compaction off. A model it does not know gets the engine's default window, and the log
+// says so, since nothing here can tell what that model's real limit is.
+async function compactionPoint($: EngineInterface): Promise<number | undefined> {
+  const { context } = await $.session.usage({ breakdown: 'summary' })
+  const b = context.breakdown
+  if (!b) return undefined
+  if (b.autocompactSource === 'unknown-model' && named !== b.model) {
+    named = b.model
+    $.ui.log(`2mw2lt: the engine does not know the context window of ${b.model}; the checkpoint prompt follows its assumed auto-compact point of ${b.autoCompactThreshold ?? b.rawMaxTokens} tokens. Set CLAUDE_CODE_AUTO_COMPACT_WINDOW to the model's real window.`, { to: 'debug' })
+  }
+  const point = b.autoCompactThreshold ?? b.rawMaxTokens
+  await $.state.set(POINT, point)
+  return point
+}
+
+// Once per window, to a connected session, when it is 85% of the way to compaction. The point is
+// read afresh at a turn's end, where a setting or the model may have moved it, and from the last
+// reading at a step, which is one model request and must not cost a breakdown.
+async function checkpointIfDue($: EngineInterface, tokens: number | undefined, fresh: boolean) {
+  // A step is one model request: an unconnected or already-warned session leaves before the lock.
+  const owed = async () => (await $.state.get(WARNED)).value !== true && !!(await $.state.get(SESSION)).value
+  if (!root || tokens === undefined || !(await owed())) return
+  await locked(async () => {
+    if (!(await owed())) return
+    const point = (fresh ? undefined : (await $.state.get(POINT)).value) ?? await compactionPoint($)
+    if (!due(tokens, point)) return
+    await $.state.set(WARNED, true)
+    await append($, CHECKPOINT)
+  })
+}
+
 async function sessionOf($: EngineInterface): Promise<string> {
   const r = await $.process.run(['python3', script($, 'hold.py'), '--session-of', await $.session.id()], { cwd: root })
   return r.exitCode === 0 ? r.stdout.trim() : ''
@@ -137,6 +170,8 @@ let refresh: Timer | undefined
 // stream back to the model-run recipe for the rest of this process rather than loop on it.
 let yielded = false
 let child: HookStream<ProcessSpawnChunk, ProcessSpawnResult> | undefined
+// The model whose window the engine did not recognise, once named in the log.
+let named = ''
 
 function stop() {
   generation++
@@ -321,19 +356,24 @@ export const register: Register = on => {
 
   on('session.measure', async ($, e, next) => {
     const out = await next(e)
-    const { value: warned = false } = await $.state.get(WARNED)
-    const { value: session = '' } = await $.state.get(SESSION)
-    if (root && session && !warned && (e.context.percent ?? 0) >= 85) {
-      await $.state.set(WARNED, true)
-      await append($, CHECKPOINT)
-    }
+    await checkpointIfDue($, e.context.tokens, true).catch(err => $.ui.log(`2mw2lt: the checkpoint check broke: ${String(err)}`, { to: 'debug' }))
     return out
+  })
+
+  // One long turn can run from well short of the point to compaction with no turn's end between,
+  // so each of the main thread's requests is measured as it is answered.
+  on('turn.step', async function* ($, e, next) {
+    const r = yield* next(e)
+    if (e.agentId === undefined && r.usage) {
+      await checkpointIfDue($, tokensOf(r.usage), false).catch(err => $.ui.log(`2mw2lt: the checkpoint check broke: ${String(err)}`, { to: 'debug' }))
+    }
+    return r
   })
 
   on('session.compact', async ($, e, next) => {
     if (!root || e.trigger === 'precompute' || e.agentId !== undefined) return next(e)
     const { value: session = '' } = await $.state.get(SESSION)
-    await $.state.set(WARNED, false)
+    await locked(() => $.state.set(WARNED, false))   // ordered with a check still in flight
     if (!session) return next(e)
     const keep = await keepLine($, session)
     return next({ ...e, instructions: [e.instructions, keep].filter(Boolean).join('\n') })
@@ -345,6 +385,7 @@ export const register: Register = on => {
     if (root && e.source === 'clear') {
       await locked(async () => {
         await $.state.set(PENDING, [])
+        await $.state.set(WARNED, false)             // a fresh context is owed its own prompt
         await unpoint($)
       })
       if (!yielded) await claim($, true, e.session_id)

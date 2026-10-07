@@ -45,7 +45,7 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 import action_notice  # noqa: E402
 import holder  # noqa: E402
-from local_workspace import agent_port, required_workspace_root, workspace_header  # noqa: E402
+from local_workspace import agent_port, path_header, required_workspace_root, workspace_header  # noqa: E402
 from moments import moment  # noqa: E402
 import door  # noqa: E402
 from bind import Refused, incarnation, pid_arg  # noqa: E402
@@ -486,7 +486,7 @@ def close_recording(recorded) -> None:
 def hold(port: str, session: str, token: str, rid: str, frames: Path, until: bool = False,
          service: bool = False, workspace: Path | None = None,
          connected: Callable[[], None] | None = None, plugin: bool = False,
-         lapsed: Callable[[], str | None] | None = None) -> int:
+         lapsed: Callable[[], str | None] | None = None, config: Path | None = None) -> int:
     """Open the stream and yield its frames, until a 403 says no reopen would help.
 
     A 403 is the one answer this loop cannot retry: the token, the node or the incarnation is
@@ -497,7 +497,8 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
     `connected` is called on each open the agent admits. `plugin` prints a line per frame in
     place of the frame, returns 3 on a revoked hold, and refuses to hold without a recording.
     `lapsed` is asked on every line read, keepalives included, and a reason it gives ends the
-    hold with 1.
+    hold with 1. `config` is the session's Claude config directory, which the agent reads the
+    session's transcript under: it runs outside the session's environment and cannot know it.
     """
     url = f"http://127.0.0.1:{port}/steering/session/{session}/stream"
     quiet = False    # the standing failure has been named; naming it again every 2s is noise
@@ -512,6 +513,7 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                                                        "X-Steering-Wake": ("plugin" if plugin else
                                                                            "service" if service else
                                                                            "event" if until else "monitor"),
+                                                       **({"X-Steering-Config-Dir": path_header(config)} if config else {}),
                                                        **(workspace_header(workspace) if workspace else {})})
             try:
                 with door.send(req, timeout=HOLD_READ) as r:
@@ -686,7 +688,8 @@ def main(argv: list[str]) -> int:
                   f"started this hold is gone, so it ends") if plugin else None
         return hold(port, session, token, rid, frames, until, service, ws,
                     (lambda: restate(ws, rid, psession, h.config_dir()))
-                    if h.provider == "claude" else None, plugin, lapsed)
+                    if h.provider == "claude" else None, plugin, lapsed,
+                    h.config_dir() if h.provider == "claude" else None)
 
 
 if __name__ == "__main__":

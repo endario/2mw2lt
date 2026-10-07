@@ -74,14 +74,7 @@ def build(hook: dict, restated: bool = False) -> dict | None:
     `restated` is a reading sent again with no turn behind it, so it carries the instant its
     entry was written rather than now: the daemon takes a reading's instant as the session's
     evidence of life, and a hold reopening by itself is not the session doing anything (#2722)."""
-    entry = last_assistant_entry(hook)
-    if entry is None:
-        return None
-    at = adapter.instant_of(entry) if restated else adapter.utc()
-    if at is None:
-        return None
-    version = entry.get("version")
-    return adapter.read(entry, hook, at, version if isinstance(version, str) and version else "0.0.0")
+    return adapter.of_entry(last_assistant_entry(hook), hook, restated)
 
 
 def due(ws: Path, hook: dict, now: float) -> bool:
