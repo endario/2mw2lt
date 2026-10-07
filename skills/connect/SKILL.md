@@ -183,14 +183,20 @@ question tool.
 Rollouts are the brain's decision: send it the rollout needed, its proving check and your
 recommendation, rather than an owner ask.
 
+## Interim GitHub rule
+
+Read GitHub state with `gh api graphql`; GraphQL has a separate primary budget from REST.
+Prefer pushed forge frames over polling. Never watch a run or pass `--watch`.
+If a wait-loop check is necessary, check no faster than every 5 minutes.
+
+For repository-scoped App credentials, `${CLAUDE_PLUGIN_ROOT}/steering/enroll/ghtoken.py` is
+optional. Capture its stdout in `GH_TOKEN`, never print it; request a fresh token when it expires.
+
 ## Gate your work
 
-Push first, keep the pull request draft, and run the applicable suite before each round where
-you judge it cheapest: the focused guards for what changed always, and a full run only when the
-change warrants one: locally first, and on a runner only when that is genuinely needed. A dispatch
-(`gh workflow run steering.yml -R <repo> --ref <branch>`, `<repo>` being the `repo:` line connect
-printed — that workflow exists only in the platform's own repository) runs on the mini, and only
-there. From the branch's worktree:
+Push first, keep the pull request draft, and before each round run the focused guards for what
+changed locally, and the full suite locally when the change warrants one. Dispatch no CI for it.
+From the branch's worktree:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> branch
@@ -202,8 +208,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <session> status <commis
 Load `/2mw2lt:gate` for the round/ceiling, cancellation, publication and pass-carry rules.
 Steering commissions the independent judgment; a queued commission is not a reason to send
 another one. Fix verified findings, push and commission the next round. `ship it` closes the
-gate; mark ready only then. After a clean rebase, a merge of `main`, or a conflict-only update,
-carry the pass rather than commissioning another round; commission one when judgment warrants it.
+gate; mark ready only then, and merge it directly (`/2mw2lt:gate`). After a clean rebase, a merge
+of `main`, or a conflict-only update, carry the pass rather than commissioning another round;
+commission one when judgment warrants it.
 
 ## Checkpoint and leave
 

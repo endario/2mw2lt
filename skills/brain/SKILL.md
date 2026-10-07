@@ -96,11 +96,11 @@ you last received is the answer — there is nothing to accumulate and nothing t
 Each row carries the session's `model`, `effort`, `machine` (its host name) and `verdict` (its own
 account's, as in the `fleet` frame), each `null` when nothing has been read: place by those, and
 never ask a session its level, since it cannot read its own.
-`data: {"kind": "kick", "idle": [...], "executing": [...], "finished": [...], "changed": {...}, "turn": …, "placement": {...}, "advice": {...}, "gates": {...}, "queue": {...}, "moved": …, "missed": …}`
+`data: {"kind": "kick", "idle": [...], "executing": [...], "finished": [...], "changed": {...}, "turn": …, "placement": {...}, "advice": {...}, "gates": {...}, "moved": …, "missed": …}`
 is the daemon's timer, not a person.
 It arrives every interval because silence sends nothing else, and on the next poll that is
 neither `quiet`, `debounced` nor `refused` once a session finishes a turn. `moved` is the daemon's verdict that this kick carries a fleet
-change, a stalled gate or a backed-up merge queue; a kick that has neither wakes no model turn for a brain the plugin holds. `finished` is the daemon's own reading of who is waiting for work — do not ask
+change or a stalled gate; a kick that has neither wakes no model turn for a brain the plugin holds. `finished` is the daemon's own reading of who is waiting for work — do not ask
 the fleet to report it, and do not read its absence for a harness that posts no turn end as
 busy. It overlaps `executing`, because a session that has just finished is still recently heard.
 `placement` is each reachable session's `{model, effort, machine, verdict}`, so a quiet brain is
@@ -115,10 +115,7 @@ cache newly `lapsing`, moves the kick. The suggestion is
 yours to weigh, not an instruction. `gates` counts the open gate commissions by state and
 lists each `stalled` one — waiting ten minutes with no run out, or past its run's deadline — with
 who commissioned it: tell that session to commission it again, or find why nothing takes it.
-`queue` is the merge queue's reading, for a workspace whose tracks document opts in with a
-`queue` block:
-its depth, entries, merges and failure ejections in the last hour, `ready_unqueued` and
-`stale_stacks`, and `backed_up` with `why` — act on it by [Keep the queue moving](#keep-the-queue-moving). The cards themselves are the board's, which a brain on any
+The cards are the board's, which a brain on any
 machine reads with
 `python3 <2mw2lt>/steering/enroll/door.py --get /steering/work` — the one read the remote door
 answers, with each reading's working directory omitted. Place from `finished` first and `idle` after it, each session once — the two lists overlap for
@@ -667,45 +664,6 @@ especially throughput and efficiency — is the mission, and placement carries i
 - Prefer the cheapest capable account and harness for the job, and offload non-critical work
   from an account under pressure.
 - A recurring sink is surfaced as a fix, never reported as a status line.
-
-## Keep the queue moving
-
-When the kick's `queue` says `backed_up`, the merge queue is the fleet's bottleneck: every
-session's finished work waits on it. Act only while it says so; otherwise the queue is its
-authors'. In order, with your own `gh` login:
-
-1. **Jump what unblocks the most** — a CI speed-up, which shortens every later round; a stack's
-   base, which frees its dependents; work the owner waits on. Dequeue it, then enqueue it with
-   `jump` (GraphQL `dequeuePullRequest`, then `enqueuePullRequest(jump: true)`; a jump on an
-   entry still queued is refused). One or two at most: each jump rebuilds every group behind it.
-2. **Dequeue what will fail** — an entry ejected twice for one cause, or a head known red, goes
-   back to its author with the cause.
-3. **Queue what is ready** — enqueue each `ready_unqueued`; tell each `stale_stacks` author to
-   retarget to the default branch, or retarget it yourself once the author is gone.
-4. **Escalate** — still backed up after two rounds of 1–3, with the backlog blocking work the
-   owner ranks above landing changes no suite has run, ask the owner for a fast-track with a
-   structured ask whose `context` is the reading. While that ask is open it is the answer to
-   step 4: do not ask again or re-triage the queue until the owner answers. Offer the scopes as
-   the options' labels, exactly — `fast-track: minutes <m>`, `fast-track: next <n>`,
-   `fast-track: until withdrawn` — since only those grant anything. The answer that does writes
-   the grant, named by the digest `ask` printed; the kick's `queue.grants` names every live one,
-   a grant the owner gave from the console included.
-5. **Fast-track** — under a live grant, from a checkout of the repository, with the owner's `gh`
-   login (the owner's ruling of 2026-10-07), merge in queue order:
-
-   ```bash
-   TOKEN=$TOKEN python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/fast-track.py" --repo <owner/name> --grant <grant> [--end] <pr>...
-   ```
-
-   It refuses while `main`'s tip has not passed its suite. It merges only heads whose own suites
-   ran and passed, never a deferred status, and dispatches the suites for the rest: run it again
-   once they pass. It records each act on the ledger, stops at the first pull request that cannot
-   go — hand that one back to its author with the reason it printed — and restores the ruleset as
-   it exits.
-   `--end` ends a scoped grant with the batch; a standing one stays until the owner ends it.
-   Then watch `main`'s push run: a red `main` is fixed forward, and the grant ended, before the
-   next merge. A kick whose `queue` carries `lowered` means a run died before its restore: run
-   `fast-track.py --repo <owner/name> --grant <grant> --restore` before anything else.
 
 ## Share the machines
 

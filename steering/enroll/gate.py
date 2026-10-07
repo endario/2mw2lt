@@ -166,19 +166,16 @@ def main(argv: list[str]) -> int:
 
 
 def shipped(answer: str) -> re.Match[str] | None:
-    """The newest shipped review row in `gate: pr`'s answer."""
     rows = [line for line in answer.splitlines() if " round " in line]
     return SHIPPED.match(rows[-1]) if rows else None
 
 
 def judged(answer: str) -> str | None:
-    """The abbreviated sha the newest round judged, from `gate: pr`'s answer, when it shipped."""
     match = shipped(answer)
     return match["sha"] if match else None
 
 
 def accepted_source(answer: str) -> str | None:
-    """The newest accepted carry source, or the judged sha before a carry exists."""
     match = shipped(answer)
     return (match["source"] or match["sha"]) if match else None
 

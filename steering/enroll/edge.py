@@ -46,6 +46,21 @@ def main(argv: list[str]) -> int:
     if not valid_token(token):
         print(f"the stored token for {session} is not one: /2mw2lt:connect again", file=sys.stderr)
         return 1
+    import refusal
+    import session_routes
+    if session_routes.on_coordination(ws):
+        fact = built[0]
+        to = {key: fact[key] for key in ("to_card", "to_issue") if key in fact}
+        try:
+            reply = session_routes.edge_card(fact["card"], verb == "unlink", fact["kind"], to,
+                                             fact["why"], token, how=fact.get("how", ""),
+                                             source=fact.get("source", ""))
+        except session_routes.Refused as e:
+            reply = refusal.use("declare", f"{verb} {fact['card']}: {e}")
+        except session_routes.Unsent as e:
+            reply = refusal.retry(str(e))
+        print(reply)
+        return 0 if reply.startswith(f"{verb}ed:") else 1
     reply = say(f"declare: {session} token {token} {verb} {shlex.join(rest)}")
     print(display_reply(reply))
     return 0 if reply.startswith(f"{verb}ed:") else 1

@@ -279,3 +279,169 @@ def answer(session: str, token: str, request: str, generation: int, text: str) -
     key = hashlib.sha256(f"answer\n{session}\n{request}\n{generation}".encode()).hexdigest()[:32]
     return post(f"/brain/requests/{request}/answer", {"session": session, "generation": generation, "answer": text},
                 key, SESSION_CARRIER, token)
+
+
+def _own_key(*parts: str) -> str:
+    """A write's own key, from what makes it that write, so a retry after a lost answer is answered
+    from the first rather than done twice."""
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:32]
+
+
+def seat_acquire(session: str, token: str, vacancy_generation: int) -> dict:
+    """The session takes the seat while it is vacant, naming the vacancy it saw
+    (go-unit9-authority-wire-design.md). Raises `Refused` or `Unsent`."""
+    return post(f"/sessions/{session}/seat/acquisition", {"vacancy_generation": vacancy_generation},
+                _own_key("seat.acquire", session, str(vacancy_generation)), SESSION_CARRIER, token)
+
+
+def seat_hand(session: str, token: str, generation: int, to: str, to_epoch: int) -> dict:
+    """The holder hands the seat to the session `to`, standing at `to_epoch`. Raises `Refused` or `Unsent`."""
+    return post(f"/sessions/{session}/seat/handover", {"generation": generation, "to": to, "to_epoch": to_epoch},
+                _own_key("seat.hand", session, str(generation), to, str(to_epoch)), SESSION_CARRIER, token)
+
+
+def seat_renew(session: str, token: str, generation: int) -> dict:
+    """The holder moves its lease. Every renewal is its own request: one key per generation would be
+    answered from the first and never move the lease again. Raises `Refused` or `Unsent`."""
+    return post(f"/sessions/{session}/seat/renewal", {"generation": generation}, uuid.uuid4().hex, SESSION_CARRIER, token)
+
+
+def seat_release(session: str, token: str, generation: int) -> dict:
+    """The holder gives the seat up. Raises `Refused` or `Unsent`."""
+    return post(f"/sessions/{session}/seat/release", {"generation": generation},
+                _own_key("seat.release", session, str(generation)), SESSION_CARRIER, token)
+
+
+def issue_directive(session: str, token: str, directive: str, to: str, to_epoch: int, generation: int, text: str) -> dict:
+    """The holder, at the seat generation it holds, directs the session `to` at `to_epoch`. `directive`
+    is a UUID the caller mints once and sends again with a retry, which Go answers from the first.
+    Raises `Refused` or `Unsent`."""
+    return post(f"/sessions/{session}/directives",
+                {"id": directive, "to": to, "to_epoch": to_epoch, "generation": generation, "body": text},
+                _own_key("directive.issue", session, directive), SESSION_CARRIER, token)
+
+
+def claim_name(token: str, key: str) -> dict:
+    """The session claims the permanent name `key`; its own repeat is granted, another's is refused
+    `name-claimed`. Raises `Refused` or `Unsent`."""
+    return post("/names", {"key": key}, _own_key("name.claim", key), SESSION_CARRIER, token)
+
+
+def card_repo(ws: Path | None = None) -> str:
+    """`owner/name` of the workspace checkout's origin. Go's wire names the repository an anchor
+    is in, which the incumbent's door filled in from the workspace's one repository; the client
+    names it from the checkout itself, where the branch and the issue numbers come from too."""
+    url = ""
+    try:
+        url = subprocess.run(["git", "-C", str(ws) if ws else os.getcwd(), "remote", "get-url", "origin"],
+                             capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    for left in ("git@github.com:", "https://github.com/", "ssh://git@github.com/"):
+        if url.startswith(left):
+            url = url[len(left):]
+    if url.endswith(".git"):
+        url = url[:-len(".git")]
+    if url.count("/") != 1 or not all(url.split("/")):
+        # The origin may embed a credential; its shape is said, never its value.
+        raise SystemExit("declare needs the checkout's origin as owner/name to name an anchor's "
+                         "repository; this checkout's origin is not in that form")
+    return url
+
+
+def declare_card(card: str, name: str, anchors: dict, token: str, repo: str = "") -> str:
+    """The session declares its own card (`POST /cards`), which engages it as executor; Go answers
+    a minted id whose declaration is the same one with that card. The key is the declaration's own,
+    so a retry after a lost answer never mints a second card. `repo` names the anchors'
+    repository, as `card_repo` reads it. Raises `Refused` or `Unsent`."""
+    body: dict = {"id": card, "name": name}
+    if anchors:
+        body["anchors"] = [{"verb": verb, "repo": repo, "n": n}
+                           for verb, ns in sorted(anchors.items()) for n in ns]
+    answer = post("/cards", body, _own_key("declare", card, json.dumps(body, sort_keys=True)),
+                  SESSION_CARRIER, token)
+    return f"declared: {card}" + (" (replayed)" if answer.get("replayed") else "")
+
+
+def edge_card(card: str, unlink: bool, kind: str, to: dict, why: str, token: str,
+              how: str = "", source: str = "") -> str:
+    """The session links, or ends a link on, the card it executes (`POST /cards/{card}/links` or
+    `.../unlinks`). The key is the edge's own, so a retry after a lost answer is answered from the
+    first rather than drawn twice. Raises `Refused` or `Unsent`."""
+    body: dict = {"kind": kind, "why": why}
+    body.update(to)
+    if how:
+        body["how"] = how
+    if source:
+        body["source"] = source
+    verb = "unlink" if unlink else "link"
+    post(f"/cards/{card}/{'unlinks' if unlink else 'links'}", body,
+         _own_key(verb, card, json.dumps(body, sort_keys=True)), SESSION_CARRIER, token)
+    return f"{verb}ed: {card} {kind}"
+
+
+def get(path: str, token: str, timeout: float = 10.0) -> dict:
+    """One read on the session's carrier. Raises `Refused` or `Unsent` as a write does."""
+    req = urllib.request.Request(_base() + path, headers={SESSION_CARRIER: token, "User-Agent": door.USER_AGENT})
+    try:
+        with door.open_direct(req, timeout) as r:
+            return json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        problem = _problem(e)
+        raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "") from None
+    except (urllib.error.URLError, OSError, TimeoutError) as e:
+        raise Unsent(f"{_base()}{path}: no answer ({e})") from None
+
+
+def executing_card(session: str, token: str) -> dict | None:
+    """The live card this session executes — its executor engagement, not a merely planned one —:
+    what a branch claim's announce defaults its doing to, the seat having ruled there is no
+    separate claim primitive (2026-10-08)."""
+    cards = get("/cards?state=live", token).get("cards") or []
+    for card in cards:
+        if any(e.get("session") == session and e.get("role") == "executor" and not e.get("ended")
+               for e in card.get("executors") or []):
+            return card
+    return None
+
+
+def status(session: str, token: str, key: str, body: dict) -> dict:
+    """The session's own status on Go's route (EL1a slice 2), under the invocation's occurrence id:
+    a resend through `--retry` is answered from the first, and a fresh invocation writes a new row.
+    Raises `Refused` or `Unsent`."""
+    return post(f"/sessions/{session}/status", body, key, SESSION_CARRIER, token)
+
+
+def announce_branch(session: str, token: str, branch: str, ws: Path, key: str,
+                    harness: str = "", account: str = "") -> str:
+    """A branch claim is an announce (the seat's ruling, 2026-10-08): the doing defaults to the
+    executed card's title, and the repository names the branch, which binds it to the card. There
+    is no separate claim primitive on the wire. Raises `ValueError` when no card names doing,
+    `Refused` or `Unsent` as a write does."""
+    card = executing_card(session, token)
+    if card is None:
+        raise ValueError(f"no live card of {session}'s names doing to announce")
+    body: dict = {"state": "announce", "doing": card["name"], "branch": branch, "repo": card_repo(ws)}
+    if harness:
+        body["harness"] = harness
+    if account:
+        body["account"] = account
+    status(session, token, key, body)
+    return f"registered: announce on {branch} doing {card['name']}"
+
+
+def claim_issue(session: str, token: str, repo: str, n: int) -> str:
+    """An issue claim is a card declared with `resolves:<n>` (the seat's ruling), named for the
+    issue, the session its executor. The card id and the request key are the claim's own, so a
+    rerun after a lost answer is answered from the first rather than minting a second permanent
+    card. Raises `Refused` or `Unsent`."""
+    card = _own_key("claim.card", session, repo, str(n))[:24]
+    body = {"id": card, "name": f"{repo}#{n}",
+            "anchors": [{"verb": "resolves", "repo": repo, "n": n}]}
+    answer = post("/cards", body, _own_key("claim", session, repo, str(n)), SESSION_CARRIER, token)
+    return f"declared: {card}" + (" (replayed)" if answer.get("replayed") else "")
+
+
+def read_seat(token: str) -> dict:
+    """The seat as Go holds it, for #4404's client verbs."""
+    return get("/seat", token)

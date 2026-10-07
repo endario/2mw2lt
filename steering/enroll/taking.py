@@ -24,7 +24,7 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 from bind import Refused  # noqa: E402
 from connect import branch as branch_of, speaker_flags, speaking_as  # noqa: E402
-from door import display_reply, remote, say  # noqa: E402
+from door import display_reply, occurrence, remote, say  # noqa: E402
 from local_workspace import required_workspace_root  # noqa: E402
 
 
@@ -55,6 +55,39 @@ def main(argv: list[str]) -> int:
     else:
         return error("taking", "taking requires an issue number or branch")
     session = args[0]
+    ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
+    import session_routes
+    if session_routes.on_coordination(ws):
+        # The seat's ruling, 2026-10-08: no separate claim primitive on Go. A branch claim is an
+        # announce, whose doing defaults to the executed card's title; an issue claim is a card
+        # declared with resolves:<n>, this session its executor, whose id is the claim's own so a
+        # rerun after a lost answer replays instead of minting a second card.
+        import refusal as refusal_mod
+        try:
+            _, token = speaking_as(ws, session, flags)
+        except Refused as why:
+            print(str(why), file=sys.stderr)
+            return 1
+        try:
+            if what.startswith("branch "):
+                # A lost answer can only be rerun as a new announce, and the CLI takes no --retry:
+                # no id is printed for one nobody can resend.
+                reply = session_routes.announce_branch(session, token, what.removeprefix("branch ").strip(),
+                                                       ws, occurrence())
+            else:
+                reply = session_routes.claim_issue(session, token, session_routes.card_repo(ws),
+                                                   int(what))
+        except ValueError as e:
+            print(f"{e}: declare the work first, or give doing", file=sys.stderr)
+            return 1
+        except session_routes.Refused as e:
+            said = refusal_mod.use("taking", str(e)) if session_routes.settled(e) \
+                else refusal_mod.retry(str(e))
+            reply = said
+        except session_routes.Unsent as e:
+            reply = refusal_mod.retry(str(e))
+        print(display_reply(reply))
+        return 0 if not reply.startswith("REJECTED") else 1
     if not what.startswith("branch ") and not remote():
         speaker = [item for flag, value in flags.items() for item in (flag, value)] + [session]
         request = f"Please assign issue {what} to a worker enrolled on the authenticated remote door for this workspace."
@@ -63,7 +96,6 @@ def main(argv: list[str]) -> int:
               f"to assign it:\n  {help_invocation('say', None)} {shlex.join(speaker + [request])}",
               file=sys.stderr)
         return 1
-    ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
     try:
         session, token = speaking_as(ws, session, flags)
     except Refused as why:

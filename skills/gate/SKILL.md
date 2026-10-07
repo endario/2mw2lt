@@ -119,29 +119,29 @@ ended and was published (#1986):
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> pr <pr number>
 ```
 
-Keep the pull request a draft through every round. A draft runs no steering suite, so before each
-round run the focused guards for what changed, and a full suite only when the change warrants one,
-locally first, and on a runner only when that is genuinely needed. A dispatch
-(`gh workflow run steering.yml -R <repo> --ref <branch>`, `<repo>` being the `repo:` line connect
-printed) runs on the mini, and only there. Mark it ready only after `ship it`: that is its one required CI
-run, then the merge.
+Keep the pull request a draft through every round, and before each round run the focused guards
+for what changed locally, and the full suite locally when the change warrants one. Dispatch no CI
+for it. Mark it ready only after `ship it`, then merge it.
 
-Arm the merge once, when you mark it ready and its base is `main`:
+For GitHub state reads and waiting, follow
+[connect's interim GitHub rule](../connect/SKILL.md#interim-github-rule).
+
+Merge it directly once its head holds `2mw2lt/review` and its base is `main`. That status is posted a
+sweep after the verdict or the carry, and you are told when it lands: a `say` frame
+`from: forge #<n>` reading `review status posted on <sha>; merge now`. Merge then, not before:
 
 ```bash
-gh pr merge <pr number> -R <repo> --squash --auto --match-head-commit <head sha>
+gh pr merge <pr number> -R <repo> --squash --match-head-commit <head sha>
 ```
 
-GitHub queues it the moment its head holds every required status, so there is nothing to poll
-for. Never arm a pull request whose base is another branch: it would merge into that branch. Do
+Not `--auto`. Never merge a pull request whose base is another branch: it would merge into that branch. Do
 not poll GitHub to learn what happens next either. The pull request's moves come to you as a
-`say` frame `from: forge #<n>`: it entered the queue, left it and why (with the check its group
-failed, when the daemon read one), merged, closed, its base moved to `main` (your cue to carry the
-pass and arm it), or, once it is ready, its checks passed or failed. A pull request you never
+`say` frame `from: forge #<n>`: it merged, closed, its base moved to `main` (your cue to carry the
+pass and merge it), or, once it is ready, its checks passed or failed. A pull request you never
 gated is told to the session whose `taking: branch` holds its branch. A `gh` loop that waits is the
 failure mode: every session on a machine shares one person's GitHub limit (#4203).
 
-To read where it stands now, ask the daemon, which read it through the App for every session: its draft, queue entry and position, and each check on its head.
+To read where it stands now, ask the daemon, which read it through the App for every session: its draft state and each check on its head.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" /pulls/<pr number> </dev/null

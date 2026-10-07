@@ -42,7 +42,7 @@ def main(argv: list[str]) -> int:
     if not " ".join(rest).strip():
         return error("declare", "declare requires a name")
     import card_grammar
-    _, why = card_grammar.declaration(session, card, rest)
+    fact, why = card_grammar.declaration(session, card, rest)
     if why:
         return error("declare", why)
     ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
@@ -54,6 +54,21 @@ def main(argv: list[str]) -> int:
     if not valid_token(token):
         print(f"the stored token for {session} is not one: /2mw2lt:connect again", file=sys.stderr)
         return 1
+    import refusal
+    import session_routes
+    if session_routes.on_coordination(ws):
+        try:
+            reply = session_routes.declare_card(card, fact["name"], fact.get("anchors") or {}, token,
+                                                repo=session_routes.card_repo(ws) if fact.get("anchors") else "")
+        except session_routes.Refused as e:
+            reply = refusal.use("declare", f"{card}: {e}")
+        except session_routes.Unsent as e:
+            reply = refusal.retry(str(e))
+        print(reply)
+        if not reply.startswith("declared:"):
+            print(f"to retry this declaration under the same card, send it with --card {card}", file=sys.stderr)
+            return 1
+        return 0
     reply = say(f"declare: {session} token {token} card {card} {shlex.join(rest)}")
     print(display_reply(reply))
     if not reply.startswith("declared:"):

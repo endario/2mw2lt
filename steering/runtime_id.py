@@ -128,6 +128,32 @@ def started_at(pid: int) -> str | None:
     return f"{b[0]}.{b[1]:06d}" if b is not None else process_start(pid)
 
 
+def started_epoch(pid: int) -> float | None:
+    """Unix start seconds, converted locally where only ps's lstart is available."""
+    b = birth(pid)
+    if b is not None:
+        return b[0] + b[1] / 1_000_000
+    start = process_start(pid)
+    if not start:
+        return None
+    try:
+        weekday, month, day, clock, year = start.split()
+        if weekday not in ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"):
+            return None
+        # ps forces C locale; numeric parsing does not depend on this process's LC_TIME.
+        month_number = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split().index(month) + 1
+        local = time.strptime(f"{month_number} {day} {clock} {year}", "%m %d %H:%M:%S %Y")
+        candidates = set()
+        # lstart omits the UTC offset: a repeated local hour cannot declare which epoch it names.
+        for dst in (0, 1):
+            candidate = time.mktime(local[:8] + (dst,))
+            if time.localtime(candidate)[:6] == local[:6]:
+                candidates.add(candidate)
+        return candidates.pop() if len(candidates) == 1 else None
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
 def _procargs(data: bytes) -> list[str] | None:
     if len(data) < ctypes.sizeof(ctypes.c_int):
         return None

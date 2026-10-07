@@ -50,24 +50,29 @@ def open_direct(req: urllib.request.Request, timeout: float):
 
 
 def send(req: urllib.request.Request, timeout: float):
-    """Every request an enroll-side script makes, with this OS user's credential when it holds
-    one for the door the request is to (doc 85 §1). One held and not usable raises rather than
-    sending the request bare."""
     if not is_loopback(urllib.parse.urlsplit(req.full_url).hostname or ""):
-        parent = str(Path(__file__).resolve().parent.parent)
-        if parent not in sys.path:
-            sys.path.insert(0, parent)
-        import credential  # noqa: E402
-        try:
-            token = credential.for_url(req.full_url)
-        except credential.NoCredential as e:
-            # The console refusing this machine's enrolment (revoked, bound elsewhere) is not
-            # changed by sending again; a console that did not answer, or throttled, may be.
-            if e.status is not None and 400 <= e.status < 500 and e.status != 429:
-                raise CredentialRefused(f"the console refused this machine's agent credential: {e}") from None
-            raise OSError(f"no usable agent credential: {e}") from None
-        if token:
-            req.add_header(credential.HEADER, token)
+        return send_agent(req, timeout)
+    req.add_header("User-Agent", USER_AGENT)
+    return open_direct(req, timeout)
+
+
+def send_agent(req: urllib.request.Request, timeout: float, *, required: bool = False):
+    parent = str(Path(__file__).resolve().parent.parent)
+    if parent not in sys.path:
+        sys.path.insert(0, parent)
+    import credential  # noqa: E402
+    try:
+        token = credential.for_url(req.full_url)
+    except credential.NoCredential as e:
+        # The console refusing this machine's enrolment (revoked, bound elsewhere) is not
+        # changed by sending again; a console that did not answer, or throttled, may be.
+        if e.status is not None and 400 <= e.status < 500 and e.status != 429:
+            raise CredentialRefused(f"the console refused this machine's agent credential: {e}") from None
+        raise OSError(f"no usable agent credential: {e}") from None
+    if required and not token:
+        raise CredentialRefused("this OS user holds no agent credential for this door")
+    if token:
+        req.add_header(credential.HEADER, token)
     req.add_header("User-Agent", USER_AGENT)
     return open_direct(req, timeout)
 

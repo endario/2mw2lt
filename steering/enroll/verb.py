@@ -113,6 +113,85 @@ def _through_outbox(ws: Path, sent: str, this: str, session: str) -> tuple[str, 
 from verb_help import _invocation as help_invocation, error, help_requested, script_help  # noqa: E402
 
 
+def _on_go(ws: Path, verb: str, session: str, text: str, retry_id: str | None) -> int:
+    """A status verb on a Go workspace: the fields its route names, on the session's carrier, under
+    the invocation's occurrence id. An announce may give no doing and take the card it executes'
+    title, the seat having ruled there is no separate claim primitive (2026-10-08)."""
+    import json as _json
+    import re
+    import refusal
+    import session_routes
+    try:
+        token = _json.loads(ack.token_path(ws, session).read_text())["token"]
+    except (OSError, ValueError, KeyError):
+        print(f"no stored token for {session}: /2mw2lt:connect first", file=sys.stderr)
+        return 1
+
+    def said(run):
+        """`run`'s answer, with Go's refusal said: a settled one names the verb's remedy, an
+        unsettled one is sent again under the id. `False` when the refusal was said and nothing
+        came back to act on; the answer itself, `None` included, otherwise."""
+        try:
+            return run()
+        except session_routes.Refused as e:
+            print(display_reply(refusal.use(verb, str(e)) if session_routes.settled(e)
+                                else refusal.retry(str(e))), file=sys.stderr)
+        except session_routes.Unsent as e:
+            print(display_reply(refusal.retry(str(e))), file=sys.stderr)
+        return False
+
+    body: dict = {}
+    if verb == "announce":
+        m = re.fullmatch(r"as (?P<agent>\S+/\S+)(?: on (?P<branch>\S+))?(?: doing (?P<work>.+))?", text)
+        if m is None:
+            print("malformed announce: as <harness>/<account> [on <branch>] [doing <text>]", file=sys.stderr)
+            return 1
+        harness, _, account = m["agent"].partition("/")
+        doing = (m["work"] or "").strip()
+        if m["branch"] and not doing:
+            # The branch claim: the announce takes the executed card's title as its doing.
+            key = retry_id or occurrence()
+            print(f"id {key}", file=sys.stderr)
+            try:
+                answer = said(lambda: session_routes.announce_branch(
+                    session, token, m["branch"], ws, key, harness=harness, account=account))
+            except ValueError as e:
+                print(f"{e}: declare the work first, or give doing", file=sys.stderr)
+                return 1
+            if answer is False:
+                return 1
+            print(answer)
+            return 0
+        body = {"state": "announce", "harness": harness, "account": account}
+        if m["branch"]:
+            body["branch"] = m["branch"]
+            body["repo"] = session_routes.card_repo(ws)
+        if not doing:
+            card = said(lambda: session_routes.executing_card(session, token))
+            if card is False:
+                return 1   # the read's refusal is said; the no-card repair would be false here
+            if card is None:
+                print("announce carries no doing, and no live card of this session's names one to "
+                      "take it from: declare the work first, or give doing", file=sys.stderr)
+                return 1
+            doing = card["name"]
+        body["doing"] = doing
+    elif verb == "blocked":
+        m = re.fullmatch(r"on (?P<what>.+)", text)
+        if m is None:
+            print("malformed blocked: on <what>", file=sys.stderr)
+            return 1
+        body = {"state": "blocked", "blocker": m["what"].strip()}
+    else:
+        body = {"state": "done", "what": text}
+    key = retry_id or occurrence()
+    print(f"id {key}", file=sys.stderr)
+    if said(lambda: session_routes.status(session, token, key, body)) is False:
+        return 1
+    print(f"registered: {verb}" + (f" {text}" if text else ""))
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if help_requested("verb", argv):
         print(script_help("verb", topic=argv[0] if len(argv) == 2 else None))
@@ -138,14 +217,34 @@ def main(argv: list[str]) -> int:
     text = (sys.stdin.read() if rest == ["-"] else " ".join(rest)).strip()
     if not text:
         return error("verb", f"nothing to say for {verb}")
+    # The grammar is judged before anything is looked up: a malformed invocation crosses no
+    # boundary. An announce shape the door's grammar refuses but Go's admits — no doing — is
+    # judged by the authority once the workspace is known, never admitted on the incumbent's.
+    import re
+    door_refused = False
     if verb in ("announce", "blocked"):
         import verb_grammar
-        if verb_grammar.parse_status(line(verb, session, text)) is None:
+        door_refused = verb_grammar.parse_status(line(verb, session, text)) is None
+        go_shape = (verb == "announce"
+                    and re.fullmatch(r"as \S+/\S+(?: on \S+)?(?: doing .+)?", text) is not None)
+        if door_refused and not go_shape:
             return error("verb", f"malformed {verb}")
     if verb == "ask" and text.startswith("json {"):
         import verb_grammar
         if verb_grammar.structured_ask(text) is None:
             return error("verb", "malformed structured ask: name a non-empty question and valid options")
+    # The workspace's authority decides the wire: a Go status takes the fields its own route names.
+    try:
+        ws = _workspace()
+    except (subprocess.SubprocessError, OSError) as e:
+        print(f"the workspace lookup failed ({e}), so this verb cannot be written down; nothing "
+              f"was sent — send it again", file=sys.stderr)
+        return 1
+    import session_routes
+    if verb in ("announce", "blocked", "done") and ws is not None and session_routes.on_coordination(ws):
+        return _on_go(ws, verb, session, text, retry_id)
+    if door_refused:
+        return error("verb", f"malformed {verb}")
     # A fresh id per invocation, because an invocation that does not say otherwise is a new write
     # — two identical `done:` lines are two events, not one repeated (doc 103 §4.1). It is printed
     # before the send, so an answer lost in transit still leaves the operator the id to resend on.
@@ -158,12 +257,6 @@ def main(argv: list[str]) -> int:
         print(f"this line is {len(sent)} characters and the door takes at most {outbox.LIMIT}; "
               f"no resend would change that, so nothing was sent", file=sys.stderr)
         return 2
-    try:
-        ws = _workspace()
-    except (subprocess.SubprocessError, OSError) as e:
-        print(f"the workspace lookup failed ({e}), so this verb cannot be written down; nothing "
-              f"was sent — send it again", file=sys.stderr)
-        return 1
     if ws is None:
         state, reply = outcome(sent, occurrence_id=this)
     else:
