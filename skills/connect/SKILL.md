@@ -47,7 +47,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/connect.py" --help
 ## Keep your reach open
 
 **Codex:** delivery is injected into your thread; connect asserts that reach. Skip the hold. A
-peer's or the seat's words arrive as `steering say <key>`: read them, and acknowledge nothing.
+peer's or the brain's words arrive as `steering say <key>`: read them, and acknowledge nothing.
 
 **Claude Code with the plugin's module:** when connect's `plugin:` line ends
 `the plugin holds this session's stream, so arm no hold`, arm nothing. A waiting frame starts a

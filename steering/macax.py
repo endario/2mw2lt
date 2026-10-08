@@ -277,6 +277,32 @@ def ready(pid: int, folder: str, title: str):
         return _ready(app, window, tab, title, deadline)
 
 
+def idle(pid: int, folder: str, title: str):
+    """Read the native control composer, not the queue-another-message input of a busy tab."""
+    with App(pid) as app:
+        deadline = time.monotonic() + 2.0
+        window, tab = _match(app, folder, title, deadline)
+        _ready(app, window, tab, title, deadline)
+        sends = []
+        for element, role in app.elements(window, prune_history=True, deadline=deadline):
+            if role in ("AXDialog", "AXMenu", "AXList"):
+                raise Unavailable("the target window shows a dialog, menu or list, not an idle composer")
+            if role != "AXButton":
+                continue
+            name = app.get(element, "AXDescription")
+            if name not in ("Stop", "Send message") or not _owns_input(app, element, window, title, deadline):
+                continue
+            if name == "Stop":
+                raise Unavailable("the target tab shows Stop, not an idle composer")
+            sends.append(element)
+        if len(sends) != 1:
+            raise Unavailable("the target tab has no unique idle Send message control")
+        text = _ready(app, window, tab, title, deadline)
+        if text and not app.get(sends[0], "AXEnabled"):
+            raise Unavailable("the target tab's Send message control is disabled")
+        return text
+
+
 def _keyboard_api():
     lib = c.CDLL("/System/Library/Frameworks/Carbon.framework/Carbon")
     for name, result, args in (

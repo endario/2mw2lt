@@ -395,7 +395,7 @@ def get(path: str, token: str, timeout: float = 10.0) -> dict:
 
 def executing_card(session: str, token: str) -> dict | None:
     """The live card this session executes — its executor engagement, not a merely planned one —:
-    what a branch claim's announce defaults its doing to, the seat having ruled there is no
+    what a branch claim's announce defaults its doing to, the brain having ruled there is no
     separate claim primitive (2026-10-08)."""
     cards = get("/cards?state=live", token).get("cards") or []
     for card in cards:
@@ -416,7 +416,7 @@ def status(session: str, token: str, key: str, body: dict) -> dict:
 
 def announce_branch(session: str, token: str, branch: str, ws: Path, key: str,
                     harness: str = "", account: str = "") -> str:
-    """A branch claim is an announce (the seat's ruling, 2026-10-08): the doing defaults to the
+    """A branch claim is an announce (the brain's ruling, 2026-10-08): the doing defaults to the
     executed card's title, and the repository names the branch, which binds it to the card. There
     is no separate claim primitive on the wire. Raises `ValueError` when no card names doing,
     `Refused` or `Unsent` as a write does."""
@@ -433,7 +433,7 @@ def announce_branch(session: str, token: str, branch: str, ws: Path, key: str,
 
 
 def claim_issue(session: str, token: str, repo: str, n: int) -> str:
-    """An issue claim is a card declared with `resolves:<n>` (the seat's ruling), named for the
+    """An issue claim is a card declared with `resolves:<n>` (the brain's ruling), named for the
     issue, the session its executor. The card id and the request key are the claim's own, so a
     rerun after a lost answer is answered from the first rather than minting a second permanent
     card. Raises `Refused` or `Unsent`."""

@@ -4,7 +4,7 @@ a session reads while it holds the seat (#4551, step 3).
 
 Exits 0 with the text when this session holds the seat, 1 with nothing when it does not, and 3 when
 it cannot tell: a caller keeps what it last had rather than drop the rulings over a door that did
-not answer. The plugin's module places the text in the seat's system prompt; any harness can print
+not answer. The plugin's module places the text in the brain's system prompt; any harness can print
 it. What the rulings are is the knowledge's: the active decisions the daemon serves at `/knowledge/units`.
 """
 from __future__ import annotations
@@ -27,7 +27,7 @@ from verb_help import error, help_requested, script_help  # noqa: E402
 
 HEADING = (
     "# Standing rulings while this session holds the seat\n"
-    "These decisions are the workspace's knowledge: each binds the seat while it holds it. Read one in full with\n"
+    "These decisions are the workspace's knowledge: each binds the brain while it holds the seat. Read one in full with\n"
     "`rest.py /knowledge/units/<id>`, which names its file."
 )
 

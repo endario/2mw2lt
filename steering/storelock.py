@@ -7,7 +7,7 @@ import fcntl
 import os
 import shutil
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 
 @contextlib.contextmanager
@@ -56,4 +56,20 @@ def sweep(entries: Iterable[Path], now: float, days: int) -> list[Path]:
                 removed.append(entry)
         except (BlockingIOError, OSError):
             continue
+    return removed
+
+
+def evict(entries: Iterable[Path], enough: Callable[[], bool]) -> list[Path]:
+    """Remove the least recently used of `entries`, with their locks, until `enough()` holds. One
+    whose lock is held is in use and kept."""
+    def used(p: Path) -> float:
+        try:
+            return p.stat().st_mtime
+        except OSError:
+            return 0.0
+    removed: list[Path] = []
+    for entry in sorted(entries, key=used):
+        if enough():
+            break
+        removed += sweep([entry], now=float("inf"), days=0)
     return removed

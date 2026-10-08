@@ -65,7 +65,7 @@ with `A steering frame is waiting`; call `mcp__2mw2lt__frames` then. A hold re-a
 top of it closes after every frame, and in each gap the brain cannot answer and the fleet loses
 it (#4520). A line that says the module
 holds no stream here may mean this process fetched its plugins before the module existed, and a
-long-lived seat stays that way until it is restarted or resumed
+long-lived brain stays that way until it is restarted or resumed
 (#4551); hold by hand until then. While you hold the seat
 the plugin also places the knowledge's standing decisions last in your system prompt, so a compaction
 does not lose them; any other harness reads them with `seat_section.py`. The
@@ -115,7 +115,7 @@ you last received is the answer — there is nothing to accumulate and nothing t
 Each row carries the session's `model`, `effort`, `machine` (its host name) and `verdict` (its own
 account's, as in the `fleet` frame), each `null` when nothing has been read: delegate by those, and
 never ask a session its level, since it cannot read its own.
-`data: {"kind": "kick", "idle": [...], "executing": [...], "finished": [...], "changed": {...}, "turn": …, "delegation": {...}, "advice": {...}, "gates": {...}, "moved": …, "missed": …}`
+`data: {"kind": "kick", "idle": [...], "executing": [...], "finished": [...], "changed": {...}, "turn": …, "delegation": {...}, "advice": {...}, "gates": {...}, "night": {...}, "moved": …, "missed": …}`
 is the daemon's timer, not a person.
 It arrives every interval because silence sends nothing else, and on the next poll that is
 neither `quiet`, `debounced` nor `refused` once a session finishes a turn. `moved` is the daemon's verdict that this kick carries a fleet
@@ -136,6 +136,16 @@ cache newly `lapsing`, moves the kick. The suggestion is
 yours to weigh, not an instruction. `gates` counts the open gate commissions by state and
 lists each `stalled` one — waiting ten minutes with no run out, or past its run's deadline — with
 who commissioned it: tell that session to commission it again, or find why nothing takes it.
+`night` is the ambient lane's rows, reported on every delivered kick
+(the night shift): `routes` is each candidate route —
+a fresh routes reading names it dispatchable on an account whose verdict is ranked — with its
+`triage` `band` (`{account, machine, ok, speed, attempts, last_seen}`: the route's agreement rate
+against the held-out human dispositions, `null` until it has one) and `admitted`, whether a
+placement of it has answered the admission ping; `queue` counts the route placements still
+waiting for theirs, so a lane drains only as the probes pace it. The rows are state for your
+placement decisions, nothing more: the daemon never places a route, and any draft the lane
+produces waits for your bulk adjudication — you delegate night work through the same placement
+as any other work.
 The cards are the board's, which a brain on any
 machine reads with
 `python3 <2mw2lt>/steering/enroll/door.py --get /steering/work` — the one read the remote door
@@ -517,8 +527,8 @@ This is the one case where you start a harness yourself; everything else is star
 
 ## Keep a session fit for its work
 
-A tmux-hosted Claude Code session's effort and model are set for that session only, never the
-account's, and it can be compacted:
+A Claude Code session in tmux or a VS Code tab can be compacted. Effort and model controls
+remain tmux-only, set for that session rather than the account:
 
 ```bash
 say "control: token @lease <session> effort <low|medium|high|xhigh|max> because <why>"
@@ -528,7 +538,7 @@ say "control: token @lease <session> compact without checkpoint because <why>"  
 ```
 
 The agent drives the pane's `/effort` slider or `/model` picker and presses `s`, or types
-`/compact`; a
+`/compact` into the pane or verified VS Code tab; a
 draft in the composer, or a screen it does not recognise, is a refusal. A compact spends a
 summarising turn on the session's account. You are told how each ended, as a say `from: action
 <id>`: the agent's `typed`, `refused` or `uncertain`, then the daemon's verdict from the session's
@@ -568,11 +578,11 @@ usage frame moves its account. Name the evidence in `because`: the fill, the ver
 - **The next card is loosely related and the session fits its model routing** (the same track, a card
   citing its last issue, the same paths): checkpoint, compact, then the directive. Name the
   relation in `because`.
-- **The session has no pane you drive** (a VS Code tab, a plain terminal): relay `checkpoint:
-  <card>` before its next directive. Its harness compacts it, and the rebrief points it at the
-  note.
+- **The session has neither a pane nor a VS Code tab the agent can reach** (a plain terminal):
+  relay `checkpoint: <card>` before its next directive. Its harness compacts it, and the rebrief
+  points it at the note.
 - **Spec settled.** A session whose spec converged checkpoints at `spec-settled` and says
-  so; lower its effort or model with `control:`, then compact it.
+  so; lower its effort or model with `control:` on tmux, and compact it on either surface.
 - **No `/clear`.** A session that should start clean is checkpointed, retired and launched again.
 - **Archive.** No next card, or its account excluded beyond the window you plan for: `retire:`.
 
@@ -631,7 +641,7 @@ returns only when what it names changes. Promote to the owner only what is the o
 
 Health is the owner's mirror of what you have not yet disposed, not a queue for the owner.
 
-One kind is yours to close rather than merely to read. **`conclusion-unwitnessed`** is a card a
+One kind is yours to close rather than merely to read. **`conclusion-unproven`** is a card a
 session declared done where the observed plane cannot corroborate it — it holds no branch, and
 no merged pull request closes an issue only it claims to resolve. It is not a dispute: there is
 nothing to disagree with.
@@ -730,7 +740,7 @@ One workspace does not drive all machines exclusively.
 
 Before launching, read each machine's headroom: the sessions it holds are on the presence
 rows, and an agent refuses a launch past its `STEERING_MAX_WORKERS`, naming the cap. Spread
-work to the machine with room, and leave room in it: other workspaces' seats delegate there too,
+work to the machine with room, and leave room in it: other workspaces' brains delegate there too,
 so never fill a cap speculatively. The platform's read of machine capacity and use is
 #4177's; until it lands, presence
 and refusals are the reading.
@@ -872,7 +882,7 @@ that are not there already, so they survive this session.
   rounds instead. After a clean rebase, a merge of `main`,
   or a conflict-only update, the worker carries the pass on its own; a round remains available
   when judgment warrants it. Do not prescribe or skip a round in a directive: the gate skill's
-  rule decides, and a seat that orders one overrides it.
+  rule decides, and a brain that orders one overrides it.
 - **Rollout is yours.** Deploying merged work, restarting agents and copying credentials is the
   brain's call (owner's ruling, 2026-09-24); a production action still takes your explicit go,
   not the owner's.

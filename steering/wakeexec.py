@@ -381,31 +381,58 @@ def execute(frame: dict, *, typist=None, lock_path: str | None = None,
             # nothing (`refused`, as `_failed` keeps it) hands the wake to the tab route.
             if via_pane["state"] != wake_states.REFUSED:
                 return via_pane
-    provider = frame.get("provider") or "claude"
+    def posting() -> None:
+        nonlocal typed
+        typed = True
+
     try:
-        tgt = target(frame["psession"], provider, frame)
-    except (Refused, KeyError) as e:
+        with tab_input(frame, t, posting, still_offered=still_offered, workspace=workspace,
+                       lock_path=lock_path, wait=wait) as (tgt, _):
+            text = wake_text(frame)
+            held = t.take_pasteboard(text.format(nonce=nonce))
+            try:
+                t.verify_focus()
+                t.clear_composer()
+                t.paste()
+                t.submit()
+            finally:
+                t.restore_pasteboard(held)
+    except Refused as e:
         why = str(e) if via_pane is None else f"{via_pane['why']}; and as a tab: {e}"
-        return {"attempt": attempt, "state": wake_states.REFUSED, "why": why}
-    if tgt["discovered"]:
-        # The frame was missing something target() had to fall back to local discovery for —
-        # post what it found so the next wake for this session does not need to discover it
-        # again (doc 113 §4's self-backfill). Best-effort: the next Stop hook tries again
-        # regardless, so a failure here costs nothing but this one head start.
+        return {"attempt": attempt, "state": _failed(typed), "why": why}
+    except Exception as e:                     # an agent does not die on one session's wake
+        return {"attempt": attempt, "state": _failed(typed),
+                "why": f"{type(e).__name__}: {e}"}
+    # `sent`, never `received`: what was typed is not a receipt, and only the nonce turning up
+    # as a user turn in the session's own transcript is (#1771 §6).
+    return {"attempt": attempt, "state": wake_states.SENT, "instance": tgt["app_pid"]}
+
+
+def tab_target(frame: dict) -> dict:
+    tgt = target(frame["psession"], frame.get("provider") or "claude", frame)
+    mismatch = fence_here(frame, tgt)
+    if mismatch:
+        raise Refused(mismatch)
+    if not runtime_id.verify_instance(tgt["pid"], tgt["app_pid"], tgt["udd"]):
+        raise Refused(f"app_pid {tgt['app_pid']} is not a verified ancestor of pid {tgt['pid']}")
+    return tgt
+
+
+@contextlib.contextmanager
+def tab_input(frame: dict, t, posting, *, still_offered=None, workspace: Path | None = None,
+              lock_path: str | None = None, wait: float = TYPING_WAIT_SECONDS, idle: bool = False):
+    """The wake and compact share the tab's address, fences, keyboard lock and focus checks."""
+    provider = frame.get("provider") or "claude"
+    tgt = tab_target(frame)
+    if tgt["discovered"] and not idle:
         try:
             _backfill(frame, tgt, workspace)
         except Exception:
             pass
-    mismatch = fence_here(frame, tgt)
-    if mismatch:
-        return {"attempt": attempt, "state": wake_states.REFUSED, "why": mismatch}
-    # Recheck the frame's app address against native ancestry and exact argv.
-    if not runtime_id.verify_instance(tgt["pid"], tgt["app_pid"], tgt["udd"]):
-        return {"attempt": attempt, "state": wake_states.REFUSED,
-                "why": f"app_pid {tgt['app_pid']} is not a verified ancestor of pid {tgt['pid']}"}
+
     def fresh() -> None:
         if still_offered is not None and not still_offered():
-            raise Refused("the uplink that carried this wake ended while it waited for the keyboard")
+            raise Refused("the uplink that carried this action ended while it waited for the keyboard")
         live = runtime_id.derive(provider, pid=tgt["pid"])
         mismatch = fence_here(frame, {**tgt, "runtime": live})
         if mismatch:
@@ -413,37 +440,16 @@ def execute(frame: dict, *, typist=None, lock_path: str | None = None,
         if not runtime_id.verify_instance(tgt["pid"], tgt["app_pid"], tgt["udd"]):
             raise Refused("the session's owning app no longer verifies")
 
-    def posting() -> None:
-        nonlocal typed
-        typed = True
-
-    def sequence() -> None:
+    deadline = time.monotonic() + max(0.0, wait)
+    with pane_lock(tgt["udd"], f"vscode:{tgt['psession']}", wait=wait), contextlib.ExitStack() as keyboard:
+        keyboard.enter_context(_typing(lock_path, max(0.0, deadline - time.monotonic())))
         fresh()
         t.verify_app(tgt["pid"], tgt["app_pid"], tgt["udd"], tgt["psession"])
         t.preflight()
+        t._idle = idle
         t.focus_tab(tgt, fresh, posting)
         t.verify_focus()
-        text = wake_text(frame)
-        held = t.take_pasteboard(text.format(nonce=nonce))
-        try:
-            t.verify_focus()
-            t.clear_composer()
-            t.paste()
-            t.submit()
-        finally:
-            t.restore_pasteboard(held)
-
-    try:
-        with _typing(lock_path, wait):
-            sequence()
-    except Refused as e:
-        return {"attempt": attempt, "state": _failed(typed), "why": str(e)}
-    except Exception as e:                     # an agent does not die on one session's wake
-        return {"attempt": attempt, "state": _failed(typed),
-                "why": f"{type(e).__name__}: {e}"}
-    # `sent`, never `received`: what was typed is not a receipt, and only the nonce turning up
-    # as a user turn in the session's own transcript is (#1771 §6).
-    return {"attempt": attempt, "state": wake_states.SENT, "instance": tgt["app_pid"]}
+        yield tgt, keyboard.close
 
 
 # What this machine can establish for itself. The other three of `wake_states.PINNED` — `session`,
@@ -638,7 +644,7 @@ def _waited(t, ready, seconds: float) -> str:
 
 def control(frame: dict, *, pane=None, find_pane=None, still_offered=None, lock_dir: str | None = None) -> dict:
     """Set a tmux-hosted Claude Code session's effort or model for this session only, or compact
-    it (doc 120 §5, doc 134 §5), or say why not. Never raises at the caller.
+    its pane or VS Code tab (doc 120 §5, doc 134 §5). Never raises at the caller.
 
     Effort and model go through the slider's and the picker's `s`, never a typed value: a typed
     value, or Enter on the picker, saves the account's default, and nothing here writes an
@@ -653,6 +659,12 @@ def control(frame: dict, *, pane=None, find_pane=None, still_offered=None, lock_
     def out(state: str, why: str = "", **kw) -> dict:
         return {"id": rid, "state": state, **({"why": why} if why else {}), "consents": consents, **kw}
 
+    def tab_fallback(why: str) -> dict:
+        result = compact_tab(frame, still_offered=still_offered)
+        if result["state"] == CONTROL_REFUSED:
+            result["why"] = f"{why}; and as a tab: {result.get('why', '')}"
+        return result
+
     if kind == "effort" and target not in composer.LEVELS:
         return out(CONTROL_REFUSED, f"no effort level {target!r}")
     if kind == "model" and not _MODEL.fullmatch(target):
@@ -661,23 +673,42 @@ def control(frame: dict, *, pane=None, find_pane=None, still_offered=None, lock_
         return out(CONTROL_REFUSED, f"no control {frame.get('value')!r}")
     if (frame.get("provider") or "claude") != "claude":
         return out(CONTROL_REFUSED, "only Claude Code's controls are measured")
+    discovered_pane = False
     if not (frame.get("tmux_socket") and frame.get("tmux_pane")):
+        if kind == "compact":
+            # A stored tab binding distinguishes VS Code from a CLI that inherited its entrypoint.
+            try:
+                tgt = tab_target(frame)
+                is_tab = bool(tab_for(tgt["udd"], tgt["psession"]))
+            except (Refused, KeyError):
+                is_tab = False
+            if is_tab:
+                return compact_tab(frame, still_offered=still_offered)
         pid = session_pid(frame)
         found = (find_pane or pane_of)(pid) if pid is not None else None
         if found is None:
-            return out(CONTROL_REFUSED, "the session runs in no tmux pane this agent can find")
+            if kind == "compact":
+                return tab_fallback("the session runs in no tmux pane this agent can find")
+            return out(CONTROL_REFUSED, "the session runs in no tmux pane this agent can find; "
+                       "VS Code model and effort pickers are not measured")
+        discovered_pane = True
         frame = {**frame, "pid": pid, "tmux_socket": found[0], "tmux_pane": found[1]}
     applied, name = False, None
     try:
         t, why = open_pane(frame, pane=pane, still_offered=still_offered, what="control")
         if t is None:
+            if discovered_pane and kind == "compact":
+                return tab_fallback(why)
             return out(CONTROL_REFUSED, why)
         with pane_lock(frame["tmux_socket"], frame["tmux_pane"], lock_dir=lock_dir):
             screen, answered = past_consent(t)
             consents[:] = [{"prompt": c, "folder": frame.get("cwd")} for c in answered]
             before = _composer(t, screen)
             if before is None:
-                return out(CONTROL_REFUSED, f"pane {frame['tmux_pane']} shows no idle claude composer: {_foot(screen)}")
+                why = f"pane {frame['tmux_pane']} shows no idle claude composer: {_foot(screen)}"
+                if discovered_pane and kind == "compact" and not answered:
+                    return tab_fallback(why)
+                return out(CONTROL_REFUSED, why)
             if not before.empty:
                 return out(CONTROL_REFUSED, f"the composer holds a draft ({before.shape}); a control never stashes")
 
@@ -857,6 +888,83 @@ def control(frame: dict, *, pane=None, find_pane=None, still_offered=None, lock_
     except Exception as e:
         why = str(e) if isinstance(e, Refused) else f"{type(e).__name__}: {e}"
         return out(CONTROL_UNCERTAIN if applied else CONTROL_REFUSED, why, **({"name": name} if name else {}))
+
+
+class CompactLog:
+    """A fresh boundary followed by its summary, read through the existing incremental tail."""
+    def __init__(self, psession: str, cwd: str):
+        import machine_harness
+        import transcript_proof
+        paths = {p.resolve() for provider, root in transcript_proof.harness_roots() if provider == "claude"
+                 for p in [machine_harness.claude_transcript_path(root.parent, psession, Path(cwd))]
+                 if p is not None}
+        if len(paths) != 1:
+            raise Refused("the session has no unique compact transcript on this machine")
+        self.path = paths.pop()
+        st = self.path.stat()
+        self.identity, self.at = (st.st_dev, st.st_ino), st.st_size
+        self.psession, self.boundary = psession, False
+
+    def completed(self) -> bool:
+        import durable_ndjson
+        st = self.path.stat()
+        if (st.st_dev, st.st_ino) != self.identity or st.st_size < self.at:
+            raise Refused("the compact transcript was replaced or shortened")
+        reset, self.at, lines = durable_ndjson.tail(self.path, self.at)
+        st = self.path.stat()
+        if reset or (st.st_dev, st.st_ino) != self.identity:
+            raise Refused("the compact transcript changed while it was read")
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(row, dict) or row.get("sessionId") != self.psession:
+                continue
+            if row.get("type") == "system" and row.get("subtype") == "compact_boundary":
+                self.boundary = True
+            elif self.boundary and row.get("type") == "user" and row.get("isCompactSummary") is True:
+                return True
+        return False
+
+
+def compact_tab(frame: dict, *, still_offered=None) -> dict:
+    """Submit a compact at the tab's idle empty composer; the daemon judges the token drop."""
+    t, posted = Typist(), False
+
+    def posting() -> None:
+        nonlocal posted
+        posted = True
+
+    def out(state: str, **kw) -> dict:
+        return {"id": frame.get("id"), "state": state, "consents": [], **kw}
+
+    try:
+        with tab_input(frame, t, posting, still_offered=still_offered, idle=True) as (tgt, release_keyboard):
+            if t.verify_focus():
+                return out(CONTROL_REFUSED, why="the composer holds a draft; a control never clears it")
+            log = CompactLog(tgt["psession"], tgt["cwd"])
+            held = t.take_pasteboard("/compact ")
+            try:
+                if t.verify_focus():
+                    return out(CONTROL_REFUSED, why="the composer changed before paste; no command sent")
+                t.paste()
+                t.submit()
+            finally:
+                t.restore_pasteboard(held)
+            release_keyboard()
+            deadline = time.monotonic() + COMPACT_WAIT_S
+            while True:
+                t._guard()
+                if log.completed():
+                    break
+                if time.monotonic() >= deadline:
+                    return out(CONTROL_UNCERTAIN, why=f"no fresh compact summary within {COMPACT_WAIT_S:.0f}s")
+                time.sleep(COMPACT_POLL_S)
+    except Exception as e:
+        why = str(e) if isinstance(e, Refused) else f"{type(e).__name__}: {e}"
+        return out(CONTROL_UNCERTAIN if posted else CONTROL_REFUSED, why=why)
+    return out(CONTROL_TYPED, echo="Compacted")
 
 
 def _read_back(t) -> str | None:
@@ -1066,7 +1174,8 @@ class Typist:
         tgt = self._target
         if tab_for(tgt["udd"], tgt["psession"]) != self._binding:
             raise Refused("the target's stored tab binding changed before native input")
-        return self._native(macax.ready, tgt["app_pid"], *self._binding)
+        ready = macax.idle if getattr(self, "_idle", False) else macax.ready
+        return self._native(ready, tgt["app_pid"], *self._binding)
 
     def _key(self, code: int | str, flags: int = 0, *, expected_text: str | None = None) -> None:
         if isinstance(code, str):
@@ -1116,7 +1225,7 @@ class Typist:
         self._expect_text("")
 
     def paste(self) -> None:
-        self._key("v", 1 << 20)
+        self._key("v", 1 << 20, expected_text="" if getattr(self, "_idle", False) else None)
         self._expect_text(self._text)
 
     def submit(self) -> None:

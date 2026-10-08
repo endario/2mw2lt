@@ -121,7 +121,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> pr <pr nu
 Keep the pull request a draft through every round, and before each round run the focused guards
 for what changed locally. Before merging, run the guards that read what you changed, chosen with
 judgment: a full steering suite only when the change crosses the tree (the suite runner, a shared
-fixture or harness, several modules). The seat runs the full suite on `main` after a batch of
+fixture or harness, several modules). The brain runs the full suite on `main` after a batch of
 merges and fixes forward what it turns red. A guard that fails under load and passes alone is a
 flake to report, not a reason to hold the merge. Dispatch no CI for it. Mark it ready only after `ship it`, then merge it.
 

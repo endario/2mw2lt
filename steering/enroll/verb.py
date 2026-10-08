@@ -116,7 +116,7 @@ from verb_help import _invocation as help_invocation, error, help_requested, scr
 def _on_go(ws: Path, verb: str, session: str, text: str, retry_id: str | None) -> int:
     """A status verb on a Go workspace: the fields its route names, on the session's carrier, under
     the invocation's occurrence id. An announce may give no doing and take the card it executes'
-    title, the seat having ruled there is no separate claim primitive (2026-10-08)."""
+    title, the brain having ruled there is no separate claim primitive (2026-10-08)."""
     import json as _json
     import re
     import refusal

@@ -228,7 +228,7 @@ export function resendId(stdout: string): string | null {
 // plugin answers above the permission system and cannot show its dialog (doc 175 §8).
 export function entryRefusal(agentId: string | undefined, origin: string, tool: string,
                              check: { decision: 'allow' | 'ask' | 'deny'; reason?: string }): string | null {
-  if (agentId !== undefined) return "refused: a seat verb is the seat's own, never a subagent's."
+  if (agentId !== undefined) return "refused: a seat verb is the brain's own, never a subagent's."
   if (origin !== 'engine') return `refused: ${origin} may not call the seat's verbs.`
   if (check.decision === 'allow') return null
   return `refused: ${check.reason ?? `this session's permission settings ${check.decision === 'ask' ? 'ask before' : 'deny'} ${tool}`}. `

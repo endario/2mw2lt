@@ -27,7 +27,7 @@ PKILL = ("refused: `pkill -f` by a pattern that names neither this worktree nor 
          "kill another checkout's process (doc 08, \"Never pkill -f by module path\"). Kill the pid you "
          "captured, or match the worktree's absolute path.")
 FOLLOW = ("refused: starting 2mw2lt-follow deploys untested main to production, and it stays stopped by "
-          "policy (doc 08, doc 138 §1). Production moves by a deploy the seat makes.")
+          "policy (doc 08, doc 138 §1). Production moves by a deploy the brain makes.")
 AUTO = ("refused: an auto-merge (the gate skill: \"Not --auto\"). Merge with `gh pr merge -R <repo> "
         "--squash --match-head-commit <sha>` once the head holds 2mw2lt/review.")
 

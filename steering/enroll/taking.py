@@ -58,7 +58,7 @@ def main(argv: list[str]) -> int:
     ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
     import session_routes
     if session_routes.on_coordination(ws):
-        # The seat's ruling, 2026-10-08: no separate claim primitive on Go. A branch claim is an
+        # The brain's ruling, 2026-10-08: no separate claim primitive on Go. A branch claim is an
         # announce, whose doing defaults to the executed card's title; an issue claim is a card
         # declared with resolves:<n>, this session its executor, whose id is the claim's own so a
         # rerun after a lost answer replays instead of minting a second card.

@@ -43,6 +43,7 @@ _RAW_FORMS = {
     "authorship": ["authorship: token <lease token> establish <session> epoch <n> model <model> because <evidence>", "authorship: token <lease token> abandon <session> epoch <n> because <reason>"],
     "dispose": ["dispose: token <lease token> <item id> <reason>"],
     "promote": ["promote: token <lease token> <item id> <reason>"],
+    "night": ["night: token <lease token> promote <route> <work class> <reason>", "night: token <lease token> demote <route> <work class> <reason>"],
     "backlog": ["backlog: token <lease token>"],
     "detach": ["detach: <session> token <t> [handover <url> or abandon <reason>]"],
     "rebind": ["rebind: <session> machine_id <stable id>"],
@@ -51,7 +52,7 @@ _RAW_FORMS = {
 
 _AUDIENCE = {
     **{verb: "session" for verb in ("announce", "blocked", "wait", "done", "recommend", "ask", "claim", "taking", "declare", "checkpoint", "holds", "enroll", "bind", "ack", "say", "detach", "gate")},
-    **{verb: "seat" for verb in ("note", "launch", "relay", "retire", "card", "effort", "wake", "control", "roster", "lift", "authorship", "dispose", "promote", "backlog")},
+    **{verb: "seat" for verb in ("note", "launch", "relay", "retire", "card", "effort", "wake", "control", "roster", "lift", "authorship", "dispose", "promote", "backlog", "night")},
     "rebind": "operator",
     "supersede": "operator",
 }
@@ -89,6 +90,7 @@ _EXAMPLES = {
     "authorship": ["authorship: token <lease token> establish violet epoch 1 model opus-5.5 because its transcript names the model", "authorship: token <lease token> abandon violet epoch 1 because no transcript or launch record names its model"],
     "dispose": ["dispose: token <lease token> 010101010101010101010101 handled"],
     "promote": ["promote: token <lease token> 010101010101010101010101 owner decision needed"],
+    "night": ["night: token <lease token> promote opencode-go/glm-5.3 review clears the spoof probe", "night: token <lease token> demote opencode-go/glm-5.3 triage agreed with a spoof two passes running"],
     "backlog": ["backlog: token <lease token>"],
     "detach": ["detach: violet token <t> handover https://github.com/example/repo/pull/1"],
     "rebind": ["rebind: violet machine_id macbook"],
