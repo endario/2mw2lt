@@ -45,6 +45,7 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 import action_notice  # noqa: E402
 import holder  # noqa: E402
+import lease  # noqa: E402
 from local_workspace import agent_port, path_header, required_workspace_root, workspace_header  # noqa: E402
 from moments import moment  # noqa: E402
 import door  # noqa: E402
@@ -237,7 +238,7 @@ def restate(ws: Path, rid: str, psession: str, config: Path, answering: str | No
 
     The daemon keeps readings in memory (doc 30 §6), so a restart blanks each one until the
     session's next `Stop`, and a session idling in its hold has none coming: it showed no model,
-    effort or machine to the brain that would place work on it (#2665). A restart ends every hold
+    effort or machine to the brain that would delegate work to it (#2665). A restart ends every hold
     through the agent's uplink, so the reopened hold is where the reading is restated.
 
     `answering` is the `at` of a routine kick (#3995): the reading is then stated as of now, the
@@ -486,7 +487,8 @@ def close_recording(recorded) -> None:
 def hold(port: str, session: str, token: str, rid: str, frames: Path, until: bool = False,
          service: bool = False, workspace: Path | None = None,
          connected: Callable[[], None] | None = None, plugin: bool = False,
-         lapsed: Callable[[], str | None] | None = None, config: Path | None = None) -> int:
+         lapsed: Callable[[], str | None] | None = None, config: Path | None = None,
+         seated: Callable[[dict], None] | None = None) -> int:
     """Open the stream and yield its frames, until a 403 says no reopen would help.
 
     A 403 is the one answer this loop cannot retry: the token, the node or the incarnation is
@@ -499,6 +501,8 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
     `lapsed` is asked on every line read, keepalives included, and a reason it gives ends the
     hold with 1. `config` is the session's Claude config directory, which the agent reads the
     session's transcript under: it runs outside the session's environment and cannot know it.
+    `seated` is given a `seat` frame before anything records or prints it, and the frame goes on
+    with its lease token replaced by `stored` (#4551).
     """
     url = f"http://127.0.0.1:{port}/steering/session/{session}/stream"
     quiet = False    # the standing failure has been named; naming it again every 2s is noise
@@ -519,6 +523,10 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                 with door.send(req, timeout=HOLD_READ) as r:
                     quiet = False   # a fresh open: the next failure is worth naming again
                     for raw in r:
+                        if seated:
+                            raw, seat = lease.seat_frame(raw)
+                            if seat:
+                                seated(seat)
                         line = raw.decode(errors="replace")   # the response iterates as bytes
                         why = lapsed() if lapsed else None
                         if why:
@@ -689,7 +697,9 @@ def main(argv: list[str]) -> int:
         return hold(port, session, token, rid, frames, until, service, ws,
                     (lambda: restate(ws, rid, psession, h.config_dir()))
                     if h.provider == "claude" else None, plugin, lapsed,
-                    h.config_dir() if h.provider == "claude" else None)
+                    h.config_dir() if h.provider == "claude" else None,
+                    seated=(lambda seat: lease.store(ws, psession, session, str(seat.get("attachment_id") or ""),
+                                                     seat["lease_token"])) if psession else None)
 
 
 if __name__ == "__main__":

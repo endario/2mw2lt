@@ -1,5 +1,6 @@
 import type { Register, EngineInterface, Timer, HookStream, ProcessSpawnChunk, ProcessSpawnResult } from 'claude-code'
-import { lines, atLeast, pick, invokes, answerable, tokensOf, due, owed, nextSeat, asksSeat, READ_KEPT, POINTER, CHECKPOINT, CONNECT_AGAIN, SEAT_SECTION } from './frames'
+import { lines, atLeast, pick, invokes, answerable, tokensOf, due, owed, nextSeat, asksSeat, seatCall, seatSchema, resendId, entryRefusal, READ_KEPT, POINTER, CHECKPOINT, CONNECT_AGAIN, SEAT_SECTION, SEAT_TOOLS } from './frames'
+import type { SeatCall } from './frames'
 import type { Routine } from './frames'
 
 // The plugin's hooks module (#3872): it holds a connected Claude session's steering stream through
@@ -21,6 +22,7 @@ const CONNECTED = { plugin: '2mw2lt', key: 'connected' } as const
 const SEAT = { plugin: '2mw2lt', key: 'seat' } as const
 
 const TOOL = 'mcp__2mw2lt__frames'
+const SEAT_TOOL = new RegExp(`^mcp__2mw2lt__(${Object.keys(SEAT_TOOLS).join('|')})$`)
 const REFRESH_MS = 60_000
 const REPOINT_MS = 1500
 const STDERR_TAIL = 2000
@@ -185,6 +187,24 @@ async function askHolder($: EngineInterface) {
   if ((await $.state.get(SEAT)).value) askSeat($, false)
 }
 
+// One seat verb, through its Python client, on this provider session's stored lease. A send whose
+// answer was lost goes once more under the id the client printed. A client that did not answer
+// with success is the call's error, in its own words.
+async function runSeatCall($: EngineInterface, call: SeatCall): Promise<{ result: string } | { deny: string }> {
+  const speaker = ['--provider', 'claude', '--provider-session', await $.session.id()]
+  const run = (argv: string[], stdin?: string) => $.process.run(argv, { cwd: root, ...(stdin !== undefined ? { stdin } : {}) })
+  const answer = (r: { exitCode: number; stdout: string; stderr: string }) => {
+    const words = [r.stdout.trim(), r.stderr.trim()].filter(Boolean).join('\n') || `the client exited ${r.exitCode} and said nothing`
+    return r.exitCode === 0 ? { result: words } : { deny: words }
+  }
+  if (call.client === 'card') return answer(await run(['python3', script($, 'card.py'), '--lease', ...speaker, ...call.argv]))
+  const argv = ['python3', script($, 'lease.py'), ...speaker, ...(call.client === 'say' ? ['say'] : ['post', call.path])]
+  let r = await run(argv, call.stdin)
+  const again = call.client === 'say' ? resendId(r.stdout) : null
+  if (again) r = await run([...argv, `--retry=${again}`], call.stdin)
+  return answer(r)
+}
+
 async function sessionOf($: EngineInterface): Promise<string> {
   const r = await $.process.run(['python3', script($, 'hold.py'), '--session-of', await $.session.id()], { cwd: root })
   return r.exitCode === 0 ? r.stdout.trim() : ''
@@ -327,12 +347,37 @@ export const register: Register = on => {
       description: 'Read the steering frames waiting for this session, each with its daemon-written from: line. Acknowledges the envelopes it returns.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     })
+    for (const name of Object.keys(SEAT_TOOLS)) {
+      await $.tool.register({ name, description: SEAT_TOOLS[name]!.description, inputSchema: seatSchema(name) })
+    }
     const session = await sessionOf($)       // a resume or reload of a session already connected
     if (session) await start($, session)
     return started
   })
 
   on('tool.describe', { tool: TOOL }, async ($, e, next) => ({ ...(await next(e)), isDeferred: false }))
+
+  // The seat's verbs stay behind ToolSearch for a session that does not hold the seat; a holder
+  // has them in its list. They move when the seat section does, so the prompt changes once.
+  on('tool.describe', { tool: SEAT_TOOL }, async ($, e, next) => {
+    const described = await next(e)
+    return (await $.state.get(SEAT)).value ? { ...described, isDeferred: false } : described
+  })
+
+  // A plugin's tool is answered above the permission system (doc 175 §8): so this hook asks it.
+  // These checks guard the tool's entry; the lease itself is the stored one any process under
+  // this provider session could use through lease.py.
+  on('tool.call', { tool: SEAT_TOOL }, async ($, e, next) => {
+    const { tool, tool_use_id: _id, agentId, ...args } = e as unknown as Record<string, unknown> & { tool: string; agentId?: string }
+    // Asked only of the model's own main-loop call: the other refusals need no question put.
+    const checked = agentId === undefined && next.origin.plugin === 'engine'
+      ? await $.tool.check({ tool, input: args }) : { decision: 'deny' as const }
+    const refused = entryRefusal(agentId, next.origin.plugin, tool, checked)
+    if (refused) return { deny: refused }
+    const call = seatCall(tool.replace(/^mcp__2mw2lt__/, ''), args)
+    if ('refused' in call) return { deny: `refused: ${call.refused}` }
+    return runSeatCall($, call)
+  })
 
   on('tool.call', { tool: TOOL }, async $ => {
     const { value: session = '' } = await $.state.get(SESSION)
@@ -375,7 +420,7 @@ export const register: Register = on => {
         await $.state.set(CONNECTED, true)
         await start($, session)
       }
-    } else if (invokes(e.command, 'promote', 'steering') || (invokes(e.command, 'door') && /\/steering\/brain\/(attach|detach)\b/.test(e.command))) {
+    } else if (invokes(e.command, 'promote', 'steering') || ((invokes(e.command, 'door') || invokes(e.command, 'lease')) && /\/steering\/brain\/(attach|detach)\b/.test(e.command))) {
       // Taking the seat, handing it on or handing it back: no frame tells the session that left it.
       askSeat($, true)
     } else if (invokes(e.command, 'disconnect')) {

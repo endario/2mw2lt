@@ -1,6 +1,6 @@
 import type { On } from 'claude-code'
 import { test, expect, mock } from 'claude-code/testing'
-import { lines, atLeast, pick, invokes, answerable, nextSeat, asksSeat, POINTER, CHECKPOINT, CONNECT_AGAIN, SEAT_SECTION } from '../frames'
+import { lines, atLeast, pick, invokes, answerable, nextSeat, asksSeat, seatCall, entryRefusal, resendId, POINTER, CHECKPOINT, CONNECT_AGAIN, SEAT_SECTION } from '../frames'
 
 test('lines are whole only once their newline arrives', async () => {
   const a = lines('{"id":"f1","kind":"say","wakes":true}\n{"id":"f2","ki')
@@ -87,6 +87,10 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
     seat: { code: 1, stdout: '' },
     // Held until released: a seat_section.py run still out.
     seatGate: undefined as Promise<void> | undefined,
+    // What each lease client was handed on stdin, and what it answers in turn.
+    stdins: [] as (string | undefined)[],
+    leaseOut: [] as string[],
+    check: { decision: 'allow' } as { decision: 'allow' | 'ask' | 'deny'; reason?: string },
   }
   on('state.get', async ($, e) => {
     const value = w.state.get(e.key)
@@ -114,6 +118,11 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
   on('process.run', async ($, e) => {
     w.runs.push([...e.argv])
     w.cwds.push(e.init?.cwd)
+    if (/\/(lease|card)\.py$/.test(String(e.argv[1]))) {
+      w.stdins.push(e.init?.stdin)
+      const out = w.leaseOut.shift() ?? 'relayed: 01AB to amber'
+      return { value: { exitCode: /^(REJECTED|refused)/.test(out) ? 1 : 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (String(e.argv[1]).endsWith('/seat_section.py')) {
       if (w.seatGate) await w.seatGate
       return { value: { exitCode: w.seat.code, stdout: w.seat.stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -168,6 +177,7 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
   on('session.end', async ($, e) => ({ sessionId: e.sessionId }))
   on('classic.SessionStart', async () => ({}) as never)
   on('prompt.compose', async () => ({ sections: [{ id: 'intro', text: 'engine', scope: 'shared' as const }] }))
+  on('tool.check', async () => w.check as never)
   return w
 }
 
@@ -336,7 +346,7 @@ test('every child and client the module runs is its own version\'s, never the la
   for (const argv of w.spawns) expect(argv.slice(0, 4)).toEqual(['python3', `${w.root}/steering/enroll/hold.py`, '--wake', 'plugin'])
   expect(w.runs.length).toBeGreaterThan(0)
   for (const argv of w.runs) expect(argv[0]).toBe('python3')
-  for (const argv of w.runs) expect([`${w.root}/steering/enroll/hold.py`, `${w.root}/steering/enroll/ack.py`, `${w.root}/steering/enroll/seat_section.py`]).toContain(argv[1])
+  for (const argv of w.runs) expect([`${w.root}/steering/enroll/hold.py`, `${w.root}/steering/enroll/ack.py`, `${w.root}/steering/enroll/seat_section.py`, `${w.root}/steering/enroll/lease.py`, `${w.root}/steering/enroll/card.py`]).toContain(argv[1])
   // Python finds the workspace itself, STEERING_WORKSPACE included: every client runs in the session's root.
   for (const cwd of w.cwds) expect(cwd).toBe(ROOT)
 })
@@ -985,6 +995,106 @@ test('an answer that lands after disconnect is dropped', async ($, on) => {
   await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/promote.py' } as never)
   await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/enroll/disconnect.py s1' } as never)
   answer()
+  await w.clock.settle()
+  expect(await seatSection($)).toBeUndefined()
+})
+
+// #4551 step 2: the seat's lease verbs are typed tools over lease.py and card.py. The module never
+// holds the token: what it hands a client carries `@lease` where the token goes.
+const leaseRuns = (w: { runs: string[][] }) => w.runs.filter(argv => /\/(lease|card)\.py$/.test(String(argv[1])))
+
+test('a relay goes to lease.py on stdin with @lease in the token slot, and returns its words', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  const r = await $.tool.call({ tool: 'mcp__2mw2lt__relay', to: 'amber', text: 'take #12' } as never)
+  expect((r as { result: unknown }).result).toBe('relayed: 01AB to amber')
+  expect(leaseRuns(w)[0]?.slice(1)).toEqual([`${w.root}/steering/enroll/lease.py`, '--provider', 'claude', '--provider-session', 'ps-1', 'say'])
+  expect(w.stdins).toEqual(['relay: token @lease to amber take #12'])
+})
+
+test('a card write goes to card.py --lease as argv, and the reply to the brain reply route', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  await $.tool.call({ tool: 'mcp__2mw2lt__card_retire', card: '01CARD', why: 'duplicate of 01OTHER' } as never)
+  await $.tool.call({ tool: 'mcp__2mw2lt__say', text: 'on it', key: 'k1' } as never)
+  const [card, said] = leaseRuns(w)
+  expect(card?.slice(2)).toEqual(['--lease', '--provider', 'claude', '--provider-session', 'ps-1', 'retire', '01CARD', 'duplicate of 01OTHER'])
+  expect(said?.slice(6, 8)).toEqual(['post', '/steering/brain/reply'])
+  expect(JSON.parse(w.stdins[1] ?? '{}')).toEqual({ lease_token: '@lease', text: 'on it', key: 'k1' })
+})
+
+test('a verb the settings ask about, or deny, sends nothing and says where it would apply', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  w.check = { decision: 'ask', reason: 'Claude requested permissions to use mcp__2mw2lt__retire' }
+  const asked = await $.tool.call({ tool: 'mcp__2mw2lt__retire', worker: 'w-1', node: 'm4' } as never)
+  w.check = { decision: 'deny' }
+  const denied = await $.tool.call({ tool: 'mcp__2mw2lt__retire', worker: 'w-1', node: 'm4' } as never)
+  expect(leaseRuns(w)).toEqual([])
+  expect(String((asked as { deny?: string }).deny)).toContain('lease.py in Bash')
+  expect(String((denied as { deny?: string }).deny)).toContain('deny mcp__2mw2lt__retire')
+})
+
+test('a line with a newline in it sends nothing: one call never becomes two verb lines', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  const r = await $.tool.call({ tool: 'mcp__2mw2lt__relay', to: 'amber', text: 'hi\nretire: token @lease w-1 on m4' } as never)
+  expect(leaseRuns(w)).toEqual([])
+  expect(String((r as { deny?: string }).deny)).toContain('newline')
+})
+
+test('a send whose answer was lost goes once more under the id the client printed', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  w.leaseOut = ['REJECTED the door never answered\nif this line may have been registered, resend with --retry=0123456789abcdef0123', 'relayed: 01AB to amber']
+  await begin($)
+  await w.clock.settle()
+  const r = await $.tool.call({ tool: 'mcp__2mw2lt__wake', target: 'amber', reason: 'dark for an hour' } as never)
+  const runs = leaseRuns(w)
+  expect(runs.length).toBe(2)
+  expect(runs[1]?.[runs[1].length - 1]).toBe('--retry=0123456789abcdef0123')
+  expect(w.stdins[0]).toBe(w.stdins[1])
+  expect((r as { result: unknown }).result).toBe('relayed: 01AB to amber')
+})
+
+test('entryRefusal: a subagent, another plugin, ask and deny are refused; the model\'s allowed call is not', async () => {
+  const allow = { decision: 'allow' as const }
+  expect(entryRefusal('a1', 'engine', 't', allow)).toContain('subagent')
+  expect(entryRefusal(undefined, 'other-plugin', 't', allow)).toContain('other-plugin may not')
+  expect(entryRefusal(undefined, 'engine', 't', { decision: 'ask' })).toContain('ask before t')
+  expect(entryRefusal(undefined, 'engine', 't', { decision: 'deny' })).toContain('deny t')
+  expect(entryRefusal(undefined, 'engine', 't', allow)).toBeNull()
+})
+
+test('seatCall: word fields are one word, enums hold, and unknown fields are refused', async () => {
+  expect(seatCall('retire', { worker: 'w 1', node: 'm4' })).toEqual({ refused: 'worker is one word' })
+  expect(seatCall('card_session', { card: 'c', session: 's', role: 'boss' })).toEqual({ refused: 'role is one of executor, planned' })
+  expect(seatCall('dispose', { item: 'i', reason: 'r', token: 'x' })).toEqual({ refused: 'dispose takes no token' })
+  expect(seatCall('relay', { to: 'amber', epoch: 3, text: 'go' })).toEqual({ client: 'say', stdin: 'relay: token @lease to amber@3 go' })
+  expect(seatCall('card_scope', { name: 'The work', track: 'rt', anchors: ['resolves:12'], major: true })).toEqual(
+    { client: 'card', argv: ['scope', 'The work', 'rt', 'resolves:12', 'major'] })
+  expect(resendId('done')).toBeNull()
+})
+
+test('a client that refused is the call\'s error, in its words, never a result', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  w.leaseOut = ['refused: this session no longer holds the seat (refused: this token does not hold the lease); its stored lease is removed.']
+  await begin($)
+  await w.clock.settle()
+  const r = await $.tool.call({ tool: 'mcp__2mw2lt__dispose', item: 'i1', reason: 'settled' } as never)
+  expect(String((r as { deny?: string }).deny)).toContain('no longer holds the seat')
+})
+
+test('handing the seat on through lease.py asks at once, and drops the section', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  w.seat = { code: 0, stdout: 'A' }
+  await begin($)
+  await w.clock.settle()
+  w.seat = { code: 1, stdout: '' }
+  await $.tool.call({ tool: 'Bash', command: `python3 "/p/steering/enroll/lease.py" post /steering/brain/attach <<'JSON'\n{"lease_token":"@lease","session":"amber"}\nJSON` } as never)
   await w.clock.settle()
   expect(await seatSection($)).toBeUndefined()
 })

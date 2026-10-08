@@ -114,3 +114,123 @@ export function nextSeat(was: string, code: number, stdout: string, refresh: boo
 export function asksSeat(kind: string): boolean {
   return kind === 'seat' || kind === 'kick' || kind === 'say'
 }
+
+// The seat's lease verbs as typed tools (#4551 step 2). Each is a thin wrapper over the Python
+// client: a `say` line or a body for lease.py, or card.py's argv, with `@lease` where the token
+// goes. The module never holds the token; the client fills it from the store.
+export type SeatCall = { client: 'say'; stdin: string } | { client: 'post'; path: string; stdin: string } | { client: 'card'; argv: string[] }
+type Field = { type: 'string' | 'integer' | 'boolean' | 'array'; description: string; word?: boolean; enum?: string[] }
+type SeatTool = { description: string; fields: Record<string, Field>; required: string[]; build: (a: Record<string, unknown>) => SeatCall }
+
+const str = (a: Record<string, unknown>, k: string) => String(a[k] ?? '')
+const word = (description: string): Field => ({ type: 'string', description, word: true })
+const text = (description: string): Field => ({ type: 'string', description })
+
+export const SEAT_TOOLS: Record<string, SeatTool> = {
+  relay: {
+    description: 'Seat only: relay a directive to a session, on the stored lease. The daemon frames it as on the owner\'s behalf.',
+    fields: { to: word('The session to direct.'), epoch: { type: 'integer', description: 'The session\'s enrolment epoch, when it must be that one.' }, text: text('The directive, naming the card.') },
+    required: ['to', 'text'],
+    build: a => ({ client: 'say', stdin: `relay: token @lease to ${str(a, 'to')}${a.epoch !== undefined ? `@${str(a, 'epoch')}` : ''} ${str(a, 'text')}` }),
+  },
+  dispose: {
+    description: 'Seat only: close one of the brain\'s Needs You rows, with a reason the owner can read.',
+    fields: { item: word('The row\'s id.'), reason: text('Why it is closed.') },
+    required: ['item', 'reason'],
+    build: a => ({ client: 'say', stdin: `dispose: token @lease ${str(a, 'item')} ${str(a, 'reason')}` }),
+  },
+  retire: {
+    description: 'Seat only: retire a worker the agent launched. Refused while it has unpublished work.',
+    fields: { worker: word('The worker\'s session.'), node: word('The machine it runs on.') },
+    required: ['worker', 'node'],
+    build: a => ({ client: 'say', stdin: `retire: token @lease ${str(a, 'worker')} on ${str(a, 'node')}` }),
+  },
+  wake: {
+    description: 'Seat only: wake a session that has gone dark.',
+    fields: { target: word('The session to wake.'), reason: text('Why.') },
+    required: ['target', 'reason'],
+    build: a => ({ client: 'say', stdin: `wake: token @lease ${str(a, 'target')} because ${str(a, 'reason')}` }),
+  },
+  card_reclassify: {
+    description: 'Seat only: correct a card\'s track, significance, state, priority or major mark.',
+    fields: { card: word('The card.'), field: { type: 'string', description: 'What to correct.', enum: ['track', 'significance', 'state', 'priority', 'major'] },
+              value: word('The new value; for track a lane id or off-track.'), why: text('Why.') },
+    required: ['card', 'field', 'value', 'why'],
+    build: a => ({ client: 'card', argv: ['reclassify', str(a, 'card'), str(a, 'field'), str(a, 'value'), str(a, 'why')] }),
+  },
+  card_retire: {
+    description: 'Seat only: retire a card that no longer describes real work.',
+    fields: { card: word('The card.'), why: text('Why.') },
+    required: ['card', 'why'],
+    build: a => ({ client: 'card', argv: ['retire', str(a, 'card'), str(a, 'why')] }),
+  },
+  card_scope: {
+    description: 'Seat only: make placed work a card.',
+    fields: { name: text('The card\'s name.'), track: word('Its lane.'), anchors: { type: 'array', description: 'Anchors, as resolves:<n> or advances:<n>.' },
+              major: { type: 'boolean', description: 'Declare the work major.' }, card: word('The card id to scope under, to retry one.') },
+    required: ['name', 'track'],
+    build: a => ({ client: 'card', argv: ['scope', ...(a.card !== undefined ? ['--card', str(a, 'card')] : []), str(a, 'name'), str(a, 'track'),
+                                         ...((a.anchors as unknown[] | undefined) ?? []).map(String), ...(a.major === true ? ['major'] : [])] }),
+  },
+  card_session: {
+    description: 'Seat only: name a session as a card\'s executor or planned one.',
+    fields: { card: word('The card.'), session: word('The session.'), role: { type: 'string', description: 'Its role.', enum: ['executor', 'planned'] } },
+    required: ['card', 'session', 'role'],
+    build: a => ({ client: 'card', argv: ['session', str(a, 'card'), str(a, 'session'), str(a, 'role')] }),
+  },
+  say: {
+    description: 'Seat only: reply to a say, as the brain.',
+    fields: { text: text('The reply.'), key: word('The say\'s id, when replying to one.') },
+    required: ['text'],
+    build: a => ({ client: 'post', path: '/steering/brain/reply',
+                   stdin: JSON.stringify({ lease_token: '@lease', text: str(a, 'text'), ...(a.key !== undefined ? { key: str(a, 'key') } : {}) }) }),
+  },
+}
+
+export function seatSchema(name: string) {
+  const t = SEAT_TOOLS[name]!
+  const properties = Object.fromEntries(Object.entries(t.fields).map(([k, f]) =>
+    [k, { type: f.type, description: f.description, ...(f.enum ? { enum: f.enum } : {}), ...(f.type === 'array' ? { items: { type: 'string' } } : {}) }]))
+  return { type: 'object', properties, required: t.required, additionalProperties: false }
+}
+
+// What one call sends, or why it is refused. A control character could end the verb line and start
+// another, and a word field with a space would shift every field after it.
+const CONTROL = /[\u0000-\u001f\u007f]/
+export function seatCall(name: string, args: Record<string, unknown>): SeatCall | { refused: string } {
+  const t = SEAT_TOOLS[name]
+  if (!t) return { refused: `no seat tool ${name}` }
+  for (const k of t.required) if (args[k] === undefined || args[k] === '') return { refused: `${k} is required` }
+  for (const [k, v] of Object.entries(args)) {
+    const f = t.fields[k]
+    if (!f) return { refused: `${name} takes no ${k}` }
+    const values = Array.isArray(v) ? v : [v]
+    for (const x of values) {
+      const s = String(x)
+      if (CONTROL.test(s)) return { refused: `${k} carries a control character or a newline` }
+      if ((f.word || f.type === 'array') && (/\s/.test(s) || s === '')) return { refused: `${k} is one word` }
+    }
+    if (f.enum && !f.enum.includes(String(v))) return { refused: `${k} is one of ${f.enum.join(', ')}` }
+    if (f.type === 'integer' && !Number.isInteger(v)) return { refused: `${k} is a whole number` }
+  }
+  return t.build(args)
+}
+
+// lease.py prints this as its last line when a send may have been registered: the same line goes
+// again under the id, and the door answers it from its record.
+export function resendId(stdout: string): string | null {
+  const m = /resend with --retry=([A-Za-z0-9-]+)\s*$/.exec(stdout)
+  return m ? m[1]! : null
+}
+
+// Why a seat tool's call is refused at its entry, or null to send it. A subagent's call, another
+// plugin's, and one the session's permission settings do not allow outright are refused: the
+// plugin answers above the permission system and cannot show its dialog (doc 175 §8).
+export function entryRefusal(agentId: string | undefined, origin: string, tool: string,
+                             check: { decision: 'allow' | 'ask' | 'deny'; reason?: string }): string | null {
+  if (agentId !== undefined) return "refused: a seat verb is the seat's own, never a subagent's."
+  if (origin !== 'engine') return `refused: ${origin} may not call the seat's verbs.`
+  if (check.decision === 'allow') return null
+  return `refused: ${check.reason ?? `this session's permission settings ${check.decision === 'ask' ? 'ask before' : 'deny'} ${tool}`}. `
+    + 'The plugin cannot show the permission dialog; run the same verb through lease.py in Bash, where it applies.'
+}

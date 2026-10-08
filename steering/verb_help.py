@@ -178,7 +178,11 @@ TOOLS = {
         {"topic": "retire", "usage": "retire <workspace id>", "example": "install retire workspace-1"},
     ]},
     "rest": {"forms": [
-        {"topic": None, "usage": _SPEAKER_USAGE + " [--post [--json <body>] [--key <key>]] <api-v1-path> [--all]", "example": "rest /openapi.json"},
+        {"topic": None, "usage": _SPEAKER_USAGE + " [--lease] [--post [--json <body>] [--key <key>]] <api-v1-path> [--all]", "example": "rest /openapi.json"},
+    ]},
+    "lease": {"forms": [
+        {"topic": "say", "usage": "say " + _SPEAKER_USAGE + " [--retry=<id>]", "example": "lease say < line.txt"},
+        {"topic": "post", "usage": "post <path> " + _SPEAKER_USAGE, "example": "lease post /steering/brain/reply < body.json"},
     ]},
     "seat_section": {"bare": False, "forms": [
         {"topic": None, "usage": _SPEAKER_USAGE, "example": "seat_section --provider claude --provider-session 9a77"},

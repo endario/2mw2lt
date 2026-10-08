@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""`card.py --token - <verb> <args…>`: a brain's board write (doc 32 §4), sent through the door as a
+"""`card.py --token - <verb> <args…>` or `card.py --lease [--provider <harness> --provider-session <id>]
+<verb> <args…>`: a brain's board write (doc 32 §4), sent through the door as a
 `card:` line on its lease token. `cards.py` is the same command where the ledger is this machine's."""
 from __future__ import annotations
 
-import shlex
 import sys
 from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+import python_floor  # noqa: E402
+
+python_floor.require()
+
+import shlex  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -47,6 +54,27 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
     if prog == "card.py" and help_requested("card", argv, bare=False):
         print(script_help("card"))
         return 0
+    if argv[:1] == ["--lease"]:
+        # The seat's stored lease, never on stdin or in a command line (#4551).
+        import connect
+        import lease as lease_mod
+        parsed = connect.speaker_flags(argv[1:])
+        if parsed is None:
+            print(usage, file=sys.stderr)
+            return 2
+        flags, rest = parsed
+        try:
+            held = lease_mod.held(flags)
+        except ValueError as why:
+            print(f"refused: {why}", file=sys.stderr)
+            return 2
+        if held is None:
+            print(lease_mod.NONE, file=sys.stderr)
+            return 1
+        if len(rest) < 1:
+            print(usage, file=sys.stderr)
+            return 2
+        return _scoped(held["lease_token"], rest[0], rest[1:], usage, local, held)
     if len(argv) < 3 or argv[0] != "--token":
         print(usage, file=sys.stderr)
         return 2
@@ -58,18 +86,22 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
     if not token:
         print("refused: --token - reads the lease token from stdin, and none arrived", file=sys.stderr)
         return 2
+    return _scoped(token, verb, rest, usage, local)
+
+
+def _scoped(token: str, verb: str, rest: list[str], usage: str, local, held: dict | None = None) -> int:
     if verb == "scope" and rest[:1] != ["--card"]:
         # The id is minted here, before anything is sent, so the same write can be made again
         # under it: a rerun with it is answered from the record (doc 125 §3).
         rest = ["--card", new_ulid(), *rest]
-        code = _send(token, verb, rest, usage, local)
+        code = _send(token, verb, rest, usage, local, held)
         if code:
             print(f"to retry this scope under the same card, send it with --card {rest[1]}", file=sys.stderr)
         return code
-    return _send(token, verb, rest, usage, local)
+    return _send(token, verb, rest, usage, local, held)
 
 
-def _send(token: str, verb: str, rest: list[str], usage: str, local) -> int:
+def _send(token: str, verb: str, rest: list[str], usage: str, local, held: dict | None = None) -> int:
     if local is not None:
         code = local(token, verb, rest, usage)
         if code is not None:
@@ -84,6 +116,11 @@ def _send(token: str, verb: str, rest: list[str], usage: str, local) -> int:
     # `shlex` both ways: a card's name has spaces in it, so the door's copy of the line
     # has to be split the way a shell would split the argv this file was given.
     reply = door.say(" ".join(["card:", "token", token, verb, shlex.join(rest)]).strip())
+    if held is not None:
+        import lease as lease_mod
+        if lease_mod.dead(reply):
+            print(lease_mod.gone(held, reply))
+            return 1
     print(reply)
     return 0 if reply.startswith("carded:") else 1
 

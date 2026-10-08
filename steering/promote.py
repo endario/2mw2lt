@@ -14,12 +14,18 @@ here.
 """
 from __future__ import annotations
 
-import json
-import os
 import sys
-import urllib.error
-import urllib.request
 from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parent))
+import python_floor  # noqa: E402
+
+python_floor.require()
+
+import json  # noqa: E402
+import os  # noqa: E402
+import urllib.error  # noqa: E402
+import urllib.request  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -28,6 +34,7 @@ from door import door, send  # noqa: E402
 from bind import records  # noqa: E402
 from local_workspace import required_workspace_root  # noqa: E402
 import hooks  # noqa: E402
+import lease  # noqa: E402
 
 USAGE = "usage: promote.py"
 
@@ -95,7 +102,11 @@ def main(argv: list[str]) -> int:
         refuse(f"the door at {base} did not seat this session: {why}")
     except (urllib.error.URLError, OSError, ValueError) as e:
         refuse(f"no steering daemon answered at {base} ({e}). The role only exists where one runs.")
-    print(f"TOKEN={out['lease_token']}\nATTACHMENT_ID={out['attachment_id']}\nSESSION={out['session']}")
+    # The lease is stored for this session, never printed: a printed token sits in the model's
+    # context and every command it writes after (#4551). The lease clients read it back with
+    # `--lease`.
+    lease.store(ws, rec["provider_session"], out["session"], out["attachment_id"], out["lease_token"])
+    print(f"LEASE=stored\nATTACHMENT_ID={out['attachment_id']}\nSESSION={out['session']}")
     print(f"\nSeated as {out['session']} — the name the door resolved from your enrollment.")
     print("Not answerable yet. Hold your stream at the local agent before the daemon will "
           "route to you — the recipe is in the /2mw2lt:brain skill, and the stream has to "

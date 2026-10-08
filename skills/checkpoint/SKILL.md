@@ -55,5 +55,5 @@ It reads the comment back from GitHub and sends its hash with it. `checkpointed:
 is the answer; `dropped: <n>` names a lesson that carried something credential-shaped and was
 left out, and the rest stand. A lost answer goes again with `--retry=<the id it printed>`.
 
-After it, the brain reads the checkpoint as current on your placement row until you next
+After it, the brain reads the checkpoint as current on your delegation row until you next
 acknowledge a directive.

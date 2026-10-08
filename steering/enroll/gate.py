@@ -240,7 +240,7 @@ def carry(session: str, flags, pr: str, retry_id: str | None = None) -> int:
     this = retry_id or occurrence()
     print(f"id {this}", file=sys.stderr)
     state, reply = outcome(f"gate: carry {pr} head {at}{' equivalent' if equivalent else ''} token {token}",
-                           VERB_WAIT, this)
+                           PIN_WAIT, this)
     print(display_reply(reply))
     if state == UNSENT:
         # The door may have carried it and lost only the answer: a resend under the same id is

@@ -19,7 +19,9 @@ To hand the seat on while you hold it, name a session that holds its stream; the
 down that session's stream, not back to you:
 
 ```bash
-printf '%s' "{\"lease_token\":\"$TOKEN\",\"session\":\"<successor>\"}" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/door.py" --post /steering/brain/attach
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" post /steering/brain/attach <<'JSON'
+{"lease_token":"@lease","session":"<successor>"}
+JSON
 ```
 
 ## Take the role
@@ -32,14 +34,19 @@ No session name: it finds the enrollment minted for this session and the role is
 that enrollment's own credential, so the holder the owner sees is the session steering already
 knows. Run `/2mw2lt:connect` first if this session is not enrolled.
 
-It prints `TOKEN`, `ATTACHMENT_ID` and `SESSION`. Keep them for this session. The token is a
-credential, so never paste it into the ledger, a file the owner reads, or a reply. Lost it?
-Run `promote.py` again: while this session still holds the seat it prints the same three, and
-the seat is not taken afresh.
+It prints `LEASE=stored`, `ATTACHMENT_ID` and `SESSION`. The lease token is stored for this
+session under the workspace's `.claude/steering-tokens/leases/` and never printed: every lease
+verb on this page reads it there, through `lease.py` or `card.py --lease`, wherever the line says
+`token @lease` (#4551). Never read the
+file or paste the token: it would sit in your context and every command after. Where the plugin
+holds your stream, the same verbs are typed tools, `mcp__2mw2lt__relay` and the rest.
 
-The owner can also seat you from the console. Then the same credential arrives on the stream
-you hold, as one frame: `data: {"kind": "seat", "attachment_id": …, "lease_token": …}`. Keep
-its two fields exactly as you would `promote.py`'s.
+The owner can also seat you from the console. Then the credential arrives on the stream you hold,
+as a `seat` frame, and the hold stores it as `promote.py` does; the frame you read says
+`"lease_token": "stored"`.
+
+When the seat is no longer yours, the next lease verb answers `refused: this session no longer
+holds the seat (…); its stored lease is removed`. Take it again only if the owner asks.
 
 If your harness keeps memory, keep one line there pointing at [Keep the board](#keep-the-board)
 and the owner's standing instructions under [Keep the brain's own house](#keep-the-brains-own-house),
@@ -106,9 +113,9 @@ through the door with `ack: <ulid> token <your enrolment token>` once you have r
 seat and again whenever it changes. It is the whole roster every time, not a delta, so the one
 you last received is the answer — there is nothing to accumulate and nothing to acknowledge.
 Each row carries the session's `model`, `effort`, `machine` (its host name) and `verdict` (its own
-account's, as in the `fleet` frame), each `null` when nothing has been read: place by those, and
+account's, as in the `fleet` frame), each `null` when nothing has been read: delegate by those, and
 never ask a session its level, since it cannot read its own.
-`data: {"kind": "kick", "idle": [...], "executing": [...], "finished": [...], "changed": {...}, "turn": …, "placement": {...}, "advice": {...}, "gates": {...}, "moved": …, "missed": …}`
+`data: {"kind": "kick", "idle": [...], "executing": [...], "finished": [...], "changed": {...}, "turn": …, "delegation": {...}, "advice": {...}, "gates": {...}, "moved": …, "missed": …}`
 is the daemon's timer, not a person.
 It arrives every interval because silence sends nothing else, and on the next poll that is
 neither `quiet`, `debounced` nor `refused` once a session finishes a turn. `moved` is the daemon's verdict that this kick carries a fleet
@@ -118,7 +125,7 @@ busy. It overlaps `executing`, because a session that has just finished is still
 `changed.reset` lists each spent account whose window has just reset, `[{account, vendor, window,
 used_before, sessions}]`: resume every session in `sessions` with a `say`, since the wake verb is
 refused for a session the plugin holds (#4564).
-`placement` is each reachable session's `{model, effort, machine, verdict}`, so a quiet brain is
+`delegation` is each reachable session's `{model, effort, machine, verdict}`, so a quiet brain is
 re-told rather than left to remember. `advice` is the daemon's suggestion for each session that
 has one:
 `concluded` or `orphaned` (its worker still runs, off the board) to `close` (`retire:`), `full`
@@ -133,18 +140,18 @@ who commissioned it: tell that session to commission it again, or find why nothi
 The cards are the board's, which a brain on any
 machine reads with
 `python3 <2mw2lt>/steering/enroll/door.py --get /steering/work` — the one read the remote door
-answers, with each reading's working directory omitted. Place from `finished` first and `idle` after it, each session once — the two lists overlap for
+answers, with each reading's working directory omitted. Delegate to `finished` first and `idle` after it, each session once — the two lists overlap for
 `ACTIVE` and a session in both is one session. For each of them, take the
 highest-priority card with no present executor (one whose executor has left the board counts)
 that the session can carry, and that you have not already relayed to a session still on the board
 that has not yet announced it: its account has room, and it runs at the level the card's `needs:`
 asks for. Relay it with
-`relay: token <lease token> to <session> <the directive, naming the card>`, which needs no
+`relay: token @lease to <session> <the directive, naming the card>`, which needs no
 clearance, and once the session announces the branch, write `card-session <session> executor`.
 If no card fits, do nothing. Never
 report to the owner because a kick arrived. Any turn you take answers it;
 three unanswered kicks raise the owner. A turn that answers a frame changing nothing the owner
-knows — a kick with nothing to place, a routine say — is one line at most, and no line when
+knows — a kick with nothing to delegate, a routine say — is one line at most, and no line when
 nothing in it is new to them.
 
 `data: {"kind": "fleet", "accounts": [{"account", "provider", "vendor", "verdict", "tightest", "incentive", "sessions"}]}`
@@ -194,7 +201,9 @@ for line in sys.stdin.read().splitlines():
 ## Reply
 
 ```bash
-printf '%s' "{\"lease_token\":\"$TOKEN\",\"key\":\"<the say's id>\",\"text\":\"...\"}" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/door.py" --post /steering/brain/reply
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" post /steering/brain/reply <<'JSON'
+{"lease_token":"@lease","key":"<the say's id>","text":"..."}
+JSON
 ```
 
 **Send `key`, and retry on anything that is not an answer.** Every frame carries an `id`, and
@@ -222,7 +231,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" ask <your session> 'json
 sends a notification to their phone.
 
 ```bash
-printf '%s' "{\"lease_token\":\"$TOKEN\",\"title\":\"Steering\",\"text\":\"...\"}" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/door.py" --post /steering/push/raise
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" post /steering/push/raise <<'JSON'
+{"lease_token":"@lease","title":"Steering","text":"..."}
+JSON
 ```
 
 **Once every fifteen minutes.** A second raise inside the window comes back `429` with
@@ -313,26 +324,26 @@ loopback answer — `takings` for an issue, `holdings` for a branch.
 Both run on the session's own enrolment token, so the session runs them and the brain reads the
 registry.
 
-## Make placed work a card
+## Make delegated work a card
 
 Work becomes a card at the first of three signs: it is declared, a gate is commissioned on it, or
 its pull request resolves, subsumes or advances an issue.
-When you place major work, scope its card so it is on the board before its first gate, and name
+When you delegate major work, scope its card so it is on the board before its first gate, and name
 the session as its executor. A session may also declare its own card with `declare.py`, without
 asking you.
 
 ```bash
-printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --token - scope <name> <track> [<verb>:<n>[,<n>] ...]
-printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --token - session <card> <session> executor
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease scope <name> <track> [<verb>:<n>[,<n>] ...]
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease session <card> <session> executor
 ```
 
-Placing a card is also when you say what it waits on and which goal it serves; a goal is a major
+Delegating a card is also when you say what it waits on and which goal it serves; a goal is a major
 card whose acceptance criteria are numbered lines. Name the plan's sentence as `--source` when an
 edge comes from one:
 
 ```bash
-printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --token - link <card> requires|part-of <card>|<owner>/<name>#<n> [--source <where>] <why>
-printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --token - unlink <card> requires|part-of <target> resolved|withdrawn <why>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease link <card> requires|part-of <card>|<owner>/<name>#<n> [--source <where>] <why>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease unlink <card> requires|part-of <target> resolved|withdrawn <why>
 ```
 
 A goal, or a card you declared major, owes an outcome brief before its first branch is pushed. Write it
@@ -342,7 +353,7 @@ brief. When the card adds the only fact that would show its outcome, state the b
 The CI backstop of #4283 would read:
 
 ```bash
-printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --token - outcome <card> \
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease outcome <card> \
   need "CI on main runs only when a GitHub schedule slot fires, and GitHub delays or drops slots" \
   target "at least 0.95 of slots due get a run within 60 min; no slot runs twice" \
   window 7d starts rollout \
@@ -365,12 +376,12 @@ from either door. Every `say "…"` on this page sends a lease verb to the door 
 names, from whichever machine you are on, with the agent credential. It prints `id <id>` on
 stderr before it sends. It exits 0 on an answer, 1 on a refusal or on a door that never answered,
 and the text says which. A line whose answer was lost goes again as
-`printf '%s' "<line>" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/door.py" --say --retry=<id>`, so the door answers it from its
+`printf '%s' "<line>" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" say --retry=<id>`, so the door answers it from its
 record rather than taking it twice. `note:` and `needs:` keep no record, so they are sent once:
 
 ```bash
-say() { printf '%s' "$1" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/door.py" --say; }
-say "relay: token $TOKEN to <their session> <the directive, with the context it needs>"
+say() { printf '%s' "$1" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" say; }
+say "relay: token @lease to <their session> <the directive, with the context it needs>"
 ```
 
 **Name the command, never the intent.** A worker acts on the words of the brief and cannot
@@ -398,9 +409,9 @@ Start one only when a card fits no session on the board and a machine has room f
 worker, and choose the harness knowing whose quota it spends:
 
 ```bash
-say "launch: token $TOKEN <goose|opencode> on <the machine's machine_id> because <why>"
-say "launch: token $TOKEN opencode on <node> model <provider/model> thinking <level> because <why>"   # the vendor with room
-say "launch: token $TOKEN opencode model <opencode-go|commandcode>/<model> because <why>"   # on the machine whose account ranks first; the reply says which and why
+say "launch: token @lease <goose|opencode> on <the machine's machine_id> because <why>"
+say "launch: token @lease opencode on <node> model <provider/model> thinking <level> because <why>"   # the vendor with room
+say "launch: token @lease opencode model <opencode-go|commandcode>/<model> because <why>"   # on the machine whose account ranks first; the reply says which and why
 ```
 
 Name the node for goose, and name the agent's own — normally a session's `machine_id`: which
@@ -421,19 +432,19 @@ session, or `launch-refused` with the agent's reason. A launch refused at the ca
 launch again.
 
 ```bash
-printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" /launches/<id>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /launches/<id>
 ```
 
 The same client reads `/facts?state=<kind>` (the ledger, redacted, a page at a time; `--all`
 follows it to the head) and `/classifications/summary`. Read these; do not reach for the ledger
 on the host.
-The worker then arrives on the next kick, and you place it like any idle session. One launch
+The worker then arrives on the next kick, and you delegate to it like any idle session. One launch
 is in flight per machine, and an agent refuses one past `STEERING_MAX_WORKERS` live workers.
 
 An interactive Claude Code session, one a person can watch and type into, is a `launch:` too:
 
 ```bash
-say "launch: token $TOKEN claude [on <node>] [vendor <vendor>] [account <n>] model <model> effort <level> [window] because <why>"
+say "launch: token @lease claude [on <node>] [vendor <vendor>] [account <n>] model <model> effort <level> [window] because <why>"
 ```
 
 `model` is Claude Code's own (`opus`, `opus[1m]`) and both it and `effort` are required, so no
@@ -446,7 +457,7 @@ mapped to that vendor's own model without a word. `worker-launched` names the ve
 launcher the session runs on; the agent starts it in tmux through that launcher, answers the
 folder-trust prompt, and answers the launch once the session has connected itself. A machine
 offers this only for the launchers it declares in `STEERING_CLAUDE_LAUNCHERS`. End one with
-`retire: token $TOKEN <tmux session> on <node>`, the `2mw2lt-launch-…` name `worker-launched`
+`retire: token @lease <tmux session> on <node>`, the `2mw2lt-launch-…` name `worker-launched`
 carries.
 
 A launched session stays headless in tmux. Name `window` only when the owner must view or
@@ -460,7 +471,7 @@ A Codex model is launched the same way, on a machine that declares a proxied `op
 since `launch:` has no launcher for the `codex` harness itself:
 
 ```bash
-say "launch: token $TOKEN claude vendor openai model <model> effort <level> because <why>"
+say "launch: token @lease claude vendor openai model <model> effort <level> because <why>"
 ```
 
 ## A connected session is yours
@@ -477,7 +488,7 @@ A session that is alive but holds no stream and takes no turns is woken by typin
 buys it a turn from its own account:
 
 ```bash
-say "wake: token $TOKEN <session> because <why>"
+say "wake: token @lease <session> because <why>"
 ```
 
 The agent on its machine types into its VS Code tab, or into its tmux pane when it connected from
@@ -510,10 +521,10 @@ A tmux-hosted Claude Code session's effort and model are set for that session on
 account's, and it can be compacted:
 
 ```bash
-say "control: token $TOKEN <session> effort <low|medium|high|xhigh|max> because <why>"
-say "control: token $TOKEN <session> model <name>-<version> because <why>"   # sonnet-5, opus-5.5
-say "control: token $TOKEN <session> compact because <why>"
-say "control: token $TOKEN <session> compact without checkpoint because <why>"   # recorded as skipped
+say "control: token @lease <session> effort <low|medium|high|xhigh|max> because <why>"
+say "control: token @lease <session> model <name>-<version> because <why>"   # sonnet-5, opus-5.5
+say "control: token @lease <session> compact because <why>"
+say "control: token @lease <session> compact without checkpoint because <why>"   # recorded as skipped
 ```
 
 The agent drives the pane's `/effort` slider or `/model` picker and presses `s`, or types
@@ -545,16 +556,16 @@ usage frame moves its account. Name the evidence in `because`: the fill, the ver
 - **Model.** Off a model whose account the evaluator excludes, or whose model-scoped window
   binds. Larger for the work you would raise effort for, smaller for mechanical work.
 - **Checkpoint first.** A compact is refused until the session's `checkpoint` is current. Ask
-  for one with `say "relay: token $TOKEN to <session> checkpoint: <card>"`; the session answers
+  for one with `say "relay: token @lease to <session> checkpoint: <card>"`; the session answers
   with the verb, and you hear it `from: checkpoint <id>`. `compact without checkpoint` goes ahead
   anyway and is recorded as skipped: name why in `because`.
 - **The next card continues the same work** (the same card, issue or branch, or its follow-up):
   keep the session. When the row's `context` passes 120k tokens, checkpoint, then compact. The
   window is not readable, so the threshold is absolute.
 - **The next card is unrelated, and the session is tmux-launched:** checkpoint at `unit-done`,
-  retire it, and launch fresh at the card's tier (below), naming the note in its first directive. A fresh launch
-  sets the tier, pays no summarising turn, and starts from the same floor a compact leaves.
-- **The next card is loosely related and the session's tier fits it** (the same track, a card
+  retire it, and launch fresh on the card's model routing (below), naming the note in its first directive. A fresh launch
+  takes the routed model, pays no summarising turn, and starts from the same floor a compact leaves.
+- **The next card is loosely related and the session fits its model routing** (the same track, a card
   citing its last issue, the same paths): checkpoint, compact, then the directive. Name the
   relation in `because`.
 - **The session has no pane you drive** (a VS Code tab, a plain terminal): relay `checkpoint:
@@ -574,7 +585,7 @@ still needs, with the exclusion lifting (`until`) later than the work can wait �
 pause itself with `blocked: … resets …`; do not move it.
 
 ```bash
-say "relay: token $TOKEN to <session> pack up: <card or issue>"
+say "relay: token @lease to <session> pack up: <card or issue>"
 ```
 
 It answers `done: <card> handed over — <PR comment url>` once its branch is pushed and a
@@ -583,8 +594,8 @@ the directive to take it over, naming that comment. It checks out the branch and
 it first; only after that announce, record the new holder, in this order:
 
 ```bash
-printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --token - unsession <card> <old session>
-printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --token - session <card> <new session> executor
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease unsession <card> <old session>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease session <card> <new session> executor
 ```
 
 The card takes its branch from the new holder's `on` when it is named, which is why the
@@ -613,7 +624,7 @@ you as lines in the `board:` row, each carrying its verb:
 | `unlaned` | a card is filed under a track no lane names: `reclassify` its track, or `retire` it |
 
 **Delegate the row; do not work it by hand.** When a kick finds a `board:` row standing, hand the
-row's lines to one routine-tier worker, with the lease writes it may make. The worker verifies
+row's lines to one worker routed for routine work, with the lease writes it may make. The worker verifies
 each line against the ledger and GitHub, writes what it can with a one-line why, never discards
 work, and returns the judgement calls. Answer those, then `dispose:` the row. A disposed line
 returns only when what it names changes. Promote to the owner only what is the owner's to decide.
@@ -624,15 +635,15 @@ One kind is yours to close rather than merely to read. **`conclusion-unwitnessed
 session declared done where the observed plane cannot corroborate it — it holds no branch, and
 no merged pull request closes an issue only it claims to resolve. It is not a dispute: there is
 nothing to disagree with.
-Read the row, decide which is true, and write it with the lease token `promote.py` printed:
+Read the row, decide which is true, and write it on the stored lease:
 
 ```bash
 # the association was real and never written — the card lands on the next sweep
-printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --token - branch <card> <repo> <branch>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease branch <card> <repo> <branch>
 # the conclusion was premature — the card returns to live work
-printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --token - unconclude <card>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease unconclude <card>
 # the card no longer describes real work
-printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --token - retire <card> "<why>"
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease retire <card> "<why>"
 ```
 
 Ask the session named in the row before withdrawing its conclusion. It concluded on evidence
@@ -645,15 +656,15 @@ the cards placed on a low-confidence answer; confirming one in the lane it is al
 correction too, and the row folds once each is settled.
 
 ```bash
-printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --token - reclassify <card> track <lane> "<why>"
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reclassify <card> track <lane> "<why>"
 # repository upkeep drawn in a product lane
-printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --token - reclassify <card> track off-track "<why>"
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reclassify <card> track off-track "<why>"
 # a minor edit that earned a card by its gate, or back again
-printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --token - reclassify <card> significance minor "<why>"
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reclassify <card> significance minor "<why>"
 # the whole anchor set the card declares, replacing what it declared before
-printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --token - reanchor <card> resolves:<n> advances:<n> "<why>"
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reanchor <card> resolves:<n> advances:<n> "<why>"
 # a card the keeper retired that is still real work
-printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --token - reclassify <card> state live "<why>"
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reclassify <card> state live "<why>"
 ```
 
 The keeper retires a card whose every branch is gone unmerged, with no open pull request and no
@@ -665,9 +676,9 @@ both declared their units, which makes it a declared split. Nothing merges them.
 duplicate, retire one `because duplicate of <card>` and move its branch across with `branch` and
 `unbranch`.
 
-Another kind is a placement veto, not a task to close. **`push-unattended`** names a branch a
+Another kind is a delegation veto, not a task to close. **`push-unattended`** names a branch a
 machine's census reports dirty or unconfirmed on origin, with no live session on that machine —
-do not place new work on it. The risk is stacking on top of an edit in flight that has not
+do not delegate new work on it. The risk is stacking on top of an edit in flight that has not
 reached GitHub yet; it clears on its own once that machine reports the branch clean and
 confirmed, or once a session is live there again.
 
@@ -675,12 +686,12 @@ confirmed, or once a session is live there again.
 
 The board is yours to keep correct: classified, connected, and amended where it is wrong. Sessions declare what
 they know, and their declarations are inputs, not the board's guarantee. Run this on taking the
-seat, after every placement, and whenever the `placement:` or `board:` row stands. The `board:`
+seat, after every delegation, and whenever the `placement:` or `board:` row stands. The `board:`
 row lists what the daemon found missing; each line carries the verb that would answer it, and you
 dispose the row once you have answered what needs it.
 
 1. **Classify.** Work the `placement:` row, as [Triage the band](#triage-the-band) says.
-2. **Connect.** When you place work from a plan, link each prerequisite the plan states
+2. **Connect.** When you delegate work from a plan, link each prerequisite the plan states
    (`requires`) and the goal it names (`part-of`), with the plan's sentence as `--source`. Then
    open the desk's Map: its **Not linked** shelf lists every held card with no relationship, by
    lane. For each card that waits on or serves another, link it; standalone work stays as it is.
@@ -700,10 +711,10 @@ before withdrawing its conclusion.
 
 The owner's ruling, 2026-10-07
 (#4175): managing everything well —
-especially throughput and efficiency — is the mission, and placement carries it.
+especially throughput and efficiency — is the mission, and delegation carries it.
 
 - Work that removes a time or cost sink — a pointless gate round, a serial chain, a flaky
-  guard, a manual step — ranks above feature work of equal value. Place it immediately.
+  guard, a manual step — ranks above feature work of equal value. Delegate it immediately.
 - Think as the user of the service: the owner and the other tenants, whose time and quota each
   slow round spends.
 - Prefer the cheapest capable account and harness for the job, and offload non-critical work
@@ -719,7 +730,7 @@ One workspace does not drive all machines exclusively.
 
 Before launching, read each machine's headroom: the sessions it holds are on the presence
 rows, and an agent refuses a launch past its `STEERING_MAX_WORKERS`, naming the cap. Spread
-work to the machine with room, and leave room in it: other workspaces' seats place there too,
+work to the machine with room, and leave room in it: other workspaces' seats delegate there too,
 so never fill a cap speculatively. The platform's read of machine capacity and use is
 #4177's; until it lands, presence
 and refusals are the reading.
@@ -734,7 +745,7 @@ what a session is running at and hand accordingly.
 
 The level is on the registry's row for each session, folded from the harness's own transcript.
 
-**Launch at the tier the work needs, not at `high` by default** (owner's ruling, 2026-09-30).
+**Model routing: launch on what the work needs, not at `high` by default** (owner's ruling, 2026-09-30).
 Today's models are strong enough that `high` everywhere buys little and spends a budget fast:
 
 | The work | Launch |
@@ -745,14 +756,14 @@ Today's models are strong enough that `high` everywhere buys little and spends a
 | Standard engineering that is well scoped and low-risk | Sonnet 5.5 at `high` or `xhigh`, or an equal |
 | Small, routine work | GLM 5.3 Flash, or an equal such as the latest GPT Luna |
 
-A design session hands its implementation to the engineering tier once the design settles: the
+A design session hands its implementation to engineering's model routing once the design settles: the
 same session lowered with `control:`, or a fresh launch. The rules below govern a session that is
 already running.
 
 - Design, critic, security-shaped and cross-cutting work goes to a session **observed at `high`**,
   or a Fable or Opus session at `medium`.
   Which model is strongest is your judgement: the registry holds names, not an ordering. An Opus
-  session at `medium` takes this work too (owner's ruling, 2026-09-19, repeated 2026-09-22): place
+  session at `medium` takes this work too (owner's ruling, 2026-09-19, repeated 2026-09-22): delegate
   it, send no `needs: … effort high` for it, and never ask the owner to raise it.
 - Mechanical fixes, doc edits and guard backfills at `medium`, and on a frontier model at
   `low`: Opus and the latest GPT Sol at `low` are at least a lesser model's `high` (the
@@ -769,7 +780,7 @@ Say what the work asks for, so a session taking it below that reaches the owner 
 nobody:
 
 ```bash
-say "needs: token $TOKEN 882 effort high"
+say "needs: token @lease 882 effort high"
 ```
 
 The owner is raised when a session announces that item below the level, once per requirement.
@@ -783,7 +794,7 @@ it, not its harness/account label or a successor's current model. Send the findi
 `say` above on your current lease:
 
 ```bash
-say "authorship: token $TOKEN establish <session> epoch <n> model <model> because <evidence>"
+say "authorship: token @lease establish <session> epoch <n> model <model> because <evidence>"
 ```
 
 Keep the evidence credential-free. The fact records the target session/epoch separately from
@@ -795,7 +806,7 @@ If the evidence cannot establish the model, abandon that epoch as invalid (the o
 #3385):
 
 ```bash
-say "authorship: token $TOKEN abandon <session> epoch <n> because <what was searched and why it is not enough>"
+say "authorship: token @lease abandon <session> epoch <n> because <what was searched and why it is not enough>"
 ```
 
 Only an epoch with no recorded model can be abandoned, and the decision is final: it is never
@@ -815,8 +826,8 @@ names. If another round is genuinely warranted — the findings are converging, 
 fresh pair of eyes is the missing thing — say so:
 
 ```bash
-say "lift: token $TOKEN review <owner/repo> pr <n> <why one more round is warranted>"
-say "lift: token $TOKEN critic <owner/repo> branch <branch> <why one more round is warranted>"
+say "lift: token @lease review <owner/repo> pr <n> <why one more round is warranted>"
+say "lift: token @lease critic <owner/repo> branch <branch> <why one more round is warranted>"
 ```
 
 It admits exactly one more round on that series — `(review, repo, pr)`, or `(critic, repo, branch)`;
@@ -842,7 +853,7 @@ that are not there already, so they survive this session.
   searching the console. The machine and account are on every presence row (`machine`, `agent`).
 
 - **Keep your Needs-you rows current.** The daemon classifies every pending item as the owner's
-  or the brain's, and the owner's rail draws only the owner's. `backlog: token <lease token>`
+  or the brain's, and the owner's rail draws only the owner's. `backlog: token @lease`
   lists each open one as `<owner|brain> <id> <what>`, from either door. The brain's rows (recommendations, inbox lines, blocks, escalated
   directives, failed deliveries, waiting dialogs, and `unheard:` says a worker sent while nobody held the seat) are yours, and nobody else sees them while you hold the seat.
   A waiting dialog is a session sitting at a question or a permission prompt: wake it, or dispose
@@ -850,9 +861,9 @@ that are not there already, so they survive this session.
   recommend. The daemon closes one itself, naming the rule, when the session's turn ends or it
   takes a new prompt.
   On every sweep, act on each with your own verbs (`relay:`, `wake:`, `card:`), then close it
-  with `dispose: token <lease token> <id> <reason>`, a reason the owner can read in the
+  with `dispose: token @lease <id> <reason>`, a reason the owner can read in the
   timeline. A stale one is closed the same way, naming what settled it. One you cannot decide
-  goes to the owner with `promote: token <lease token> <id> <reason>`; if they dismiss it, it
+  goes to the owner with `promote: token @lease <id> <reason>`; if they dismiss it, it
   comes back to you (a waiting dialog is closed instead, and you are told), and you promote it again only with a fresh reason. The owner's rows
   (questions, rulings) are not yours to close.
 - **Check the issue is still open before you brief it.** Search merged pull requests for it
@@ -878,7 +889,7 @@ that are not there already, so they survive this session.
   accepted it; the thread has it once the session acknowledges it. When no acknowledgement
   follows, check whether Codex Desktop has unloaded the thread. An unloaded thread takes
   nothing until the owner opens it, so tell them.
-- **Place by the account's rank as well as by level.** The kick's `usage` rows rank each
+- **Delegate by the account's rank as well as by level.** The kick's `usage` rows rank each
   account. When two sessions fit the level, choose the one whose own account ranks higher.
 - **Check who already holds it, then say who has it.** Before handing an issue out, search open
   and merged pull requests, remote branches, and every machine's worktrees as the board reports
@@ -894,13 +905,12 @@ that are not there already, so they survive this session.
   fixed, find the fix in the diff before relaying a go. Check your own brief's premise against
   merged state too, before sending it.
 - **Close a session whose unit is concluded.** A session says `concluded` with its last pull
-  request when its work is merged and you have placed nothing next. Close it rather than
+  request when its work is merged and you have delegated nothing next. Close it rather than
   leave it holding a slot, whoever started it: `retire:` (refused while it executes a card not
   concluded, or has unpublished work in its checkout). Where retire cannot end it, tell it, in
   these words, to remove its worktrees and run `/2mw2lt:disconnect`. Leaving is that command;
   tidying up alone leaves it enrolled.
-- **Read your lease token once.** Keep the token `promote.py` printed for the session.
-  Running it again re-takes the seat and mints a new attachment (#2235).
+- **Run `promote.py` once.** Its lease is stored for the session.
 - **Ask the owner only what is theirs.** Business, trust boundaries, retiring something built:
   at most a few questions, each with your recommendation. Decide the rest and say so. Post a
   ruling the owner gives, with its words and date, as a comment on the issue it decides, since
@@ -915,7 +925,9 @@ that are not there already, so they survive this session.
 ## Hand back
 
 ```bash
-printf '%s' "{\"lease_token\":\"$TOKEN\"}" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/door.py" --post /steering/brain/detach
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" post /steering/brain/detach <<'JSON'
+{"lease_token":"@lease"}
+JSON
 ```
 
 Do this before the session ends: an attachment nobody detached stays standing, the owner sees a

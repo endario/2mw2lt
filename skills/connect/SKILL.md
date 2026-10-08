@@ -20,7 +20,7 @@ If work is already assigned, name it at connection:
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/connect.py" --current --doing "<work>"
 ```
 
-With no work, connect without `--doing`, hold your reach, and wait for the brain to place you.
+With no work, connect without `--doing`, hold your reach, and wait for the brain to delegate to you.
 After a process restart, connect again before continuing: the surviving enrollment needs its
 new incarnation bound.
 

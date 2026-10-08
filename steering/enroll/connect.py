@@ -224,9 +224,14 @@ def speaker_flags(argv: list[str], also: tuple[str, ...] = ()) -> tuple[dict[str
 
 def speaking_as(ws: Path, session: str | None, flags: dict[str, str]) -> tuple[str, str]:
     """(name, token) a script sends as: `own_enrolment` for the provider session this process
-    runs in, or the one the flags name where no harness identifies the process (#1105). A
-    harness that does say is not overruled by the flag, and a named provider that is silent
-    while another harness identifies this process does not stand in for it."""
+    runs in, or the one the flags name where no harness identifies the process (#1105)."""
+    return own_enrolment(ws, provider_session(flags), session)
+
+
+def provider_session(flags: dict[str, str]) -> str:
+    """The provider session this process runs in, or the one the flags name where no harness
+    identifies the process. A harness that does say is not overruled by the flag, and a named
+    provider that is silent while another harness identifies this process does not stand in for it."""
     provider = flags.get("--provider")
     own = harness_of(provider).whoami()[0]
     named = flags.get("--provider-session")
@@ -243,7 +248,7 @@ def speaking_as(ws: Path, session: str | None, flags: dict[str, str]) -> tuple[s
     if not psession:
         raise Refused("this harness does not say which session this is: pass "
                       "--provider <harness> --provider-session <id>")
-    return own_enrolment(ws, psession, session)
+    return psession
 
 
 def branch(project: Path | None = None) -> str:

@@ -3,9 +3,15 @@
 token. The handover is the exit checkpoint's note (doc 154 §4), recorded on the detach (doc 123)."""
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+import python_floor  # noqa: E402
+
+python_floor.require()
+
+import os  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -13,6 +19,7 @@ sys.path.insert(0, str(HERE))
 from local_workspace import required_workspace_root  # noqa: E402
 from door import say  # noqa: E402
 from ack import token_path  # noqa: E402
+import lease  # noqa: E402
 from bind import records  # noqa: E402
 from verb_help import current_args, error, help_requested, script_help  # noqa: E402
 
@@ -63,6 +70,8 @@ def main(argv: list[str]) -> int:
         answer = say(f"detach: {session} token {known[session]['token']}" + (f" handover {handover}" if handover else ""))
     if answer.startswith("detached:"):
         token_path(ws, session).unlink(missing_ok=True)  # the token died with the epoch
+        if minted:
+            lease.remove(ws, minted)                      # and a lease it held is no one's to use
     print(f"{session}: {answer}")
     return 0 if answer.startswith("detached:") else 1
 

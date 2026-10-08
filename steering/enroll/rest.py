@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""`rest.py [--provider <harness>] [--provider-session <id>] [--post [--json <body>] [--key <idempotency
+"""`rest.py [--provider <harness>] [--provider-session <id>] [--lease] [--post [--json <body>] [--key <idempotency
 key>]] <path> [--all]`: a call to the steering API (doc 126) from any machine.
 
 The path is relative to `/api/v1`, as `/launches/<id>` or `/facts?state=worker-launched`. It goes
 to the door this workspace names, with the agent credential a remote door requires. A token on
 stdin — the seat's lease token, or a session's enrolment token — goes as `Authorization: Bearer`,
-and stays out of the process table. With nothing on stdin, this session's own enrolment token goes,
+and stays out of the process table; `--lease` sends the seat's stored lease instead. With nothing on stdin, this session's own enrolment token goes,
 found as `say.py` finds it (#3551). `--all` follows a page's `next` until the head. `--post` sends
 the path a POST with no body, as `/tracks/syncs` takes, or with `--json`'s body and `--key` as its
 `Idempotency-Key`, as a room's messages take (doc 156).
@@ -69,7 +69,7 @@ def main(argv: list[str], stdin) -> int:
         return 0
     valued: dict[str, str] = {}
     rest = list(argv)
-    for flag in ("--json", "--key", "--post", "--all", *connect.SPEAKER_FLAGS):
+    for flag in ("--json", "--key", "--post", "--all", "--lease", *connect.SPEAKER_FLAGS):
         if rest.count(flag) > 1:
             return error("rest", f"{flag} may appear once")
     for flag in ("--json", "--key", *connect.SPEAKER_FLAGS):
@@ -82,7 +82,7 @@ def main(argv: list[str], stdin) -> int:
     speaker = {f: valued.pop(f) for f in connect.SPEAKER_FLAGS if f in valued}
     if speaker.get("--provider", connect.harness_mod.DEFAULT) not in connect.harness_mod.PROVIDERS:
         return error("rest", "--provider names no harness this client knows")
-    args = [a for a in rest if a not in ("--all", "--post")]
+    args = [a for a in rest if a not in ("--all", "--post", "--lease")]
     method = "POST" if "--post" in rest else "GET"
     if method == "POST" and "--all" in rest:
         return error("rest", "--post cannot be combined with --all")
@@ -100,8 +100,20 @@ def main(argv: list[str], stdin) -> int:
     if "/w/" not in base:
         print("this workspace's door names no authority; set STEERING_DOOR to …/w/<authority>", file=sys.stderr)
         return 2
-    token = None if stdin.isatty() else (stdin.read().strip() or None)
     why_none = None
+    if "--lease" in rest:
+        # The seat's stored lease, never on stdin or a command line (#4551).
+        import lease
+        try:
+            held = lease.held(speaker)
+        except ValueError as why:
+            return error("rest", str(why))
+        if held is None:
+            print(lease.NONE, file=sys.stderr)
+            return 1
+        token = held["lease_token"]
+    else:
+        token = None if stdin.isatty() else (stdin.read().strip() or None)
     if token is None:
         token, why_none = own_bearer(speaker)
     url = f"{base}/api/v1{args[0]}"
@@ -109,6 +121,12 @@ def main(argv: list[str], stdin) -> int:
     while True:
         try:
             status, answer = fetch(url, token, method, body, valued.get("--key"))
+            # Only the API's refusal of the bearer itself says the lease is dead: an answer's data may
+            # quote the same words.
+            why = f"{answer.get('title') or ''} {answer.get('detail') or ''}".strip() if isinstance(answer, dict) else ""
+            if "--lease" in rest and status in (401, 403) and lease.dead(f"refused: {why}"):
+                print(lease.gone(held, why), file=sys.stderr)
+                return 1
         except (urllib.error.URLError, OSError) as e:
             print(f"the door at {base} did not answer: {e}", file=sys.stderr)
             return 1
