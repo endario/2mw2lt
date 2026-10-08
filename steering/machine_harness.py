@@ -6,8 +6,10 @@ import glob
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
+import time
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
@@ -215,6 +217,10 @@ class Harness:
     # loaded process. Codex is different: its queue accepts an idle thread after the writer
     # closes; its process discovery separately asks for the current writer.
     reachable: Callable[[str], bool] | None = None
+    # Census callbacks keep exact command and provider registry interpretation at this seam.
+    process_kind: Callable[[list[str]], str | None] | None = None
+    process_names: Callable[[], tuple[str, ...]] | None = None
+    live_workers: Callable[..., tuple[list[dict], list[str]]] | None = None
 
     @property
     def exports(self) -> bool:
@@ -465,20 +471,209 @@ def _goose_reading(psession: str) -> dict | None:
     return worker_probe.goose_reading(psession)
 
 
+CENSUS_REGISTRY_LIMIT = 256
+CENSUS_RECORD_BYTES = 65536
+CENSUS_BUDGET_SECONDS = 5.0
+
+
+class CensusBudgetExhausted(TimeoutError):
+    """The local worker sample exhausted its cooperative elapsed budget."""
+
+
+def census_deadline() -> float:
+    return time.monotonic() + CENSUS_BUDGET_SECONDS
+
+
+def check_census_budget(deadline: float) -> None:
+    # Cooperative: the call already in progress is not preempted.
+    if time.monotonic() >= deadline:
+        raise CensusBudgetExhausted("worker census sampling budget exhausted")
+
+
+def _command(argv: list[str], binary: str | tuple[str, ...], node_script: str = "") -> list[str] | None:
+    if not argv:
+        return None
+    if Path(argv[0]).name in ((binary,) if isinstance(binary, str) else binary):
+        return argv[1:]
+    if (Path(argv[0]).name in ("node", "nodejs") and len(argv) > 1
+            and node_script and argv[1].endswith(node_script)):
+        return argv[2:]
+    return None
+
+
+def _claude_process(argv: list[str]) -> str | None:
+    args = _command(argv, "claude", "/@anthropic-ai/claude-code/cli.js")
+    if args is None and len(argv) > 1 and Path(argv[0]).name in ("node", "nodejs"):
+        if "/anthropic.claude-" in argv[1] and argv[1].endswith("/resources/claude-code/cli.js"):
+            args = argv[2:]
+    if args is None or any(x in args for x in ("--version", "--help", "-v", "-h")):
+        return None
+    if args and args[0] in ("mcp", "update", "install", "doctor", "auth", "plugin"):
+        return None
+    return "worker"
+
+
+def _codex_process(argv: list[str]) -> str | None:
+    args = _command(argv, "codex", "/@openai/codex/bin/codex.js")
+    if args is None or any(x in args for x in ("--version", "--help", "-V", "-h")):
+        return None
+    if args and args[0] in ("login", "logout", "mcp", "mcp-server", "completion", "debug"):
+        return None
+    shared = "app-server" in args
+    if Path(argv[0]).name in ("node", "nodejs"):
+        return "shared-wrapper" if shared else "wrapper"
+    return "shared" if shared else "worker"
+
+
+def _goose_command_prefix() -> list[str]:
+    return shlex.split(GOOSE_CLI)
+
+
+def _goose_process_names() -> tuple[str, ...]:
+    prefix = _goose_command_prefix()
+    return ("goose", Path(prefix[0]).name) if prefix else ("goose",)
+
+
+def _goose_process(argv: list[str]) -> str | None:
+    prefix = _goose_command_prefix()
+    if prefix and argv[:len(prefix)] == prefix:
+        args = argv[len(prefix):]
+        if len(prefix) > 1 and not args:
+            return None
+    else:
+        args = _command(argv, "goose")
+    return "worker" if args is not None and (not args or args[0] in ("acp", "session", "run")) else None
+
+
+def _opencode_process_names() -> tuple[str, ...]:
+    return "opencode", Path(os.environ.get("STEERING_OPENCODE_CLI") or "opencode").name
+
+
+def _opencode_process(argv: list[str]) -> str | None:
+    args = _command(argv, _opencode_process_names())
+    if args is None or any(x in args for x in ("--version", "--help", "-v", "-h")):
+        return None
+    if args and args[0] in ("auth", "mcp", "upgrade", "debug", "models"):
+        return None
+    return "shared" if args and args[0] == "serve" else "worker"
+
+
+def census_process(pid: int, command: str, *, deadline: float | None = None
+                   ) -> tuple[Harness | None, str | None, list[str], str | None]:
+    # The executable name is only a prefilter. Birth brackets the exact argv capture, so a
+    # reused PID cannot acquire the previous process's harness identity.
+    names = {"node", "nodejs", *HARNESSES}
+    names.update(name for h in HARNESSES.values() if h.process_names for name in h.process_names())
+    if Path(command).name not in names:
+        return None, None, [], None
+    deadline = census_deadline() if deadline is None else deadline
+    check_census_budget(deadline)
+    since = runtime_id.started_at(pid)
+    check_census_budget(deadline)
+    if since is None:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return None, None, [], None
+        except OSError:
+            pass
+        return None, None, ["process-birth-unreadable"], None
+    argv = runtime_id.process_argv(pid)
+    check_census_budget(deadline)
+    current = runtime_id.started_at(pid)
+    check_census_budget(deadline)
+    if current != since:
+        return None, None, ["process-changed-during-capture"], None
+    if argv is None:
+        return None, None, ["process-argv-unreadable"], None
+    for h in HARNESSES.values():
+        kind = h.process_kind(argv) if h.process_kind else None
+        if kind:
+            return h, kind, [], since
+        if h.process_kind is None and Path(argv[0]).name == h.provider:
+            return h, "shared", [], since
+    return None, None, [], None
+
+
+def _claude_live_workers(config: Path, *, deadline: float | None = None) -> tuple[list[dict], list[str]]:
+    from datetime import datetime, timezone
+    import math
+    deadline = census_deadline() if deadline is None else deadline
+    check_census_budget(deadline)
+    out, gaps = [], set()
+    directory = config / "sessions"
+    try:
+        with os.scandir(directory) as entries:
+            for index, entry in enumerate(entries):
+                check_census_budget(deadline)
+                if index >= CENSUS_REGISTRY_LIMIT:
+                    gaps.add("claude-registry-overflow")
+                    break
+                if not entry.name.endswith(".json") or not entry.is_file(follow_symlinks=False):
+                    continue
+                try:
+                    check_census_budget(deadline)
+                    with open(entry.path, "rb") as f:
+                        check_census_budget(deadline)
+                        data = f.read(CENSUS_RECORD_BYTES + 1)
+                    check_census_budget(deadline)
+                    if len(data) > CENSUS_RECORD_BYTES:
+                        gaps.add("claude-registry-overflow")
+                        continue
+                    rec = json.loads(data)
+                    pid, sid, start = rec.get("pid"), rec.get("sessionId"), rec.get("procStart")
+                    if (not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0
+                            or not isinstance(sid, str) or not sid or len(sid) > 256
+                            or not isinstance(start, str) or len(start) > 64):
+                        raise ValueError("invalid registry witness")
+                    check_census_budget(deadline)
+                    since = runtime_id.started_at(pid)
+                    check_census_budget(deadline)
+                    epoch = runtime_id.started_epoch(pid)
+                    check_census_budget(deadline)
+                    current = runtime_id.started_at(pid)
+                    check_census_budget(deadline)
+                    if current != since:
+                        gaps.add("process-changed-during-capture")
+                        continue
+                    if epoch is None or since is None:
+                        # Exited records are common; the process table independently reports
+                        # unreadable live candidates instead of trusting a historical record.
+                        continue
+                    stated = datetime.strptime(start, "%a %b %d %H:%M:%S %Y").replace(tzinfo=timezone.utc).timestamp()
+                    if math.floor(epoch) != stated:
+                        continue
+                    out.append({"harness": "claude", "pid": pid, "since": since, "psession": sid})
+                except (ValueError, TypeError, AttributeError, UnicodeError, OverflowError):
+                    gaps.add("claude-registry-malformed")
+                except TimeoutError:
+                    raise
+                except OSError:
+                    gaps.add("claude-registry-unreadable")
+    except FileNotFoundError:
+        pass
+    except TimeoutError:
+        raise
+    except OSError:
+        gaps.add("claude-registry-unreadable")
+    check_census_budget(deadline)
+    return out, sorted(gaps)
+
+
 HARNESSES = {h.provider: h for h in (
     Harness("claude", agent="claude-code", config=".claude", config_env="CLAUDE_CONFIG_DIR",
             transcript_root="projects",
             session_id=_env("CLAUDE_CODE_SESSION_ID"), harness_pid=_claude_pid,
             transcript=_claude_transcript, version=_cli_version("claude", "--version"),
             shape=_claude_shape, workspace=_claude_workspace, hooks=True,
-            reading=_claude_reading),
+            reading=_claude_reading, process_kind=_claude_process, live_workers=_claude_live_workers),
     Harness("codex", agent="codex", config=".codex", config_env="CODEX_HOME",
             transcript_root="sessions",
             session_id=_env("CODEX_THREAD_ID", "CODEX_SESSION_ID"), harness_pid=_codex_pid,
             transcript=_codex_transcript, version=_cli_version("codex", "--version"),
             shape=_codex_shape, workspace=_codex_workspace,
             delivery="inject", loaded=_codex_loaded, reachable=_codex_reachable,
-            reading=_codex_reading),
+            reading=_codex_reading, process_kind=_codex_process),
     Harness("grok", agent="grok", config=".grok", transcript_root="sessions",
             shape=_grok_shape, workspace=_grok_workspace),
     # A worker rather than a session someone is sitting at: this platform launches it, so it
@@ -488,13 +683,15 @@ HARNESSES = {h.provider: h for h in (
             transcript_root="steering-workers",
             harness_pid=_goose_pid, transcript=_goose_transcript, version=goose_version,
             shape=_goose_shape, workspace=_goose_workspace,
-            delivery="inject", loaded=_goose_loaded, reading=_goose_reading),
+            delivery="inject", loaded=_goose_loaded, reading=_goose_reading,
+            process_kind=_goose_process, process_names=_goose_process_names),
     # Launched enrolled and reached as Goose is (docs 83, 89).
     Harness("opencode", agent="opencode", config=".local/share/opencode",
             transcript_root="steering-workers",
             harness_pid=_opencode_pid, transcript=_opencode_transcript, version=opencode_version,
             shape=_goose_shape, workspace=_opencode_workspace,
-            delivery="inject", loaded=_opencode_loaded),
+            delivery="inject", loaded=_opencode_loaded, process_kind=_opencode_process,
+            process_names=_opencode_process_names),
 )}
 
 
