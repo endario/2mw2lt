@@ -180,6 +180,9 @@ TOOLS = {
     "rest": {"forms": [
         {"topic": None, "usage": _SPEAKER_USAGE + " [--post [--json <body>] [--key <key>]] <api-v1-path> [--all]", "example": "rest /openapi.json"},
     ]},
+    "seat_section": {"bare": False, "forms": [
+        {"topic": None, "usage": _SPEAKER_USAGE, "example": "seat_section --provider claude --provider-session 9a77"},
+    ]},
     "rotate": {"current": True, "forms": [
         {"topic": None, "usage": "[--as <harness/account>] [--doing <text>] [--provider <provider>] [--provider-session <id>] [--pid <pid>] [session]", "example": "rotate --current"},
     ]},
@@ -210,6 +213,7 @@ TOOLS = {
     "armed": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "armed --help"}]},
     "codex_observe": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "codex_observe --help"}]},
     "delete_guard": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "delete_guard --help"}]},
+    "trap_guard": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "trap_guard --help"}]},
     "ghtoken": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "ghtoken --help"}]},
     "observe": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "observe --help"}]},
     "readout": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "readout --help"}]},

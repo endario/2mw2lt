@@ -30,6 +30,11 @@
             "type": "command",
             "command": "for R in \"${PLUGIN_ROOT:-}\" \"${CLAUDE_PLUGIN_ROOT:-}\"; do if [ -n \"$R\" ] && [ -f \"$R/steering/enroll/delete_guard.py\" ]; then exec python3 \"$R/steering/enroll/delete_guard.py\"; fi; done; exit 0",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "for R in \"${PLUGIN_ROOT:-}\" \"${CLAUDE_PLUGIN_ROOT:-}\"; do if [ -n \"$R\" ] && [ -f \"$R/steering/enroll/trap_guard.py\" ]; then exec python3 \"$R/steering/enroll/trap_guard.py\"; fi; done; exit 0",
+            "timeout": 5
           }
         ]
       }

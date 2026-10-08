@@ -1,5 +1,5 @@
 import type { Register, EngineInterface, Timer, HookStream, ProcessSpawnChunk, ProcessSpawnResult } from 'claude-code'
-import { lines, atLeast, pick, invokes, answerable, tokensOf, due, owed, READ_KEPT, POINTER, CHECKPOINT, CONNECT_AGAIN } from './frames'
+import { lines, atLeast, pick, invokes, answerable, tokensOf, due, owed, nextSeat, asksSeat, READ_KEPT, POINTER, CHECKPOINT, CONNECT_AGAIN, SEAT_SECTION } from './frames'
 import type { Routine } from './frames'
 
 // The plugin's hooks module (#3872): it holds a connected Claude session's steering stream through
@@ -18,6 +18,7 @@ const WARNED = { plugin: '2mw2lt', key: 'warned' } as const
 const POINT = { plugin: '2mw2lt', key: 'point' } as const
 const SESSION = { plugin: '2mw2lt', key: 'session' } as const
 const CONNECTED = { plugin: '2mw2lt', key: 'connected' } as const
+const SEAT = { plugin: '2mw2lt', key: 'seat' } as const
 
 const TOOL = 'mcp__2mw2lt__frames'
 const REFRESH_MS = 60_000
@@ -153,6 +154,37 @@ async function checkpointIfDue($: EngineInterface, tokens: number | undefined, f
   })
 }
 
+// Whether this session holds the seat, and the rulings it then reads in its system prompt. Only a
+// connected session asks: seat_section.py reads on its enrolment. `refresh` lets the text itself
+// change; without it a holder keeps the bytes it had, and only taking or losing the seat moves them.
+// Asks run one after another, so an older answer never lands over a newer one, and an answer that
+// arrives after the session disconnected is dropped.
+let seatChain: Promise<unknown> = Promise.resolve()
+function refreshSeat($: EngineInterface, refresh: boolean): Promise<void> {
+  const run = seatChain.then(async () => {
+    if (!root || !(await $.state.get(SESSION)).value) return
+    const r = await $.process.run(
+      ['python3', script($, 'seat_section.py'), '--provider', 'claude', '--provider-session', await $.session.id()],
+      { cwd: root })
+    if (r.exitCode !== 0 && r.exitCode !== 1) $.ui.log(`2mw2lt: seat_section.py exited ${r.exitCode}: ${r.stderr.trim()}`, { to: 'debug' })
+    if (!(await $.state.get(SESSION)).value) return
+    const { value: was = '' } = await $.state.get(SEAT)
+    const next = nextSeat(was, r.exitCode, r.stdout, refresh)
+    if (next !== was) await $.state.set(SEAT, next)
+  })
+  seatChain = run.catch(() => undefined)
+  return run
+}
+
+const askSeat = ($: EngineInterface, refresh: boolean) =>
+  void refreshSeat($, refresh).catch(err => $.ui.log(`2mw2lt: the seat check broke: ${String(err)}`, { to: 'debug' }))
+
+// A kick or a say asks only a holder: it is how the daemon tells one the seat was taken. A session
+// that does not hold the seat is seated by a seat frame or promote.py, never by either.
+async function askHolder($: EngineInterface) {
+  if ((await $.state.get(SEAT)).value) askSeat($, false)
+}
+
 async function sessionOf($: EngineInterface): Promise<string> {
   const r = await $.process.run(['python3', script($, 'hold.py'), '--session-of', await $.session.id()], { cwd: root })
   return r.exitCode === 0 ? r.stdout.trim() : ''
@@ -214,6 +246,8 @@ async function holdOnce($: EngineInterface, ps: string, session: string, gen: nu
     const { complete, rest } = lines(buffer + text)
     buffer = rest
     for (const l of complete) {
+      if (l.kind === 'seat') askSeat($, true)
+      else if (asksSeat(l.kind)) await askHolder($)
       if (l.routine && !l.wakes) {
         void answerKick($, ps, session, l.routine, gen).catch(err => $.ui.log(`2mw2lt: answering a kick broke: ${String(err)}`, { to: 'debug' }))
         continue
@@ -274,6 +308,7 @@ async function start($: EngineInterface, session: string) {
   stop()
   const gen = generation
   await $.state.set(SESSION, session)
+  askSeat($, true)
   void holdLoop($, session, gen).catch(err => $.ui.log(`2mw2lt: the hold loop ended: ${String(err)}`, { to: 'debug' }))
 }
 
@@ -340,12 +375,16 @@ export const register: Register = on => {
         await $.state.set(CONNECTED, true)
         await start($, session)
       }
+    } else if (invokes(e.command, 'promote', 'steering') || (invokes(e.command, 'door') && /\/steering\/brain\/(attach|detach)\b/.test(e.command))) {
+      // Taking the seat, handing it on or handing it back: no frame tells the session that left it.
+      askSeat($, true)
     } else if (invokes(e.command, 'disconnect')) {
       // The session chose to leave: hold nothing, and ask nothing of it. The claim stays, since
       // the module is still live for a later connect.
       stop()
       await $.state.set(CONNECTED, false)
       await $.state.set(SESSION, '')
+      await $.state.set(SEAT, '')
     }
     return result
   }).catch(($, e, next) => next(e))
@@ -360,6 +399,13 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {                                 // a subagent's turn ends inside ours
       await $.state.set(BUSY, false)
+      // A turn dead on an API error (a 429) did not read its pointer, and sending it into the
+      // same refusal would only be refused again. The frames stay pending, and the next one to
+      // arrive is pointed afresh, which a pointer left outstanding would have blocked for good.
+      if (e.reason === 'error') {
+        await locked(() => unpoint($))
+        return next(e)
+      }
       if ((await $.state.get(APPENDED)).value) $.clock.after(REPOINT_MS, () => { void repoint($).catch(() => undefined) })
     }
     return next(e)
@@ -386,6 +432,8 @@ export const register: Register = on => {
     const { value: session = '' } = await $.state.get(SESSION)
     await locked(() => $.state.set(WARNED, false))   // ordered with a check still in flight
     if (!session) return next(e)
+    // The conversation's cache is spent here anyway: the new text is in place before the next request.
+    await refreshSeat($, true).catch(err => $.ui.log(`2mw2lt: the seat check broke: ${String(err)}`, { to: 'debug' }))
     const keep = await keepLine($, session)
     return next({ ...e, instructions: [e.instructions, keep].filter(Boolean).join('\n') })
   }).catch(($, e, next) => next(e))
@@ -401,8 +449,18 @@ export const register: Register = on => {
         await unpoint($)
       })
       if (!yielded) await claim($, true, e.session_id)
+      askSeat($, true)
     }
     return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // The seat's rulings, last in the system prompt, after the cache boundary. A teammate renders its
+  // lead's prompt and holds no seat.
+  on('prompt.compose', async ($, e, next) => {
+    const composed = await next(e)
+    if (e.traits.includes('teammate')) return composed
+    const { value: text = '' } = await $.state.get(SEAT)
+    return text ? { sections: [...composed.sections, { id: SEAT_SECTION, text, scope: 'session' as const }] } : composed
   }).catch(($, e, next) => next(e))
 
   // Stop the loop before anything else: the engine ends the child before this runs, and a loop

@@ -20,67 +20,15 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from shell_words import (ASSIGNMENT, SHELLS, Unresolvable, assigned as _assigned,  # noqa: E402
+                         command_name as _command_name, expand as _expand, segments as _segments,
+                         heredocs, shell_script as _shell_script)
+
 GLOB = re.compile(r"[*?[]")
-VARIABLE = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)(?::?-([^}]*))?\}|([A-Za-z_][A-Za-z0-9_]*))")
-ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.S)
-SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 
 
-class Unresolvable(Exception):
-    pass
 
-
-def _segments(command: str) -> list[list[str]]:
-    lexer = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=True)
-    lexer.whitespace_split = True
-    segments, current, redirected = [], [], False
-    for token in lexer:
-        if redirected:
-            redirected = False
-        elif token and set(token) <= set(";&|()"):
-            if current:
-                segments.append(current)
-            current = []
-        elif token and set(token) <= set("<>&") and set(token) & set("<>"):
-            # A redirection's file is not a delete target, nor is the descriptor before it.
-            redirected = True
-            if current and current[-1].isdigit():
-                current.pop()
-        else:
-            current.append(token)
-    if current:
-        segments.append(current)
-    return segments
-
-
-def _expand(word: str, env: dict[str, str | None]) -> str:
-    if "$(" in word or "`" in word or "$((" in word:
-        raise Unresolvable(word)
-
-    def value(match: re.Match) -> str:
-        name = match.group(1) or match.group(3)
-        got = env.get(name, "")
-        if got is None:
-            raise Unresolvable(word)
-        if not got and match.group(2) is not None:
-            return match.group(2)
-        return got
-
-    expanded = VARIABLE.sub(value, word)
-    if "$" in expanded.replace("$$", ""):
-        raise Unresolvable(word)
-    if expanded == "~" or expanded.startswith("~/"):
-        expanded = str(Path.home()) + expanded[1:]
-    return expanded
-
-
-def _assigned(value: str, env: dict[str, str | None]) -> str | None:
-    """A variable's new value, or None when only running the shell would tell: a delete that
-    later names it is unresolvable, and nothing else is judged by it."""
-    try:
-        return _expand(value, env)
-    except Unresolvable:
-        return None
 
 
 def _resolve(target: str, cwd: Path) -> tuple[Path, bool]:
@@ -142,6 +90,11 @@ def targets(command: str, cwd: Path, env: dict[str, str]) -> list[tuple[str, Pat
     """Each recursive delete's (as written, resolved, is-a-glob's-directory)."""
     env: dict[str, str | None] = dict(env)
     found = []
+    # A here-document is words unless a shell or ssh reads it as its script: a commit message that
+    # describes a delete is not one.
+    command, scripts = heredocs(command)
+    for script in scripts:
+        found.extend(targets(script, cwd, env))
     for words in _segments(command):
         while words and ASSIGNMENT.match(words[0]):
             name, value = ASSIGNMENT.match(words[0]).groups()
@@ -188,21 +141,6 @@ def targets(command: str, cwd: Path, env: dict[str, str]) -> list[tuple[str, Pat
     return found
 
 
-def _command_name(word: str, env: dict[str, str | None]) -> str:
-    try:
-        return os.path.basename(_expand(word, env))
-    except Unresolvable:
-        return os.path.basename(word)
-
-
-def _shell_script(args: list[str]) -> str | None:
-    """The script of `sh -c script`, or None."""
-    for i, arg in enumerate(args):
-        if not arg.startswith("-") or arg.startswith("--"):
-            return None
-        if "c" in arg[1:]:
-            return args[i + 1] if i + 1 < len(args) else None
-    return None
 
 
 def roots(payload: dict, cwd: Path) -> list[Path]:

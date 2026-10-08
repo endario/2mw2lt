@@ -1,6 +1,6 @@
 import type { On } from 'claude-code'
 import { test, expect, mock } from 'claude-code/testing'
-import { lines, atLeast, pick, invokes, answerable, POINTER, CHECKPOINT, CONNECT_AGAIN } from '../frames'
+import { lines, atLeast, pick, invokes, answerable, nextSeat, asksSeat, POINTER, CHECKPOINT, CONNECT_AGAIN, SEAT_SECTION } from '../frames'
 
 test('lines are whole only once their newline arrives', async () => {
   const a = lines('{"id":"f1","kind":"say","wakes":true}\n{"id":"f2","ki')
@@ -83,6 +83,10 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
     context,
     usageCalls: 0,
     stepUsage: 0,
+    // What seat_section.py answers: 0 with the rulings, 1 for a session that does not hold the seat.
+    seat: { code: 1, stdout: '' },
+    // Held until released: a seat_section.py run still out.
+    seatGate: undefined as Promise<void> | undefined,
   }
   on('state.get', async ($, e) => {
     const value = w.state.get(e.key)
@@ -110,6 +114,10 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
   on('process.run', async ($, e) => {
     w.runs.push([...e.argv])
     w.cwds.push(e.init?.cwd)
+    if (String(e.argv[1]).endsWith('/seat_section.py')) {
+      if (w.seatGate) await w.seatGate
+      return { value: { exitCode: w.seat.code, stdout: w.seat.stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     const out = e.argv.includes('--session-of') ? (w.enrolled ? 's1\n' : '')
       : e.argv.includes('--claim-path') ? (w.claimFails ? '' : `/ws/.claude/steering-holders/${e.argv[3]}.json\n`)
       : e.argv.includes('--frame-path') ? `${FRAME_PATH}\n`
@@ -159,6 +167,7 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
   on('turn.step', async function* ($, e) { return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage: { model: 'claude-test', input_tokens: 1, output_tokens: 1, cache_read_input_tokens: w.stepUsage - 1, cache_creation_input_tokens: 0 } } as never })
   on('session.end', async ($, e) => ({ sessionId: e.sessionId }))
   on('classic.SessionStart', async () => ({}) as never)
+  on('prompt.compose', async () => ({ sections: [{ id: 'intro', text: 'engine', scope: 'shared' as const }] }))
   return w
 }
 
@@ -327,7 +336,7 @@ test('every child and client the module runs is its own version\'s, never the la
   for (const argv of w.spawns) expect(argv.slice(0, 4)).toEqual(['python3', `${w.root}/steering/enroll/hold.py`, '--wake', 'plugin'])
   expect(w.runs.length).toBeGreaterThan(0)
   for (const argv of w.runs) expect(argv[0]).toBe('python3')
-  for (const argv of w.runs) expect([`${w.root}/steering/enroll/hold.py`, `${w.root}/steering/enroll/ack.py`]).toContain(argv[1])
+  for (const argv of w.runs) expect([`${w.root}/steering/enroll/hold.py`, `${w.root}/steering/enroll/ack.py`, `${w.root}/steering/enroll/seat_section.py`]).toContain(argv[1])
   // Python finds the workspace itself, STEERING_WORKSPACE included: every client runs in the session's root.
   for (const cwd of w.cwds) expect(cwd).toBe(ROOT)
 })
@@ -607,6 +616,24 @@ test('a pointer submitted as a prompt is not sent again by the turn it started',
   expect(w.submits).toEqual([POINTER])
 })
 
+// A pointer sent as a prompt whose turn dies on an API error (a 429) was never read. It must not
+// stand in the way of the next one, and must not be sent again into the same refusal.
+test('a pointer whose turn ended on an API error does not block the next frame, and is not sent again', async ($, on) => {
+  let next!: () => void
+  const gate = new Promise<void>(r => { next = r })
+  const w = world(on, { rounds: [{ lines: [line('e1', 'envelope', true), gate, line('f2', 'say', true)], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  expect(w.submits).toEqual([POINTER])
+  await $.turn.start({ text: POINTER, turnId: 't-1' } as never)
+  await $.turn.complete({ turnId: 't-1', text: '', reason: 'error' } as never)
+  await w.clock.advance(60_000)
+  expect(w.submits).toEqual([POINTER])
+  next()
+  await w.clock.settle()
+  expect(w.submits).toEqual([POINTER, POINTER])
+})
+
 test('a pending frame the recording does not hold yet stays pending', async ($, on) => {
   const w = world(on, { rounds: [{ lines: [line('f1', 'say', true)], code: 0, hold: never }] })
   await begin($)
@@ -827,4 +854,137 @@ test('a /clear gives the fresh context its own checkpoint prompt', async ($, on)
   await $.classic.SessionStart({ source: 'clear', session_id: 'ps-2' } as never)
   await measure($, 900_000)
   expect(w.appends).toEqual([CHECKPOINT, CHECKPOINT])
+})
+
+// #4551 step 3: a seated session reads canon's rulings in its system prompt.
+const FACTS = { model: 'claude-test', promptModel: 'claude-test', surfaces: [], tools: [], outputStyle: null, traits: [] }
+const seatSection = async ($: any) => ((await $.prompt.compose(FACTS)).sections as { id: string; text: string; scope: string }[])
+  .find(x => x.id === SEAT_SECTION)
+const seatRuns = (w: { runs: string[][] }) => w.runs.filter(argv => String(argv[1]).endsWith('/seat_section.py'))
+
+test('a session that holds the seat reads its rulings last in its system prompt, after the cache boundary', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  w.seat = { code: 0, stdout: '# Rulings\n- A (a)\n' }
+  await begin($)
+  await w.clock.settle()
+  const sections = (await $.prompt.compose(FACTS)).sections
+  expect(sections[sections.length - 1]).toEqual({ id: SEAT_SECTION, text: '# Rulings\n- A (a)', scope: 'session' })
+  expect(seatRuns(w)[0]?.slice(2)).toEqual(['--provider', 'claude', '--provider-session', 'ps-1'])
+})
+
+test('a session that does not hold the seat, or is not connected, reads no section', async ($, on) => {
+  const w = world(on, { enrolled: false })
+  w.seat = { code: 0, stdout: '# Rulings\n' }
+  await begin($)
+  await w.clock.settle()
+  expect(seatRuns(w)).toEqual([])
+  expect(await seatSection($)).toBeUndefined()
+})
+
+test('renders between seat changes give the same bytes, and a kick does not swap a holder\'s text', async ($, on) => {
+  let kick!: () => void
+  const later = new Promise<void>(resolve => { kick = resolve })
+  const w = world(on, { rounds: [{ lines: [later, line('k1', 'kick', true)], code: 0, hold: never }] })
+  w.seat = { code: 0, stdout: 'A' }
+  await begin($)
+  await w.clock.settle()
+  const first = await seatSection($)
+  w.seat = { code: 0, stdout: 'B' }
+  kick()
+  await w.clock.settle()
+  expect(seatRuns(w).length).toBe(2)
+  expect(await seatSection($)).toEqual(first)
+  expect(first?.text).toBe('A')
+})
+
+test('the seat taken from a session drops its section; a door that did not answer keeps it', async ($, on) => {
+  let gone!: () => void, dark!: () => void
+  const lost = new Promise<void>(resolve => { gone = resolve })
+  const unanswered = new Promise<void>(resolve => { dark = resolve })
+  const w = world(on, { rounds: [{ lines: [unanswered, line('s2', 'seat', true), lost, line('s3', 'seat', true)], code: 0, hold: never }] })
+  w.seat = { code: 0, stdout: 'A' }
+  await begin($)
+  await w.clock.settle()
+  w.seat = { code: 3, stdout: '' }
+  dark()
+  await w.clock.settle()
+  expect((await seatSection($))?.text).toBe('A')
+  w.seat = { code: 1, stdout: '' }
+  gone()
+  await w.clock.settle()
+  expect(await seatSection($)).toBeUndefined()
+})
+
+test('taking the seat by promote.py asks at once, and a compaction may refresh the text', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  expect(await seatSection($)).toBeUndefined()
+  w.seat = { code: 0, stdout: 'A' }
+  await $.tool.call({ tool: 'Bash', command: 'python3 "${CLAUDE_PLUGIN_ROOT}/steering/promote.py"' } as never)
+  await w.clock.settle()
+  expect((await seatSection($))?.text).toBe('A')
+  w.seat = { code: 0, stdout: 'B' }
+  await $.session.compact({ trigger: 'manual', messages: [MESSAGE] } as never)
+  await w.clock.settle()
+  expect((await seatSection($))?.text).toBe('B')
+})
+
+test('a teammate rendering its lead\'s prompt carries no seat section', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  w.seat = { code: 0, stdout: 'A' }
+  await begin($)
+  await w.clock.settle()
+  const sections = (await $.prompt.compose({ ...FACTS, traits: ['teammate'] })).sections as { id: string }[]
+  expect(sections.some(x => x.id === SEAT_SECTION)).toBe(false)
+})
+
+test('nextSeat: 0 sets, 1 clears, anything else keeps; a holder keeps its bytes unless refreshed', async () => {
+  expect(nextSeat('', 0, 'A\n', false)).toBe('A')
+  expect(nextSeat('A', 0, 'B', false)).toBe('A')
+  expect(nextSeat('A', 0, 'B', true)).toBe('B')
+  expect(nextSeat('A', 1, '', false)).toBe('')
+  expect(nextSeat('A', 3, '', true)).toBe('A')
+  expect(nextSeat('A', 2, '', true)).toBe('A')
+  expect(asksSeat('seat') && asksSeat('kick') && asksSeat('say')).toBe(true)
+  expect(asksSeat('presence') || asksSeat('envelope') || asksSeat('usage')).toBe(false)
+  expect(invokes('python3 /p/steering/promote.py', 'promote', 'steering')).toBe(true)
+  expect(invokes('python3 /p/steering/enroll/promote.py', 'promote', 'steering')).toBe(false)
+})
+
+test('a kick or a say asks nothing of a session that does not hold the seat', async ($, on) => {
+  let frames!: () => void
+  const later = new Promise<void>(resolve => { frames = resolve })
+  const w = world(on, { rounds: [{ lines: [later, line('k1', 'kick', true), line('f1', 'say', true)], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  const asked = seatRuns(w).length
+  frames()
+  await w.clock.settle()
+  expect(seatRuns(w).length).toBe(asked)
+})
+
+test('handing the seat back through the door asks at once, and drops the section', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  w.seat = { code: 0, stdout: 'A' }
+  await begin($)
+  await w.clock.settle()
+  w.seat = { code: 1, stdout: '' }
+  await $.tool.call({ tool: 'Bash', command: `printf '%s' "$B" | python3 "/p/steering/enroll/door.py" --post /steering/brain/detach` } as never)
+  await w.clock.settle()
+  expect(await seatSection($)).toBeUndefined()
+})
+
+test('an answer that lands after disconnect is dropped', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  let answer!: () => void
+  w.seatGate = new Promise<void>(resolve => { answer = resolve })
+  w.seat = { code: 0, stdout: 'A' }
+  await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/promote.py' } as never)
+  await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/enroll/disconnect.py s1' } as never)
+  answer()
+  await w.clock.settle()
+  expect(await seatSection($)).toBeUndefined()
 })

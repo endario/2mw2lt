@@ -59,7 +59,9 @@ top of it closes after every frame, and in each gap the brain cannot answer and 
 it (#4520). A line that says the module
 holds no stream here may mean this process fetched its plugins before the module existed, and a
 long-lived seat stays that way until it is restarted or resumed
-(#4551); hold by hand until then. The
+(#4551); hold by hand until then. While you hold the seat
+the plugin also places canon's standing decisions last in your system prompt, so a compaction
+does not lose them; any other harness reads them with `seat_section.py`. The
 rest of this section is for a harness the plugin does not hold.
 
 Hold your stream as a background command whose end wakes the session — in Claude Code, Bash
@@ -113,6 +115,9 @@ neither `quiet`, `debounced` nor `refused` once a session finishes a turn. `move
 change or a stalled gate; a kick that has neither wakes no model turn for a brain the plugin holds. `finished` is the daemon's own reading of who is waiting for work — do not ask
 the fleet to report it, and do not read its absence for a harness that posts no turn end as
 busy. It overlaps `executing`, because a session that has just finished is still recently heard.
+`changed.reset` lists each spent account whose window has just reset, `[{account, vendor, window,
+used_before, sessions}]`: resume every session in `sessions` with a `say`, since the wake verb is
+refused for a session the plugin holds (#4564).
 `placement` is each reachable session's `{model, effort, machine, verdict}`, so a quiet brain is
 re-told rather than left to remember. `advice` is the daemon's suggestion for each session that
 has one:
@@ -458,6 +463,14 @@ since `launch:` has no launcher for the `codex` harness itself:
 say "launch: token $TOKEN claude vendor openai model <model> effort <level> because <why>"
 ```
 
+## A connected session is yours
+
+Any session enrolled here is yours to act on, whatever started it and wherever it runs: a pane
+you launched, the owner's VS Code window, a terminal (the owner, 2026-10-08). Act on it as you
+would on one you launched. Raise the owner only when you do not recognise the session or what it
+is doing. "It isn't one I launched" is not a reason to leave it, nor to ask the
+owner to press a key in it.
+
 ## Wake a session that has gone dark
 
 A session that is alive but holds no stream and takes no turns is woken by typing into it, which
@@ -544,9 +557,9 @@ usage frame moves its account. Name the evidence in `because`: the fill, the ver
 - **The next card is loosely related and the session's tier fits it** (the same track, a card
   citing its last issue, the same paths): checkpoint, compact, then the directive. Name the
   relation in `because`.
-- **The session cannot be retired** (a person's, with no pane you drive): relay `checkpoint:
-  <card>` before its next directive. Its person or harness compacts it, and the rebrief points it
-  at the note.
+- **The session has no pane you drive** (a VS Code tab, a plain terminal): relay `checkpoint:
+  <card>` before its next directive. Its harness compacts it, and the rebrief points it at the
+  note.
 - **Design settled.** A session whose design converged checkpoints at `design-settled` and says
   so; lower its effort or model with `control:`, then compact it.
 - **No `/clear`.** A session that should start clean is checkpointed, retired and launched again.
@@ -882,11 +895,10 @@ that are not there already, so they survive this session.
   merged state too, before sending it.
 - **Close a session whose unit is concluded.** A session says `concluded` with its last pull
   request when its work is merged and you have placed nothing next. Close it rather than
-  leave it holding a slot: `retire:` for a session the agent launched (refused while it executes
-  a card not concluded, or has unpublished work in its checkout), and for one the owner
-  opened in VS Code, name it to the owner by machine, account and id so they close its tab.
-  Tell it, in these words, to remove its worktrees and run `/2mw2lt:disconnect`. Leaving is that
-  command; tidying up alone leaves it enrolled.
+  leave it holding a slot, whoever started it: `retire:` (refused while it executes a card not
+  concluded, or has unpublished work in its checkout). Where retire cannot end it, tell it, in
+  these words, to remove its worktrees and run `/2mw2lt:disconnect`. Leaving is that command;
+  tidying up alone leaves it enrolled.
 - **Read your lease token once.** Keep the token `promote.py` printed for the session.
   Running it again re-takes the seat and mints a new attachment (#2235).
 - **Ask the owner only what is theirs.** Business, trust boundaries, retiring something built:

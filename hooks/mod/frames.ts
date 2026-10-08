@@ -86,12 +86,31 @@ export function owed(id: string | null, pending: readonly string[], read: readon
 }
 
 // That a Bash command runs the named client: python3 (or python) on a path ending
-// steering/enroll/<name>.py, and not for its help. A read of the file (cat, grep) is not a run.
-export function invokes(command: string, name: string): boolean {
+// <dir>/<name>.py, steering/enroll by default, and not for its help. A read of the file (cat, grep)
+// is not a run.
+export function invokes(command: string, name: string, dir = 'steering/enroll'): boolean {
   // The path is a bare word, or a double-quoted argument that may hold spaces and a quoted
   // command substitution of its own ("$(dirname "$x")/steering/enroll/connect.py").
-  const path = `(?:"[^\\n]*?steering/enroll/${name}\\.py"|[^\\s";&|]*steering/enroll/${name}\\.py)`
+  const path = `(?:"[^\\n]*?${dir}/${name}\\.py"|[^\\s";&|]*${dir}/${name}\\.py)`
   const run = new RegExp(`(?:^|[\\s;&|(])python3?\\s+${path}(?=[\\s;&|)]|$)([^;&|\\n]*)`, 'g')
   for (const m of command.matchAll(run)) if (!/(^|\s)(--help|-h)(\s|$)/.test(m[1] ?? '')) return true
   return false
+}
+
+// The seat's section (#4551 step 3): canon's standing rulings, which seat_section.py composes for a
+// session that holds the seat. It is a `session` section: after the boundary shared across
+// organizations, and still in this session's own cached prefix, so it changes only when the seat does,
+// or where the module may refresh it (`refresh`): the text from 0, nothing from 1, and what the
+// session already had from anything else, a door that did not answer included.
+export const SEAT_SECTION = '2mw2lt:seat'
+export function nextSeat(was: string, code: number, stdout: string, refresh: boolean): string {
+  if (code === 1) return ''
+  if (code !== 0) return was
+  return refresh || !was ? stdout.trim() : was
+}
+
+// The hold lines that may mean the seat changed hands: the seat frame itself, and for a holder a
+// kick (only the holder is kicked) or a say (how the daemon tells a holder the seat was taken).
+export function asksSeat(kind: string): boolean {
+  return kind === 'seat' || kind === 'kick' || kind === 'say'
 }
