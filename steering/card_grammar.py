@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from track_shape import bounded_text, valid_track
 from ulids import new_ulid, valid_ulid
-from wire_instants import now
+from wire_instants import is_instant, now
 
 
 # Strongest first: the order settles a conflict between two trailers, and decides which
@@ -22,7 +22,9 @@ STATES = ("card-scoped", "card-branch", "card-unbranch", "card-session", "card-u
           # A correction, with what it replaced (doc 125 §5).
           "card-reclassified", "card-reanchored",
           # What a card waits on or contributes to (doc 167).
-          "card-link", "card-unlink")
+          "card-link", "card-unlink",
+          # What the work is for, and the daemon's reading of it (doc 185 §5).
+          "card-outcome", "card-outcome-read")
 SIGNS = ("gate", "anchor")
 FIELDS = ("track", "significance", "state", "priority", "major")
 
@@ -42,6 +44,11 @@ NAME_MAX = 80
 # An edge's kinds and how one ends (doc 167). `requires` is acyclic; `part-of` is not a wait.
 LINKS = ("requires", "part-of")
 ENDINGS = ("resolved", "withdrawn")
+
+# An outcome's window (doc 185 §3.2): long enough to see use, short enough to end in a verdict.
+OUTCOME_WINDOW_MAX = 30
+OUTCOME_STARTS = ("merge", "rollout")
+PHASES = ("baseline",)
 
 
 def _text(v: object, limit: int = NAME_MAX) -> bool:
@@ -140,6 +147,58 @@ def validate(fact: dict) -> str | None:
             return "pr is a positive number"
     elif state in ("card-link", "card-unlink"):
         return _edge_refusal(fact)
+    elif state == "card-outcome":
+        return _outcome_refusal(fact)
+    elif state == "card-outcome-read":
+        if fact.get("phase") not in PHASES:
+            return f"phase must be one of {PHASES}"
+        if not all(_count(fact.get(k)) for k in ("rev", "count", "per", "gaps")):
+            return "rev, count, per and gaps are counts"
+        if not (is_instant(fact.get("from")) and is_instant(fact.get("to"))):
+            return "from and to are instants"
+        halves = fact.get("halves")
+        if not (isinstance(halves, list) and len(halves) == 2 and all(
+                isinstance(h, dict) and set(h) == {"count", "per"} and _count(h["count"]) and _count(h["per"])
+                for h in halves)):
+            return "halves are the window's two halves, each a count and a per"
+    return None
+
+
+def _count(v: object, least: int = 0) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool) and v >= least
+
+
+def _valid_reading(r: object) -> bool:
+    return isinstance(r, dict) and set(r) == {"count", "per"} and all(
+        isinstance(side, dict) and _text(side.get("state"), 120)
+        and set(side) in ({"state"}, {"state", "field", "value"})
+        and all(_text(side[k], 120) for k in ("field", "value") if k in side)
+        for side in r.values())
+
+
+def _outcome_refusal(fact: dict) -> str | None:
+    if not (_text(fact.get("need"), EVIDENCE_MAX) and _text(fact.get("target"), EVIDENCE_MAX)):
+        return f"need and target are each one line of at most {EVIDENCE_MAX} characters"
+    if not (_count(fact.get("window"), 1) and fact["window"] <= OUTCOME_WINDOW_MAX):
+        return f"window is 1 to {OUTCOME_WINDOW_MAX} days"
+    if "uses" in fact and not _count(fact["uses"], 1):
+        return "uses is a positive count"
+    if fact.get("starts") not in OUTCOME_STARTS:
+        return f"starts must be one of {OUTCOME_STARTS}"
+    reading, baseline = fact.get("reading"), fact.get("baseline")
+    if reading is not None and not _valid_reading(reading):
+        return "a reading is facts <state> [<field>=<value>] per <state> [<field>=<value>]"
+    if baseline is not None and baseline != {"none": True} and not (
+            isinstance(baseline, dict) and set(baseline) == {"stated"} and _text(baseline["stated"], EVIDENCE_MAX)):
+        return "baseline is stated \"<value and how it was measured>\" or none"
+    if reading is None and baseline is None:
+        return "an outcome names a reading the daemon can take, or states its baseline"
+    if "stop" in fact and not _text(fact["stop"], EVIDENCE_MAX):
+        return f"stop is one line of at most {EVIDENCE_MAX} characters"
+    if "rev" in fact and not _count(fact["rev"], 1):
+        return "rev is a positive count"
+    if fact.get("by") is not None and not _text(fact.get("by"), 120):
+        return "by must name who wrote it"
     return None
 
 
@@ -273,6 +332,8 @@ def built(verb: str, rest: list[str]) -> tuple[list[dict], str | None]:
         if verb == "unlink" and len(rest) >= 5:
             return [_fact("card-unlink", rest[0], kind=rest[1], **_to(rest[2]), how=rest[3],
                           why=" ".join(rest[4:]))], None
+        if verb == "outcome" and rest:
+            return [_outcome(rest)], None
         if verb == "reanchor" and len(rest) >= 2:
             named = [a for a in rest[1:] if _ANCHOR_ARG.match(a)]
             why = " ".join(a for a in rest[1:] if not _ANCHOR_ARG.match(a))
@@ -281,6 +342,79 @@ def built(verb: str, rest: list[str]) -> tuple[list[dict], str | None]:
     except (IndexError, ValueError) as e:
         return [], str(e) or USAGE_REFUSAL
     return [], USAGE_REFUSAL
+
+
+def _side(words: list[str]) -> dict:
+    """One side of a reading: a state, narrowed by at most one `field=value` (doc 185 §9.4)."""
+    if len(words) not in (1, 2):
+        raise ValueError("a reading's side is <state> [<field>=<value>]")
+    side = {"state": words[0]}
+    if len(words) == 2:
+        field, eq, value = words[1].partition("=")
+        if not (field and eq and value):
+            raise ValueError(f"a reading narrows by <field>=<value>, not {words[1]!r}")
+        side.update(field=field, value=value)
+    return side
+
+
+def _outcome(rest: list[str]) -> dict:
+    """The brief, walked keyword by keyword. Every text field is one token, so a quote the shell
+    or `speak.argv` broke leaves a stray word that is refused, never one moved to another field."""
+    card, words, kw = rest[0], rest[1:], {}
+    i = 0
+    while i < len(words):
+        key = words[i]
+        if i + 1 == len(words):
+            raise ValueError(f"outcome: {key} needs a value")
+        if key in kw:
+            raise ValueError(f"outcome: {key} twice")
+        if key in ("need", "target", "stop"):
+            kw[key] = words[i + 1]
+            i += 2
+        elif key == "reading":
+            if words[i + 1] != "facts":
+                raise ValueError("outcome: a reading is facts <state> ... per <state> ...")
+            end = next((j for j in range(i + 2, len(words)) if words[j] in _OUTCOME_KEYS), len(words))
+            body = words[i + 2:end]
+            if body.count("per") != 1:
+                raise ValueError("outcome: a reading is <state> [<field>=<value>] per <state> [<field>=<value>]")
+            at = body.index("per")
+            kw["reading"] = {"count": _side(body[:at]), "per": _side(body[at + 1:])}
+            i = end
+        elif key == "window":
+            days = words[i + 1]
+            if not (days.endswith("d") and days[:-1].isdigit()):
+                raise ValueError(f"outcome: window is <n>d, not {days!r}")
+            kw["window"] = int(days[:-1])
+            i += 2
+        elif key == "uses":
+            kw["uses"] = int(words[i + 1])
+            i += 2
+        elif key == "starts":
+            kw["starts"] = words[i + 1]
+            i += 2
+        elif key == "baseline":
+            if words[i + 1] == "none":
+                kw["baseline"] = {"none": True}
+                i += 2
+            elif words[i + 1] == "stated" and i + 2 < len(words):
+                kw["baseline"] = {"stated": words[i + 2]}
+                i += 3
+            else:
+                raise ValueError("outcome: baseline is stated \"<value>\" or none")
+        else:
+            raise ValueError(f"outcome: unexpected {key}")
+    missing = [k for k in ("need", "target", "window", "starts") if k not in kw]
+    if missing:
+        raise ValueError(f"outcome: needs {', '.join(missing)}")
+    fact = _fact("card-outcome", card, reading=kw.pop("reading", None), **kw)
+    refusal = _outcome_refusal(fact)
+    if refusal:
+        raise ValueError(refusal)
+    return fact
+
+
+_OUTCOME_KEYS = ("need", "reading", "target", "window", "uses", "starts", "baseline", "stop")
 
 
 def _to(word: str) -> dict:

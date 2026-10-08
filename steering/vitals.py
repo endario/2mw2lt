@@ -34,7 +34,7 @@ _FIELDS = {"v", "source", "source_version", "provider_session", "runtime_id", "o
            "model", "vendor", "tokens", "branch", "cwd", "permission_mode", "effort",
            "context_window",
            "stop_reason", "background_tasks", "session_crons", "entrypoint", "agent_type",
-           "machine_id", "hostname", "turn"}
+           "machine_id", "hostname", "turn", "tmux"}
 _REQUIRED = {"v", "source", "source_version", "provider_session", "observed_at"}
 _TOKENS = ("input", "output", "thinking", "cache_read", "cache_creation")
 # Claude Code's own permission modes; anything else is a string this does not recognise.
@@ -45,6 +45,10 @@ EFFORTS = {"off", "low", "medium", "high", "xhigh", "max"}
 # Where a reading's session stands in its turn, for a harness that posts no turn-end observation of
 # its own (#1795): read from its transcript by the agent that reaches it.
 TURNS = {"open", "ended", "aborted"}
+# Whether a window is on the tmux session the harness runs in, as its machine saw it when it stated
+# the reading: present only for a session in a tmux pane. What a person is watching is not in the
+# transcript, so only the sender can say it.
+TMUX = {"attached", "detached"}
 
 
 def tail(path: Path, limit: int = TAIL) -> str:
@@ -222,6 +226,8 @@ def validate(rec: object) -> str | None:
         return "effort outside the closed set"
     if rec.get("turn") is not None and rec["turn"] not in TURNS:
         return "turn outside the closed set"
+    if rec.get("tmux") is not None and rec["tmux"] not in TMUX:
+        return "tmux outside the closed set"
     why = records.integers(rec, ("background_tasks", "session_crons", "context_window"),
                            least=0, what="a non-negative integer")
     if why:

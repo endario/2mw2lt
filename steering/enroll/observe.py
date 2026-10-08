@@ -6,14 +6,20 @@ Configured for every event doc 15 §3 names, e.g.
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+import python_floor  # noqa: E402
+
+python_floor.require()
+
 import json
 import os
 import subprocess
-import sys
 import time
 import urllib.request
 import uuid
-from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))

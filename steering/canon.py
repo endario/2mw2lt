@@ -283,8 +283,8 @@ def names_card(units: dict[str, dict] | None, card_id: str, issues) -> str | Non
 
 def owes(*, major: bool, concluded: bool, design_passed: bool, card_id: str, issues,
          diff_paths: list[str] | None, units: dict[str, dict] | None,
-         read: dict | None) -> dict:
-    """The three knowledge stages of one card (doc 148 §5), beside doc 80's five.
+         read: dict | None, outcome: dict | None = None) -> dict:
+    """The knowledge stages of one card (doc 148 §5), beside doc 80's five.
 
     Each stage is `{"state": …}` with the state the obligation's own name (`owes-design`,
     `owes-record`, `owes-harvest`) while it stands, `met` once satisfied, `none` where the card
@@ -298,6 +298,8 @@ def owes(*, major: bool, concluded: bool, design_passed: bool, card_id: str, iss
     `units` is the synced canon's fold and `read` the `knowledge.read` answer, both as the
     daemon holds them; `diff_paths` is the card's branch diff against main, or None when no
     diff is known (no pull request, or one whose files the sweep did not read whole).
+    `outcome` is the card's folded brief (doc 185 §3.1): a goal is owed one too, but whether a
+    card is a goal is the work fold's edges, so the fold marks that after.
     """
     if not major:
         design = {"state": "none"}
@@ -320,7 +322,8 @@ def owes(*, major: bool, concluded: bool, design_passed: bool, card_id: str, iss
         record = ({"state": "owes-record", "units": owed, "moved": moved} if owed
                   else {"state": "met"})
     return {"design": design, "record": record,
-            "harvest": {"state": "none" if not concluded else "owes-harvest"}}
+            "harvest": {"state": "none" if not concluded else "owes-harvest"},
+            "outcome": {"state": "met" if outcome else "owes-outcome" if major and not concluded else "none"}}
 
 
 class Tree:

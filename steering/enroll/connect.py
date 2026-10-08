@@ -30,7 +30,7 @@ import urllib.request
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
-from local_workspace import KEY_HEADER, agent_key, agent_port, common_root, required_workspace_root, workspace_header  # noqa: E402
+from local_workspace import KEY_HEADER, agent_key, agent_port, common_root, origin_slug, required_workspace_root, workspace_header  # noqa: E402
 import door  # noqa: E402
 from door import say  # noqa: E402
 from ack import store, valid_token  # noqa: E402
@@ -40,6 +40,7 @@ from transcript_proof import account_of, identify_transcript  # noqa: E402
 import machine_harness as harness_mod  # noqa: E402
 from process_probe import Undetermined  # noqa: E402
 import hooks  # noqa: E402
+import checkout_binding  # noqa: E402
 import holder  # noqa: E402
 import refusal  # noqa: E402
 import witness as witness_mod  # noqa: E402
@@ -535,11 +536,20 @@ def plugin_line(provider: str | None, mine_file: Path = HERE.parent.parent / "ve
     return f"plugin: {mine}"
 
 
-def holder_note(ws: Path, psession: str | None) -> str:
-    """What the `plugin:` line adds when the plugin's module holds this session's stream: with a
-    fresh holder claim the model arms no hold of its own (#3872 D2)."""
-    return "; the plugin holds this session's stream, so arm no hold" \
-        if psession and holder.fresh(ws, psession) else ""
+def holder_note(ws: Path, psession: str | None, provider: str | None = None,
+                plugin_root: Path = HERE.parent.parent) -> str:
+    """What the `plugin:` line adds about the plugin's module: with a fresh holder claim the model
+    arms no hold of its own (#3872 D2). Without one, a Claude session of a plugin that ships a
+    module says so, because a process fetched its plugins when it started and never loads a module
+    that arrived after (#4551)."""
+    if not psession:
+        return ""
+    if holder.fresh(ws, psession):
+        return "; the plugin holds this session's stream, so arm no hold"
+    if provider == "claude" and (plugin_root / "hooks" / "mods.json").is_file():
+        return ("; the plugin's module holds no stream here (this process may have started before the "
+                "plugin gained it: restart it or --resume), so arm a hold")
+    return ""
 
 
 def plugin_out(line: str, note: str) -> tuple[str | None, str | None]:
@@ -553,7 +563,13 @@ def plugin_out(line: str, note: str) -> tuple[str | None, str | None]:
 def repo_line(ws: Path) -> str:
     """`repo: owner/name`, the repository this workspace serves as its door names it. A checkout's
     `origin` may be an SSH host alias, which `gh` cannot resolve; `gh -R` with this line does not
-    read `origin`."""
+    read `origin`.
+
+    The workspace is the binding install writes, else the one this door itself names: a checkout
+    wired before bindings existed carries no file, and the door that served this connect is the
+    same source install resolved. Written back only when the workspace serves this checkout's own
+    `origin` — the mismatch install refuses (#2618) is not persisted here — so the readers that
+    come after this one read the file alone (#4282)."""
     try:
         code, body = door.get("/steering/authorities", timeout=5)
         if code != 200:
@@ -561,17 +577,38 @@ def repo_line(ws: Path) -> str:
         rows = json.loads(body).get("authorities") or []
     except Exception as e:
         return f"repo: unknown ({type(e).__name__}: {e})"
-    try:
-        wid = (ws / ".claude" / "steering-workspace").read_text().strip() or None
-    except OSError:
-        wid = None
+    wid = checkout_binding.id_at(ws)
+    from_door = wid is None
+    if from_door:
+        # The door is resolved here, not hoisted above, so a bound checkout never pays for it;
+        # a resolution that refuses leaves the unknown line below, not a crashed connect.
+        try:
+            wid = door.split(door.door_url())[1]
+        except (Exception, SystemExit):
+            wid = None
     if wid is None:
         return "repo: unknown (this checkout is bound to no workspace)"
     mine = [r for r in rows if isinstance(r, dict) and r.get("id") == wid]
     if len(mine) != 1:
-        return f"repo: unknown (the door does not list the workspace {wid} this checkout is bound to)"
+        return f"repo: unknown (the door does not list the workspace {wid})"
     if not mine[0].get("repo"):
         return f"repo: unknown (the door names no repository for the workspace {wid})"
+    if from_door:
+        # Written only when the workspace serves this checkout's own `origin`: the mismatch
+        # install refuses (#2618) is not persisted, and an `origin` that cannot be asked
+        # verifies nothing.
+        try:
+            slug = origin_slug(ws, timeout=5)
+        except Exception:
+            slug = None
+        if slug is not None and slug != mine[0]["repo"]:
+            return (f"repo: unknown (the workspace {wid} serves {mine[0]['repo']}, this checkout's "
+                    f"origin is {slug}; uninstall here, then install again)")
+        if slug is not None:
+            try:
+                checkout_binding.bind(ws, wid)
+            except OSError:
+                pass   # best-effort: a checkout that cannot be written still gets its line
     return f"repo: {mine[0]['repo']}"
 
 
@@ -640,11 +677,18 @@ def main(argv: list[str]) -> int:
         print(why, file=sys.stderr)
     line = plugin_line(h.provider)
     if line:
-        out, warn = plugin_out(line, holder_note(ws, psession))
+        out, warn = plugin_out(line, holder_note(ws, psession, h.provider))
         if warn:
             print(warn, file=sys.stderr)
         if out:
             print(out)
+    try:
+        import ghmeter
+        blind = ghmeter.shadowed(os.environ.get("PATH", ""))
+    except (ImportError, OSError, RuntimeError):  # a symlink loop on PATH raises RuntimeError
+        blind = None
+    if blind:
+        print(blind, file=sys.stderr)
     if not h.holds:
         print(reached(session, psession, ws) if port else
               f"reach: not asserted, there being no agent here for {ws}; "

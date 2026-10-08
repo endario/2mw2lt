@@ -214,12 +214,20 @@ def _ready(app, window, tab, title, deadline=None):
     return "" if text == "⌘ Esc to focus or unfocus Claude" else text
 
 
+# How long a wake waits for Chromium to build the accessibility tree after the wake itself
+# requested it (`AXManualAccessibility`): the tree builds lazily, and the first wake of an app
+# measured longer than the two seconds this used to allow — the first live #2183 trial refused
+# with no windows while the tree was still building, and the one minutes later typed. Bounded,
+# still well inside the keyboard wait a wake holds, and paid only once per app.
+COLD_TREE_WAIT_S = 15.0
+
+
 def focus(pid: int, folder: str, title: str):
     with App(pid) as app:
         enabling = not app.get(app.root, "AXManualAccessibility")
         if enabling:
             app.flag(app.root, "AXManualAccessibility", True)
-        deadline = time.monotonic() + (2.0 if enabling else 0.0)
+        deadline = time.monotonic() + (COLD_TREE_WAIT_S if enabling else 0.0)
         while True:
             try:
                 window, tab = _match(app, folder, title)

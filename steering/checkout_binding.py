@@ -9,7 +9,8 @@ HERE = Path(__file__).resolve().parent
 MANIFEST = HERE / "workspaces.json"
 
 # Where a checkout records which workspace of this deployment it is. Written by
-# `hooks.py install`, read by everything else.
+# `hooks.py install`; `connect` writes it back from the door when a checkout wired before
+# bindings carries none (#4282). Read by everything else.
 BINDING = Path(".claude") / "steering-workspace"
 
 

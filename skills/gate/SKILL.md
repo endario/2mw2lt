@@ -119,8 +119,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> pr <pr nu
 ```
 
 Keep the pull request a draft through every round, and before each round run the focused guards
-for what changed locally, and the full suite locally when the change warrants one. Dispatch no CI
-for it. Mark it ready only after `ship it`, then merge it.
+for what changed locally. Before merging a change under `steering/`, run the full steering suite
+locally on the head you merge; a focused run misses guards that read the whole tree. Dispatch no
+CI for it. Mark it ready only after `ship it`, then merge it.
 
 For GitHub state reads and waiting, follow
 [connect's interim GitHub rule](../connect/SKILL.md#interim-github-rule).

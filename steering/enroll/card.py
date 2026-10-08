@@ -34,9 +34,15 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
              "       card.py --token - reanchor <card> [<verb>:<n>[,<n>] ...] <why>\n"
              "       card.py --token - link <card> requires|part-of <card>|<owner>/<name>#<n> [--source <where>] <why>\n"
              "       card.py --token - unlink <card> requires|part-of <card>|<owner>/<name>#<n> resolved|withdrawn <why>\n"
+             "       card.py --token - outcome <card> need <how it is handled now> "
+             "[reading facts <state> [<field>=<value>] per <state> [<field>=<value>]] target <comparison> "
+             "window <n>d [uses <n>] starts merge|rollout [baseline stated <value and how measured>|baseline none] "
+             "[stop <rule>]\n"
              "\n"
              "       `major` is the brain's declaration that a card's work is major (doc 148 §5): "
-             "a major card owes a design until a critic-passed canon record names it.")
+             "a major card owes a design until a critic-passed canon record names it.\n"
+             "       `outcome` is the seat's alone (doc 185): each text field is one quoted argument, and a "
+             "brief with a reading has the daemon take its baseline as it is written.")
     usage = usage.replace("card.py", prog)
     if prog == "card.py" and help_requested("card", argv, bare=False):
         print(script_help("card"))

@@ -14,12 +14,18 @@ delivered later is worth nothing.
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+import python_floor  # noqa: E402
+
+python_floor.require()
+
 import hashlib
 import json
 import os
-import sys
 import time
-from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -96,6 +102,27 @@ def due(ws: Path, hook: dict, now: float) -> bool:
     return True
 
 
+def with_tmux(rec: dict, left: float) -> None:
+    """Whether a window is on the tmux session this process runs in, stated on the reading. Said
+    only inside a pane, and never at the cost of the reading: the lookup makes up to three tmux calls
+    in a row, each held to a sixth of what is left, half a second at most. A reading without it
+    would read as a window gone, so a mid-turn one carries it too."""
+    if left < 0.5:
+        return
+    each = min(0.5, left / 6)
+    import subprocess
+    import wakeexec
+    tmux = os.environ.get("TMUX")
+    try:
+        state = wakeexec.tmux_state(
+            os.getppid(), socket=tmux.split(",", 1)[0] if tmux else None,
+            run=lambda *a, **k: subprocess.run(*a, **{**k, "timeout": each}))
+    except Exception:
+        return
+    if state:
+        rec["tmux"] = state
+
+
 def midturn(hook: dict, ws: Path, rid: str | None, timeout: float) -> None:
     """The reading a Stop would send, sent from a tool call instead. Raises what `post` raises."""
     rec = build(hook)
@@ -103,7 +130,9 @@ def midturn(hook: dict, ws: Path, rid: str | None, timeout: float) -> None:
         return
     if rid:
         rec["runtime_id"] = rid
-    observe_post.post(rec, ws, timeout)
+    deadline = time.monotonic() + timeout
+    with_tmux(rec, timeout)
+    observe_post.post(rec, ws, max(0.1, deadline - time.monotonic()))
 
 
 def main() -> int:
@@ -131,6 +160,8 @@ def main() -> int:
     left = deadline - time.monotonic()
     if left < 0.2:
         return finish()
+    with_tmux(rec, left)
+    left = deadline - time.monotonic()
     sent_at = time.monotonic(); anchor = Path(os.environ.get("CLAUDE_PROJECT_DIR") or hook.get("cwd") or os.getcwd()); where = anchor
     ws = anchor  # a fallback the targeting block below can still post through if resolution fails
     try:

@@ -108,6 +108,10 @@ fits the hour and name that bound in announce. `excluded`, or runway shorter tha
 unit needs, means stop before starting it: preserve the work, push, and report the limit and
 reset with `blocked`.
 
+`incentive` beside the verdict is the owner's own steering of the account, not the
+vendor's word: above 1x, worry less — keep working as the window fills; below 1x, spend it
+sparingly. It never overrides `excluded`.
+
 A `--until-event` hold ends on a move to excluded, not every forecast update. Read the newest
 usage from the recording before another unit.
 

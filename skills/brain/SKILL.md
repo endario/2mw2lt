@@ -52,6 +52,16 @@ nothing reaches you until you take it.
 
 ## Hold the stream
 
+**When connect's `plugin:` line ends `the plugin holds this session's stream, so arm no hold`, arm
+nothing here.** The plugin's module holds one stream for the life of the process and wakes you
+with `A steering frame is waiting`; call `mcp__2mw2lt__frames` then. A hold re-armed by hand on
+top of it closes after every frame, and in each gap the brain cannot answer and the fleet loses
+it (#4520). A line that says the module
+holds no stream here may mean this process fetched its plugins before the module existed, and a
+long-lived seat stays that way until it is restarted or resumed
+(#4551); hold by hand until then. The
+rest of this section is for a harness the plugin does not hold.
+
 Hold your stream as a background command whose end wakes the session — in Claude Code, Bash
 with `run_in_background`. The brain holds this for as long as it runs the fleet, often the whole
 day, so — unlike other commands on this page — do not use `${CLAUDE_PLUGIN_ROOT}` here: it is
@@ -132,7 +142,7 @@ three unanswered kicks raise the owner. A turn that answers a frame changing not
 knows — a kick with nothing to place, a routine say — is one line at most, and no line when
 nothing in it is new to them.
 
-`data: {"kind": "fleet", "accounts": [{"account", "provider", "vendor", "verdict", "tightest", "sessions"}]}`
+`data: {"kind": "fleet", "accounts": [{"account", "provider", "vendor", "verdict", "tightest", "incentive", "sessions"}]}`
 is every account's verdict,
 sent when you take the seat, when you hold, and whenever any account's verdict or rank moves; the
 kick carries the same rows under `usage`. The daemon ranks; you follow the ranking and quote it,
@@ -140,6 +150,9 @@ and do not weigh room yourself. New work goes to a session whose account ranks h
 harness's (`rank` 1 first), and never to one `excluded` or whose `runway` is shorter than the
 work. The rank spends quota that would otherwise expire: an account near its reset with quota
 left ranks first however high its use, and one projected to run out before its reset ranks last.
+`incentive` is the owner's own steering of the account, not the vendor's word: a multiplier above
+1x asks for spend there — among ranked accounts, prefer it and worry less as its windows fill;
+below 1x, prefer another of equal rank.
 `unread` is not room. A gate's reviewer is chosen by the same evaluator (#2135). When you
 recommend an account to the owner, name its forecast — `used`, `at_reset`, `resets_at`, runway —
 never a band.
@@ -316,6 +329,25 @@ edge comes from one:
 printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --token - link <card> requires|part-of <card>|<owner>/<name>#<n> [--source <where>] <why>
 printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --token - unlink <card> requires|part-of <target> resolved|withdrawn <why>
 ```
+
+A goal, or a card you declared major, owes an outcome brief before its first branch is pushed. Write it
+yourself; the card's builder never writes it, and never sees it as owed. Name a reading over facts
+that exist before the card, with a denominator, and the daemon takes the baseline as you write the
+brief. When the card adds the only fact that would show its outcome, state the baseline instead.
+The CI backstop of #4283 would read:
+
+```bash
+printf '%s' "$TOKEN" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --token - outcome <card> \
+  need "CI on main runs only when a GitHub schedule slot fires, and GitHub delays or drops slots" \
+  target "at least 0.95 of slots due get a run within 60 min; no slot runs twice" \
+  window 7d starts rollout \
+  baseline stated "nightly: 18 of 18 slots ran, none within 60 min; 8-hourly: 0 of 2 ran"
+```
+
+The board shows the brief under the card's chips. A second `outcome` is the next revision; it
+never overwrites the first, and the result is judged against the one current when the window
+opens. When the baseline shows the need is rare or already cheap, retire the card with
+`retire <card> "not-worth-building: <baseline>"`.
 
 `scope` mints the card's id before it sends. If the send fails, it prints the id: send the same
 scope again with `--card <that id>`, and the door answers from its record instead of minting a
