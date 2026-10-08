@@ -24,34 +24,10 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 import composer
+import macax
 import runtime_id
 import targeting
 import wake_states
-
-CODE = "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
-
-# A rebranded per-account bundle (`~/Applications/Code <label>.app`) carries the same layout as
-# the stock app under its own `Contents/`, so the bundle root is all `_bundle_cli` needs — never
-# assumed from the label, which is chosen freely and not addressable by name (#2091, doc 08).
-_APP_BUNDLE = re.compile(r"^(.*\.app)/Contents/")
-
-
-def _bundle_cli(app_pid: int, *, ps=None) -> str | None:
-    """The `code` CLI inside the bundle `app_pid` is actually running from, or None where that
-    can't be read or the bundle carries no CLI of its own — the caller falls back to `CODE` then.
-    """
-    try:
-        r = (ps or subprocess.run)(["ps", "-ww", "-o", "comm=", "-p", str(app_pid)],
-                                   capture_output=True, text=True, timeout=5)
-    except Exception:
-        return None
-    if r.returncode != 0:
-        return None
-    m = _APP_BUNDLE.match(r.stdout.strip())
-    if not m:
-        return None
-    cli = Path(m.group(1)) / "Contents" / "Resources" / "app" / "bin" / "code"
-    return str(cli) if cli.exists() else None
 
 # What is typed. It becomes a real user turn the session pays for and reasons about, so it is
 # stated here rather than composed at the call site. The trailer is shared so a wording change
@@ -180,7 +156,7 @@ def instance_of(pid: int) -> tuple[str, int]:
     return found
 
 
-def target(psession: str, provider: str, frame: dict | None = None, *, ps=None) -> dict:
+def target(psession: str, provider: str, frame: dict | None = None) -> dict:
     """Everything the sequence needs, with the two staleness checks that make it safe to use.
 
     The frame is read first when it carries targeting fields (doc 113) — pre-handed while the
@@ -219,8 +195,7 @@ def target(psession: str, provider: str, frame: dict | None = None, *, ps=None) 
     # function falls back to (entrypoint/pid/cwd, not just udd/app_pid) could silently stop
     # triggering `execute()`'s self-backfill.
     return {"psession": psession, "pid": pid, "cwd": cwd, "udd": udd,
-            "app_pid": app_pid, "runtime": live, "discovered": discovered,
-            "cli": _bundle_cli(app_pid, ps=ps) or CODE}
+            "app_pid": app_pid, "runtime": live, "discovered": discovered}
 
 
 def _backfill(frame: dict, tgt: dict, workspace: Path | None) -> None:
@@ -234,15 +209,6 @@ def _backfill(frame: dict, tgt: dict, workspace: Path | None) -> None:
     observe_post.post(rec, workspace, 3.0, route="targeting")
 
 
-# One machine has one keyboard and one frontmost window, so one wake types at a time on it. The
-# per-session claim of #1771 does not bound this: two wakes for two *different* sessions are both
-# legitimate and, run together, interleave focus, clear, paste and submit. `frontmost_pid` cannot
-# save them — it compares the VS Code instance, and sibling tabs share one. So a wake for session
-# A could clear session B's composer and submit A's text into it, which is the one outcome the
-# owner ruled out (2026-09-22).
-#
-# Both locks, because there are two ways to get a second typist: another task in this agent, and
-# another agent on this machine (one host ran two side by side, #1780).
 _TYPING = threading.Lock()
 # The typing lock lives at /tmp, whose file is world-writable on purpose: the two agents it
 # sequences can be different logins. Where /tmp itself is refused — a judge cage (#2816) — it
@@ -345,7 +311,7 @@ def _acquire_until(take, deadline: float) -> bool:
         time.sleep(_POLL)
 
 
-def execute(frame: dict, *, typist=None, ps=None, lock_path: str | None = None,
+def execute(frame: dict, *, typist=None, lock_path: str | None = None,
             wait: float = TYPING_WAIT_SECONDS, still_offered=None,
             workspace: Path | None = None, tmux=None, find_pane=None) -> dict:
     """Wake the session the frame names, or say why not. Never raises at the caller: an agent
@@ -373,18 +339,9 @@ def execute(frame: dict, *, typist=None, ps=None, lock_path: str | None = None,
             # nothing (`refused`, as `_failed` keeps it) hands the wake to the tab route.
             if via_pane["state"] != wake_states.REFUSED:
                 return via_pane
-    if frame.get("role") == "brain":
-        # The tab route opens a window through the instance's CLI and a `vscode://` URI. For the
-        # brain on 2026-09-24 that started a second main process on the brain's own user-data-dir,
-        # which resumed the brain's session in a new window behind a URI consent dialog, beside the
-        # brain still running (#2171). Until the route can show it reaches the running instance,
-        # the brain is not typed into this way; a pane route above is unaffected.
-        why = "the VS Code tab route cannot be shown to reach the brain's running instance (#2171)"
-        if via_pane is not None:
-            why = f"{via_pane['why']}; and as a tab: {why}"
-        return {"attempt": attempt, "state": wake_states.REFUSED, "why": why}
+    provider = frame.get("provider") or "claude"
     try:
-        tgt = target(frame["psession"], frame.get("provider") or "claude", frame, ps=ps)
+        tgt = target(frame["psession"], provider, frame)
     except (Refused, KeyError) as e:
         why = str(e) if via_pane is None else f"{via_pane['why']}; and as a tab: {e}"
         return {"attempt": attempt, "state": wake_states.REFUSED, "why": why}
@@ -404,40 +361,39 @@ def execute(frame: dict, *, typist=None, ps=None, lock_path: str | None = None,
     if not runtime_id.verify_instance(tgt["pid"], tgt["app_pid"], tgt["udd"]):
         return {"attempt": attempt, "state": wake_states.REFUSED,
                 "why": f"app_pid {tgt['app_pid']} is not a verified ancestor of pid {tgt['pid']}"}
-    def sequence() -> str | None:
-        """The keys, under the machine's keyboard lock. Returns why it stopped, or None."""
-        nonlocal typed
+    def fresh() -> None:
         if still_offered is not None and not still_offered():
-            return "the uplink that carried this wake ended while it waited for the keyboard"
+            raise Refused("the uplink that carried this wake ended while it waited for the keyboard")
+        live = runtime_id.derive(provider, pid=tgt["pid"])
+        mismatch = fence_here(frame, {**tgt, "runtime": live})
+        if mismatch:
+            raise Refused(mismatch)
+        if not runtime_id.verify_instance(tgt["pid"], tgt["app_pid"], tgt["udd"]):
+            raise Refused("the session's owning app no longer verifies")
+
+    def posting() -> None:
+        nonlocal typed
+        typed = True
+
+    def sequence() -> None:
+        fresh()
         t.verify_app(tgt["pid"], tgt["app_pid"], tgt["udd"], tgt["psession"])
         t.preflight()
-        t.focus_window(tgt["udd"], tgt["cwd"], cli=tgt["cli"])
-        if not runtime_id.verify_instance(tgt["pid"], tgt["app_pid"], tgt["udd"]):
-            return f"app_pid {tgt['app_pid']} no longer verifies before tab activation"
-        t.activate_tab(tgt["udd"], tgt["psession"], cli=tgt["cli"])
-        t.step_focus()
-        front = t.frontmost_pid()
-        if front != tgt["app_pid"]:
-            # Before a key reaches a composer, not after. This bounds the blast radius to the
-            # one instance; it cannot say which tab holds focus, which is why the receipt of
-            # #1771 is what actually establishes where the text went.
-            return f"frontmost is {front}, the session's instance is {tgt['app_pid']}"
-        text = WAKE_TEXT  # the brain is refused above
+        t.focus_tab(tgt, fresh, posting)
+        t.verify_focus()
+        text = BRAIN_WAKE_TEXT if frame.get("role") == "brain" else WAKE_TEXT
         held = t.take_pasteboard(text.format(nonce=nonce))
         try:
+            t.verify_focus()
             t.clear_composer()
-            typed = True          # from here on a paste may have reached a composer
             t.paste()
             t.submit()
         finally:
             t.restore_pasteboard(held)
-        return None
 
     try:
         with _typing(lock_path, wait):
-            why = sequence()
-        if why is not None:
-            return {"attempt": attempt, "state": wake_states.REFUSED, "why": why}
+            sequence()
     except Refused as e:
         return {"attempt": attempt, "state": _failed(typed), "why": str(e)}
     except Exception as e:                     # an agent does not die on one session's wake
@@ -1025,35 +981,53 @@ class Typist:
             raise Refused(f"app_pid {app_pid} is not a verified running VS Code main process")
         tab_for(udd, psession)
 
+    def _native(self, fn, *args):
+        try:
+            return fn(*args)
+        except macax.Unavailable as e:
+            raise Refused(str(e)) from None
+
     def preflight(self) -> None:
-        trusted = self._osa('ObjC.import("ApplicationServices"); $.AXIsProcessTrusted()',
-                            lang="JavaScript")
-        if trusted != "true":
-            raise Refused("Accessibility is not granted to the signed 2mw2lt agent; enable it "
-                          "in System Settings > Privacy & Security > Accessibility")
+        self._native(macax.preflight)
 
-    def _code(self, cli: str, udd: str, *args: str) -> None:
-        raise Refused("the CLI/URI tab wake route is retired pending the native route (#2183)")
+    def focus_tab(self, tgt: dict, guard, before_post) -> None:
+        self._target = dict(tgt)
+        self._guard, self._before_post = guard, before_post
+        self._binding = tab_for(tgt["udd"], tgt["psession"])
+        pid = tgt["app_pid"]
+        activated = self._osa(
+            'ObjC.import("AppKit"); const app = $.NSRunningApplication.'
+            f'runningApplicationWithProcessIdentifier({int(pid)}); '
+            f'Number(app.processIdentifier) !== {int(pid)} || app.isTerminated ? "false" : '
+            'String(app.activateWithOptions(2))', lang="JavaScript")
+        if activated != "true":
+            raise Refused("the verified running app could not be activated by PID")
+        self._native(macax.focus, pid, *self._binding)
 
-    def focus_window(self, udd: str, cwd: str, *, cli: str = CODE) -> None:
-        self._code(cli, udd, cwd)
+    def verify_focus(self) -> str:
+        self._guard()
+        tgt = self._target
+        if tab_for(tgt["udd"], tgt["psession"]) != self._binding:
+            raise Refused("the target's stored tab binding changed before native input")
+        return self._native(macax.ready, tgt["app_pid"], *self._binding)
 
-    def activate_tab(self, udd: str, psession: str, *, cli: str = CODE) -> None:
-        self._code(cli, udd, "--open-url", f"vscode://anthropic.claude-code/open?session={psession}")
+    def _key(self, code: int | str, flags: int = 0, *, expected_text: str | None = None) -> None:
+        if isinstance(code, str):
+            code = self._native(macax.command_key, code)
+        text = self.verify_focus()
+        if expected_text is not None and text != expected_text:
+            raise Refused("the composer changed before Enter; no Enter sent")
+        self._native(macax.keys, self._target["app_pid"], code, flags, self._before_post)
 
-    def step_focus(self) -> None:
-        self._osa('tell application "System Events" to key code 124 using {command down, option down}')
-        self._osa('tell application "System Events" to key code 123 using {command down, option down}')
-
-    def frontmost_pid(self) -> int | None:
-        out = self._osa('tell application "System Events" to return unix id of '
-                        '(first application process whose frontmost is true)')
-        return int(out) if out.isdigit() else None
+    def _expect_text(self, text: str) -> None:
+        if not _acquire_until(lambda: self.verify_focus() == text, time.monotonic() + 2.0):
+            raise Refused("the native composer did not show the expected input; no Enter sent")
 
     def take_pasteboard(self, text: str) -> dict:
         """Put `text` on the board and answer what is needed to give the board back. Only text
         survives `pbpaste`/`pbcopy`, so a board holding an image is not read: what it held is
         gone the moment the wake text goes on, and the choice left is what to leave behind."""
+        self._text = text
         count, types = self._board()
         restorable = bool(types) and set(types) <= _TEXT_TYPES
         saved = subprocess.run(["pbpaste"], capture_output=True, text=True,
@@ -1080,14 +1054,17 @@ class Typist:
                       lang="JavaScript")
 
     def clear_composer(self) -> None:
-        self._osa('tell application "System Events" to keystroke "a" using {command down}')
-        self._osa('tell application "System Events" to key code 51')
+        self._key("a", 1 << 20)
+        self._key(51)
+        self._expect_text("")
 
     def paste(self) -> None:
-        self._osa('tell application "System Events" to keystroke "v" using {command down}')
+        self._key("v", 1 << 20)
+        self._expect_text(self._text)
 
     def submit(self) -> None:
-        self._osa('tell application "System Events" to key code 36')
+        self._expect_text(self._text)
+        self._key(36, expected_text=self._text)
 
     def _board(self) -> tuple[int | None, list[str]]:
         try:

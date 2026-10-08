@@ -14,6 +14,7 @@ from pathlib import Path
 _RAW_FORMS = {
     "announce": ["announce: <session> token <t> as <harness>/<account> [on <branch>] doing <text>"],
     "blocked": ["blocked: <session> token <t> on <what>"],
+    "wait": ["wait: <session> token <t> for <kind> <on> [recheck <seconds>]"],
     "done": ["done: <session> token <t> [<what>]"],
     "recommend": ["recommend: <session> token <t> <text>"],
     "ask": ["ask: <session> token <t> <question>", "ask: <session> token <t> json <object>"],
@@ -49,7 +50,7 @@ _RAW_FORMS = {
 }
 
 _AUDIENCE = {
-    **{verb: "session" for verb in ("announce", "blocked", "done", "recommend", "ask", "claim", "taking", "declare", "checkpoint", "holds", "enroll", "bind", "ack", "say", "detach", "gate")},
+    **{verb: "session" for verb in ("announce", "blocked", "wait", "done", "recommend", "ask", "claim", "taking", "declare", "checkpoint", "holds", "enroll", "bind", "ack", "say", "detach", "gate")},
     **{verb: "seat" for verb in ("note", "launch", "relay", "retire", "card", "needs", "wake", "control", "roster", "lift", "authorship", "dispose", "promote", "backlog")},
     "rebind": "operator",
     "supersede": "operator",
@@ -59,6 +60,7 @@ _EXAMPLE_RUNTIME = "claude:" + "0" * 32 + ":" + "0" * 64
 _EXAMPLES = {
     "announce": ["announce: violet token <t> as claude-code/main on feat/help doing add help"],
     "blocked": ["blocked: violet token <t> on waiting for review"],
+    "wait": ["wait: violet token <t> for checks 4391 recheck 1800"],
     "done": ["done: violet token <t> help contract"],
     "recommend": ["recommend: violet token <t> approve the release"],
     "ask": ["ask: violet token <t> should this deploy?", 'ask: violet token <t> json {"question":"deploy?"}'],
@@ -191,6 +193,7 @@ TOOLS = {
     "verb": {"forms": [
         {"topic": "announce", "usage": "announce <session> as <harness/account> on <branch> doing <what> [--retry=<id>]", "example": "verb announce violet as claude-code/main on feat/help doing add-help"},
         {"topic": "blocked", "usage": "blocked <session> on <what> [--retry=<id>]", "example": "verb blocked violet on waiting"},
+        {"topic": "wait", "usage": "wait <session> for checks <pr>, merged <pr>, verdict <pr>, comment <pr> or at <YYYY-MM-DDTHH:MMZ> [recheck <seconds>] [--retry=<id>]", "example": "verb wait violet for checks 4391"},
         {"topic": "done", "usage": "done <session> <what> [--retry=<id>]", "example": "verb done violet help"},
         {"topic": "recommend", "usage": "recommend <session> <what> [--retry=<id>]", "example": "verb recommend violet approve"},
         {"topic": "ask", "usage": "ask <session> <question> [--retry=<id>]", "example": "verb ask violet should-we-deploy"},
@@ -218,7 +221,7 @@ EXEMPTIONS = {"outbox": "library", "witness": "library", "probe-stop": "fixture"
 
 # A wire form references the tool forms that can issue it. Client syntax remains in TOOLS only.
 _CLIENTS = {
-    "announce": ((("verb", "announce"),),), "blocked": ((("verb", "blocked"),),),
+    "announce": ((("verb", "announce"),),), "blocked": ((("verb", "blocked"),),), "wait": ((("verb", "wait"),),),
     "done": ((("verb", "done"),),), "recommend": ((("verb", "recommend"),),),
     "ask": ((("verb", "ask"),), (("verb", "ask-json"),)),
     "enroll": ((("connect", None),),),

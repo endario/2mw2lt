@@ -24,9 +24,9 @@ from refusal import resend  # noqa: E402
 
 # `recommend:` and `ask:` share the session-owned status path and door admission. `say:` remains
 # deliberately absent — it is speech routed by `say.py`.
-VERBS = ("announce", "blocked", "done", "recommend", "ask")
+VERBS = ("announce", "blocked", "wait", "done", "recommend", "ask")
 
-ARTICLE = {"announce": "an", "blocked": "a", "done": "a", "recommend": "a", "ask": "an"}
+ARTICLE = {"announce": "an", "blocked": "a", "wait": "a", "done": "a", "recommend": "a", "ask": "an"}
 
 
 def invocation() -> str:
@@ -222,7 +222,7 @@ def main(argv: list[str]) -> int:
     # judged by the authority once the workspace is known, never admitted on the incumbent's.
     import re
     door_refused = False
-    if verb in ("announce", "blocked"):
+    if verb in ("announce", "blocked", "wait"):
         import verb_grammar
         door_refused = verb_grammar.parse_status(line(verb, session, text)) is None
         go_shape = (verb == "announce"

@@ -91,6 +91,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> <issue>
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> branch
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" announce <session> as <account> on <branch> doing "<work>"
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" blocked <session> on "<blocker>"
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" wait <session> for checks <pr>  # or merged <pr>, verdict <pr>, comment <pr>, at <UTC time>: told once it holds, instead of polling
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" done <session> "<result>"
 ```
 

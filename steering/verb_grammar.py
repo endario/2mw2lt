@@ -1,6 +1,7 @@
 """The status verbs a session sends, and a structured ask's shape."""
 from __future__ import annotations
 
+import calendar
 import json
 import re
 import time
@@ -13,6 +14,11 @@ REDACTED = "<redacted>"
 _TOKEN_SLOT = r"(?:\s+token\s+<redacted>)?"
 _ANNOUNCE = re.compile(r"^announce:\s*(?P<session>\S+)" + _TOKEN_SLOT + r"\s+as\s+(?P<agent>\S+)(?:\s+on\s+(?P<on>\S+))?\s+doing\s+(?P<work>.+)$", re.S)
 _BLOCKED = re.compile(r"^blocked:\s*(?P<session>\S+)" + _TOKEN_SLOT + r"\s+on\s+(?P<what>.+)$", re.S)
+# What a session waits for (#4391): its pull request's checks settling, a gate's verdict on it, a
+# new comment on it or its ending, or a time. `recheck` is how long until it is told to look for
+# itself if nothing held.
+_WAIT = re.compile(r"^wait:\s*(?P<session>\S+)" + _TOKEN_SLOT + r"\s+for\s+(?:(?P<kind>checks|merged|verdict|comment)\s+#?(?P<pr>\d+)"
+                   r"|at\s+(?P<at>\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d)?Z))(?:\s+recheck\s+(?P<recheck>\d+))?\s*$")
 _DONE = re.compile(r"^done:\s*(?P<session>\S+)" + _TOKEN_SLOT + r"\s*(?P<what>.*)$", re.S)
 
 # The brain proposes; the owner clears (doc 13 R-B). Never self-dispatched.
@@ -80,6 +86,18 @@ def parse_status(text: str) -> dict | None:
     m = _BLOCKED.match(text)
     if m:
         return {"state": "blocked", "session": m["session"], "on": m["what"].strip(), "ts": ts}
+    m = _WAIT.match(text)
+    if m:
+        if m["kind"]:
+            on = str(int(m["pr"]))
+        else:
+            on = m["at"] if len(m["at"]) == 20 else m["at"][:-1] + ":00Z"
+            try:
+                calendar.timegm(time.strptime(on, "%Y-%m-%dT%H:%M:%SZ"))
+            except ValueError:
+                return None   # shaped like a time and not one, as 2026-02-30 is
+        return {"state": "wait", "session": m["session"], "kind": m["kind"] or "at", "on": on,
+                **({"recheck": int(m["recheck"])} if m["recheck"] else {}), "ts": ts}
     m = _DONE.match(text)
     if m:
         return {"state": "done", "session": m["session"], "what": m["what"].strip(), "ts": ts}
