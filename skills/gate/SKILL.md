@@ -97,10 +97,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> carry <pr
 
 A clean rebase, a merge of `main`, or a conflict-only update after `ship it` carries the pass; run
 `carry` rather than commissioning another round. Commission one when judgment warrants it. A docs-only
-pull request needs a review too, since a critique sets no status. A refusal because aggregate
-replay cannot establish a serial de-conflict is tracked in
-#4287; it is not an instruction to
-commission another round solely for the update.
+pull request needs a review too, since a critique sets no status. Remaining serial proof gaps are
+tracked in #4287; a proof gap is not an
+instruction to commission another round solely for the update.
 
 When the answer is lost, the carry says it may have landed: send the same command again with the
 `--retry=<id>` it printed, and the door answers from its record rather than carrying twice.

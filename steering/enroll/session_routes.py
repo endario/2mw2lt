@@ -399,7 +399,9 @@ def executing_card(session: str, token: str) -> dict | None:
     separate claim primitive (2026-10-08)."""
     cards = get("/cards?state=live", token).get("cards") or []
     for card in cards:
-        if any(e.get("session") == session and e.get("role") == "executor" and not e.get("ended")
+        # Live, not merely unended: an earlier epoch's engagement stays unended. An engagement
+        # read without `live` is not taken, so no card's title is guessed (#4469).
+        if any(e.get("session") == session and e.get("role") == "executor" and e.get("live") is True
                for e in card.get("executors") or []):
             return card
     return None

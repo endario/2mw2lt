@@ -239,14 +239,14 @@ def title(text: str) -> str | None:
 
 def rows(joined: dict) -> list[tuple[str, str]]:
     """Each unit a brief for `joined` names, as its key and its line, in doc 148 §6's order: the
-    card's owed obligations, the card's record, the `*` units, the units in scope, the contracts.
+    card's owed obligations, the card's record, the units in scope, the `*` units, the contracts.
     A decision or lesson is keyed by its id; a record or contract, which has none, by its path;
     an owed stage by its own name, the units it owes carried on its line."""
     unit = lambda u: (u["id"], f"{u['kind']} {u['id']}" + (f": {u['title']}" if u.get("title") else ""))
     stage = lambda o: (f"owes-{o['stage']}", " ".join([f"owes-{o['stage']}", *o.get("units", [])]))
     return ([stage(o) for o in joined.get("owes") or []]
             + [(r["path"], f"record {r['path']}") for r in joined.get("records", [])]
-            + [unit(u) for u in joined.get("every", [])] + [unit(u) for u in joined.get("units", [])]
+            + [unit(u) for u in joined.get("units", [])] + [unit(u) for u in joined.get("every", [])]
             + [(c["path"], f"contract {c['path']}") for c in joined.get("contracts", [])])
 
 
