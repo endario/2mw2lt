@@ -326,10 +326,10 @@ def retry_args(argv: list[str]) -> tuple[list[str], str | None]:
 
 
 def unkeyed(line: str) -> bool:
-    """The brain's `note:` and `needs:` keep no record a resend could be answered from, so they
+    """The brain's `note:` and `effort:` keep no record a resend could be answered from, so they
     are sent once. A `say:` is settled once by the door's message id (doc 73 §3.1) like every
     keyed verb: its lost answer goes again under the id the sender printed."""
-    return line.startswith(("note:", "needs:"))
+    return line.startswith(("note:", "effort:"))
 
 
 SETTLED, UNSENT, REFUSED = "settled", "unsent", "refused"

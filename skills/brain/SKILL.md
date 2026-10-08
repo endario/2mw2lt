@@ -67,7 +67,7 @@ it (#4520). A line that says the module
 holds no stream here may mean this process fetched its plugins before the module existed, and a
 long-lived seat stays that way until it is restarted or resumed
 (#4551); hold by hand until then. While you hold the seat
-the plugin also places canon's standing decisions last in your system prompt, so a compaction
+the plugin also places the knowledge's standing decisions last in your system prompt, so a compaction
 does not lose them; any other harness reads them with `seat_section.py`. The
 rest of this section is for a harness the plugin does not hold.
 
@@ -123,8 +123,7 @@ change or a stalled gate; a kick that has neither wakes no model turn for a brai
 the fleet to report it, and do not read its absence for a harness that posts no turn end as
 busy. It overlaps `executing`, because a session that has just finished is still recently heard.
 `changed.reset` lists each spent account whose window has just reset, `[{account, vendor, window,
-used_before, sessions}]`: resume every session in `sessions` with a `say`, since the wake verb is
-refused for a session the plugin holds (#4564).
+used_before, sessions}]`: resume every session in `sessions` with `wake:`.
 `delegation` is each reachable session's `{model, effort, machine, verdict}`, so a quiet brain is
 re-told rather than left to remember. `advice` is the daemon's suggestion for each session that
 has one:
@@ -144,7 +143,7 @@ answers, with each reading's working directory omitted. Delegate to `finished` f
 `ACTIVE` and a session in both is one session. For each of them, take the
 highest-priority card with no present executor (one whose executor has left the board counts)
 that the session can carry, and that you have not already relayed to a session still on the board
-that has not yet announced it: its account has room, and it runs at the level the card's `needs:`
+that has not yet announced it: its account has room, and it runs at the effort the card's `effort:`
 asks for. Relay it with
 `relay: token @lease to <session> <the directive, naming the card>`, which needs no
 clearance, and once the session announces the branch, write `card-session <session> executor`.
@@ -377,7 +376,7 @@ names, from whichever machine you are on, with the agent credential. It prints `
 stderr before it sends. It exits 0 on an answer, 1 on a refusal or on a door that never answered,
 and the text says which. A line whose answer was lost goes again as
 `printf '%s' "<line>" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" say --retry=<id>`, so the door answers it from its
-record rather than taking it twice. `note:` and `needs:` keep no record, so they are sent once:
+record rather than taking it twice. `note:` and `effort:` keep no record, so they are sent once:
 
 ```bash
 say() { printf '%s' "$1" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" say; }
@@ -484,15 +483,16 @@ owner to press a key in it.
 
 ## Wake a session that has gone dark
 
-A session that is alive but holds no stream and takes no turns is woken by typing into it, which
-buys it a turn from its own account:
+A session that is alive and takes no turns is woken, which buys it a turn from its own account:
 
 ```bash
 say "wake: token @lease <session> because <why>"
 ```
 
-The agent on its machine types into its VS Code tab, or into its tmux pane when it connected from
-one, after reading that the pane shows an idle composer.
+Where the plugin holds the session's stream, the wake is said on that stream and the plugin starts
+the turn; you are told `closed-delivered`. Where it holds none, or what was handed to it has sat
+unread past the receipt deadline, the agent on its machine types into its VS Code tab, or into its
+tmux pane when it connected from one, after reading that the pane shows an idle composer.
 Every wake and launch is recorded with its reason and what came of it; never type into a session
 or its pane yourself.
 
@@ -550,7 +550,7 @@ it was doing, repeats finished work, or acts against a ruling it was given (the 
 Apply these at a unit boundary: after a session's `done:`, before its next directive, and when a
 usage frame moves its account. Name the evidence in `because`: the fill, the verdict, the card.
 
-- **Effort.** The level the work needs: higher for design, security, or a gate the session keeps
+- **Effort.** The effort the work asks for: higher for design, security, or a gate the session keeps
   failing; lower for mechanical follow-through. An `effort-mismatch` still goes to the owner;
   answer it with `control:` too.
 - **Model.** Off a model whose account the evaluator excludes, or whose model-scoped window
@@ -571,7 +571,7 @@ usage frame moves its account. Name the evidence in `because`: the fill, the ver
 - **The session has no pane you drive** (a VS Code tab, a plain terminal): relay `checkpoint:
   <card>` before its next directive. Its harness compacts it, and the rebrief points it at the
   note.
-- **Design settled.** A session whose design converged checkpoints at `design-settled` and says
+- **Spec settled.** A session whose spec converged checkpoints at `spec-settled` and says
   so; lower its effort or model with `control:`, then compact it.
 - **No `/clear`.** A session that should start clean is checkpointed, retired and launched again.
 - **Archive.** No next card, or its account excluded beyond the window you plan for: `retire:`.
@@ -735,7 +735,7 @@ so never fill a cap speculatively. The platform's read of machine capacity and u
 #4177's; until it lands, presence
 and refusals are the reading.
 
-## Hand work out at the level it needs
+## Hand work out at the effort it asks for
 
 `/effort` is a command a person types in a session's terminal. A session can neither run it nor
 read its own level back, so asking one to raise itself asks for nothing. That holds for every
@@ -752,11 +752,11 @@ Today's models are strong enough that `high` everywhere buys little and spends a
 |---|---|
 | Groundbreaking, highly innovative, technically demanding design | Fable 5.1 (`claude-fable-5-1`) at `medium` |
 | A standard large epic's design | Opus 5.5 at `high` |
-| Standard engineering, from the start or once its design settles | Opus 5.5 at `medium`, or `low` where the work is simple; or an equal such as the latest GPT Sol |
+| Standard engineering, from the start or once its spec settles | Opus 5.5 at `medium`, or `low` where the work is simple; or an equal such as the latest GPT Sol |
 | Standard engineering that is well scoped and low-risk | Sonnet 5.5 at `high` or `xhigh`, or an equal |
 | Small, routine work | GLM 5.3 Flash, or an equal such as the latest GPT Luna |
 
-A design session hands its implementation to engineering's model routing once the design settles: the
+A design session hands its implementation to engineering's model routing once the spec settles: the
 same session lowered with `control:`, or a fresh launch. The rules below govern a session that is
 already running.
 
@@ -764,7 +764,7 @@ already running.
   or a Fable or Opus session at `medium`.
   Which model is strongest is your judgement: the registry holds names, not an ordering. An Opus
   session at `medium` takes this work too (owner's ruling, 2026-09-19, repeated 2026-09-22): delegate
-  it, send no `needs: … effort high` for it, and never ask the owner to raise it.
+  it, send no `effort: … high` for it, and never ask the owner to raise it.
 - Mechanical fixes, doc edits and guard backfills at `medium`, and on a frontier model at
   `low`: Opus and the latest GPT Sol at `low` are at least a lesser model's `high` (the
   owner's ruling, 2026-09-20). A level is a
@@ -776,14 +776,14 @@ already running.
 - When no session is observed at the level, **hold the work and say so**. Handing it down and
   hoping is how a cross-cutting design got done at `medium`.
 
-Say what the work asks for, so a session taking it below that reaches the owner rather than
+Say the effort the work asks for, so a session taking it below that reaches the owner rather than
 nobody:
 
 ```bash
-say "needs: token @lease 882 effort high"
+say "effort: token @lease 882 high"
 ```
 
-The owner is raised when a session announces that item below the level, once per requirement.
+The owner is raised when a session announces that item below that effort, once per requirement.
 Only the owner can act on it, so the line names the remedy in their words.
 
 ## Establish missing authorship
@@ -868,10 +868,11 @@ that are not there already, so they survive this session.
   (questions, rulings) are not yours to close.
 - **Check the issue is still open before you brief it.** Search merged pull requests for it
   first. A brief for work that has already landed wastes a session's turn.
-- **Brief a pull request to stay a draft until `ship it`.** Each push to a ready one is a full
-  CI run; the suite runs locally between rounds instead. After a clean rebase, a merge of `main`,
-  or a conflict-only update, tell the worker to carry the pass; a round remains available when
-  judgment warrants it.
+- **Brief a pull request to stay a draft until `ship it`.** The suite runs locally between
+  rounds instead. After a clean rebase, a merge of `main`,
+  or a conflict-only update, the worker carries the pass on its own; a round remains available
+  when judgment warrants it. Do not prescribe or skip a round in a directive: the gate skill's
+  rule decides, and a seat that orders one overrides it.
 - **Rollout is yours.** Deploying merged work, restarting agents and copying credentials is the
   brain's call (owner's ruling, 2026-09-24); a production action still takes your explicit go,
   not the owner's.
@@ -879,8 +880,10 @@ that are not there already, so they survive this session.
   sha once and pass it as an argument, as `steering/host/deploy.sh` does, then read the served
   sha back. Rehearse a new deploy script under a throwaway label and port, and tell the fleet
   before restarting the orchestrator.
-- **Deploy after the guard suite has run on it.** A push to main that changed only documentation
-  or `pypi/` skips the steering suite, and the run is still green. So check the job, not the run.
+- **Run the full suite on `main` after a batch of merges, then deploy.** Sessions merge on their
+  review pass and the guards their change reads, not a full suite each (owner's ruling,
+  2026-10-08), so the full run on `main` is yours. Fix forward what it turns red, finding the
+  pull request from the failing guard; rerun a failure alone before calling it a regression.
 - **Deploy in batches, and not over a gate.** A daemon restart ends every gate run then in
   flight. Wait until no commission is outstanding, then carry everything verified since the
   last deploy in a single restart.
@@ -907,8 +910,9 @@ that are not there already, so they survive this session.
 - **Close a session whose unit is concluded.** A session says `concluded` with its last pull
   request when its work is merged and you have delegated nothing next. Close it rather than
   leave it holding a slot, whoever started it: `retire:` (refused while it executes a card not
-  concluded, or has unpublished work in its checkout). Where retire cannot end it, tell it, in
-  these words, to remove its worktrees and run `/2mw2lt:disconnect`. Leaving is that command;
+  concluded, or has unpublished work in its checkout). A session in no pane, such as a VS Code
+  tab or a plain terminal, is ended by its process once its harness says it is idle. Where retire
+  cannot end it, tell it, in these words, to remove its worktrees and run `/2mw2lt:disconnect`. Leaving is that command;
   tidying up alone leaves it enrolled.
 - **Run `promote.py` once.** Its lease is stored for the session.
 - **Ask the owner only what is theirs.** Business, trust boundaries, retiring something built:

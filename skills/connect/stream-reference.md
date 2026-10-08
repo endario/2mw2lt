@@ -78,7 +78,7 @@ without repairing identity or the credential just repeats the refusal.
 
 | Frame | Action |
 |---|---|
-| `envelope` with `ulid`, `text` | Acknowledge through `ack.py`, re-arm, then act or report a blocker. Read the daemon-written `from:` line and named canon before acting. |
+| `envelope` with `ulid`, `text` | Acknowledge through `ack.py`, re-arm, then act or report a blocker. Read the daemon-written `from:` line and named knowledge before acting. |
 | `say` with `from`, `text` | Speech; nothing to acknowledge. Reply to a peer with `say.py --to`; a gate result uses `from: gate <id>`. Check its commission/round against the one expected. |
 | `seat` | Load `/2mw2lt:brain`; the session has been seated. |
 | `kick`, `room` | Frames for the brain; load `/2mw2lt:brain` for the timer or room-message recipe. |

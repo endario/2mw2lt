@@ -1,4 +1,4 @@
-"""A workspace's canon units — its decisions and lessons — and the one validator of their
+"""A workspace's knowledge units — its decisions and lessons — and the one validator of their
 headers (doc 148 §3).
 
 A unit is a markdown file reached from the index whose front matter names a `kind`. The header
@@ -7,7 +7,7 @@ line, a value a plain or quoted string or a `[a, b]` list of them. That is a sub
 a renderer that shows front matter still reads it, and a header outside the subset is refused
 with a reason rather than read two ways.
 
-`python3 canon.py [--index <path>] [<root>]` is the guard a workspace runs over its checkout.
+`python3 knowledge_units.py [--index <path>] [<root>]` is the guard a workspace runs over its checkout.
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ KEYS = (*REQUIRED, "superseded_by")
 ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
 EVERY = "*"
 TITLE_MAX = 100
-# The canon block's own ceiling, below the room a directive's words leave it under `TEXT_MAX`.
+# The knowledge block's own ceiling, below the room a directive's words leave it under `TEXT_MAX`.
 # Set from `probes/brief_bytes.py` over 200 merged cards at fe0135a7, whose largest block was
 # 2893 bytes: no card measured there is cut by this rather than by the words beside it.
 BLOCK_MAX = 3072
@@ -254,7 +254,7 @@ def block(joined: dict, link: str, room: int) -> tuple[str, list[str]]:
     """The fenced index a brief carries (doc 148 §6), cut from the end to fit `room` bytes, and
     the keys of the rows it kept. Nothing when not one row fits beside its frame and link."""
     shown, keys, pending = [], [], rows(joined)
-    frame = lambda cut: (["```canon", *shown, f"full brief{f' (+{cut} not shown)' if cut else ''}: {link}", "```"])
+    frame = lambda cut: (["```knowledge", *shown, f"full brief{f' (+{cut} not shown)' if cut else ''}: {link}", "```"])
     size = lambda cut: len("\n".join(frame(cut)).encode())
     for n, (key, line) in enumerate(pending):
         shown.append(line)
@@ -281,34 +281,34 @@ def names_card(units: dict[str, dict] | None, card_id: str, issues) -> str | Non
     return None
 
 
-def owes(*, major: bool, concluded: bool, design_passed: bool, card_id: str, issues,
+def owes(*, major: bool, concluded: bool, spec_passed: bool, card_id: str, issues,
          diff_paths: list[str] | None, units: dict[str, dict] | None,
          read: dict | None, outcome: dict | None = None) -> dict:
     """The knowledge stages of one card (doc 148 §5), beside doc 80's five.
 
-    Each stage is `{"state": …}` with the state the obligation's own name (`owes-design`,
+    Each stage is `{"state": …}` with the state the obligation's own name (`owes-spec`,
     `owes-record`, `owes-harvest`) while it stands, `met` once satisfied, `none` where the card
     owes nothing at all, and `unknown` where the data to judge it has not been read — which is
     not `met`, so a fold still warming never passes a card it has not seen. `owes-record` names
-    the documents owed and the diff's paths that owe them, and a met design the unit that
+    the documents owed and the diff's paths that owe them, and a met spec the unit that
     satisfied it, so a row can say what to write without re-deriving the join. A harvest has
     no `met` here: what records that a concluded card was swept is slice 4's, so a concluded
     card owes its harvest until then.
 
-    `units` is the synced canon's fold and `read` the `knowledge.read` answer, both as the
+    `units` is the synced knowledge's fold and `read` the `knowledge.read` answer, both as the
     daemon holds them; `diff_paths` is the card's branch diff against main, or None when no
     diff is known (no pull request, or one whose files the sweep did not read whole).
     `outcome` is the card's folded brief (doc 185 §3.1): a goal is owed one too, but whether a
     card is a goal is the work fold's edges, so the fold marks that after.
     """
     if not major:
-        design = {"state": "none"}
+        spec = {"state": "none"}
     elif units is None:
-        design = {"state": "unknown"}
+        spec = {"state": "unknown"}
     else:
         named = names_card(units, card_id, issues)
-        design = ({"state": "met", "unit": named} if design_passed and named
-                  else {"state": "owes-design"})
+        spec = ({"state": "met", "unit": named} if spec_passed and named
+                else {"state": "owes-spec"})
     if diff_paths is None or read is None:
         record = {"state": "unknown"}
     else:
@@ -321,7 +321,7 @@ def owes(*, major: bool, concluded: bool, design_passed: bool, card_id: str, iss
         moved = sorted({p for p in diff_paths for u in owed for o in code[u] if overlap(o, p)})
         record = ({"state": "owes-record", "units": owed, "moved": moved} if owed
                   else {"state": "met"})
-    return {"design": design, "record": record,
+    return {"spec": spec, "record": record,
             "harvest": {"state": "none" if not concluded else "owes-harvest"},
             "outcome": {"state": "met" if outcome else "owes-outcome" if major and not concluded else "none"}}
 
@@ -346,7 +346,7 @@ class Tree:
 
 
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(description="Check a workspace's canon units (doc 148 §3).")
+    ap = argparse.ArgumentParser(description="Check a workspace's knowledge units (doc 148 §3).")
     ap.add_argument("root", nargs="?", default=".")
     ap.add_argument("--index", default="documentation/README.md",
                     help="the index the tracks document names")

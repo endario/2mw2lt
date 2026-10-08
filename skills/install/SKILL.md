@@ -175,7 +175,7 @@ The workspace works without lanes, and its board says it has none yet. Give it l
    accept. On not now, delete the drafted document, commit nothing, and go on to
    [Connect](#3-connect): the board waits for a document at that path, and the next run of this
    skill drafts the lanes again.
-5. Give the repository a canon when it has none: somewhere its decisions and lessons live. Set
+5. Give the repository a home for its knowledge when it has none: somewhere its decisions and lessons live. Set
    `index` in the tracks document to the repository's documentation index, or to
    `.2mw2lt/README.md` beside the tracks document when it has none. Unless the index already
    links a `decisions/` and a `lessons/` index, add `decisions/README.md` and
@@ -184,7 +184,7 @@ The workspace works without lanes, and its board says it has none yet. Give it l
    every unit the index reaches:
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/steering/canon.py" --index <index> .
+   python3 "${CLAUDE_PLUGIN_ROOT}/steering/knowledge_units.py" --index <index> .
    ```
 
 6. Commit it all on a branch `2mw2lt/tracks`, push it, and open a pull request with

@@ -34,7 +34,7 @@ _RAW_FORMS = {
     "relay": ["relay: token <lease token> to <session>[@<epoch>] <text>"],
     "retire": ["retire: token <lease token> <worker> on <node>"],
     "card": ["card: token <lease token> <verb> <args…>"],
-    "needs": ["needs: token <lease token> <item> effort <level>"],
+    "effort": ["effort: token <lease token> <item> <level>"],
     "wake": ["wake: token <lease token> <session> because <reason>"],
     "control": ["control: token <lease token> <session> effort <level> because <reason>", "control: token <lease token> <session> model <name>-<version> because <reason>", "control: token <lease token> <session> compact [without checkpoint] because <reason>"],
     "roster": ["roster: token <lease token> [with gone]"],
@@ -51,7 +51,7 @@ _RAW_FORMS = {
 
 _AUDIENCE = {
     **{verb: "session" for verb in ("announce", "blocked", "wait", "done", "recommend", "ask", "claim", "taking", "declare", "checkpoint", "holds", "enroll", "bind", "ack", "say", "detach", "gate")},
-    **{verb: "seat" for verb in ("note", "launch", "relay", "retire", "card", "needs", "wake", "control", "roster", "lift", "authorship", "dispose", "promote", "backlog")},
+    **{verb: "seat" for verb in ("note", "launch", "relay", "retire", "card", "effort", "wake", "control", "roster", "lift", "authorship", "dispose", "promote", "backlog")},
     "rebind": "operator",
     "supersede": "operator",
 }
@@ -80,7 +80,7 @@ _EXAMPLES = {
     "relay": ["relay: token <lease token> to violet@1 review the branch"],
     "retire": ["retire: token <lease token> worker-1 on build"],
     "card": ["card: token <lease token> reclassify 010101010101010101010101 state live"],
-    "needs": ["needs: token <lease token> 3384 effort high"],
+    "effort": ["effort: token <lease token> 3384 high"],
     "wake": ["wake: token <lease token> violet because review arrived"],
     "control": ["control: token <lease token> violet effort high because review", "control: token <lease token> violet model opus-5.5 because review", "control: token <lease token> violet compact without checkpoint because context full"],
     "roster": ["roster: token <lease token> with gone"],

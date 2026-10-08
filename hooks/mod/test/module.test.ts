@@ -866,7 +866,7 @@ test('a /clear gives the fresh context its own checkpoint prompt', async ($, on)
   expect(w.appends).toEqual([CHECKPOINT, CHECKPOINT])
 })
 
-// #4551 step 3: a seated session reads canon's rulings in its system prompt.
+// #4551 step 3: a seated session reads the knowledge's rulings in its system prompt.
 const FACTS = { model: 'claude-test', promptModel: 'claude-test', surfaces: [], tools: [], outputStyle: null, traits: [] }
 const seatSection = async ($: any) => ((await $.prompt.compose(FACTS)).sections as { id: string; text: string; scope: string }[])
   .find(x => x.id === SEAT_SECTION)

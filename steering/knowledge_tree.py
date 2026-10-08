@@ -1,4 +1,4 @@
-"""How a canon is read: the files an index reaches, and the issues its records cite (doc 148)."""
+"""How a workspace's knowledge is read: the files an index reaches, and the issues its records cite (doc 148)."""
 from __future__ import annotations
 
 import posixpath

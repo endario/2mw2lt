@@ -97,7 +97,7 @@ export function invokes(command: string, name: string, dir = 'steering/enroll'):
   return false
 }
 
-// The seat's section (#4551 step 3): canon's standing rulings, which seat_section.py composes for a
+// The seat's section (#4551 step 3): the knowledge's standing rulings, which seat_section.py composes for a
 // session that holds the seat. It is a `session` section: after the boundary shared across
 // organizations, and still in this session's own cached prefix, so it changes only when the seat does,
 // or where the module may refresh it (`refresh`): the text from 0, nothing from 1, and what the

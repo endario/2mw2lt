@@ -5,7 +5,7 @@ description: Write down what this session knows before it forgets — before a c
 A checkpoint puts the work where it lives and indexes it with one note.
 The note is not a second copy of the work.
 
-**When.** At each boundary: `design-settled` once your critic converges; `unit-done` when the
+**When.** At each boundary: `spec-settled` once your critic converges; `unit-done` when the
 brain's directive says `checkpoint: <card>`; `context` when the brain asks before a compact;
 `handover` on `pack up:`; `exit` before `/2mw2lt:disconnect`.
 

@@ -8,10 +8,11 @@ from __future__ import annotations
 import re
 
 # What `actions.said` builds for an ending that asks nothing of the brain: a retire that retired,
-# and a wake or control whose verdict is `confirmed`. Every other ending — a refusal, a
+# a wake or control whose verdict is `confirmed`, and a wake said on the stream the plugin holds. Every other ending — a refusal, a
 # contradiction, an unjudged verdict, and a `typed` a verdict is still owed on — is one the brain
 # may have to act on.
-ROUTINE = re.compile(r"retire of \S+: retired \(.*\)|(?:wake|control)\b[^—]* on \S+: confirmed(?:, the reading shows [^—]*)?")
+ROUTINE = re.compile(r"retire of \S+: retired \(.*\)|(?:wake|control)\b[^—]* on \S+: confirmed(?:, the reading shows [^—]*)?"
+                     r"|wake\b[^—]* on \S+: closed-delivered — said on the stream the plugin holds")
 
 
 def routine(sender: object, text: object) -> bool:

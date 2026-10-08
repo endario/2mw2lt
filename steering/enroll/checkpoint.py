@@ -73,7 +73,7 @@ def main(argv: list[str]) -> int:
     if len(argv) > 3:
         return error("checkpoint", "checkpoint takes exactly a session, boundary, and note URL")
     session, boundary, note = argv
-    if boundary not in {"design-settled", "unit-done", "context", "handover", "exit"}:
+    if boundary not in {"spec-settled", "unit-done", "context", "handover", "exit"}:
         return error("checkpoint", f"unknown checkpoint boundary {boundary!r}")
     if not _COMMENT.fullmatch(note):
         return error("checkpoint", f"not a GitHub issue or pull request comment: {note}")

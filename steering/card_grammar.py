@@ -29,7 +29,7 @@ SIGNS = ("gate", "anchor")
 FIELDS = ("track", "significance", "state", "priority", "major")
 
 # What a correction spells the card's weight in (doc 148 §5): major is the brain's declaration,
-# which the knowledge stages' `owes-design` reads.
+# which the knowledge stages' `owes-spec` reads.
 MAJOR_AFTER = ("major", "ordinary")
 SIGNIFICANCE = ("card", "minor")
 

@@ -16,6 +16,7 @@ import glob
 import json
 import os
 import re
+import signal
 import sqlite3
 import subprocess
 import threading
@@ -40,6 +41,18 @@ WAKE_TEXT = "steering wake {nonce}: your hold is down and a directive is waiting
 # WAKE_TEXT, including one from before this shipped, which carries no "role" key at all.
 BRAIN_WAKE_TEXT = ("steering wake {nonce}: the brain has gone silent and a directive is waiting. "
                  + _WAKE_TRAILER)
+
+# A session the plugin holds whose pointer never started a turn (doc 186 §3): its hold is up, and
+# what it has not read is waiting behind the plugin's own frames tool.
+STUCK_WAKE_TEXT = ("steering wake {nonce}: frames are waiting on your stream that you have not read. "
+                   "Call mcp__2mw2lt__frames to read them; this message carries nothing else.")
+
+
+def wake_text(frame: dict) -> str:
+    """`pointer` is the agent's: the plugin holds the stream and its pointer started no turn."""
+    if frame.get("pointer"):
+        return STUCK_WAKE_TEXT
+    return BRAIN_WAKE_TEXT if frame.get("role") == "brain" else WAKE_TEXT
 
 # The one entrypoint this route addresses. Anything else is refused rather than attempted: the
 # sequence below activates a *tab*, and a session that is not one has no tab to activate. Owned
@@ -145,6 +158,35 @@ def session_gone(psession: str, runtime: str) -> bool:
     except Refused:
         return True
     return not isinstance(pid, int) or runtime_id.derive("claude", pid=pid) != runtime
+
+
+def terminate(psession: str, runtime: str, *, wait_s: float = 10.0, kill=os.kill, row=None,
+              derive=None, sleep=time.sleep, clock=time.monotonic) -> str:
+    """End the Claude Code process `runtime` names on this machine by its pid, for a session no
+    pane route reaches (doc 186 §4). Only an idle one: its harness's own registry row says so, as
+    the pane route's idle, empty composer does there. `SIGTERM` alone; a process that outlives it is
+    a refusal, never a `SIGKILL`."""
+    derive = derive or (lambda pid: runtime_id.derive("claude", pid=pid))
+    if runtime_id.provider_of(runtime) != "claude" or runtime_id.node_of(runtime) != runtime_id.node_id():
+        raise Refused("only a Claude Code session on this machine is ended by its pid")
+    found = (row or row_for)(psession)
+    pid = found.get("pid")
+    if not isinstance(pid, int) or isinstance(pid, bool) or derive(pid) != runtime:
+        raise Refused(f"its registry row names pid {pid}, which is not this session's process")
+    if found.get("status") != "idle":
+        raise Refused(f"its harness says it is {found.get('status') or 'in no stated status'}; retire it when idle")
+    try:
+        kill(pid, signal.SIGTERM)
+    except ProcessLookupError:   # gone between the read and the signal
+        pass
+    except OSError as e:          # another login's process, such as one started under sudo
+        raise Refused(f"pid {pid} could not be signalled: {e.strerror or e}") from e
+    deadline = clock() + wait_s
+    while derive(pid) == runtime:
+        if clock() >= deadline:
+            raise Refused(f"pid {pid} did not exit within {wait_s:.0f}s of SIGTERM")
+        sleep(0.2)
+    return "terminated"
 
 
 def instance_of(pid: int) -> tuple[str, int]:
@@ -381,7 +423,7 @@ def execute(frame: dict, *, typist=None, lock_path: str | None = None,
         t.preflight()
         t.focus_tab(tgt, fresh, posting)
         t.verify_focus()
-        text = BRAIN_WAKE_TEXT if frame.get("role") == "brain" else WAKE_TEXT
+        text = wake_text(frame)
         held = t.take_pasteboard(text.format(nonce=nonce))
         try:
             t.verify_focus()
@@ -543,7 +585,7 @@ def execute_tmux(frame: dict, *, pane=None, still_offered=None, lock_dir: str | 
                     # Not pressed again: the stash is a toggle whose effect here is not known,
                     # and a second press could move the draft rather than restore it.
                     return refused("the composer held a draft the stash did not clear")
-            text = BRAIN_WAKE_TEXT if frame.get("role") == "brain" else WAKE_TEXT
+            text = wake_text(frame)
             typed = True             # from here on a paste may have reached the composer
             t.paste(text.format(nonce=nonce), f"steering-wake-{attempt}")
             t.submit()

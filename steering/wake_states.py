@@ -13,5 +13,6 @@ RECEIVED = "closed-received"
 TIMEOUT = "closed-timeout"
 REFUSED = "closed-refused"
 UNCERTAIN = "closed-uncertain"       # the paste may have landed; never retried
-CLOSED = frozenset({RECEIVED, TIMEOUT, REFUSED, UNCERTAIN})
+DELIVERED = "closed-delivered"       # said on the stream the plugin holds, which points the session at it
+CLOSED = frozenset({RECEIVED, TIMEOUT, REFUSED, UNCERTAIN, DELIVERED})
 STATES = frozenset({OPENED, SENT}) | CLOSED

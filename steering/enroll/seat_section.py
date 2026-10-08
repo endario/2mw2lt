@@ -5,7 +5,7 @@ a session reads while it holds the seat (#4551, step 3).
 Exits 0 with the text when this session holds the seat, 1 with nothing when it does not, and 3 when
 it cannot tell: a caller keeps what it last had rather than drop the rulings over a door that did
 not answer. The plugin's module places the text in the seat's system prompt; any harness can print
-it. What the rulings are is canon's: the active decisions the daemon serves at `/knowledge/units`.
+it. What the rulings are is the knowledge's: the active decisions the daemon serves at `/knowledge/units`.
 """
 from __future__ import annotations
 
@@ -27,13 +27,13 @@ from verb_help import error, help_requested, script_help  # noqa: E402
 
 HEADING = (
     "# Standing rulings while this session holds the seat\n"
-    "These decisions are canon: each binds the seat while it holds it. Read one in full with\n"
+    "These decisions are the workspace's knowledge: each binds the seat while it holds it. Read one in full with\n"
     "`rest.py /knowledge/units/<id>`, which names its file."
 )
 
 
 def compose(units: list[dict]) -> str:
-    """The section: canon's active decisions, by title and id, in id order."""
+    """The section: the knowledge's active decisions, by title and id, in id order."""
     decisions = sorted((u for u in units if u.get("kind") == "decision" and u.get("status") == "active"),
                        key=lambda u: str(u.get("id")))
     return "\n".join([HEADING, "", *(f"- {u.get('title')} ({u.get('id')})" for u in decisions)])
@@ -100,7 +100,7 @@ def _main(argv: list[str]) -> int:
         return 1
     found = units(flags)
     if found is None:
-        print("seat_section: canon's units did not answer", file=sys.stderr)
+        print("seat_section: the knowledge units did not answer", file=sys.stderr)
         return 3
     print(compose(found))
     return 0

@@ -7,7 +7,7 @@ import re
 import verb_grammar
 
 
-BOUNDARIES = ("design-settled", "unit-done", "context", "handover", "exit")
+BOUNDARIES = ("spec-settled", "unit-done", "context", "handover", "exit")
 MAX_LEARNED = 8
 MAX_TEXT = 500
 MAX_NOTE = 300

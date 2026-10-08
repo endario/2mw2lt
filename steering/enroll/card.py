@@ -47,7 +47,7 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
              "[stop <rule>]\n"
              "\n"
              "       `major` is the brain's declaration that a card's work is major (doc 148 §5): "
-             "a major card owes a design until a critic-passed canon record names it.\n"
+             "a major card owes a spec until a critic-passed knowledge record names it.\n"
              "       `outcome` is the seat's alone (doc 185): each text field is one quoted argument, and a "
              "brief with a reading has the daemon take its baseline as it is written.")
     usage = usage.replace("card.py", prog)
