@@ -230,7 +230,11 @@ def carry(session: str, flags, pr: str, retry_id: str | None = None) -> int:
     full = _git(here, "rev-parse", "-q", "--verify", f"{source}^{{commit}}")
     equivalent = not full
     if full:
-        walked, after = _git_result(here, "rev-list", at, f"^{full}")
+        # Main's commits are base movement, which the daemon proves by replay; only the branch's own
+        # are history this checkout may or may not have made (#4476).
+        trunk = next((r for r in ("refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+                      if _git(here, "rev-parse", "-q", "--verify", f"{r}^{{commit}}")), None)
+        walked, after = _git_result(here, "rev-list", at, f"^{full}", *([f"^{trunk}"] if trunk else []))
         made = made_here(_git(here, "reflog", "--format=%H %gs", "HEAD"))
         equivalent = not walked or any(c not in made for c in after.split())
     this = retry_id or occurrence()
