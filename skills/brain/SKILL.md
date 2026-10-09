@@ -142,10 +142,15 @@ a fresh routes reading names it dispatchable on an account whose verdict is rank
 `triage` `band` (`{account, machine, ok, speed, attempts, last_seen}`: the route's agreement rate
 against the held-out human dispositions, `null` until it has one) and `admitted`, whether a
 placement of it has answered the admission ping; `queue` counts the route placements still
-waiting for theirs, so a lane drains only as the probes pace it. The rows are state for your
-placement decisions, nothing more: the daemon never places a route, and any draft the lane
-produces waits for your bulk adjudication — you delegate night work through the same placement
-as any other work.
+waiting for theirs, so a lane drains only as the probes pace it. `drafts` is the review queue:
+one row per issue you have placed and the daemon has run — `state` `queued` carries the draft's
+`cluster`, `label` and `rationale` for your bulk adjudication; `state` `error` is a run that
+drafted nothing, with `why`, and it drafts again only after every other placement has had its
+pass. You place a draft with your recorded `night:` line —
+`night: token <lease token> draft <issue> <route> <account> <why>` — naming the issue, the route
+and the account in one act; the daemon drafts on that placement and nothing else, refusing a
+placement no admission has answered. The rows are state for your placement decisions, nothing
+more: the daemon never places a route — it only drafts what you have recorded.
 The cards are the board's, which a brain on any
 machine reads with
 `python3 <2mw2lt>/steering/enroll/door.py --get /steering/work` — the one read the remote door
