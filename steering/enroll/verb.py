@@ -114,7 +114,7 @@ from verb_help import _invocation as help_invocation, error, help_requested, scr
 
 
 def _on_go(ws: Path, verb: str, session: str, text: str, retry_id: str | None) -> int:
-    """A status verb on a Go workspace: the fields its route names, on the session's carrier, under
+    """A board verb on a Go workspace: the fields its route names, on the session's carrier, under
     the invocation's occurrence id. An announce may give no doing and take the card it executes'
     title, the brain having ruled there is no separate claim primitive (2026-10-08)."""
     import json as _json
@@ -182,6 +182,10 @@ def _on_go(ws: Path, verb: str, session: str, text: str, retry_id: str | None) -
             print("malformed blocked: on <what>", file=sys.stderr)
             return 1
         body = {"state": "blocked", "blocker": m["what"].strip()}
+    elif verb in ("ask", "recommend"):
+        return _need_on_go(verb, session, token, text, retry_id, said)
+    elif verb == "wait":
+        return _wait_on_go(ws, session, token, text, retry_id, said)
     else:
         body = {"state": "done", "what": text}
     key = retry_id or occurrence()
@@ -189,6 +193,50 @@ def _on_go(ws: Path, verb: str, session: str, text: str, retry_id: str | None) -
     if said(lambda: session_routes.status(session, token, key, body)) is False:
         return 1
     print(f"registered: {verb}" + (f" {text}" if text else ""))
+    return 0
+
+
+def _wait_on_go(ws: Path, session: str, token: str, text: str, retry_id: str | None, said) -> int:
+    """A wait on Go's waits route: a pull request's merge or verdict in the checkout's repository,
+    or a time, told once it holds."""
+    import session_routes
+    import verb_grammar
+    status = verb_grammar.parse_status(line("wait", session, text))
+    body: dict = {"kind": status["kind"]}
+    if status["kind"] == "at":
+        body["at"] = status["on"]
+    else:
+        body.update(repo=session_routes.card_repo(ws), pr=int(status["on"]))
+    if "recheck" in status:
+        body["recheck"] = status["recheck"]
+    key = retry_id or occurrence()
+    print(f"id {key}", file=sys.stderr)
+    answer = said(lambda: session_routes.wait(session, token, key, body))
+    if answer is False:
+        return 1
+    print(f"registered: wait {session} {answer['id']}")
+    return 0
+
+
+def _need_on_go(verb: str, session: str, token: str, text: str, retry_id: str | None, said) -> int:
+    """An ask or a recommendation raised on Go's needs route, about the card the session executes
+    when it executes one. A structured ask's fields are the route's own."""
+    import session_routes
+    import verb_grammar
+    body: dict = {"kind": verb, "question": text}
+    if verb == "ask" and text.startswith("json {"):
+        body = {"kind": verb, **verb_grammar.structured_ask(text)}
+    card = said(lambda: session_routes.executing_card(session, token))
+    if card is False:
+        return 1
+    if card is not None:
+        body["card"] = card["id"]
+    key = retry_id or occurrence()
+    print(f"id {key}", file=sys.stderr)
+    need = said(lambda: session_routes.raise_need(token, key, body))
+    if need is False:
+        return 1
+    print(f"registered: {verb} {need['need']['id']}")
     return 0
 
 
@@ -241,7 +289,7 @@ def main(argv: list[str]) -> int:
               f"was sent — send it again", file=sys.stderr)
         return 1
     import session_routes
-    if verb in ("announce", "blocked", "done") and ws is not None and session_routes.on_coordination(ws):
+    if verb in ("announce", "blocked", "wait", "done", "ask", "recommend") and ws is not None and session_routes.on_coordination(ws):
         return _on_go(ws, verb, session, text, retry_id)
     if door_refused:
         return error("verb", f"malformed {verb}")

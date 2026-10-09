@@ -84,6 +84,14 @@ def entry_for(url: str) -> Path | None:
     return None
 
 
+def transport_for_url(url: str) -> str:
+    entry = entry_for(url)
+    held = _read(entry) if entry is not None else None
+    if held is None:
+        raise NoCredential('report transport registration unavailable')
+    return 'native' if held.get('native') else 'legacy'
+
+
 def post(console: str, path: str, body: dict, timeout: float = 10.0) -> dict:
     """A JSON POST to the console on a secret alone, as the exchange and a review host's listing
     make it. `NoCredential` on any refusal or silence."""

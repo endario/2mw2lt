@@ -30,6 +30,24 @@ from local_workspace import required_workspace_root  # noqa: E402
 from verb_help import error, help_requested, script_help  # noqa: E402
 
 
+def _on_go(session: str, token: str, this: str, text: str, target: str | None) -> int:
+    """The say on a Go workspace's own route: answered there, or refused in its words."""
+    import refusal
+    import session_routes
+    try:
+        print(session_routes.say(session, token, this, text, target))
+        return 0
+    except session_routes.Refused as e:
+        if session_routes.settled(e):
+            print(refusal.use("say", str(e)))
+            return 1
+        print(refusal.retry(str(e)))
+    except session_routes.Unsent as e:
+        print(refusal.retry(str(e)))
+    print(f"if the words may have been delivered, resend with --retry={this}; a plain resend is a second say")
+    return 1
+
+
 def main(argv: list[str]) -> int:
     if help_requested("say", argv):
         print(script_help("say", topic=argv[0] if len(argv) == 2 else None))
@@ -71,6 +89,9 @@ def main(argv: list[str]) -> int:
     addressed = f"{session} to {target}" if target else session
     this = retry_id or occurrence()
     print(f"id {this}", file=sys.stderr)
+    import session_routes
+    if session_routes.on_coordination(ws):
+        return _on_go(session, token, this, text, target)
     state, reply = outcome(f"say: {addressed} token {token} {text}", occurrence_id=this)
     print(display_reply(reply))
     # `UNSENT`, not the text: a did-not-answer carries the refusal prefix too, which is why the

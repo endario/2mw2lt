@@ -55,14 +55,35 @@ def read(path: str, flags: dict[str, str]) -> dict | None:
     return answer if code == 200 and isinstance(answer, dict) else None
 
 
+def go_read(path: str, flags: dict[str, str]) -> tuple[str, dict] | None:
+    """On a Go workspace, (this session's name, Go's answer to `path` on its own carrier); None
+    where it is not Go's, or the read did not answer."""
+    import session_routes
+    if not session_routes.on_coordination():
+        return None
+    try:
+        ws = connect.required_workspace_root(connect.project_dir(), timeout=2.0)
+        session, token = connect.own_enrolment(ws, connect.provider_session(flags))
+        return session, session_routes.get(path, token)
+    except (connect.Refused, session_routes.Refused, session_routes.Unsent):
+        return None
+
+
 def holds(flags: dict[str, str]) -> bool | None:
+    import session_routes
+    if session_routes.on_coordination():
+        got = go_read("/seat", flags)
+        if got is None or "holder" not in got[1]:
+            return None
+        return got[1]["holder"] == got[0]
     answer = read("/seat", flags)
     held = answer.get("holds") if answer else None
     return held if isinstance(held, bool) else None
 
 
 def units(flags: dict[str, str]) -> list[dict] | None:
-    answer = read("/knowledge/units", flags)
+    got = go_read("/knowledge/units", flags)
+    answer = got[1] if got else read("/knowledge/units", flags)
     items = answer.get("items") if answer else None
     return items if isinstance(items, list) else None
 

@@ -8,7 +8,8 @@ stdin — the seat's lease token, or a session's enrolment token — goes as `Au
 and stays out of the process table; `--lease` sends the seat's stored lease instead. With nothing on stdin, this session's own enrolment token goes,
 found as `say.py` finds it (#3551). `--all` follows a page's `next` until the head. `--post` sends
 the path a POST with no body, as `/tracks/syncs` takes, or with `--json`'s body and `--key` as its
-`Idempotency-Key`, as a room's messages take (doc 156).
+`Idempotency-Key`, as a room's messages take (doc 156). On a Go workspace the token goes on Go's
+session carrier instead, and alone: Go refuses a bearer, or a machine credential beside it.
 
 Exits 0 with the JSON on stdout; otherwise 1, with the problem's title and remedy on stderr.
 """
@@ -30,14 +31,25 @@ import urllib.request
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import connect  # noqa: E402
 import door  # noqa: E402
+import session_routes  # noqa: E402
 from verb_help import error, help_requested, script_help  # noqa: E402
+
+# The paths this client was taught on the incumbent's door that Go has no route for, with what to
+# read there instead; said only when Go answers 404, so a route Go comes to serve is reached.
+GO_UNSERVED = (
+    ("/tracks/syncs", "Go syncs the lanes as the workspace's mirror moves; GET /tracks names the "
+                      "commit synced, awaited or failed"),
+    ("/knowledge/brief", "read /knowledge/units, or /knowledge/units/<id>"),
+    ("/launches", "a launch is not read on Go yet"),
+    ("/pulls/", "a pull request is not read on Go yet"),
+)
 
 
 def fetch(url: str, token: str | None, method: str = "GET", body: bytes | None = None,
-          key: str | None = None) -> tuple[int, dict]:
+          key: str | None = None, go: bool = False) -> tuple[int, dict]:
     headers = {"Accept": "application/json"}
     if token:
-        headers["Authorization"] = f"Bearer {token}"
+        headers.update({session_routes.SESSION_CARRIER: token} if go else {"Authorization": f"Bearer {token}"})
     if body is not None:
         headers["Content-Type"] = "application/json"
     if key:
@@ -45,7 +57,9 @@ def fetch(url: str, token: str | None, method: str = "GET", body: bytes | None =
     req = urllib.request.Request(url, headers=headers, method=method,
                                  data=(body if body is not None else b"") if method == "POST" else None)
     try:
-        with door.send(req, timeout=door.SEND_TIMEOUT) as r:
+        if go:
+            req.add_header("User-Agent", door.USER_AGENT)
+        with (door.open_direct if go else door.send)(req, timeout=door.SEND_TIMEOUT) as r:
             return r.status, json.loads(r.read() or b"{}")
     except urllib.error.HTTPError as e:
         try:
@@ -101,6 +115,7 @@ def main(argv: list[str], stdin) -> int:
         print("this workspace's door names no authority; set STEERING_DOOR to …/w/<authority>", file=sys.stderr)
         return 2
     why_none = None
+    go = session_routes.on_coordination()
     if "--lease" in rest:
         # The seat's stored lease, never on stdin or a command line (#4551).
         import lease
@@ -111,7 +126,8 @@ def main(argv: list[str], stdin) -> int:
         if held is None:
             print(lease.NONE, file=sys.stderr)
             return 1
-        token = held["lease_token"]
+        # On Go the seat is the holder's own enrolment, judged by Go at each call.
+        token = held["token"] if go else held["lease_token"]
     else:
         token = None if stdin.isatty() else (stdin.read().strip() or None)
     if token is None:
@@ -120,11 +136,11 @@ def main(argv: list[str], stdin) -> int:
     pages, out = [], None
     while True:
         try:
-            status, answer = fetch(url, token, method, body, valued.get("--key"))
+            status, answer = fetch(url, token, method, body, valued.get("--key"), go)
             # Only the API's refusal of the bearer itself says the lease is dead: an answer's data may
             # quote the same words.
             why = f"{answer.get('title') or ''} {answer.get('detail') or ''}".strip() if isinstance(answer, dict) else ""
-            if "--lease" in rest and status in (401, 403) and lease.dead(f"refused: {why}"):
+            if "--lease" in rest and not go and status in (401, 403) and lease.dead(f"refused: {why}"):
                 print(lease.gone(held, why), file=sys.stderr)
                 return 1
         except (urllib.error.URLError, OSError) as e:
@@ -136,7 +152,11 @@ def main(argv: list[str], stdin) -> int:
         if not 200 <= status < 300:
             remedy = (answer.get("remedy") or {}).get("text")
             print(f"{status} {answer.get('title') or answer.get('refused') or answer}"
+                  + (f" [{answer['code']}]" if go and answer.get("code") else "")
                   + (f" — {remedy}" if remedy else ""), file=sys.stderr)
+            hint = next((h for prefix, h in GO_UNSERVED if args[0].startswith(prefix)), None)
+            if go and status == 404 and hint:
+                print(f"{args[0].split('?')[0]} is not a route on Go: {hint}", file=sys.stderr)
             if why_none and status in (401, 403):
                 print(f"no credential was sent: {why_none}", file=sys.stderr)
             return 1

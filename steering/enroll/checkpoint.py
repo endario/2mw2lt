@@ -101,6 +101,9 @@ def main(argv: list[str]) -> int:
     if ws is None:
         print("not in a checkout: a checkpoint is sent through the session's outbox", file=sys.stderr)
         return 1
+    import session_routes
+    if session_routes.on_coordination(ws):
+        return _on_go(ws, session, body, boundary, note, this)
     if len(verb.signed(sent, session, ws)) > outbox.LIMIT:  # the door measures the signed line
         print(f"this line signed is over the {outbox.LIMIT} characters the door takes; "
               f"shorten the lessons", file=sys.stderr)
@@ -122,6 +125,27 @@ def main(argv: list[str]) -> int:
         # Last on stdout, so it is the line a piped reader keeps (#3303).
         print(f"kept in {outbox.outbox_dir(ws)}; resend with --retry={this}")
     return 0 if reply.startswith("checkpointed:") else 1
+
+
+def _on_go(ws: Path, session: str, body: dict, boundary: str, note: str, this: str) -> int:
+    """Go records the checkpoint on the session's own token; a resend under `--retry` is its replay."""
+    import session_routes
+    from ack import token_path
+    try:
+        token = json.loads(token_path(ws, session).read_text())["token"]
+    except (OSError, ValueError, KeyError):
+        print(f"no stored token for {session}: /2mw2lt:connect first", file=sys.stderr)
+        return 1
+    reply = session_routes.checkpoint(token, body)
+    print(reply)
+    if not reply.startswith("checkpointed:"):
+        print(f"resend with --retry={this}", file=sys.stderr)
+        return 1
+    try:
+        rebrief.remember(ws, session, note, boundary)
+    except OSError as e:
+        print(f"recorded, but the rebrief's pointer was not kept: {e}", file=sys.stderr)
+    return 0
 
 
 if __name__ == "__main__":

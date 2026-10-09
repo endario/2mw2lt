@@ -63,9 +63,7 @@ def main(argv: list[str]) -> int:
               "the brain ends another session with `retire:`", file=sys.stderr); return 1
     import session_routes  # noqa: E402
     if session_routes.on_coordination(ws):
-        answer = session_routes.detach(session, known[session]["token"])
-        if handover:
-            print(f"the handover {handover} was not recorded: Go's detachment carries no exit yet (#4076)", file=sys.stderr)
+        answer = session_routes.detach(session, known[session]["token"], handover=handover or "")
     else:
         answer = say(f"detach: {session} token {known[session]['token']}" + (f" handover {handover}" if handover else ""))
     if answer.startswith("detached:"):

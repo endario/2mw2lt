@@ -33,7 +33,7 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
              "       card.py --token - session <card> <session> executor|planned\n"
              "       card.py --token - unsession <card> <session>\n"
              "       card.py --token - conclude <card> <by> <evidence> [--branch-is-the-work]\n"
-             "       card.py --token - unconclude <card>\n"
+             "       card.py --token - unconclude <card> [<why>]  (Go requires the why)\n"
              "       card.py --token - retire <card> <why>\n"
              "       card.py --token - reclassify <card> track <lane>|off-track <why>\n"
              "       card.py --token - reclassify <card> significance|state|priority <value> <why>\n"
@@ -74,6 +74,8 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
         if len(rest) < 1:
             print(usage, file=sys.stderr)
             return 2
+        if held.get("authority"):
+            return _on_go(held, rest[0], rest[1:], usage)
         return _scoped(held["lease_token"], rest[0], rest[1:], usage, local, held)
     if len(argv) < 3 or argv[0] != "--token":
         print(usage, file=sys.stderr)
@@ -82,11 +84,50 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
     if token != "-":
         print("refused: --token takes only -, and reads the lease token from stdin", file=sys.stderr)
         return 2
+    if local is None:
+        import session_routes
+        if session_routes.on_coordination():
+            print("refused: a Go workspace keeps no lease token; send the verb with card.py --lease", file=sys.stderr)
+            return 2
     token = read_secret("lease token: ")
     if not token:
         print("refused: --token - reads the lease token from stdin, and none arrived", file=sys.stderr)
         return 2
     return _scoped(token, verb, rest, usage, local)
+
+
+def _on_go(held: dict, verb: str, rest: list[str], usage: str) -> int:
+    """The seat's card verb on a Go workspace: the work route it maps to, on the session's own
+    carrier, which Go runs as the seat while this session holds it."""
+    import refusal
+    import session_routes
+    ruled = session_routes.ruled_out(f"card {verb} {rest[1]}" if verb == "reclassify" and len(rest) > 1 else f"card {verb}")
+    if ruled:
+        print(ruled)
+        return 1
+    if verb == "scope" and rest[:1] != ["--card"]:
+        rest = ["--card", new_ulid(), *rest]
+    facts, bad_grammar = built(verb, rest)
+    if bad_grammar:
+        print(usage if bad_grammar == USAGE_REFUSAL else f"refused: {bad_grammar}", file=sys.stderr)
+        return 2
+    fact = facts[0]
+    try:
+        anchored = fact.get("anchors") or fact["state"] == "card-reanchored" and fact["after"]
+        repo = session_routes.card_repo(held["ws"]) if anchored else ""
+        print(session_routes.seat_card(held["session"], held["token"], verb, fact, repo))
+        return 0
+    except session_routes.NotSeated as why:
+        print(f"refused: this session does not hold the seat ({why})")
+    except LookupError as why:
+        print(refusal.escalate(str(why), to="seat"))
+    except session_routes.Unsent as e:
+        print(refusal.retry(str(e)))
+    except session_routes.Refused as e:
+        print(refusal.use("card", str(e)) if session_routes.settled(e) else refusal.retry(str(e)))
+    if verb == "scope":
+        print(f"to retry this scope under the same card, send it with --card {rest[1]}", file=sys.stderr)
+    return 1
 
 
 def _scoped(token: str, verb: str, rest: list[str], usage: str, local, held: dict | None = None) -> int:

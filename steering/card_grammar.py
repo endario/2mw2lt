@@ -317,8 +317,8 @@ def built(verb: str, rest: list[str]) -> tuple[list[dict], str | None]:
                 return [], USAGE_REFUSAL
             return [_fact("card-concluded", rest[0], by=rest[1], evidence=rest[2],
                           **({"kept": True} if len(rest) == 4 else {}))], None
-        if verb == "unconclude" and len(rest) == 1:
-            return [_fact("card-unconcluded", rest[0])], None
+        if verb == "unconclude" and len(rest) in (1, 2):
+            return [_fact("card-unconcluded", rest[0], **({"why": rest[1]} if len(rest) == 2 else {}))], None
         if verb == "retire" and len(rest) == 2:
             return [_fact("card-retired", rest[0], why=rest[1])], None
         if verb == "reclassify" and len(rest) >= 4 and rest[1] in FIELDS:

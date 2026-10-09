@@ -60,6 +60,7 @@ import credential  # noqa: E402
 import door as door_mod  # noqa: E402
 import machine_workspaces  # noqa: E402
 import checkout_binding  # noqa: E402
+import session_routes  # noqa: E402
 import spool  # noqa: E402
 import tracksdoc  # noqa: E402
 import ghauth  # noqa: E402
@@ -100,6 +101,9 @@ def platform_url() -> str:
 # --- HTTP, with the agent's own opener: no proxy, no redirect, a user agent Cloudflare admits
 
 TRANSIENT = frozenset({502, 503, 504})  # a gateway's answer while what is behind it restarts
+# Coordination's 503s for an outage that passes, unlike its capacity deferral or a missing
+# configuration, which waiting does not mend.
+PASSING = frozenset({"verifier-unavailable", "authority-elapsed", "deadline", "upstream"})
 
 
 class Unanswered(Exception):
@@ -134,11 +138,14 @@ def _retry_after(headers) -> float | None:
 
 
 def ask(method: str, url: str, body: dict | None = None, token: str | None = None,
-        timeout: float = 60) -> tuple[int, dict]:
-    """One request and its answer; `Unanswered` when nothing answered or a gateway answered."""
+        timeout: float = 60, key: str | None = None) -> tuple[int, dict]:
+    """One request and its answer; `Unanswered` when nothing answered or a gateway answered. `key`
+    is coordination's Idempotency-Key, which makes a retry the same request."""
     req = urllib.request.Request(url, method=method,
                                  data=json.dumps(body).encode() if body is not None else None,
                                  headers={"Content-Type": "application/json", "Accept": "application/json"})
+    if key:
+        req.add_header("Idempotency-Key", key)
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     try:
@@ -150,8 +157,11 @@ def ask(method: str, url: str, body: dict | None = None, token: str | None = Non
         except ValueError:
             got = {}
         # A gateway's 502-504 carries no reason of its own; the console's own refusal does.
-        if e.code in TRANSIENT and not (isinstance(got, dict) and got.get("error")):
-            raise Unanswered(str(e.code), _retry_after(e.headers)) from None
+        # Coordination's refusal names its check as `code`, a capacity deferral's 503 among them;
+        # of those, only a passing outage is asked again.
+        code = got.get("code") if isinstance(got, dict) else None
+        if e.code in TRANSIENT and (code in PASSING or not (isinstance(got, dict) and (got.get("error") or code))):
+            raise Unanswered(str(code or e.code), _retry_after(e.headers)) from None
         return e.code, got if isinstance(got, dict) else {}
     except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException) as e:
         raise Unanswered(_reason(e)) from None
@@ -169,23 +179,23 @@ def ask(method: str, url: str, body: dict | None = None, token: str | None = Non
 
 
 def call(method: str, url: str, body: dict | None = None, token: str | None = None,
-         timeout: float = 60) -> tuple[int, dict]:
+         timeout: float = 60, key: str | None = None) -> tuple[int, dict]:
     """A request outside any wait: one that goes unanswered stops the run."""
     try:
-        return ask(method, url, body, token, timeout)
+        return ask(method, url, body, token, timeout, key)
     except Unanswered as e:
         raise Stop(f"{_who(url)} at {_origin(url)} did not answer ({e}); "
                    "check the network, then run install again") from None
 
 
 def waited(method: str, url: str, deadline: float, body: dict | None = None,
-           token: str | None = None) -> tuple[int, dict]:
+           token: str | None = None, key: str | None = None) -> tuple[int, dict]:
     """A request inside a wait: one that goes unanswered is asked again, with backoff, until
     `deadline`, and each retry is shown rather than ending the run."""
     delay = POLL
     while True:
         try:
-            return ask(method, url, body, token)
+            return ask(method, url, body, token, key=key)
         except Unanswered as e:
             pause = max(delay, e.after or 0)
             if time.monotonic() + pause > deadline:
@@ -391,35 +401,137 @@ def go_access(console: str, token: str) -> dict | None:
     return got
 
 
-def admit_on_go(console: str, token: str, access: dict, repo: str, team: str | None) -> tuple[str, str]:
-    """This machine admitted to the workspace of the caller's team that already serves `repo`
-    (go-dc2-onboarding-design.md §5, case 1), on the person's terminal session. Its door and alias."""
-    teams = [t for t in access["teams"] if isinstance(t, dict) and (team is None or t.get("id") == team)]
+def admit_on_go(console: str, token: str, access: dict, repo: str, team: str | None) -> tuple[str, str, str, bool]:
+    """This machine admitted to the workspace serving `repo`, on the person's terminal session, by
+    what coordination says the repository is (go-dc2-onboarding-design.md §5): a team of theirs
+    serves it; they own a team, which installs it; or they hold an operator's team of their own,
+    which they create with it. Its door, workspace id, team id, and whether the person owns that team."""
+    # A team without an id is passed over, as a malformed workspace is; one without a name is named by its id.
+    teams = [{**t, "name": t.get("name") or t["id"]} for t in access["teams"]
+             if isinstance(t, dict) and isinstance(t.get("id"), str) and (team is None or t["id"] == team)]
     if team is not None and not teams:
         raise Stop(f"you are not a member of team {team}; name one of yours with --team, or leave it out")
     serving = [(t, w) for t in teams for w in t.get("workspaces") or []
-               if isinstance(w, dict) and w.get("repo") == repo and isinstance(w.get("id"), str)]
+               # GitHub reads a repository's name in any case, as coordination compares it.
+               if isinstance(w, dict) and isinstance(w.get("repo"), str) and w["repo"].lower() == repo.lower()
+               and isinstance(w.get("id"), str)]
     if len(serving) > 1:
         raise Stop(f"several of your teams serve {repo}; name one with --team: "
                    + ", ".join(f"{t['name']} ({t['id']})" for t, _ in serving))
-    if not serving:
-        if not teams:
-            raise Stop("you are in no team yet; redeem your invitation from the desk, then run install again")
-        if not any(t.get("owner") for t in teams):
+    intents = [i for i in access.get("invitations") or [] if isinstance(i, dict) and i.get("kind") == "team"]
+    owned = [t for t in teams if t.get("owner")]
+    if serving:
+        t, w = serving[0]
+        say("team", f"{t['name']}{'' if t.get('owner') else ' (you joined it; installing a new repository is its owner’s)'}")
+        say("workspace", f"{w['id']} found")
+    elif owned or teams and not intents:
+        if not owned:
             raise Stop(f"none of your teams serves {repo}, and only a team's owner installs a new repository; "
                        f"ask the owner of {', '.join(t['name'] for t in teams)} to install it")
-        raise Stop(f"none of your teams serves {repo}, and installing a new repository on coordination is not "
-                   "built yet; install a repository your team already serves")
-    t, w = serving[0]
-    say("team", f"{t['name']}{'' if t.get('owner') else ' (you joined it; installing a new repository is its owner’s)'}")
-    say("workspace", f"{w['id']} found")
+        if len(owned) > 1:
+            raise Stop(f"none of your teams serves {repo}, and you own several; name the one to install it in "
+                       "with --team: " + ", ".join(f"{t['name']} ({t['id']})" for t in owned))
+        t = owned[0]
+        say("team", f"{t['name']} (yours)")
+        w = create_workspace(console, token, t["id"], repo)
+    else:
+        # No team of theirs can take it; an operator's team of their own can, whatever they joined.
+        if not intents:
+            if access.get("invitations"):
+                raise Stop("you are in no team yet; redeem your invitation from the desk, then run install again")
+            raise Stop("you are in no team yet, and no team of your own was given to your GitHub account; "
+                       "ask the platform's operator for one, or a team's owner for an invitation")
+        t, w = create_team(console, token, intents[0], repo)
     door = f"{console}/w/{w['id']}"
     try:
         approval = credential.approve(console, w["id"], token, key=str(uuid.uuid4()))
         credential.enrol_native(door, console, w["id"], approval["secret"])
     except credential.NoCredential as e:
         raise Stop(f"coordination would not admit this machine: {e}") from None
-    return door, w["id"]
+    return door, w["id"], t["id"], t.get("owner") is True
+
+
+def go_alias(repo: str) -> str:
+    """A route alias for `repo`'s workspace: its name, kept to the route grammar, and a suffix,
+    since an alias is unique across every team."""
+    name = re.sub(r"[^A-Za-z0-9._-]", "-", repo.split("/")[-1]).lstrip("._-")[:48] or "workspace"
+    return f"{name}-{uuid.uuid4().hex[:6]}"
+
+
+def go_created(console: str, path: str, body: dict, token: str, what: str) -> dict:
+    """A creation on the person's terminal session under one key, so a lost answer's retry is the
+    same creation; a capacity deferral is waited through, as progress."""
+    key, start = str(uuid.uuid4()), time.monotonic()
+    deadline = start + GRANT
+    while True:
+        status, got = waited("POST", f"{console}{path}", deadline, body, token, key)
+        if status == 200:
+            return got
+        code = got.get("code") or got.get("error") or status
+        if status == 503 and str(code).endswith("-cap-reached") and time.monotonic() < deadline:
+            say("", f"the platform is at its {code.removesuffix('-reached')}; waiting to {what} ({elapsed(time.monotonic() - start)})")
+            time.sleep(POLL * 6)
+            continue
+        raise Stop(f"coordination would not {what} ({status}): {code}")
+
+
+def create_workspace(console: str, token: str, team: str, repo: str) -> dict:
+    """`repo` installed in the owner's team (§5, case 2): its new workspace."""
+    got = go_created(console, f"/api/v1/teams/{team}/workspaces", {"repository": repo, "alias": go_alias(repo)},
+                     token, f"install {repo}")
+    if not isinstance(got.get("id"), str):
+        raise Stop(f"coordination installed {repo} and named no workspace id: {got}")
+    say("workspace", f"{got['id']} created" + (", reading the team's GitHub installation" if got.get("source") else ""))
+    return got
+
+
+def create_team(console: str, token: str, intent: dict, repo: str) -> tuple[dict, dict]:
+    """The team an operator gave this person, created with `repo` as its first workspace (§5,
+    case 5): the team, and the workspace."""
+    owner = repo.split("/")[0]
+    got = go_created(console, "/api/v1/teams", {"authorization": intent.get("id"), "team_name": owner,
+                                                "workspace_name": repo, "alias": go_alias(repo)},
+                     token, "create your team")
+    made = got.get("workspace")
+    if not isinstance(got.get("id"), str) or not isinstance(made, dict) or not isinstance(made.get("id"), str):
+        raise Stop(f"coordination created your team and named no team or workspace id: {got}")
+    say("team", f"{owner} created (yours)")
+    say("workspace", f"{got['workspace']['id']} created")
+    return {"id": got["id"], "name": owner, "owner": True}, got["workspace"]
+
+
+def wait_for_go_grant(console: str, token: str, team: str, repo: str, owner: bool) -> None:
+    """Until the team holds the App's installation on `repo`, which is when its workspace's source
+    is read: the owner connects GitHub from the desk; anyone else asks them to."""
+    url = f"{console}/api/v1/teams/{team}/installations?{urllib.parse.urlencode({'repository': repo})}"
+    deadline = time.monotonic() + GRANT
+
+    def held() -> bool:
+        status, got = waited("GET", url, deadline, token=token)
+        if status != 200:
+            raise Stop(f"coordination could not say whether the App reaches {repo} ({status}): "
+                       f"{got.get('code') or got}; run install again, or ask the operator if it repeats")
+        return got.get("held") is True
+
+    if held():
+        say("github", f"the 2mw2lt App reaches {repo}")
+        return
+    say("github", f"the 2mw2lt App cannot read {repo} yet")
+    if owner:
+        say("", f"open {console}/ and choose Connect GitHub in the account menu (opened in your browser; waiting…)")
+        open_page(f"{console}/")
+    else:
+        say("", "only the team's owner, signed in with GitHub, connects it: ask them to (waiting…)")
+    start = told = time.monotonic()
+    while not held():
+        if time.monotonic() - told >= PROGRESS:
+            told = time.monotonic()
+            say("", f"waiting for the App to reach {repo} ({elapsed(told - start)})")
+        if time.monotonic() >= deadline:
+            raise Stop(f"the App does not reach {repo} yet: the team's owner, signed in with GitHub, chooses "
+                       f"Connect GitHub on {console}/; then run this again")
+        time.sleep(POLL)
+    say("", f"{repo} is readable")
 
 
 def authorities(door: str) -> dict | None:
@@ -436,7 +548,7 @@ def authorities(door: str) -> dict | None:
         say("machine", f"the workspace's door refused this machine ({status}); admitting it again")
         return None
     if status == 404:
-        # Coordination serves no authorities view before its cutover: a machine it admitted is asked again.
+        # A door that serves no authorities view: the machine is admitted again.
         say("machine", "the workspace's door has no authorities view; admitting this machine again")
         return None
     if status != 200:
@@ -636,22 +748,31 @@ def unsupported() -> Stop:
                 "installs here. A Linux host is provisioned with steering/host/provision-agent-host.sh")
 
 
-def record(root: Path, door: str, authority: str) -> None:
+def record(root: Path, door: str, authority: str, on_go: bool) -> None:
     """`STEERING_DOOR` and the workspace's id, written once the machine is admitted, so a run
-    stopped after that resumes there rather than signing in and admitting it again."""
+    stopped after that resumes there rather than signing in and admitting it again. A workspace on
+    Go also gets `STEERING_AUTHORITY=coordination`, without which every client speaks the
+    incumbent's protocol to Go's door (session_routes.authority)."""
     env = root / ".env"
     lines = env.read_text().splitlines() if env.exists() else []
-    lines = [line for line in lines if not line.startswith("STEERING_DOOR=")] + [f"STEERING_DOOR={door}"]
+    lines = [line for line in lines if not line.startswith(("STEERING_DOOR=", "STEERING_AUTHORITY="))]
+    lines.append(f"STEERING_DOOR={door}")
+    if on_go:
+        lines.append(f"STEERING_AUTHORITY={session_routes.COORDINATION}")
     spool.write_atomic(env, "\n".join(lines) + "\n", mode=0o600)
     checkout_binding.bind(root, authority)
     os.environ["STEERING_DOOR"] = door
+    if on_go:
+        os.environ["STEERING_AUTHORITY"] = session_routes.COORDINATION
+    else:
+        os.environ.pop("STEERING_AUTHORITY", None)
 
 
-def wire(root: Path, door: str, authority: str, codex: bool = False) -> None:
+def wire(root: Path, door: str, authority: str, on_go: bool, codex: bool = False) -> None:
     """The door and id `record` writes, and Claude's hook pack; nothing else local. Codex runs
     no hooks: its sessions share only the enrolment tokens' directory."""
     import hooks
-    record(root, door, authority)
+    record(root, door, authority, on_go)
     if codex:
         hooks.tokens_directory(root)
     else:
@@ -691,11 +812,14 @@ def install(root: Path, codex: bool = False, team: str | None = None,
     door = recorded_door(root, bound) if bound else None
     got: dict | None = None
     view = authorities(door) if door else None
-    if view is not None and (other := serves(view)) != repo:
+    if view is not None and ((other := serves(view)) or "").lower() != repo.lower():
         # Before any write: a checkout whose origin moved would otherwise keep reporting to the
-        # workspace of the repository it came from (#2618).
+        # workspace of the repository it came from (#2618). GitHub reads a name in any case.
         raise Stop(f"{root} is bound to {bound}, which serves {other or 'no repository it names'}, and its "
                    f"origin is {repo}; run `install.py uninstall` here, then install again")
+    # A coordination door answering on this machine's credential has admitted it: the run goes on
+    # to the hooks and the agent, as after a first admission on Go below.
+    on_go = view is not None and view.get("coordination") is True
     if view is None:
         source = tracks_source(root, repo)
         # The workspace's GitHub login is the account the person most likely signs in as (#3954).
@@ -703,26 +827,25 @@ def install(root: Path, codex: bool = False, team: str | None = None,
         try:
             access = go_access(console, token)
             if access is not None:
-                door, authority = admit_on_go(console, token, access, repo, team)
-                record(root, door, authority)
+                door, authority, team_id, owner = admit_on_go(console, token, access, repo, team)
+                record(root, door, authority, on_go=True)
                 say("machine", f"this machine is admitted to {authority}")
-                # The agent, its hooks and the GitHub grant join coordination at its cutover.
-                say("agent", "not started: coordination serves this machine's agent from its cutover")
-                print(json.dumps({"workspace": authority, "door": door, "coordination": True}))
-                return 0
-            got = workspace(console, token, repo, source, team)
-            authority = got.get("id")
-            if not isinstance(authority, str):
-                raise Stop("the workspace answer carried no id")
-            door = checked_door(got.get("door"), authority)
-            for step, said in (("signed in", got.get("user")), ("team", got.get("team"))):
-                if isinstance(said, str):
-                    say(step, f"{said} (you joined it; installing a new repository is its owner's)"
-                        if step == "team" and got.get("member") is True else said)
-            say("workspace", f"{authority} {'created' if got.get('created') else 'found'}")
-            admit_machine(console, token, door, authority, label)
-            record(root, door, authority)
-            say("machine", f"this machine is admitted to {authority}")
+                wait_for_go_grant(console, token, team_id, repo, owner)
+                on_go = True
+            else:
+                got = workspace(console, token, repo, source, team)
+                authority = got.get("id")
+                if not isinstance(authority, str):
+                    raise Stop("the workspace answer carried no id")
+                door = checked_door(got.get("door"), authority)
+                for step, said in (("signed in", got.get("user")), ("team", got.get("team"))):
+                    if isinstance(said, str):
+                        say(step, f"{said} (you joined it; installing a new repository is its owner's)"
+                            if step == "team" and got.get("member") is True else said)
+                say("workspace", f"{authority} {'created' if got.get('created') else 'found'}")
+                admit_machine(console, token, door, authority, label)
+                record(root, door, authority, on_go=False)
+                say("machine", f"this machine is admitted to {authority}")
         finally:
             end_session(console, token)
     authority = door_mod.split(door)[1]
@@ -731,10 +854,11 @@ def install(root: Path, codex: bool = False, team: str | None = None,
     # The desk's address is the console's to say (desk-address.md); a checkout installed before
     # has no answer to read it from.
     desk = (got or {}).get("desk")
-    wait_for_grant(door, (got or {}).get("forge") or reach(door), repo,
-                   desk if isinstance(desk, str) and desk.startswith(console + "/") else f"{console}/", authority,
-                   approved_here=got is not None)
-    wire(root, door, authority, codex)
+    if not on_go:
+        wait_for_grant(door, (got or {}).get("forge") or reach(door), repo,
+                       desk if isinstance(desk, str) and desk.startswith(console + "/") else f"{console}/", authority,
+                       approved_here=got is not None)
+    wire(root, door, authority, on_go, codex)
     say("hooks", "none for Codex" if codex else "written")
     held = machine_workspaces.at(root)
     machine_workspaces.write(machine_workspaces.directory(Path.home()), authority, machine_workspaces.Entry(
@@ -966,7 +1090,7 @@ def uninstall(root: Path, retire: bool) -> int:
     env = root / ".env"
     if env.exists():
         kept = [line for line in env.read_text().splitlines()
-                if not line.startswith(("STEERING_DOOR=", "STEERING_AGENT_PORT="))]
+                if not line.startswith(("STEERING_DOOR=", "STEERING_AUTHORITY=", "STEERING_AGENT_PORT="))]
         spool.write_atomic(env, "\n".join(kept) + ("\n" if kept else ""), mode=0o600)
     for leftover in (root / ".claude" / "steering-workspace", root / ".claude" / "steering-launch.py"):
         leftover.unlink(missing_ok=True)
