@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`ack.py <session> <ulid>`: record receipt of a relayed directive."""
+"""`ack.py <session> <directive id>`: record receipt of a relayed directive."""
 from __future__ import annotations
 
 import hashlib
@@ -12,8 +12,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 from local_workspace import required_workspace_root  # noqa: E402
-from ulids import valid_ulid  # noqa: E402
-from door import display_reply, say  # noqa: E402
+from door import display_reply  # noqa: E402
 
 
 def valid_token(value: object) -> bool:
@@ -98,11 +97,9 @@ def main(argv: list[str]) -> int:
         return error("ack", "unknown ack option")
     if not valid_token(argv[0]):
         return error("ack", "ack requires a session name")
-    if not valid_ulid(argv[1]) and not go_directive(argv[1]):
+    if not go_directive(argv[1]):
         return error("ack", "ack requires a valid directive id")
     ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
-    if not valid_directive(ws, argv[1]):
-        return error("ack", "ack requires a valid directive id")
     session, ulid = argv
     try:
         reply = acknowledge(ws, session, ulid)
@@ -113,9 +110,8 @@ def main(argv: list[str]) -> int:
 
 
 def valid_directive(ws: Path, directive: str) -> bool:
-    """A directive's id as its authority mints it: the door's envelope ULID, or Go's UUID."""
-    import session_routes  # noqa: E402
-    return go_directive(directive) if session_routes.on_coordination(ws) else valid_ulid(directive)
+    """A directive's id as Go mints it: a UUID."""
+    return go_directive(directive)
 
 
 def go_directive(directive: str) -> bool:
@@ -126,8 +122,8 @@ def go_directive(directive: str) -> bool:
 
 
 def acknowledge(ws: Path, session: str, ulid: str) -> str:
-    """Acknowledge a directive on the session's stored token: `ack:` to the door, or Go's
-    acknowledgement route. Raises LookupError when no usable token is stored."""
+    """Acknowledge a directive on the session's stored token, on Go's acknowledgement route.
+    Raises LookupError when no usable token is stored."""
     try:
         token = json.loads(token_path(ws, session).read_text())["token"]
     except (OSError, ValueError, KeyError):
@@ -135,9 +131,7 @@ def acknowledge(ws: Path, session: str, ulid: str) -> str:
     if not valid_token(token):
         raise LookupError(f"the stored token for {session} is not one: enroll again")
     import session_routes  # noqa: E402
-    if session_routes.on_coordination(ws):
-        return session_routes.acknowledge(session, token, ulid)
-    return say(f"ack: {ulid} token {token}")
+    return session_routes.acknowledge(session, token, ulid)
 
 
 if __name__ == "__main__":

@@ -83,6 +83,11 @@ oldest, as reviewers free.
 Do not commission it again: a second commission on that series is refused while it waits. One
 still queued after an hour is refused, and `cancel` withdraws a queued one.
 
+On Go, a review commissioned at a head the server has not yet observed, sent a second after the
+push, is `awaiting`, not refused: GitHub's delivery of that head queues it. Do not send it again. If
+a later head is observed first, or none within a minute, you are told why from `gate <id>`, and
+`cancel` withdraws an awaiting one too.
+
 Fix what you verify, push, and commission again: the next round is briefed with every earlier
 round's findings. A `ship it` closes the gate. At the ceiling steering refuses another round and
 the owner hears it: build or decompose.
@@ -143,10 +148,11 @@ pass and merge it), or, once it is ready, its checks passed or failed. A pull re
 gated is told to the session whose `taking: branch` holds its branch. A `gh` loop that waits is the
 failure mode: every session on a machine shares one person's GitHub limit (#4203).
 
-To read where it stands now, ask the daemon, which read it through the App for every session: its draft state and each check on its head.
+To read where its gates stand now, ask the daemon. Go does not read a pull request's draft state
+or checks yet (#4391).
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" /pulls/<pr number> </dev/null
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" "/gates?repo=<owner>/<name>&pr=<pr number>" </dev/null
 ```
 
 `REJECTED … does not hold <branch>` — claim it with `taking.py`, above. `unresolved: …` — no

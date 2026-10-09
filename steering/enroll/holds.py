@@ -17,11 +17,10 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 from bind import Refused  # noqa: E402
 from connect import speaker_flags, speaking_as  # noqa: E402
-from door import display_reply, remote, say  # noqa: E402
 from local_workspace import required_workspace_root  # noqa: E402
 
 
-from verb_help import _invocation as help_invocation, error, help_requested, script_help  # noqa: E402
+from verb_help import error, help_requested, script_help  # noqa: E402
 
 
 def _executors(card: dict) -> list[str]:
@@ -93,30 +92,12 @@ def main(argv: list[str]) -> int:
     else:
         return error("holds", "holds requires a branch or issue number")
     ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
-    import session_routes
-    if session_routes.on_coordination(ws):
-        try:
-            session, token = speaking_as(ws, session, flags)
-        except Refused as why:
-            print(str(why), file=sys.stderr)
-            return 1
-        return _on_go(ws, token, branch)
-    # The verb lives on the remote door only (doc 68 §9). Sending it to the loopback door would
-    # queue it as an ordinary message for the owner to read, which looks like being ignored.
-    if not remote():
-        field = "takings" if branch.startswith("issue ") else "holdings"
-        print(f"this is the brain machine's own door, which does not answer `holds:`. Read its "
-              f"registry field `{field}` with:\n"
-              f"  {help_invocation('door', None)} --get /steering/registry", file=sys.stderr)
-        return 1
     try:
         session, token = speaking_as(ws, session, flags)
     except Refused as why:
         print(str(why), file=sys.stderr)
         return 1
-    reply = say(f"holds: {branch} token {token}")
-    print(display_reply(reply, 2000))
-    return 1 if reply.startswith("REJECTED") else 0
+    return _on_go(ws, token, branch)
 
 
 if __name__ == "__main__":

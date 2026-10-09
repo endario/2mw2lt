@@ -2,11 +2,7 @@
 """`rotate.py [--as <account>] [--doing <text>] [<session>]`: replace this session's enrolment token.
 
 For a token that has been disclosed. The enrollment is made again under the same name, which mints
-a fresh token on a new epoch and leaves the old one resolving to nothing.
-
-At the incumbent's door it is detached first: that door refuses a re-enrolment over a standing one
-unless it can show the caller is that session, and it shows that from the transcript, which a
-remote enrollment has none of. On Go (`STEERING_AUTHORITY=coordination`) the enrolment itself ends
+a fresh token on a new epoch and leaves the old one resolving to nothing. The enrolment itself ends
 the standing credential, so nothing is detached first.
 """
 from __future__ import annotations
@@ -27,7 +23,6 @@ from local_workspace import required_workspace_root  # noqa: E402
 from ack import token_path  # noqa: E402
 from bind import Refused, bind, incarnation, records  # noqa: E402
 from process_probe import Undetermined  # noqa: E402
-from door import say  # noqa: E402
 from connect import account, enrol, harness_of, options, project_dir, reached  # noqa: E402
 import hooks  # noqa: E402
 from verb_help import current_args, error, help_requested, script_help  # noqa: E402
@@ -86,23 +81,11 @@ def main(argv: list[str]) -> int:
         # power to end another's.
         print(f"{session} is not this session's enrollment"
               f" ({minted_for or 'it names no session it was minted for'})", file=sys.stderr); return 1
-    import session_routes  # noqa: E402
-    on_go = session_routes.on_coordination(ws)
-    if not acct and not on_go:
-        return connect_recovery("this harness keeps no account in a directory")
-
-    if not on_go:  # Go's enrolment ends the standing credential itself
-        ended = say(f"detach: {session} token {known[session]['token']}")
-        # A token already revoked is the case this command exists for, so its refusal is not one.
-        if not ended.startswith("detached:") and "stale token" not in ended:
-            print(f"{ended}\nthe standing token was not ended, and still stands", file=sys.stderr); return 1
 
     try:
         token = enrol(ws, session, acct, doing, psession, h, rid=rid)
     except Refused as why:
-        if on_go:
-            return connect_recovery(str(why))
-        return connect_recovery(f"{why}\n{session} is now detached")
+        return connect_recovery(str(why))
     print(f"{session}: rotated, the previous token proves nothing now")
     print(f"the new token is the `token` field of {token_path(ws, session)}")
     try:

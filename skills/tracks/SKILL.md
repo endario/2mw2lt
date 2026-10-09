@@ -23,17 +23,16 @@ Each lane has a stable `id` distinct from its changeable name: keep the id when 
 
 ## Read this workspace's tracks
 
-The repository document named by the authority manifest's `tracks_source` is canonical (`source` in a checkout-mode workspace definition). The daemon serves its synced copy at `GET /w/<authority>/api/v1/tracks`, including lane ids, source commit, staleness and drift. Read it **before** placing or classifying work. The brain can inspect sync history at `GET /w/<authority>/api/v1/tracks/syncs`. From the workspace, the client resolves the authority and door for you:
+The repository document named by the authority manifest's `tracks_source` is canonical (`source` in a checkout-mode workspace definition). The daemon serves its synced copy at `GET /w/<authority>/api/v1/tracks`, including lane ids, source commit, staleness and drift, and the commit last synced, awaited or failed. Read it **before** placing or classifying work. From the workspace, the client resolves the authority and door for you:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" /tracks </dev/null
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /tracks/syncs
 ```
 
-The first read goes on your own enrolment; the sync-history read needs the seat's stored lease (`--lease`). Never put a token in a URL or a response. If tracks are stale or drifted, inspect the source and sync result before treating the server's lanes as current.
+The read goes on your own enrolment. Never put a token in a URL or a response. If tracks are stale or drifted, inspect the source and sync result before treating the server's lanes as current.
 
 ## Place and curate
 
 Read the card's declaration, owning issue anchors and descriptions in that order. Compare their intended outcome with the lanes' outcome, Not and ladder lines; secondary capabilities remain labels, not competing primary lanes. File paths and branch prefixes are not evidence of a capability. When the classifier marks a placement low-confidence or refers it, inspect the issue or card. The brain can correct a **card** to a product lane with `reclassify` (see `/2mw2lt:brain`); resolve an issue's track through its issue label or lane epic. A card classified off-track belongs outside the product lanes when its work is repository upkeep; if it belongs in a capability, reclassify it to that lane. If upkeep was placed in a product lane, the brain corrects it with `reclassify <card> track off-track`. The classifier does not offer off-track for issues.
 
-Propose a lane only if it names a distinct capability serving the product north star, has an outcome a newcomer can understand, a Not boundary and a ladder line, and is not repository upkeep or a cross-cutting label. Change the repository tracks document by pull request, retaining stable ids across renames. Never change tracks through a board write. After merge, read `/tracks` and `/tracks/syncs` to check that the server synced the intended commit; the brain may request `POST /tracks/syncs` through `rest.py --post /tracks/syncs` if reconciliation is needed.
+Propose a lane only if it names a distinct capability serving the product north star, has an outcome a newcomer can understand, a Not boundary and a ladder line, and is not repository upkeep or a cross-cutting label. Change the repository tracks document by pull request, retaining stable ids across renames. Never change tracks through a board write. After merge, read `/tracks` to check that the server synced the intended commit. Go syncs the lanes as the workspace's mirror moves, so there is no sync to request.

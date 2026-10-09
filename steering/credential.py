@@ -403,3 +403,37 @@ def _native_current(p: Path, d: dict, clock) -> str:
         return d["credential"]
     finally:
         os.close(lock)
+
+
+RENEW_POLL = 60.0
+RENEW_BACKOFF = (30.0, 900.0)
+
+
+def renew_native(failures: dict, clock=time.time, say=None) -> float:
+    """Renew each of this OS user's native credentials that is due, whether or not anything asks for
+    it, and return the seconds until the next look. Go renews one up to its grace past expiry
+    (go-unit7-enrolment-design.md §4), so a machine woken from sleep renews here within a poll. One
+    that did not renew is tried again after a backoff doubling from 30 s to 15 min, kept per
+    enrolment in `failures`. The poll is short because a sleeping Mac's timers stop with it."""
+    wait = RENEW_POLL
+    for p in sorted(home().glob("*.json")) if home().is_dir() else []:
+        d = _read(p)
+        if not d or not d.get("native") or not d.get("credential") or _native_fresh(d, clock):
+            failures.pop(p, None)
+            continue
+        tried, retry_at = failures.get(p, (0, 0.0))
+        if clock() < retry_at:
+            wait = min(wait, retry_at - clock())
+            continue
+        try:
+            current(p, clock)
+        except NoCredential as e:
+            if say:
+                say(f"credential for {d.get('workspace')}: not renewed: {e}")
+        if _native_fresh(_read(p) or d, clock):
+            failures.pop(p, None)
+            continue
+        delay = min(RENEW_BACKOFF[1], RENEW_BACKOFF[0] * 2 ** tried)
+        failures[p] = (tried + 1, clock() + delay)
+        wait = min(wait, delay)
+    return max(1.0, wait)

@@ -10,7 +10,6 @@ EFFORT = {"standard": {"glm": "high", "codex": "xhigh", "claude": "high", "grok"
                        "deepseek": "high", "meta": "high", "stealth": "high"},
           "heavy": {"glm": "high", "codex": "low", "claude": "high"}}
 REVIEWERS = tuple(EFFORT["standard"])
-TIERS = tuple(EFFORT)
 _STATUS = re.compile(r"^gate:\s*status\s+(?P<id>[0-9A-Za-z]{8,40})\s+token\s+\S+\s*$")
 _CANCEL = re.compile(r"^gate:\s*cancel\s+(?P<id>[0-9A-Za-z]{8,40})\s+token\s+\S+\s*$")
 

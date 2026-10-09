@@ -194,7 +194,8 @@ def launch_drain(path: Path = DEFAULT_PATH) -> str | None:
 
 def placement(path: Path = DEFAULT_PATH, review_host: bool | None = None) -> dict:
     """What this machine tells the orchestrator it is for (doc 146 §2.1): its role, its threshold,
-    `host_limit` and `max_workers`. A declared review host is dedicated unless its file says
+    `host_limit`, `max_workers`, and the gate runs it takes on one account and in all (`vendor_limit`,
+    `agent_limit`), which the orchestrator counts per machine. A declared review host is dedicated unless its file says
     otherwise."""
     if review_host is None:
         import review_host as review_host_mod
@@ -202,7 +203,8 @@ def placement(path: Path = DEFAULT_PATH, review_host: bool | None = None) -> dic
     table = capacity(path).get("placement", {})
     return {"role": table.get("role", "dedicated" if review_host else "workstation"),
             "soft": float(table.get("soft", 0.75)), "capacity": gate_host_limit(path),
-            "workers": max_workers(path)}
+            "workers": max_workers(path), "vendor_limit": gate_vendor_limit(path),
+            "agent_limit": gate_agent_limit(path)}
 
 
 def judges_exclude(path: Path = DEFAULT_PATH) -> set[str] | None:

@@ -6,6 +6,7 @@ name keeps working after the lane is renamed.
 """
 from __future__ import annotations
 
+import json
 import re
 
 import knowledge_shape
@@ -102,3 +103,34 @@ def validate(doc: object, repo: str | None) -> list[str]:
             why.append("`ci.workflows` is not a non-empty list of workflow file names such as `steering.yml`, "
                        "each watched on the default branch only")
     return why
+
+
+def modules_text(doc: dict) -> str:
+    """The tracks document as written: each module's patterns one per line, sorted, once.
+
+    A pattern's place in its list means nothing to `modules_of`, so this form changes no
+    classification, and two pull requests that each register a path touch different lines (#3442).
+    """
+    out = {**doc, "modules": {k: sorted(set(v)) for k, v in doc["modules"].items()}}
+    return json.dumps(out, indent=2, ensure_ascii=False) + "\n"
+
+
+def modules_of(files: set[str], mapping: dict[str, list[str]], *, partial: bool = False) -> list[str]:
+    found: set[str] = set()
+    for path in files:
+        matches = []
+        source = ("steering/" + path[len("steering/test/"):-len("_test.py")] + ".py"
+                  if path.startswith("steering/test/") and path.endswith("_test.py") else None)
+        for candidate in (path, source) if source else (path,):
+            matches = [(len(pattern[:-2] if pattern.endswith("/**") else pattern), name)
+                       for name, patterns in mapping.items() for pattern in patterns
+                       if (candidate.startswith(pattern[:-2]) if pattern.endswith("/**")
+                           else candidate == pattern)]
+            if matches:
+                break
+        if matches:
+            longest = max(length for length, _ in matches)
+            found.update(name for length, name in matches if length == longest)
+        elif not partial:
+            found.add("unmapped")
+    return sorted(found)

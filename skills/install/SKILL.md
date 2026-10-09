@@ -67,8 +67,11 @@ did not answer; the engine asks again on its own.
 At each pause, tell the person in one line what to click, then keep waiting. The engine polls on
 its own and carries on once the grant lands. Do not ask the person to confirm they have done it.
 
-A run on a finished install signs nobody in and opens no page. A run stopped after `machine`
-resumes at the grant, with no second sign-in.
+A run on a finished install signs nobody in and opens no page, except when the checkout's door is
+the incumbent's and the platform now serves coordination. Then it prints `platform … moving` and
+signs in once to move the checkout there, and its `sessions` line asks each session on the checkout
+to connect again; tell the person that line. A run stopped after `machine` resumes at
+the grant, with no second sign-in.
 
 Its last line is a JSON object: `{workspace, door, port, tracks, tracks_missing}`.
 

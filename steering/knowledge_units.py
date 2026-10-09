@@ -28,10 +28,6 @@ KEYS = (*REQUIRED, "superseded_by")
 ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
 EVERY = "*"
 TITLE_MAX = 100
-# The knowledge block's own ceiling, below the room a directive's words leave it under `TEXT_MAX`.
-# Set from `probes/brief_bytes.py` over 200 merged cards at fe0135a7, whose largest block was
-# 2893 bytes: no card measured there is cut by this rather than by the words beside it.
-BLOCK_MAX = 3072
 
 _KEY = re.compile(r"([A-Za-z_]+):(?:\s+(.*))?")
 # A plain scalar may not open with what YAML would read as something else.

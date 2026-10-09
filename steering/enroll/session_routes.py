@@ -1,9 +1,7 @@
-"""The session commands on a workspace whose authority is Go (C5,
-documentation/architecture/go-c5-session-client-design.md).
+"""The session commands on Go (C5, documentation/architecture/go-c5-session-client-design.md).
 
-The workspace's `.env` says so: `STEERING_AUTHORITY=coordination`. Without that line nothing here
-is used and the door's lines are spoken as before. The machine observes and enrols on its own
-carrier; the session binds and detaches on its own, and no request carries both.
+The machine observes and enrols on its own carrier; the session binds and detaches on its own,
+and no request carries both.
 """
 from __future__ import annotations
 
@@ -26,7 +24,6 @@ sys.path.insert(0, str(HERE))
 import door  # noqa: E402
 import refusal  # noqa: E402
 
-COORDINATION = "coordination"
 MACHINE_CARRIER = "X-Steering-Agent-Credential"
 SESSION_CARRIER = "X-Steering-Session-Credential"
 # A refusal of an invalid token: unknown, expired, or one a detachment revoked, which Go answers
@@ -42,53 +39,13 @@ RETRY_ATTEMPTS = 5
 class Refused(Exception):
     """Go refused the request. `code` and `field` are its problem's."""
 
-    def __init__(self, status: int, code: str, field: str = ""):
+    def __init__(self, status: int, code: str, field: str = "", wait: int | None = None):
         super().__init__(f"refused ({status}): {code}" + (f" [{field}]" if field else ""))
-        self.status, self.code, self.field = status, code, field
+        self.status, self.code, self.field, self.wait = status, code, field, wait
 
 
 class Unsent(OSError):
     """No answer came: the request may or may not have been committed."""
-
-
-def authority(ws: Path | None = None) -> str:
-    """The workspace's authority: "" for the incumbent's door, or `coordination`. Read as the door
-    is (`door.configured_door`): the environment, else the workspace's `.env` (`ws`, or the one
-    found from here); under `door.ANCHOR`, that workspace's `.env` alone. So every stage of one
-    command reads the same. Any other value is refused, so a typo cannot quietly keep the
-    incumbent."""
-    anchored = door.ANCHOR.get()
-    value = "" if anchored is not None else os.environ.get("STEERING_AUTHORITY", "").strip()
-    if not value:
-        value = _env_value(anchored or ws, "STEERING_AUTHORITY")
-    if value not in ("", COORDINATION):
-        raise SystemExit(f"STEERING_AUTHORITY={value}: the authorities are the incumbent's door "
-                         f"(no line) and {COORDINATION}")
-    return value
-
-
-def _env_value(ws: Path | None, key: str) -> str:
-    if ws is None:
-        from local_workspace import workspace_root  # noqa: E402
-        anchor = Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
-        try:
-            ws = workspace_root(anchor, timeout=1.0)
-        except (subprocess.SubprocessError, OSError) as e:
-            # Not knowing the workspace is not knowing its authority: never read as the incumbent's.
-            raise SystemExit(f"door: the workspace lookup from {anchor} failed ({e}); its authority is unknown")
-    try:
-        text = (ws / ".env").read_text()
-    except FileNotFoundError:
-        return ""
-    for line in text.splitlines():
-        k, _, v = line.strip().partition("=")
-        if k == key:
-            return v.strip().strip('"').strip("'")
-    return ""
-
-
-def on_coordination(ws: Path | None = None) -> bool:
-    return authority(ws) == COORDINATION
 
 
 def _base() -> str:
@@ -124,7 +81,9 @@ def post(path: str, body: dict, key: str, carrier: str, token: str, timeout: flo
             pause = _retry_after(e) if e.code in (429, 503) else None
             attempts += 1
             if pause is None or attempts >= RETRY_ATTEMPTS or time.monotonic() - started + pause > RETRY_LIMIT:
-                raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "") from None
+                wait = problem.get("wait_seconds")
+                raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
+                              wait if isinstance(wait, int) else None) from None
             time.sleep(pause)
         except (urllib.error.URLError, OSError, TimeoutError) as e:
             raise Unsent(f"{_base()}{path}: no answer ({e})") from None
@@ -203,7 +162,7 @@ def enrol(ws: Path, session: str, provider: str, psession: str, runtime: str) ->
         raise
     import ack  # noqa: E402
     ack.store(ws, session, answer["credential"], request["body"]["provider_session"],
-              authority=COORDINATION, epoch=answer.get("epoch"))
+              authority="coordination", epoch=answer.get("epoch"))
     # The credential is on disk before the request that recovers it is gone.
     _durable(ack.token_path(ws, session))
     pending.unlink(missing_ok=True)
@@ -224,14 +183,19 @@ def _durable(path: Path) -> None:
         os.close(fd)
 
 
-def bind(session: str, token: str, provider: str, psession: str, runtime: str) -> str:
-    """The session binds the process it now runs in; the answer reads as the door's did."""
+def bind(session: str, token: str, provider: str, psession: str, runtime: str,
+         account_id: str | None = None) -> str:
+    """The session binds the process it now runs in, and the account it spends from when it has
+    one; the answer reads as the door's did."""
     try:
-        post(f"/sessions/{session}/bindings", _incarnation(provider, psession, runtime),
+        post(f"/sessions/{session}/bindings",
+             _incarnation(provider, psession, runtime) | ({"account_id": account_id} if account_id else {}),
              uuid.uuid4().hex, SESSION_CARRIER, token)
     except Unsent as e:
         return refusal.retry(str(e))
     except Refused as e:
+        if not settled(e):  # Go asked to wait past the retries, or did not say: the binding may land later
+            return refusal.retry(str(e))
         if e.code in INVALID_TOKEN:
             return refusal.reconnect(f"unknown, detached or stale token for {session}")
         return refusal.reconnect(str(e))
@@ -258,22 +222,25 @@ def detach(session: str, token: str, key: str | None = None, handover: str = "")
     return f"detached: {session}"
 
 
-def checkpoint(token: str, body: dict) -> str:
+def checkpoint(token: str, body: dict) -> tuple[str, bool]:
     """The session records its checkpoint (`POST /checkpoints`), keyed by its occurrence, so a resend
-    under `--retry` is answered from the first. The answer reads as the door's did."""
+    under `--retry` is answered from the first: the answer, and whether it may have been recorded
+    unanswered, which only a resend under the id settles."""
     sent = {"occurrence": body["id"], "boundary": body["boundary"], "note": body["note"],
             "note_sha256": body["note_sha256"], **({"learned": body["learned"]} if body.get("learned") else {})}
     try:
         answer = post("/checkpoints", sent, body["id"], SESSION_CARRIER, token)
     except Unsent as e:
-        return refusal.retry(str(e))
+        return refusal.retry(str(e)), True
     except Refused as e:
         if e.code in INVALID_TOKEN:
-            return refusal.reconnect("the session's token is not valid")
-        return refusal.use("checkpoint", str(e))
+            return refusal.reconnect("the session's token is not valid"), False
+        if not settled(e):
+            return refusal.retry(str(e)), True
+        return refusal.use("checkpoint", str(e)), False
     got = answer.get("checkpoint") or {}
     dropped = got.get("dropped") or 0
-    return f"checkpointed: {body['id']} {body['boundary']}" + (f" dropped: {dropped}" if dropped else "")
+    return f"checkpointed: {body['id']} {body['boundary']}" + (f" dropped: {dropped}" if dropped else ""), False
 
 
 def acknowledge(session: str, token: str, directive: str) -> str:
@@ -460,8 +427,9 @@ def announce_branch(session: str, token: str, branch: str, ws: Path, key: str,
                     harness: str = "", account: str = "") -> str:
     """A branch claim is an announce (the brain's ruling, 2026-10-08): the doing defaults to the
     executed card's title, and the repository names the branch, which binds it to the card. There
-    is no separate claim primitive on the wire. Raises `ValueError` when no card names doing,
-    `Refused` or `Unsent` as a write does."""
+    is no separate claim primitive on the wire. Answers the card it bound and the branch it
+    displaced, or `REJECTED` with why nothing bound (#5084). Raises `ValueError` when no card names
+    doing, `Refused` or `Unsent` as a write does."""
     card = executing_card(session, token)
     if card is None:
         raise ValueError(f"no live card of {session}'s names doing to announce")
@@ -470,8 +438,28 @@ def announce_branch(session: str, token: str, branch: str, ws: Path, key: str,
         body["harness"] = harness
     if account:
         body["account"] = account
-    status(session, token, key, body)
-    return f"registered: announce on {branch} doing {card['name']}"
+    answer = status(session, token, key, body)
+    bound = answer.get("bound")
+    if bound:
+        return f"bound: {bound['branch']} to card {bound['card']}" + (
+            f", displacing {bound['displaced']}" if bound.get("displaced") else "")
+    why = answer.get("unbound")
+    if why:
+        if why in UNBOUND:
+            return refusal.refuse(f"not bound: {why}", send=UNBOUND[why])
+        return refusal.refuse(f"not bound: {why}",
+                              hand_to=("the brain", f"say: {session} token <t> my branch claim bound no card, {why}"))
+    return f"announced on {branch}; the daemon did not say what it bound"
+
+
+# Why an announce's branch claim bound nothing, and what the session sends instead (#5084). The
+# others, the owner or the seat having taken the branch from the card or another card holding it,
+# are the brain's to settle.
+UNBOUND = {
+    "no-executed-card": [("declare: <session> token <t> card <ulid> <name> [<verb>:<n>[,<n>] …]",
+                          "first, then claim the branch again")],
+    "trunk": [("taking: branch <name> token <t>", "for the branch the work is on, since a trunk is never a card's")],
+}
 
 
 def claim_issue(session: str, token: str, repo: str, n: int) -> str:
@@ -544,9 +532,26 @@ def seat_launch(session: str, token: str, body: dict, key: str) -> str:
     rerun after a lost answer is answered from the first. Raises `NotSeated`, `Refused` or `Unsent`."""
     seat_generation(session, token)
     answer = post("/launches", body, key, SESSION_CARRIER, token)
+    account = answer.get("account")
+    on = f" on {account['vendor']} account {account['number']} ({account['account_id']}, brought by {account['brought_by']})" if account else ""
+    if answer.get("outcome") == "refused":
+        return f"launch refused: {answer['id']} {body['harness']}{on}: {answer.get('refused')}"
+    if answer.get("outcome") == "session":
+        return f"launched: {answer['id']} {body['harness']}{on}"
     if answer.get("state") == "admitted":
-        return f"launching: {answer['id']} {body['harness']}"
-    return f"launch waiting: {answer['id']} {answer.get('reason') or answer.get('state')}"
+        return f"launching: {answer['id']} {body['harness']}{on}"
+    return f"launch waiting: {answer['id']} {answer.get('reason') or answer.get('state')}{on}"
+
+
+def seat_action(session: str, token: str, body: dict, key: str) -> str:
+    """The holder asks the machine a session runs on to wake, control or retire it
+    (`POST /actions`), keyed by the line's own key so a rerun after a lost answer is answered from
+    the first. Raises `NotSeated`, `Refused` or `Unsent`."""
+    seat_generation(session, token)
+    answer = post("/actions", body, key, SESSION_CARRIER, token)
+    doing = {"wake": "waking", "control": "controlling", "retire": "retiring"}[body["kind"]]
+    value = f" {body['value']}" if body.get("value") else ""
+    return f"{doing}: {answer['id']} {body['to']}{value}, offered"
 
 
 def lift(session: str, token: str, kind: str, repo: str, at: int | str, reason: str, key: str) -> str:
@@ -559,6 +564,16 @@ def lift(session: str, token: str, kind: str, repo: str, at: int | str, reason: 
             **({"pr": at} if kind == "review" else {"branch": at})}
     post("/gates/lifts", body, _own_key("gate.lift", session, key), SESSION_CARRIER, token)
     return f"lifted: review {repo}#{at}" if kind == "review" else f"lifted: critic {repo} {at}"
+
+
+def raise_owner(session: str, token: str, title: str, text: str, need: str = "", about: str = "") -> int:
+    """The holder raises every member's subscribed browser (`POST /sessions/{session}/push/raises`)
+    at the generation it holds, and answers how many pushes Go queued. Each raise is its own: a
+    resend after a lost answer is refused for the window the first spent, never sent twice.
+    Raises `NotSeated`, `Refused` or `Unsent`."""
+    body = {"generation": seat_generation(session, token), "title": title, "text": text,
+            **({"need": need} if need else {}), **({"session": about} if about else {})}
+    return int(post(f"/sessions/{session}/push/raises", body, uuid.uuid4().hex, SESSION_CARRIER, token)["enqueued"])
 
 
 # A card verb on Go: the work route it posts to, and its body from the verb's own fact
@@ -574,12 +589,15 @@ def _card_write(fact: dict, repo: str) -> tuple[str, dict] | None:
             body["major"] = True
         return "/cards", body
     if state in ("card-branch", "card-unbranch"):
+        # An ending carries the reason every ending records; Go refuses its absence.
         return (f"/cards/{card}/{'associations' if state == 'card-branch' else 'dissociations'}",
-                {"branch": {"repo": fact["repo"], "branch": fact["branch"]}})
+                {"branch": {"repo": fact["repo"], "branch": fact["branch"]},
+                 **({"why": fact["why"]} if fact.get("why") else {})})
     if state == "card-session":
         return f"/cards/{card}/engagements", {"session": fact["session"], "role": fact["role"]}
     if state == "card-unsession":
-        return f"/cards/{card}/disengagements", {"session": fact["session"]}
+        return f"/cards/{card}/disengagements", {"session": fact["session"],
+                                                 **({"why": fact["why"]} if fact.get("why") else {})}
     if state == "card-concluded":
         return f"/cards/{card}/conclusion", {"evidence": fact["evidence"], **({"keep_branch": True} if fact.get("kept") else {})}
     if state == "card-unconcluded":
@@ -619,25 +637,20 @@ def ruled_out(what: str) -> str | None:
         reason, hand_to=("the owner", f"ask: <session> token <t> reopen {reason}"), to="seat")
 
 
-def seat_card(session: str, token: str, verb: str, fact: dict, repo: str) -> str:
+def seat_card(session: str, token: str, verb: str, fact: dict, repo: str, key: str) -> str:
     """The seat's card verb on Go's work routes, which run it as the seat while this session holds
-    it. The key is the write's own, so a rerun after a lost answer is answered from the first.
+    it. `key` is the invocation's occurrence: a resend under `--retry` is answered from the first,
+    and a fresh invocation is a fresh write, so the same verb after its undo is made again.
     Raises `NotSeated`, `Refused`, `Unsent`, or `LookupError` for a verb Go does not serve yet."""
     if fact["state"] == "card-reanchored":
         return seat_reanchor(session, token, fact, repo)
     write = _card_write(fact, repo)
     if write is None:
         what = f"{verb} {fact['field']}" if fact["state"] == "card-reclassified" else verb
-        raise LookupError(f"card {what}: not served on a Go workspace yet")
+        raise LookupError(f"card {what}: not served by Go yet")
     seat_generation(session, token)
     path, body = write
-    parts = ["seat.card", session, path, json.dumps(body, sort_keys=True)]
-    if fact["state"] == "card-unconcluded":
-        # The conclusion it takes back is what makes it this write, so a later conclusion is taken
-        # back afresh, under the same words, while a retry of this one is answered from the first.
-        concluded = (get(f"/cards/{fact['card']}", token).get("card") or {}).get("conclusion") or {}
-        parts.append(str(concluded.get("at")))
-    post(path, body, _own_key(*parts), SESSION_CARRIER, token)
+    post(path, body, _own_key("seat.card", session, key), SESSION_CARRIER, token)
     return f"carded: {verb} {fact['card']}"
 
 
@@ -674,6 +687,22 @@ def backlog(session: str, token: str) -> str:
     lines = [_need_line(marker, need) for audience, marker in (("seat", "brain"), ("owner", "owner"))
              for need in get(f"/needs?audience={audience}", token).get("needs") or []]
     return "\n".join(lines) or "backlog: nothing open"
+
+
+def _roster_line(item: dict) -> str:
+    cards = item.get("cards") or []
+    told = f"; executing {', '.join(cards)}" if cards else ""
+    return f"{item['name']} {item['epoch']} {item['state']} - on {item.get('machine_registration') or item.get('machine') or '-'}{told}"
+
+
+def roster(session: str, token: str, include_gone: bool) -> str:
+    """Every session Go lists at its current epoch, one line each in the incumbent's `roster:`
+    columns: `<session> <epoch> <state> - on <machine>`. Go keeps no basis for a state, so that
+    column is `-`; what the incumbent told as sent is the live cards the epoch executes.
+    Raises `NotSeated`, `Refused` or `Unsent`."""
+    seat_generation(session, token)
+    items = get("/sessions?gone=1" if include_gone else "/sessions", token).get("items") or []
+    return "\n".join(_roster_line(item) for item in items) or "roster: empty"
 
 
 def say(session: str, token: str, occurrence: str, text: str, to: str | None = None) -> str:

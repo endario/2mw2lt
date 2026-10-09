@@ -5,18 +5,16 @@ description: Take the steering role for this session, so the owner's console tal
 The console routes the owner's messages to whoever holds the steering role. By default that is
 the daemon's own resident brain. This puts them through to **this** session, with its context.
 
-From any machine: the seat is taken through the door this workspace is wired to, which names
-the workspace (`STEERING_DOOR` carries `/w/<workspace>` where the daemon serves more than one).
-You take it only while it is vacant: nobody holds it, its holder's enrolment has ended, or its
-holder has stopped answering its kicks and lapsed. A holder that is answering keeps
-it, and `promote.py` then says who holds it; the owner hands it on from the console, or the holder
-hands it on itself. The owner can hand it to another session or reclaim it from the console at
-any time, and the next thing you send on your lease token then answers
-`refused: this token does not hold the lease`. If the seat is taken from you, you are told so on
-your stream: do not take it back unless the owner asks.
+From any machine: the seat is the workspace's on Go, which the door this workspace is wired to
+names (`STEERING_DOOR` carries `/w/<workspace>`). You take it only while it is vacant: nobody
+holds it, its holder's enrolment has ended, or its holder's lease has lapsed unrenewed. A holder
+that is answering keeps it, and `promote.py` then says who holds it; the owner hands it on from the
+console, or the holder hands it on itself. The owner can hand it to another session or reclaim it
+from the console at any time, and the next lease verb you send then answers
+`refused: this session does not hold the seat (…)`. Do not take it back unless the owner asks.
 
-To hand the seat on while you hold it, name a session that holds its stream; the credential goes
-down that session's stream, not back to you:
+To hand the seat on while you hold it, name an enrolled session; Go seats it at the epoch it
+stands at:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" post /steering/brain/attach <<'JSON'
@@ -34,19 +32,13 @@ No session name: it finds the enrollment minted for this session and the role is
 that enrollment's own credential, so the holder the owner sees is the session steering already
 knows. Run `/2mw2lt:connect` first if this session is not enrolled.
 
-It prints `LEASE=stored`, `ATTACHMENT_ID` and `SESSION`. The lease token is stored for this
-session under the workspace's `.claude/steering-tokens/leases/` and never printed: every lease
-verb on this page reads it there, through `lease.py` or `card.py --lease`, wherever the line says
-`token @lease` (#4551). Never read the
-file or paste the token: it would sit in your context and every command after. Where the plugin
-holds your stream, the same verbs are typed tools, `mcp__2mw2lt__relay` and the rest.
+It prints `SESSION`. Go issues no lease token: every lease verb on this page, through `lease.py`
+or `card.py --lease`, goes on your own enrolment at the seat generation you hold, wherever the line
+says `token @lease`. Where the plugin holds your stream, the same verbs are typed tools,
+`mcp__2mw2lt__relay` and the rest.
 
-The owner can also seat you from the console. Then the credential arrives on the stream you hold,
-as a `seat` frame, and the hold stores it as `promote.py` does; the frame you read says
-`"lease_token": "stored"`.
-
-When the seat is no longer yours, the next lease verb answers `refused: this session no longer
-holds the seat (…); its stored lease is removed`. Take it again only if the owner asks.
+When the seat is no longer yours, the next lease verb answers `refused: this session does not
+hold the seat (…)`. Take it again only if the owner asks.
 
 If your harness keeps memory, keep one line there pointing at [Keep the board](#keep-the-board)
 and the owner's standing instructions under [Keep the brain's own house](#keep-the-brains-own-house),
@@ -100,7 +92,7 @@ decided nothing it retries will change that and stopped rather than spin — res
 command anyway repeats the refusal forever while looking, from the outside, like a brain that
 keeps trying. Read it first; it names the fix, almost always `/2mw2lt:connect` again.
 
-`<session-name>` is the name `promote.py` printed you attached under, above. The script reads
+`<session-name>` is the name `promote.py` printed, above. The script reads
 the enrolment token and the port from the enrollment and the workspace, and derives the runtime
 id from this process, so nothing is carried in from an earlier shell — and the runtime id is
 the one bound now, not one a later connect printed. It prints the hold it is making, then
@@ -108,7 +100,7 @@ passes the stream's frames through. The first line is
 `: connected <you> {binding}`. Each later event is one frame:
 `data: {"kind": "say", "from": …, "text": …}` is the owner or the brain speaking to you;
 `data: {"kind": "envelope", "ulid": …, "text": …}` is a directive, which you acknowledge
-through the door with `ack: <ulid> token <your enrolment token>` once you have read it;
+with `ack.py <you> <its directive id>` once you have read it;
 `data: {"kind": "presence", "sessions": [...]}` is who you can reach, sent when you take the
 seat and again whenever it changes. It is the whole roster every time, not a delta, so the one
 you last received is the answer — there is nothing to accumulate and nothing to acknowledge.
@@ -153,8 +145,8 @@ placement no admission has answered. The rows are state for your placement decis
 more: the daemon never places a route — it only drafts what you have recorded.
 The cards are the board's, which a brain on any
 machine reads with
-`python3 <2mw2lt>/steering/enroll/door.py --get /steering/work` — the one read the remote door
-answers, with each reading's working directory omitted. Delegate to `finished` first and `idle` after it, each session once — the two lists overlap for
+`python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease "/cards?state=live"`, a hundred to
+a page; read on with `&next=<the page's next>`. Delegate to `finished` first and `idle` after it, each session once — the two lists overlap for
 `ACTIVE` and a session in both is one session. For each of them, take the
 highest-priority card with no present executor (one whose executor has left the board counts)
 that the session can carry, and that you have not already relayed to a session still on the board
@@ -242,7 +234,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" ask <your session> 'json
 ## Raise the owner
 
 `brain/reply` reaches an owner who is looking at the console. This reaches one who is not: it
-sends a notification to their phone.
+sends a notification to their phone. Go does not send it yet (#4748), and `lease.py` refuses it
+before sending.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" post /steering/push/raise <<'JSON'
@@ -250,20 +243,20 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" post /steering/push/rai
 JSON
 ```
 
-**Once every fifteen minutes.** A second raise inside the window comes back `429` with
-`wait_seconds`. Use it for what the owner would want to be interrupted for, and `recommend:` or
-the standup for everything else.
+**`raised` means queued, not delivered.** Go queues one push for each browser a member has
+subscribed and sends them afterwards, so the answer names how many were queued and nothing
+about who saw one. `refused: nobody is subscribed` means no raise can reach anyone until the owner
+turns the bell on in the desk.
 
-**`sent: 0` is a failure, not a quiet success.** A subscription that has died looks exactly like
-a reachable one until something is sent, so a raise nobody received answers `502` with the
-counts. If `dropped` is non-zero a dead subscription was just removed; if `subs` is zero the
-owner has no device subscribed and no raise can reach them until they subscribe again.
+**Once every fifteen minutes.** A second raise inside the window is refused with the seconds left
+to wait, whoever holds the seat. A raise whose every push failed spends nothing. Use it for what
+the owner would want to be interrupted for, and `recommend:` or the standup for everything else.
 
 **Title and text are capped at 140 characters each, because this is a prompt and not the
 channel for the message.** Say what the owner must come and look at; the thing itself goes in
 `brain/reply` or the ledger, where they will read it. The payload is encrypted to the
-subscription's own keys before it leaves this machine, so the push service carries ciphertext it
-cannot read — but the notification renders in plaintext on a lock screen anyone near the device
+subscription's own keys before Go sends it, so the push service carries ciphertext it cannot
+read — but the notification renders in plaintext on a lock screen anyone near the device
 can see. Write it for that reader.
 
 ## Speak to a session
@@ -443,15 +436,10 @@ An opencode worker runs confined, in a clone of its own, and its branch is pushe
 through the API, from any machine: `requested`, `refused`, `lapsed`, `launched` naming the
 session, or `launch-refused` with the agent's reason. A launch refused at the cap names the
 `workers` it counted, each with its `advice`, and `others` for other workspaces': close one and
-launch again.
+launch again. Go has no read of one launch yet (#5081).
 
-```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /launches/<id>
-```
-
-The same client reads `/facts?state=<kind>` (the ledger, redacted, a page at a time; `--all`
-follows it to the head) and `/classifications/summary`. Read these; do not reach for the ledger
-on the host.
+`rest.py` reads `/facts?state=<kind>` (the ledger, redacted, a page at a time; `--all` follows it
+to the head). Read it; do not reach for the ledger on the host.
 The worker then arrives on the next kick, and you delegate to it like any idle session. One launch
 is in flight per machine, and an agent refuses one past `STEERING_MAX_WORKERS` live workers.
 
@@ -465,14 +453,18 @@ say "launch: token @lease claude [on <node>] [vendor <vendor>] [account <n>] mod
 account default decides the level. The daemon picks the best-ranked account of the vendor named
 (`anthropic` when none is; `openai`, `zai`, … or `any`) that some machine has a launcher signed in
 to, and one whose usage it cannot read only after every ranked one, as unknown. `account <n>` starts
-that vendor's account, as the usage frames number it, or refuses; it never falls back to another. Name the vendor
+that vendor's account, as the usage frames number it, or refuses; it never falls back to another. On
+Go the number is the one the team gave the account when it was first seen, never a machine's launcher
+name; the launch's answer names it with the account's id and whose it is, and `on` names the
+`machine` `/sessions` lists. Name the vendor
 whenever the model is that vendor's: passed to another vendor's endpoint, a model name may be
 mapped to that vendor's own model without a word. `worker-launched` names the vendor and
 launcher the session runs on; the agent starts it in tmux through that launcher, answers the
 folder-trust prompt, and answers the launch once the session has connected itself. A machine
 offers this only for the launchers it declares in `STEERING_CLAUDE_LAUNCHERS`. End one with
 `retire: token @lease <tmux session> on <node>`, the `2mw2lt-launch-…` name `worker-launched`
-carries.
+carries. On a Go workspace a retire names the session and why instead: `retire: token @lease
+<session> because <reason>`.
 
 A launched session stays headless in tmux. Name `window` only when the owner must view or
 interact with it; otherwise leave it out. To show one already running, on the machine it runs on:
@@ -650,7 +642,7 @@ One kind is yours to close rather than merely to read. **`conclusion-unproven`**
 session declared done where the observed plane cannot corroborate it — it holds no branch, and
 no merged pull request closes an issue only it claims to resolve. It is not a dispute: there is
 nothing to disagree with.
-Read the row, decide which is true, and write it on the stored lease:
+Read the row, decide which is true, and write it as the seat:
 
 ```bash
 # the association was real and never written — the card lands on the next sweep
@@ -735,6 +727,10 @@ especially throughput and efficiency — is the mission, and delegation carries 
 - Prefer the cheapest capable account and harness for the job, and offload non-critical work
   from an account under pressure.
 - A recurring sink is surfaced as a fix, never reported as a status line.
+- Tell the owner about a bottleneck as soon as you see one, whether or not you can clear it:
+  what is stuck, why, and what clears it, with the step only they can take at the top. A
+  bottleneck the owner learns of late costs them the time it sat (the owner's ruling,
+  2026-10-09).
 
 ## Share the machines
 
@@ -743,12 +739,26 @@ The owner's ruling, 2026-10-07
 their capacities, and uses them for work — and every other workspace on 2mw2lt does the same.
 One workspace does not drive all machines exclusively.
 
-Before launching, read each machine's headroom: the sessions it holds are on the presence
-rows, and an agent refuses a launch past its `STEERING_MAX_WORKERS`, naming the cap. Spread
-work to the machine with room, and leave room in it: other workspaces' brains delegate there too,
-so never fill a cap speculatively. The platform's read of machine capacity and use is
-#4177's; until it lands, presence
-and refusals are the reading.
+Before launching, read the machines Go reports for this workspace, every page, on your own
+seated session:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" /machines --all
+```
+
+Each machine is keyed by a registration alias (`identity_scope: workspace-registration`): it joins
+a session's `machine_registration`, and names nothing beyond this workspace's read. Its `sources`
+are the logins reporting from it, each with its hardware, readings, declared `policy` and
+`worker_census`. Say each fact with its source, its age and its scope: hardware, CPU, load,
+memory, swap and battery are the host's; policy and census are that login's; disk is the
+workspace's volume. `historical: true` is old or failed-attempt evidence, not the machine now;
+`alternatives` are equal-time reports that disagree, and you choose none of them. Two logins on
+one host share it: never add their policies into one limit. A census that is not `complete` is
+at least that many workers; one not reported is not idle. None of this is free slots, a ranking
+or proof a worker ended: spread work toward the machine whose evidence shows room, leave room in
+it, since other workspaces' brains delegate there too, and let the launch itself decide. An agent
+refuses a launch past its cap and names it; that refusal is authoritative
+(#4177 owns capacity accounting).
 
 ## Hand work out at the effort it asks for
 
@@ -911,8 +921,9 @@ that are not there already, so they survive this session.
   account. When two sessions fit the level, choose the one whose own account ranks higher.
 - **Check who already holds it, then say who has it.** Before handing an issue out, search open
   and merged pull requests, remote branches, and every machine's worktrees as the board reports
-  them — `/steering/work`'s census-derived rows, never a `git` command run in the checkout you
-  happen to be in, which only ever sees this one machine. Match on the files the work would own
+  them, never a `git` command run in the checkout you happen to be in, which only ever sees this
+  one machine. Go's census does not carry each machine's worktrees yet (#5081), so a holder found
+  only in a worktree is asked of the fleet, not assumed absent. Match on the files the work would own
   rather than the number. Hand out one item per named session, and announce the holder where the
   whole fleet reads it in the same minute: a list offered to several sessions at once was taken
   by three of them in forty seconds.
@@ -929,7 +940,7 @@ that are not there already, so they survive this session.
   tab or a plain terminal, is ended by its process once its harness says it is idle. Where retire
   cannot end it, tell it, in these words, to remove its worktrees and run `/2mw2lt:disconnect`. Leaving is that command;
   tidying up alone leaves it enrolled.
-- **Run `promote.py` once.** Its lease is stored for the session.
+- **Run `promote.py` once.**
 - **Ask the owner only what is theirs.** Business, trust boundaries, retiring something built:
   at most a few questions, each with your recommendation. Decide the rest and say so. Post a
   ruling the owner gives, with its words and date, as a comment on the issue it decides, since

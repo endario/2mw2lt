@@ -22,8 +22,7 @@ sys.path.insert(0, str(HERE))
 from bind import Refused  # noqa: E402
 from connect import speaker_flags, speaking_as  # noqa: E402
 from verb import VERBS as BOARD_VERBS, invocation as board_invocation  # noqa: E402
-from door import SETTLED, UNSENT, display_reply, occurrence, outcome, retry_args  # noqa: E402
-from refusal import PREFIX as REJECTED  # noqa: E402
+from door import occurrence, retry_args  # noqa: E402
 from local_workspace import required_workspace_root  # noqa: E402
 
 
@@ -38,6 +37,10 @@ def _on_go(session: str, token: str, this: str, text: str, target: str | None) -
         print(session_routes.say(session, token, this, text, target))
         return 0
     except session_routes.Refused as e:
+        # A token Go no longer takes is the enrolment's to repair; sending the say again cannot.
+        if e.code in session_routes.INVALID_TOKEN:
+            print(refusal.reconnect(f"{session}'s token is not valid: {e}"))
+            return 1
         if session_routes.settled(e):
             print(refusal.use("say", str(e)))
             return 1
@@ -86,21 +89,9 @@ def main(argv: list[str]) -> int:
     except Refused as why:
         print(str(why), file=sys.stderr)
         return 1
-    addressed = f"{session} to {target}" if target else session
     this = retry_id or occurrence()
     print(f"id {this}", file=sys.stderr)
-    import session_routes
-    if session_routes.on_coordination(ws):
-        return _on_go(session, token, this, text, target)
-    state, reply = outcome(f"say: {addressed} token {token} {text}", occurrence_id=this)
-    print(display_reply(reply))
-    # `UNSENT`, not the text: a did-not-answer carries the refusal prefix too, which is why the
-    # state exists (#1798). A refusal the door answered is final, and no resend improves it.
-    # The last line on stdout, after the refusal: a sender reading `2>&1 | tail -1` saw only the
-    # refusal, since a piped stdout is flushed after stderr, and resent plain (#3303).
-    if state == UNSENT:
-        print(f"if the words may have been delivered, resend with --retry={this}; a plain resend is a second say")
-    return 0 if state == SETTLED and not reply.startswith(REJECTED) else 1
+    return _on_go(session, token, this, text, target)
 
 
 if __name__ == "__main__":

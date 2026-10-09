@@ -535,7 +535,8 @@ if __name__ == "__main__":
             print(f"000 {failure(e)}")
             sys.exit(1)
         print(f"{code} {text}")
-        sys.exit(0)
+        # A refusal, or a page the console answers for a route Go does not serve, is not a read.
+        sys.exit(0 if 200 <= code < 300 else 1)
     if len(argv) == 1 and not argv[0].startswith("-"):
         os.environ["CLAUDE_PROJECT_DIR"] = str(Path(argv[0]).resolve())
         print(door_url())

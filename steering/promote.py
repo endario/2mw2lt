@@ -6,11 +6,10 @@ harness exports, the enrollment minted for it is found by that, and the name on 
 attachment is the one the door resolves from its credential. Naming the holder by hand is
 how one session came to show two identities (#193).
 
-The seat is taken through the door (doc 38 §4): the daemon detaches whatever holds it and
-seats this session, from this machine or another node. The attachment is NOT answerable when
-this returns. Only a held stream makes it so, so the session has to hold its stream at the
-local agent — the recipe in `skills/brain/SKILL.md` — before the console can route anything
-here.
+The seat is Go's, taken only while it is vacant (go-unit8-seat-design.md §2). The session is
+NOT answerable when this returns. Only a held stream makes it so, so the session holds its stream
+at the local agent — the recipe in
+`skills/brain/SKILL.md` — for as long as it keeps the seat.
 """
 from __future__ import annotations
 
@@ -18,23 +17,15 @@ import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parent))
-import python_floor  # noqa: E402
-
-python_floor.require()
-
-import json  # noqa: E402
 import os  # noqa: E402
-import urllib.error  # noqa: E402
-import urllib.request  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE / "enroll"))
-from door import door, send  # noqa: E402
 from bind import records  # noqa: E402
 from local_workspace import required_workspace_root  # noqa: E402
 import hooks  # noqa: E402
-import lease  # noqa: E402
+import session_routes  # noqa: E402
 
 USAGE = "usage: promote.py"
 
@@ -73,9 +64,8 @@ def main(argv: list[str]) -> int:
         print(USAGE, file=sys.stderr)
         return 2
 
-    base, _remote = door()
     # The enrolment `connect.py` stored for this session lives in the workspace this session
-    # runs in — on this machine, whichever machine the daemon is on.
+    # runs in.
     ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
     # A brain can hold hold.py's `exec` for as long as it runs the fleet without ever running
     # connect again — the skill only requires it once, on enrolling (#1875 round 2). `repin` is
@@ -88,26 +78,22 @@ def main(argv: list[str]) -> int:
     except Exception as e:
         print(f"launcher refresh skipped: {e}", file=sys.stderr)
     rec = enrollment(ws)
-    req = urllib.request.Request(f"{base}/steering/brain/attach", data=json.dumps({"token": rec["token"]}).encode(),
-                                 headers={"Content-Type": "application/json"}, method="POST")
+    session, token = rec["session"], rec["token"]
     try:
-        with send(req, 10.0) as r:
-            out = json.load(r)
-    except urllib.error.HTTPError as e:
-        body = e.read().decode(errors="replace")
-        try:
-            why = json.loads(body).get("error") or body
-        except ValueError:
-            why = body
-        refuse(f"the door at {base} did not seat this session: {why}")
-    except (urllib.error.URLError, OSError, ValueError) as e:
-        refuse(f"no steering daemon answered at {base} ({e}). The role only exists where one runs.")
-    # The lease is stored for this session, never printed: a printed token sits in the model's
-    # context and every command it writes after (#4551). The lease clients read it back with
-    # `--lease`.
-    lease.store(ws, rec["provider_session"], out["session"], out["attachment_id"], out["lease_token"])
-    print(f"LEASE=stored\nATTACHMENT_ID={out['attachment_id']}\nSESSION={out['session']}")
-    print(f"\nSeated as {out['session']} — the name the door resolved from your enrollment.")
+        seat = session_routes.read_seat(token)
+        holder = seat.get("holder")
+        if holder is not None and holder != session:
+            refuse(f"{holder} holds the seat; the owner hands it on from the "
+                   f"console, or {holder} hands it on itself")
+        if holder is None:
+            session_routes.seat_acquire(session, token, int(seat["vacancy_generation"]))
+    except session_routes.Refused as e:
+        refuse(f"Go did not seat {session}: {e}")
+    except session_routes.Unsent as e:
+        refuse(f"Go did not answer ({e}), so {session} may hold the seat: run promote.py again, "
+               f"which reads the seat before taking it")
+    print(f"SESSION={session}")
+    print(f"\nSeated as {session}.")
     print("Not answerable yet. Hold your stream at the local agent before the daemon will "
           "route to you — the recipe is in the /2mw2lt:brain skill, and the stream has to "
           "stay open for as long as you hold the role.")

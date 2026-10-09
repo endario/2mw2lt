@@ -17,12 +17,8 @@ import python_floor  # noqa: E402
 
 python_floor.require()
 
-import urllib.error  # noqa: E402
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import connect  # noqa: E402
-import door  # noqa: E402
-import rest  # noqa: E402
 from verb_help import error, help_requested, script_help  # noqa: E402
 
 HEADING = (
@@ -39,28 +35,10 @@ def compose(units: list[dict]) -> str:
     return "\n".join([HEADING, "", *(f"- {u.get('title')} ({u.get('id')})" for u in decisions)])
 
 
-def read(path: str, flags: dict[str, str]) -> dict | None:
-    """An API read on this session's own enrolment token, at whichever door the workspace names:
-    the remote door serves the API, and the seat is remote."""
-    base = door.door_url()
-    if "/w/" not in base:
-        return None
-    token, _why = rest.own_bearer(flags)
-    if token is None:
-        return None
-    try:
-        code, answer = rest.fetch(f"{base}/api/v1{path}", token)
-    except (urllib.error.URLError, OSError, ValueError):
-        return None
-    return answer if code == 200 and isinstance(answer, dict) else None
-
-
 def go_read(path: str, flags: dict[str, str]) -> tuple[str, dict] | None:
-    """On a Go workspace, (this session's name, Go's answer to `path` on its own carrier); None
-    where it is not Go's, or the read did not answer."""
+    """(This session's name, Go's answer to `path` on its own carrier); None when the read did not
+    answer."""
     import session_routes
-    if not session_routes.on_coordination():
-        return None
     try:
         ws = connect.required_workspace_root(connect.project_dir(), timeout=2.0)
         session, token = connect.own_enrolment(ws, connect.provider_session(flags))
@@ -70,21 +48,15 @@ def go_read(path: str, flags: dict[str, str]) -> tuple[str, dict] | None:
 
 
 def holds(flags: dict[str, str]) -> bool | None:
-    import session_routes
-    if session_routes.on_coordination():
-        got = go_read("/seat", flags)
-        if got is None or "holder" not in got[1]:
-            return None
-        return got[1]["holder"] == got[0]
-    answer = read("/seat", flags)
-    held = answer.get("holds") if answer else None
-    return held if isinstance(held, bool) else None
+    got = go_read("/seat", flags)
+    if got is None or "holder" not in got[1]:
+        return None
+    return got[1]["holder"] == got[0]
 
 
 def units(flags: dict[str, str]) -> list[dict] | None:
     got = go_read("/knowledge/units", flags)
-    answer = got[1] if got else read("/knowledge/units", flags)
-    items = answer.get("items") if answer else None
+    items = got[1].get("items") if got else None
     return items if isinstance(items, list) else None
 
 

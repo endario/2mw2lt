@@ -98,50 +98,6 @@ class Repository:
                                 path).stdout.strip().partition("\0")
         return {"at": sha or None, "utc": utc or None}
 
-    def _document_history(self) -> dict:
-        got = self._git("log", "--format=%H%x00%P%x00%cI", self.head)
-        if got.returncode != 0:
-            raise RuntimeError(got.stderr.strip())
-        commits, edges, queries = {}, [], []
-        for row in got.stdout.splitlines():
-            sha, parents, utc = row.split("\0")
-            parents = parents.split()
-            commits[sha] = {"parents": parents, "utc": utc, "changes": {}}
-            for parent in parents or [None]:
-                edges.append((sha, parent))
-                queries.append(sha + (" " + parent if parent else ""))
-        # Explicit parent overrides preserve edge order; --always keeps TREESAME frames.
-        got = self._git("diff-tree", "--stdin", "--always", "--root", "-r", "--raw", "-z",
-                        "--no-renames", "--", "*.md", text=False,
-                        input=("\n".join(queries) + "\n").encode())
-        if got.returncode != 0:
-            raise RuntimeError(got.stderr.decode().strip())
-        edge_iter = iter(edges)
-        rows = iter(got.stdout.split(b"\0")[:-1])
-        for row in rows:
-            if row.startswith(b":"):
-                changed.add(next(rows).decode(errors="surrogateescape"))
-            else:
-                sha, parent = next(edge_iter)
-                assert row.decode() == sha
-                changed = commits[sha]["changes"][parent] = set()
-        return {"commits": commits, "last": {}}
-
-    def _document_commit(self, path: str) -> dict:
-        history = held(self, ("document-history",), lambda repo: repo._document_history())
-        if path not in history["last"]:
-            sha = self.head
-            while True:
-                commit = history["commits"][sha]
-                same = next((p for p in commit["parents"] if path not in commit["changes"][p]), None)
-                if same is not None:
-                    sha = same
-                    continue
-                exists = bool(commit["parents"]) or path in commit["changes"][None]
-                history["last"][path] = {"at": sha if exists else None,
-                                         "utc": commit["utc"] if exists else None}
-                break
-        return history["last"][path]
 
     def behind(self, at: str | None, paths: list[str]) -> int:
         if not at or not paths:
@@ -171,9 +127,6 @@ class Repository:
 
 _REGULAR = {"100644", "100755"}
 _COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
-# The most a reader of unreviewed content takes into memory: a proposed tracks document is a few
-# kilobytes.
-TEXT_LIMIT = 1 << 20
 
 
 def inside(repo: Repository, path: str) -> bool:

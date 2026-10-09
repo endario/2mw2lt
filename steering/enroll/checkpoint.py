@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """`checkpoint.py <session> <boundary> <note url> [--learned-file <f.json>] [--retry=<id>]`: record
-this session's checkpoint (doc 154 §5), on its stored token, through the session's outbox.
+this session's checkpoint (doc 154 §5), on its stored token.
 
 The note is the `## Checkpoint` comment already posted. Its body is read back from GitHub and
 hashed here, so a later reader can tell whether it was edited; the daemon reads no GitHub.
@@ -17,10 +17,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
-import outbox  # noqa: E402
 import rebrief  # noqa: E402
 import verb  # noqa: E402
-from door import OCCURRENCE, SETTLED, REFUSED, display_reply, occurrence  # noqa: E402
+from door import OCCURRENCE, occurrence  # noqa: E402
 
 _COMMENT = re.compile(r"https://github\.com/(?P<repo>[^/\s]+/[^/\s]+)/(?:issues|pull)/\d+#issuecomment-(?P<id>\d+)")
 
@@ -92,39 +91,15 @@ def main(argv: list[str]) -> int:
     print(f"id {this}", file=sys.stderr)
     body = {"id": this, "boundary": boundary, "note": note, "note_sha256": sha,
             **({"learned": learned} if learned else {})}
-    sent = f"checkpoint: {session} json {json.dumps(body, ensure_ascii=False)}"
     try:
         ws = verb._workspace()
     except (subprocess.SubprocessError, OSError) as e:
         print(f"the workspace lookup failed ({e}); nothing was sent", file=sys.stderr)
         return 1
     if ws is None:
-        print("not in a checkout: a checkpoint is sent through the session's outbox", file=sys.stderr)
+        print("not in a checkout: a checkpoint is sent on the session's stored token", file=sys.stderr)
         return 1
-    import session_routes
-    if session_routes.on_coordination(ws):
-        return _on_go(ws, session, body, boundary, note, this)
-    if len(verb.signed(sent, session, ws)) > outbox.LIMIT:  # the door measures the signed line
-        print(f"this line signed is over the {outbox.LIMIT} characters the door takes; "
-              f"shorten the lessons", file=sys.stderr)
-        return 2
-    try:
-        state, reply = verb._through_outbox(ws, sent, this, session)
-    except outbox.Conflict as e:
-        print(str(e), file=sys.stderr)
-        return 2
-    if reply is None:
-        return 1
-    print(display_reply(reply))
-    if reply.startswith("checkpointed:"):
-        try:
-            rebrief.remember(ws, session, note, boundary)  # what the SessionStart hook points at
-        except OSError as e:  # the door has it; only the rebrief's pointer is missing
-            print(f"recorded, but the rebrief's pointer was not kept: {e}", file=sys.stderr)
-    if state not in (SETTLED, REFUSED):
-        # Last on stdout, so it is the line a piped reader keeps (#3303).
-        print(f"kept in {outbox.outbox_dir(ws)}; resend with --retry={this}")
-    return 0 if reply.startswith("checkpointed:") else 1
+    return _on_go(ws, session, body, boundary, note, this)
 
 
 def _on_go(ws: Path, session: str, body: dict, boundary: str, note: str, this: str) -> int:
@@ -136,10 +111,12 @@ def _on_go(ws: Path, session: str, body: dict, boundary: str, note: str, this: s
     except (OSError, ValueError, KeyError):
         print(f"no stored token for {session}: /2mw2lt:connect first", file=sys.stderr)
         return 1
-    reply = session_routes.checkpoint(token, body)
+    reply, unsure = session_routes.checkpoint(token, body)
     print(reply)
     if not reply.startswith("checkpointed:"):
-        print(f"resend with --retry={this}", file=sys.stderr)
+        # Last on stdout, so a reader of `2>&1 | tail -1` keeps the id (#3303).
+        if unsure:
+            print(f"if it may have been recorded, resend with --retry={this}")
         return 1
     try:
         rebrief.remember(ws, session, note, boundary)

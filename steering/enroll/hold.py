@@ -37,7 +37,7 @@ import os
 import time
 import urllib.request
 import urllib.error
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Callable
 
 HERE = Path(__file__).resolve().parent
@@ -45,7 +45,6 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 import action_notice  # noqa: E402
 import holder  # noqa: E402
-import lease  # noqa: E402
 from local_workspace import agent_port, path_header, required_workspace_root, workspace_header  # noqa: E402
 from moments import moment  # noqa: E402
 import door  # noqa: E402
@@ -53,13 +52,13 @@ from bind import Refused, incarnation, pid_arg  # noqa: E402
 from connect import agent_says, harness_of, minted_name, own_enrolment, project_dir, records  # noqa: E402
 import machine_harness as harness_mod  # noqa: E402
 from process_probe import Undetermined  # noqa: E402
-import observe_post  # noqa: E402
-import readout  # noqa: E402
 import spool  # noqa: E402
 from verb_help import current_args, error, help_requested, script_help  # noqa: E402
 
 REOPEN_AFTER = 2.0    # seconds between opens; the loop the skills carried slept the same
 HOLD_READ = 90.0      # the agent keeps the stream alive every 20s; several missed means dead
+SEAT_CHECK = 1800.0   # seconds between reads of the seat this session may hold
+SEAT_RENEW = 6300.0   # seconds left on the lease below which its holder renews: half of Go's SeatLease
 MAX_FRAME_RECORD_BYTES = 64 * 1024
 # The frames `--until-event` ends on. Presence, usage and fleet are state a later frame restates,
 # and `closed` for an uplink is reopened here; a revoked hold is the session's to answer. A say that
@@ -159,19 +158,6 @@ def acts(line: str, seen: datetime | str | None = None) -> bool:
     return frame.get("kind") in ACTS or (frame.get("kind") == "closed" and frame.get("why") == "revoked")
 
 
-def routine(frame: dict) -> dict | None:
-    """What the module needs to answer this frame without a model turn: `{"at", "interval"}` of a
-    kick the daemon says moved nothing (`moved` false), else None. A kick without a verdict, from
-    a daemon that stamps none, or with a malformed `at` or `interval`, is not routine and wakes
-    as it always has (#3995)."""
-    at, interval = frame.get("at"), frame.get("interval")
-    if (frame.get("kind") != "kick" or frame.get("moved") is not False or not isinstance(at, str)
-            or isinstance(interval, bool) or not isinstance(interval, (int, float))
-            or moment(at) is None):
-        return None
-    return {"at": at, "interval": interval}
-
-
 def last_exclusion(frames: Path) -> datetime | str | None:
     """The exclusion an earlier run already woke the session for, since each `--until-event` run
     is a new process: the newest one recorded, or None when a lifted one came after it."""
@@ -232,59 +218,30 @@ def who(ws: Path, h: harness_mod.Harness, psession: str | None, pid: int | None,
     return name, token, rid, psession
 
 
-def restate(ws: Path, rid: str, psession: str, config: Path, answering: str | None = None) -> bool:
-    """Send the reading this session's last turn end sent, read again from its transcript; whether
-    the daemon took it.
+def seat_renewer(ws: Path, session: str, token: str,
+                 clock: Callable[[], float] = time.time) -> Callable[[], None]:
+    """What renews this session's seat on Go while its hold runs. Go lets a seat lapse unrenewed,
+    and a held stream is the holder still answering, as an answered kick was to the incumbent.
+    Called on every line the hold reads; it reads the seat at most once every `SEAT_CHECK`, and
+    renews while this session holds it with less than half its lease left
+    (go-unit8-seat-design.md §1). A failure is recorded and never ends the hold."""
+    import session_routes
+    due = clock()
 
-    The daemon keeps readings in memory (doc 30 §6), so a restart blanks each one until the
-    session's next `Stop`, and a session idling in its hold has none coming: it showed no model,
-    effort or machine to the brain that would delegate work to it (#2665). A restart ends every hold
-    through the agent's uplink, so the reopened hold is where the reading is restated.
+    def renew() -> None:
+        nonlocal due
+        now = clock()
+        if now < due:
+            return
+        due = now + SEAT_CHECK
+        try:
+            seat = session_routes.read_seat(token)
+            if seat.get("holder") == session and moment(seat["expires_at"]).timestamp() - now < SEAT_RENEW:
+                session_routes.seat_renew(session, token, int(seat["generation"]))
+        except (Exception, SystemExit) as e:  # a door it cannot name exits
+            door.record("hold", f"renewing the seat failed: {door.failure(e)}", ws)
 
-    `answering` is the `at` of a routine kick (#3995): the reading is then stated as of now, the
-    session being alive now, and never stamped before that kick, because the daemon counts a kick
-    answered only by evidence later than it, to the second (doc 70 §3).
-
-    Found by the session id alone: the hold may run from a directory other than the one the
-    session's transcripts are kept under."""
-    found = harness_mod.claude_transcript_path(config, psession)
-    rec = found and readout.build({"session_id": psession, "transcript_path": str(found)},
-                                   restated=answering is None)
-    if rec is None:
-        if answering is not None:
-            print(f"no reading to answer the kick: no assistant entry in a transcript of {psession}",
-                  file=sys.stderr)
-        return False
-    rec["runtime_id"] = rid
-    if answering is not None:
-        rec["observed_at"] = max(rec["observed_at"], (moment(answering) + timedelta(seconds=1))
-                                 .strftime("%Y-%m-%dT%H:%M:%SZ"))
-    try:
-        observe_post.post(rec, ws, 2.0)
-    except (Exception, SystemExit) as e:  # a door it cannot name exits; the next turn end restates it
-        door.record("hold", f"restating the reading failed: {door.failure(e)}", ws)
-        return False
-    return True
-
-
-def answer_kick(args: list[str]) -> int:
-    """`--answer-kick <at> <the hold's own flags and session>`: the reading that answers the routine
-    kick sent at `at`, for the module to run on a kick it will not wake a model for (#3995). Exits
-    0 when the daemon took it."""
-    at = args[1] if len(args) > 1 else ""
-    if not at or at.startswith("-") or moment(at) is None:
-        return error("hold", "--answer-kick takes the kick's `at`")
-    try:
-        provider, psession, pid, session = options(args[2:])
-        h = harness_of(provider)
-        ws = required_workspace_root(project_dir(), timeout=2.0)
-        _, _, rid, psession = who(ws, h, psession, pid or plugin_pid(h, psession), session)
-    except (Refused, Undetermined) as why:
-        print(str(why), file=sys.stderr)
-        return 1
-    if h.provider != "claude":
-        return error("hold", "--answer-kick answers for a Claude session")
-    return 0 if restate(ws, rid, psession, h.config_dir(), answering=at) else 1
+    return renew
 
 
 def frame_path(ws: Path, session: str) -> Path:
@@ -486,9 +443,9 @@ def close_recording(recorded) -> None:
 
 def hold(port: str, session: str, token: str, rid: str, frames: Path, until: bool = False,
          service: bool = False, workspace: Path | None = None,
-         connected: Callable[[], None] | None = None, plugin: bool = False,
+         plugin: bool = False,
          lapsed: Callable[[], str | None] | None = None, config: Path | None = None,
-         seated: Callable[[dict], None] | None = None) -> int:
+         renew: Callable[[], None] | None = None) -> int:
     """Open the stream and yield its frames, until a 403 says no reopen would help.
 
     A 403 is the one answer this loop cannot retry: the token, the node or the incarnation is
@@ -496,13 +453,12 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
     (no uplink) and a dead connection clear on their own, so they reopen — said once, when
     the failure begins, and not on every attempt while it lasts.
 
-    `connected` is called on each open the agent admits. `plugin` prints a line per frame in
+    `plugin` prints a line per frame in
     place of the frame, returns 3 on a revoked hold, and refuses to hold without a recording.
     `lapsed` is asked on every line read, keepalives included, and a reason it gives ends the
     hold with 1. `config` is the session's Claude config directory, which the agent reads the
     session's transcript under: it runs outside the session's environment and cannot know it.
-    `seated` is given a `seat` frame before anything records or prints it, and the frame goes on
-    with its lease token replaced by `stored` (#4551).
+    `renew` is called on every line read.
     """
     url = f"http://127.0.0.1:{port}/steering/session/{session}/stream"
     quiet = False    # the standing failure has been named; naming it again every 2s is noise
@@ -523,15 +479,13 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                 with door.send(req, timeout=HOLD_READ) as r:
                     quiet = False   # a fresh open: the next failure is worth naming again
                     for raw in r:
-                        if seated:
-                            raw, seat = lease.seat_frame(raw)
-                            if seat:
-                                seated(seat)
                         line = raw.decode(errors="replace")   # the response iterates as bytes
                         why = lapsed() if lapsed else None
                         if why:
                             print(why, file=sys.stderr)
                             return 1
+                        if renew:
+                            renew()
                         if raw.startswith(b"data: ") and recorded:
                             recorded = record(recorded, frames, raw)
                             if recorded is None and (lost := recording_lost(plugin)):
@@ -539,8 +493,6 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                             # After the record, so a receipt is never sent for a say this
                             # machine did not keep.
                             say_read(port, session, raw)
-                        if connected and line.startswith(": connected "):
-                            connected()
                         if line.startswith(": keepalive") or not line.strip():
                             continue
                         wakes, found = acts(line, seen), exclusion(line)
@@ -553,12 +505,7 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                             # `id` is stamped on every frame the orchestrator hands an agent, of
                             # every kind; a `closed` frame may carry none.
                             kind = frame.get("kind")
-                            # A routine kick wakes nothing: the module answers it itself, and a
-                            # model turn would buy only the answer (#3995).
-                            answers = routine(frame)
-                            sys.stdout.write(json.dumps({"id": frame.get("id"), "kind": kind,
-                                                         "wakes": wakes and answers is None,
-                                                         **({"routine": answers} if answers else {})}) + "\n")
+                            sys.stdout.write(json.dumps({"id": frame.get("id"), "kind": kind, "wakes": wakes}) + "\n")
                             sys.stdout.flush()
                             if kind == "closed" and frame.get("why") == "revoked":
                                 return 3
@@ -649,8 +596,6 @@ def main(argv: list[str]) -> int:
                                 lambda ws, ps: minted_name(records(ws), ps))):
         if args[:1] == [flag]:
             return workspace_answer(args, what, answer)
-    if args[:1] == ["--answer-kick"]:
-        return answer_kick(args)
     try:
         wake, args = wake_mode(args)
     except Refused as why:
@@ -694,12 +639,9 @@ def main(argv: list[str]) -> int:
         lapsed = (lambda: None if holder.fresh(ws, psession) else
                   f"the holder claim for {psession} is no longer fresh; the plugin's module that "
                   f"started this hold is gone, so it ends") if plugin else None
-        return hold(port, session, token, rid, frames, until, service, ws,
-                    (lambda: restate(ws, rid, psession, h.config_dir()))
-                    if h.provider == "claude" else None, plugin, lapsed,
+        return hold(port, session, token, rid, frames, until, service, ws, plugin, lapsed,
                     h.config_dir() if h.provider == "claude" else None,
-                    seated=(lambda seat: lease.store(ws, psession, session, str(seat.get("attachment_id") or ""),
-                                                     seat["lease_token"])) if psession else None)
+                    renew=seat_renewer(ws, session, token))
 
 
 if __name__ == "__main__":

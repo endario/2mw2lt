@@ -25,10 +25,14 @@ class BuildFailed(Exception):
     """A fetched release that did not build into a working agent."""
 
 
-def vote(answers: list[tuple[str, dict | None]]) -> tuple[str, dict] | str | None:
+def vote(answers: list[tuple[str, dict | None]], native=frozenset()) -> tuple[str, dict] | str | None:
     """Every door that answered names one sha, and the first of them is the source: its digest
-    is the one checked against the bytes that same door serves. Doors that disagree are `split`."""
+    is the one checked against the bytes that same door serves. Doors that disagree are `split`.
+    A `native` door is Go's: once one states a release, a legacy door's answer is no vote, since
+    the legacy doors stopped moving at the cutover (#3485)."""
     voters = [(door, target) for door, target in answers if valid(target)]
+    if any(door in native for door, _ in voters):
+        voters = [(door, target) for door, target in voters if door in native]
     if not voters:
         return None
     if len({target["sha"] for _, target in voters}) > 1:
@@ -182,12 +186,13 @@ def idle(gates: int, reports: int, workers: list[str]) -> str:
 
 
 async def follow_once(m, served: list, own: str | None, root: Path, *, workers, start,
-                      sleep=asyncio.sleep, clock=time.monotonic, log=print) -> str:
+                      sleep=asyncio.sleep, clock=time.monotonic, log=print, native=lambda door: False) -> str:
     """One pass of the follower (§5, §6). `served` are the workspaces this agent serves, each
     with its door (`orch`), `target()`, `stream(path)` and `busy()` → (gate runs, reports);
-    `workers()` names the workers an update must not end; `start(release)` starts the updater."""
+    `workers()` names the workers an update must not end; `start(release)` starts the updater;
+    `native(door)` says whether a door is Go's."""
     answers = [(s.orch, await s.target()) for s in served]
-    got = vote(answers)
+    got = vote(answers, {s.orch for s in served if native(s.orch)})
     if got is None:
         return "no door states a release"
     if got == "split":

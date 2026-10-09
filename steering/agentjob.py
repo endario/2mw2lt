@@ -138,6 +138,12 @@ def root(home: Path) -> Path:
     return home / ".local" / "share" / "2mw2lt-agent"
 
 
+def instance_lock(home: Path, machine: str) -> Path:
+    """The one agent per hardware and login's lock (#4211), which the agent holds while it lives;
+    `machine` is `hardware.fingerprint()`."""
+    return root(home) / f"agent-{machine}-{os.getuid()}.lock"
+
+
 def settings(home: Path) -> Path:
     return home / ".config" / "2mw2lt" / "agent.env"
 

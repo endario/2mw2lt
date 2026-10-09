@@ -22,7 +22,6 @@ python_floor.require()
 import json
 import os
 import shlex
-import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -30,13 +29,12 @@ import urllib.request
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
-from local_workspace import KEY_HEADER, agent_key, agent_port, common_root, origin_slug, required_workspace_root, workspace_header  # noqa: E402
+from local_workspace import KEY_HEADER, agent_key, agent_port, origin_slug, required_workspace_root, workspace_header  # noqa: E402
 import door  # noqa: E402
-from door import say  # noqa: E402
-from ack import store, valid_token  # noqa: E402
+from ack import valid_token  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
 from bind import Refused, bind, incarnation, incarnation_of, pid_arg, records  # noqa: E402
-from transcript_proof import account_of, identify_transcript  # noqa: E402
+from transcript_proof import account_of  # noqa: E402
 import machine_harness as harness_mod  # noqa: E402
 from process_probe import Undetermined  # noqa: E402
 import hooks  # noqa: E402
@@ -117,15 +115,6 @@ def harness_of(provider: str | None) -> harness_mod.Harness:
     return h
 
 
-def transcript(h: harness_mod.Harness, psession: str) -> str:
-    """Where this harness writes the session, asked of the harness."""
-    path = h.transcript(psession) if h.transcript is not None else None
-    if path is None:
-        raise Refused(f"no transcript for {psession}: {h.provider} keeps none under "
-                      f"{h.config_dir()}. Enrol by hand, naming the transcript")
-    return str(path)
-
-
 def name_for(psession: str, taken: dict[str, dict] | None = None,
              project: Path | None = None) -> str:
     """This workspace and eight hex of the session id. Not the identity: the record holds the
@@ -167,13 +156,6 @@ def own_enrolment(ws: Path, psession: str, session: str | None = None) -> tuple[
     typo and speaking with somebody else's credential (#1077)."""
     known = records(ws)
     name = session or minted_name(known, psession)
-    minted_for = (known.get(name) or {}).get("provider_session")
-    if minted_for and minted_for != psession:
-        raise Refused(f"{name} is another session's enrollment ({minted_for}): pass a name of your own")
-    if session and name in known and not minted_for and len(known) > 1:
-        # Stored by hand, with nothing saying whose it is, beside records that are somebody's.
-        raise Refused(f"{name} was stored without the session it belongs to, so nothing shows it is "
-                      f"yours: store it again with ack.py --store {name} --provider-session <id>, the token on stdin")
     if name is None:
         if len(known) == 1:
             name = next(iter(known))
@@ -181,6 +163,13 @@ def own_enrolment(ws: Path, psession: str, session: str | None = None) -> tuple[
             raise Refused("no enrollment is minted for this session in " + str(ws)
                           + (f"; it holds tokens for {', '.join(sorted(known))}" if known else "")
                           + ": run /2mw2lt:connect first")
+    minted_for = (known.get(name) or {}).get("provider_session")
+    if minted_for and minted_for != psession:
+        raise Refused(f"{name} is another session's enrollment ({minted_for}): pass a name of your own")
+    if session and name in known and not minted_for and len(known) > 1:
+        # Stored by hand, with nothing saying whose it is, beside records that are somebody's.
+        raise Refused(f"{name} was stored without the session it belongs to, so nothing shows it is "
+                      f"yours: store it again with ack.py --store {name} --provider-session <id>, the token on stdin")
     token = (known.get(name) or {}).get("token")
     if not valid_token(token):
         raise Refused(f"no stored token for {name}: enroll first")
@@ -192,7 +181,7 @@ SPEAKER_FLAGS = ("--provider", "--provider-session")
 
 def say_invocation(h: harness_mod.Harness, psession: str, session: str) -> str:
     """The one `say.py` this machine and this harness can actually run, ready to paste: to the
-    brain, which either door takes (#3381); `--to <session>` reaches a peer instead.
+    brain (#3381); `--to <session>` reaches a peer instead.
 
     The provider pair is named unconditionally rather than only where the harness
     is silent: `speaking_as` accepts the pair that agrees with the process it runs in, and
@@ -276,57 +265,26 @@ def head(project: Path | None = None) -> str:
     return out.stdout.strip() if out.returncode == 0 else ""
 
 
-def workspace_of(h: harness_mod.Harness, project: Path, path: str) -> Path:
-    """The workspace the door's own proof admits `path` under: the directory the session runs in,
-    else the repository's main checkout, where a session launched there and connecting from a
-    linked worktree keeps its transcript. The proof is the door's, run here, so nothing is
-    admitted that it would refuse; one that neither admits is left to the door to refuse."""
-    roots = [(h.provider, h.config_dir() / h.transcript_root)]
-    try:
-        candidates = [project, common_root(project, timeout=2.0)]
-    except (OSError, subprocess.SubprocessError):
-        candidates = [project]
-    for candidate in candidates:
-        if identify_transcript(path, str(candidate), roots, h.provider)[0] is None:
-            return candidate
-    return project
-
-
 def enrol(ws: Path, session: str, account: str, doing: str, psession: str,
           h: harness_mod.Harness, project: Path | None = None, rid: str | None = None) -> str:
     import session_routes  # noqa: E402
-    if session_routes.on_coordination(ws):
-        # Go takes the name and the incarnation; account, branch and work are not enrolment's
-        # (go-c5-session-client-design.md, "What C5 does not build").
-        rid = rid or incarnation(psession, None, h.provider)[1]
-        try:
-            return session_routes.enrol(ws, session, h.provider, psession, rid)["credential"]
-        except session_routes.Refused as e:
-            raise Refused(refusal.reconnect(str(e))) from None
-        except session_routes.Unsent as e:
-            raise Refused(f"{e}\nthe enrolment is kept, and the next connect sends it again") from None
-    project = project or project_dir()
-    on = branch(project)
-    path = transcript(h, psession)
-    line = (f"enroll: {session} as {account} workspace {workspace_of(h, project, path)} transcript {path}"
-            + (f" on {on}" if on else "") + (f" doing {doing}" if doing else ""))
-    reply = say(line)
-    if not reply.startswith("enrolled:"):
-        raise Refused(reply)
-    token = reply.split(" token ", 1)[1].split()[0] if " token " in reply else ""
-    if not valid_token(token):
-        raise Refused(f"the door's reply carried no token: {reply[:120]}")
-    store(ws, session, token, psession)
-    return token
+    # Go takes the name and the incarnation; account, branch and work are not enrolment's
+    # (go-c5-session-client-design.md, "What C5 does not build").
+    rid = rid or incarnation(psession, None, h.provider)[1]
+    try:
+        return session_routes.enrol(ws, session, h.provider, psession, rid)["credential"]
+    except session_routes.Refused as e:
+        raise Refused(refusal.reconnect(str(e))) from None
+    except session_routes.Unsent as e:
+        raise Refused(f"{e}\nthe enrolment is kept, and the next connect sends it again") from None
 
 
 def connect(ws: Path, session: str | None, account: str, doing: str,
             h: harness_mod.Harness, psession: str | None = None,
             pid: int | None = None, project: Path | None = None) -> tuple[str, str, str, str]:
-    """(session, the door's answer to `bind:`, the runtime id it named, the provider session).
+    """(session, Go's answer to the bind, the runtime id it named, the provider session).
 
-    `project` is the directory the session is working in — the workspace an `enroll:` line
-    names, the base its name is derived from, and the checkout its branch is read from. It is
+    `project` is the directory the session is working in — the base its name is derived from. It is
     an argument rather than the ambient one because the agent enrolling a worker of its own
     holds its workspace explicitly and must not rest on where launchd started it.
     """
@@ -351,7 +309,7 @@ def connect(ws: Path, session: str | None, account: str, doing: str,
         raise Refused(f"{session} is another session's enrollment ({minted_for}): pass a name of your own")
     token = rec.get("token")
     import session_routes  # noqa: E402
-    if session_routes.on_coordination(ws) and session_routes.pending(ws, session):
+    if session_routes.pending(ws, session):
         # An enrolment sent and not settled, a rotation's among them, is recovered before the
         # standing token is used: that token is the one the enrolment was made to end.
         token = None
@@ -359,8 +317,6 @@ def connect(ws: Path, session: str | None, account: str, doing: str,
         answer, rid = bind(session, token, psession, pid, h.provider)
         if not any(why in answer for why in STALE):
             return session, answer, rid, psession
-    if not account and not session_routes.on_coordination(ws):  # only a harness whose account cannot be derived and was not named
-        raise Refused(f"{session} is not enrolled here: re-run with --as <harness>/<account>")
     token = enrol(ws, session, account, doing, psession, h, project, rid)
     return session, *bind(session, token, psession, pid, h.provider), psession
 

@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import sys
 from pathlib import Path
 
@@ -14,7 +13,6 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 from ack import token_path, valid_token  # noqa: E402
-from door import display_reply, say  # noqa: E402
 from local_workspace import required_workspace_root  # noqa: E402
 
 from verb_help import error, help_requested, script_help  # noqa: E402
@@ -48,21 +46,17 @@ def main(argv: list[str]) -> int:
         return 1
     import refusal
     import session_routes
-    if session_routes.on_coordination(ws):
-        fact = built[0]
-        to = {key: fact[key] for key in ("to_card", "to_issue") if key in fact}
-        try:
-            reply = session_routes.edge_card(fact["card"], verb == "unlink", fact["kind"], to,
-                                             fact["why"], token, how=fact.get("how", ""),
-                                             source=fact.get("source", ""))
-        except session_routes.Refused as e:
-            reply = refusal.use("declare", f"{verb} {fact['card']}: {e}")
-        except session_routes.Unsent as e:
-            reply = refusal.retry(str(e))
-        print(reply)
-        return 0 if reply.startswith(f"{verb}ed:") else 1
-    reply = say(f"declare: {session} token {token} {verb} {shlex.join(rest)}")
-    print(display_reply(reply))
+    fact = built[0]
+    to = {key: fact[key] for key in ("to_card", "to_issue") if key in fact}
+    try:
+        reply = session_routes.edge_card(fact["card"], verb == "unlink", fact["kind"], to,
+                                         fact["why"], token, how=fact.get("how", ""),
+                                         source=fact.get("source", ""))
+    except session_routes.Refused as e:
+        reply = refusal.use("declare", f"{verb} {fact['card']}: {e}")
+    except session_routes.Unsent as e:
+        reply = refusal.retry(str(e))
+    print(reply)
     return 0 if reply.startswith(f"{verb}ed:") else 1
 
 

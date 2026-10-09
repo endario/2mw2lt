@@ -6,7 +6,6 @@ inbox's replay unchanged. `conforms` is the check made where answers are given.
 """
 from __future__ import annotations
 
-import difflib
 import re
 
 from verb_help import VERBS
@@ -109,31 +108,9 @@ def use(verb: str, why: str) -> str:
                   to=AUDIENCE[verb])
 
 
-def unmatched(text: str) -> str:
-    """A line no verb's grammar matched (#3384). Steering queues no unaddressed text, which reached
-    nobody who could act on it, so the reader is shown where words go — and, for a head that is
-    a session verb misspelt, that verb. The line itself is not echoed: it may carry a credential."""
-    head, sep, _ = text.partition(":")
-    sessions = [verb for verb, audience in AUDIENCE.items() if audience == "session"]
-    near = difflib.get_close_matches(head.strip().lower(), sessions, n=1) if sep else []
-    send = [(VERBS[near[0]]["forms"][0]["grammar"], f"if you meant {near[0]}:")] if near else []
-    return refuse("no verb matched this line, and steering queues nothing unaddressed", send=send + [
-        ("say: <session> token <t> <text>", "to speak to the brain"),
-        ("say: <session> to <peer> token <t> <text>", "to speak to a peer"),
-        ("ask: <session> token <t> <question>", "for a decision only the owner can make"),
-        ("recommend: <session> token <t> <text>", "for a proposal the brain triages"),
-    ])
-
-
 def reconnect(reason: str, to: str = "session") -> str:
     """The session's enrolment is missing, stale or not its own: `/2mw2lt:connect` sets it right."""
     return refuse(reason, send="/2mw2lt:connect", to=to)
-
-
-def take_the_seat(reason: str) -> str:
-    """The lease is held but nothing is attached to it: `/2mw2lt:brain` takes the role, which
-    `/2mw2lt:connect` (enrol, bind, hold) does not."""
-    return refuse(reason, send="/2mw2lt:brain", to="seat")
 
 
 def resend(reason: str, change: str) -> str:

@@ -24,17 +24,9 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 from bind import Refused  # noqa: E402
 from connect import branch, head, speaker_flags, speaking_as  # noqa: E402
-from door import UNSENT, display_reply, occurrence, outcome, remote, retry_args, say  # noqa: E402
-import requestlog  # noqa: E402
+from door import display_reply, occurrence, retry_args  # noqa: E402
 from local_workspace import origin_slug, required_workspace_root  # noqa: E402
 
-# A client that gives up before the daemon has pinned sends the line again, and a commission it
-# was told failed may stand.
-PIN_WAIT = 330.0
-# The other gate verbs read GitHub or wait on the mirror's lock on the daemon's side, so they are
-# given longer than a plain verb's send: a client that gives up first reports a write that landed
-# as one that failed.
-VERB_WAIT = 60.0
 # A reflog subject that records a commit this checkout made, rather than one it was handed by a
 # fetch, a fast-forward or a reset. `HEAD`'s reflog holds each rebase step; a branch's, only the tip.
 # A resolved merge and a continued rebase are locally made, while the daemon proves their replay.
@@ -42,9 +34,6 @@ VERB_WAIT = 60.0
 # makes it another writer's commit.
 MADE = re.compile(r"^(?:commit(?: \((?:amend|merge)\))?:|cherry-pick:|revert:|"
                   r"rebase \((?:pick|reword|edit|squash|fixup|continue)\):|merge [^:]+: Merge made by )")
-# A row of `gate: pr`'s answer whose round shipped: `<id> round <n>/<cap> at <sha12> <ts> <by>: ship it, by …`.
-# A derived pass whose reviewer said otherwise reads `ship it (the reviewer said …)` (doc 150 §4.1).
-SHIPPED = re.compile(r"^\S+ round \d+/\d+ at (?P<sha>[0-9a-f]{12}) \S+ [^:]*: ship it(?: \([^)]*\))?, by .*?(?:; source (?P<source>[0-9a-f]{40}))?$")
 
 
 def gate_flags(argv: list[str]) -> tuple[list[str], str] | None:
@@ -114,77 +103,14 @@ def main(argv: list[str]) -> int:
     if kind in ("status", "cancel") and not re.fullmatch(r"[0-9A-Za-z]{8,40}|[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", what):
         return error("gate", f"gate {kind} requires a commission id")
     ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
-    import session_routes
-    if session_routes.on_coordination(ws):
-        return go_gate(ws, session, flags, kind, what, extra, retry_id)
-    if kind in ("status", "cancel"):
-        import gate_grammar
-        parser = gate_grammar.parse_status if kind == "status" else gate_grammar.parse_cancel
-        if parser(f"gate: {kind} {what} token <t>") is None:
-            return error("gate", f"gate {kind} requires a commission id")
-    if kind == "carry":
-        return carry(session, flags, what.lstrip("#"), retry_id)
-    if kind in ("status", "cancel", "pr"):
-        # A harness that holds no stream is never told how its gate ended; it asks (#1405).
-        # A cancel needs no stream either, and is answered synchronously the same way (doc 98).
-        ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
-        try:
-            session, token = speaking_as(ws, session, flags)
-        except Refused as why:
-            print(str(why), file=sys.stderr)
-            return 1
-        # `pr` asks what was ever commissioned for a pull request, by any session here (#1986).
-        reply = say(f"gate: {kind} {what.lstrip('#') if kind == 'pr' else what} token {token}", timeout=VERB_WAIT)
-        print(reply)
-        return 1 if reply.startswith("REJECTED") else 0
-    ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
-    # The checkout the command runs in, not the project directory: a session working in a linked
-    # worktree still carries the shared checkout as its project, and that is another branch.
-    here = Path.cwd()
-    on, repo = branch(here), origin_slug(here, timeout=5)
-    if not on or not repo:
-        print("this checkout names no branch or no origin to gate", file=sys.stderr)
-        return 1
-    # A session whose project directory is one workspace and whose checkout is another
-    # repository sends a verb the workspace must refuse, and learns it only after a round
-    # trip (#2750): say so here, where the split is visible.
-    own = origin_slug(ws, timeout=5)
-    if own and own != repo:
-        print(f"this workspace gates {own}, not {repo} — commission it from the workspace that owns {repo}",
-              file=sys.stderr)
-        return 1
-    try:
-        session, token = speaking_as(ws, session, flags)
-    except Refused as why:
-        print(str(why), file=sys.stderr)
-        return 1
-    tail = f"pr {what.lstrip('#')}" if kind == "review" else f"doc {what}"
-    # The commit this checkout is on travels with the branch: steering pins what GitHub answers,
-    # and GitHub can answer an older head for a moment after a push (#1552).
-    at = head(here)
-    this = retry_id or occurrence()
-    print(f"id {this}", file=sys.stderr)
-    if remote():  # the name the door logs, records and journals this commission under
-        print(f"request {requestlog.of_key(this)}", file=sys.stderr)
-    reply = say(f"gate: {kind} {repo} {on} {tail}{f' head {at}' if at else ''}{extra} token {token}",
-                timeout=PIN_WAIT, occurrence_id=this)
-    print(display_reply(reply))
-    return 1 if reply.startswith("REJECTED") else 0
-
-
-# What a Go workspace serves of the gate verbs so far; the rest are refused here, before a send.
-GO_SERVED = ("review", "critic", "cancel", "carry", "status", "pr")
+    return go_gate(ws, session, flags, kind, what, extra, retry_id)
 
 
 def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, retry_id: str | None) -> int:
-    """The gate verbs on a Go workspace (`STEERING_AUTHORITY=coordination`): a review or a critique
-    is `POST /gates`, a withdrawal `POST /gates/<id>/cancellation`, each on the session's own
-    carrier."""
+    """The gate verbs on Go: a review or a critique is `POST /gates`, a withdrawal
+    `POST /gates/<id>/cancellation`, each on the session's own carrier."""
     import refusal
     import session_routes
-    if kind not in GO_SERVED:
-        print(f"gate {kind} is not served on a Go workspace yet", file=sys.stderr)
-        return 1
     if kind == "cancel":
         import uuid
         try:
@@ -213,8 +139,9 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
     if kind in ("status", "pr"):
         return go_read(ws, session, flags, kind, what)
     tier = re.search(r" tier (\S+)", extra)
-    if extra.replace(tier[0] if tier else "", "").replace(" harness full", ""):
-        print(f"a {kind} on a Go workspace takes --tier and the full harness only, so far", file=sys.stderr)
+    final = " final" in extra
+    if extra.replace(tier[0] if tier else "", "").replace(" harness full", "").replace(" final", ""):
+        print(f"a {kind} on a Go workspace takes --tier, --final and the full harness only, so far", file=sys.stderr)
         return 1
     here = Path.cwd()
     repo = origin_slug(here, timeout=5)
@@ -241,6 +168,8 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
         body = {"repo": repo, "pr": int(what.lstrip("#")), "tier": tier}
         if at:
             body["head"] = at
+    if final:
+        body["final"] = True
     this = retry_id or occurrence()
     print(f"id {this}", file=sys.stderr)
     uncertain = False
@@ -380,21 +309,6 @@ def go_carry(ws: Path, session: str, flags, pr: int, retry_id: str | None) -> in
     return 1 if reply.startswith("REJECTED") else 0
 
 
-def shipped(answer: str) -> re.Match[str] | None:
-    rows = [line for line in answer.splitlines() if " round " in line]
-    return SHIPPED.match(rows[-1]) if rows else None
-
-
-def judged(answer: str) -> str | None:
-    match = shipped(answer)
-    return match["sha"] if match else None
-
-
-def accepted_source(answer: str) -> str | None:
-    match = shipped(answer)
-    return (match["source"] or match["sha"]) if match else None
-
-
 def made_here(reflog: str) -> set[str]:
     """The commits `git reflog --format='%H %gs'` records this checkout making."""
     return {sha for sha, _, subject in (l.partition(" ") for l in reflog.splitlines()) if MADE.search(subject)}
@@ -411,57 +325,6 @@ def _git_result(here: Path, *args: str) -> tuple[bool, str]:
 def _git(here: Path, *args: str) -> str:
     ok, output = _git_result(here, *args)
     return output if ok else ""
-
-
-def carry(session: str, flags, pr: str, retry_id: str | None = None) -> int:
-    """Carry the newest pass on `pr` to this checkout's `HEAD` (doc 162 §3). Locally made
-    follow-ups retain the author-attested path; history from elsewhere asks the daemon to prove
-    equivalence."""
-    ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
-    here = Path.cwd()
-    on, at = branch(here), head(here)
-    if not on or not at:
-        print("this checkout names no branch or no commit to carry", file=sys.stderr)
-        return 1
-    own, repo = origin_slug(ws, timeout=5), origin_slug(here, timeout=5)
-    if own and repo and own != repo:
-        print(f"this workspace gates {own}, not {repo} — carry it from the workspace that owns {repo}",
-              file=sys.stderr)
-        return 1
-    try:
-        session, token = speaking_as(ws, session, flags)
-    except Refused as why:
-        print(str(why), file=sys.stderr)
-        return 1
-    answer = say(f"gate: pr {pr} token {token}", timeout=VERB_WAIT)
-    if answer.startswith("REJECTED"):
-        print(display_reply(answer), file=sys.stderr)   # the door's refusal, not a round that did not ship
-        return 1
-    short = judged(answer)
-    source = accepted_source(answer)
-    if short is None or source is None:
-        print(f"the newest review of #{pr} did not ship, so there is no pass to carry", file=sys.stderr)
-        return 1
-    full = _git(here, "rev-parse", "-q", "--verify", f"{source}^{{commit}}")
-    equivalent = not full
-    if full:
-        # Main's commits are base movement, which the daemon proves by replay; only the branch's own
-        # are history this checkout may or may not have made (#4476).
-        trunk = next((r for r in ("refs/remotes/origin/HEAD", "refs/remotes/origin/main")
-                      if _git(here, "rev-parse", "-q", "--verify", f"{r}^{{commit}}")), None)
-        walked, after = _git_result(here, "rev-list", at, f"^{full}", *([f"^{trunk}"] if trunk else []))
-        made = made_here(_git(here, "reflog", "--format=%H %gs", "HEAD"))
-        equivalent = not walked or any(c not in made for c in after.split())
-    this = retry_id or occurrence()
-    print(f"id {this}", file=sys.stderr)
-    state, reply = outcome(f"gate: carry {pr} head {at}{' equivalent' if equivalent else ''} token {token}",
-                           PIN_WAIT, this)
-    print(display_reply(reply))
-    if state == UNSENT:
-        # The door may have carried it and lost only the answer: a resend under the same id is
-        # answered from its record, or makes the carry once if it never arrived.
-        print(f"the carry may have landed: send it again with --retry={this} to learn which", file=sys.stderr)
-    return 1 if reply.startswith("REJECTED") else 0
 
 
 if __name__ == "__main__":

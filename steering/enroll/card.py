@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""`card.py --token - <verb> <args…>` or `card.py --lease [--provider <harness> --provider-session <id>]
-<verb> <args…>`: a brain's board write (doc 32 §4), sent through the door as a
-`card:` line on its lease token. `cards.py` is the same command where the ledger is this machine's."""
+"""`card.py --lease [--provider <harness> --provider-session <id>] <verb> <args…>`: a brain's board
+write (doc 32 §4), sent to Go as the seat's holder on the session's own enrolment. `cards.py --token -
+<verb> <args…>` writes the ledger where it is this machine's."""
 from __future__ import annotations
 
 import sys
@@ -11,8 +11,6 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 import python_floor  # noqa: E402
 
 python_floor.require()
-
-import shlex  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -25,23 +23,24 @@ from verb_help import help_requested, script_help  # noqa: E402
 
 
 def main(argv: list[str], local=None, prog: str = "card.py") -> int:
-    """`local(token, verb, rest, usage)` is the writer a caller holding the ledger passes; it
-    answers None when the write belongs to the door after all."""
-    usage = ("usage: card.py --token - scope [--card <ulid>] <name> <track> [<verb>:<n>[,<n>] ...] [major]\n"
-             "       card.py --token - rescope <card> <name> <track> [<verb>:<n>[,<n>] ...] [major]\n"
-             "       card.py --token - branch|unbranch <card> <repo> <branch>\n"
-             "       card.py --token - session <card> <session> executor|planned\n"
-             "       card.py --token - unsession <card> <session>\n"
-             "       card.py --token - conclude <card> <by> <evidence> [--branch-is-the-work]\n"
-             "       card.py --token - unconclude <card> [<why>]  (Go requires the why)\n"
-             "       card.py --token - retire <card> <why>\n"
-             "       card.py --token - reclassify <card> track <lane>|off-track <why>\n"
-             "       card.py --token - reclassify <card> significance|state|priority <value> <why>\n"
-             "       card.py --token - reclassify <card> major major|ordinary <why>\n"
-             "       card.py --token - reanchor <card> [<verb>:<n>[,<n>] ...] <why>\n"
-             "       card.py --token - link <card> requires|part-of <card>|<owner>/<name>#<n> [--source <where>] <why>\n"
-             "       card.py --token - unlink <card> requires|part-of <card>|<owner>/<name>#<n> resolved|withdrawn <why>\n"
-             "       card.py --token - outcome <card> need <how it is handled now> "
+    """`local(token, verb, rest, usage)` is the writer a caller holding the ledger passes, for
+    `--token -`; it answers None when the ledger is not this machine's."""
+    usage = ("usage: card.py --lease scope [--card <ulid>] <name> <track> [<verb>:<n>[,<n>] ...] [major]\n"
+             "       card.py --lease rescope <card> <name> <track> [<verb>:<n>[,<n>] ...] [major]\n"
+             "       card.py --lease branch <card> <repo> <branch>\n"
+             "       card.py --lease unbranch <card> <repo> <branch> [<why>]  (Go requires the why)\n"
+             "       card.py --lease session <card> <session> executor|planned\n"
+             "       card.py --lease unsession <card> <session> [<why>]  (Go requires the why)\n"
+             "       card.py --lease conclude <card> <by> <evidence> [--branch-is-the-work]\n"
+             "       card.py --lease unconclude <card> [<why>]  (Go requires the why)\n"
+             "       card.py --lease retire <card> <why>\n"
+             "       card.py --lease reclassify <card> track <lane>|off-track <why>\n"
+             "       card.py --lease reclassify <card> significance|state|priority <value> <why>\n"
+             "       card.py --lease reclassify <card> major major|ordinary <why>\n"
+             "       card.py --lease reanchor <card> [<verb>:<n>[,<n>] ...] <why>\n"
+             "       card.py --lease link <card> requires|part-of <card>|<owner>/<name>#<n> [--source <where>] <why>\n"
+             "       card.py --lease unlink <card> requires|part-of <card>|<owner>/<name>#<n> resolved|withdrawn <why>\n"
+             "       card.py --lease outcome <card> need <how it is handled now> "
              "[reading facts <state> [<field>=<value>] per <state> [<field>=<value>]] target <comparison> "
              "window <n>d [uses <n>] starts merge|rollout [baseline stated <value and how measured>|baseline none] "
              "[stop <rule>]\n"
@@ -55,7 +54,6 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
         print(script_help("card"))
         return 0
     if argv[:1] == ["--lease"]:
-        # The seat's stored lease, never on stdin or in a command line (#4551).
         import connect
         import lease as lease_mod
         parsed = connect.speaker_flags(argv[1:])
@@ -74,9 +72,15 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
         if len(rest) < 1:
             print(usage, file=sys.stderr)
             return 2
-        if held.get("authority"):
-            return _on_go(held, rest[0], rest[1:], usage)
-        return _scoped(held["lease_token"], rest[0], rest[1:], usage, local, held)
+        try:
+            rest, retry = door.retry_args(rest)
+        except ValueError as why:
+            print(f"refused: {why}", file=sys.stderr)
+            return 2
+        if not rest:
+            print(usage, file=sys.stderr)
+            return 2
+        return _on_go(held, rest[0], rest[1:], usage, retry)
     if len(argv) < 3 or argv[0] != "--token":
         print(usage, file=sys.stderr)
         return 2
@@ -85,10 +89,8 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
         print("refused: --token takes only -, and reads the lease token from stdin", file=sys.stderr)
         return 2
     if local is None:
-        import session_routes
-        if session_routes.on_coordination():
-            print("refused: a Go workspace keeps no lease token; send the verb with card.py --lease", file=sys.stderr)
-            return 2
+        print("refused: no lease token is kept; send the verb with card.py --lease", file=sys.stderr)
+        return 2
     token = read_secret("lease token: ")
     if not token:
         print("refused: --token - reads the lease token from stdin, and none arrived", file=sys.stderr)
@@ -96,9 +98,10 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
     return _scoped(token, verb, rest, usage, local)
 
 
-def _on_go(held: dict, verb: str, rest: list[str], usage: str) -> int:
+def _on_go(held: dict, verb: str, rest: list[str], usage: str, retry: str | None = None) -> int:
     """The seat's card verb on a Go workspace: the work route it maps to, on the session's own
-    carrier, which Go runs as the seat while this session holds it."""
+    carrier, which Go runs as the seat while this session holds it. Each invocation is its own
+    write, named by the id it prints; `--retry=<id>` sends that write again."""
     import refusal
     import session_routes
     ruled = session_routes.ruled_out(f"card {verb} {rest[1]}" if verb == "reclassify" and len(rest) > 1 else f"card {verb}")
@@ -112,10 +115,12 @@ def _on_go(held: dict, verb: str, rest: list[str], usage: str) -> int:
         print(usage if bad_grammar == USAGE_REFUSAL else f"refused: {bad_grammar}", file=sys.stderr)
         return 2
     fact = facts[0]
+    key = retry or door.occurrence()
+    print(f"id {key}", file=sys.stderr)
     try:
         anchored = fact.get("anchors") or fact["state"] == "card-reanchored" and fact["after"]
         repo = session_routes.card_repo(held["ws"]) if anchored else ""
-        print(session_routes.seat_card(held["session"], held["token"], verb, fact, repo))
+        print(session_routes.seat_card(held["session"], held["token"], verb, fact, repo, key))
         return 0
     except session_routes.NotSeated as why:
         print(f"refused: this session does not hold the seat ({why})")
@@ -123,47 +128,34 @@ def _on_go(held: dict, verb: str, rest: list[str], usage: str) -> int:
         print(refusal.escalate(str(why), to="seat"))
     except session_routes.Unsent as e:
         print(refusal.retry(str(e)))
+        print(f"if this write may have been made, resend it with --retry={key}", file=sys.stderr)
     except session_routes.Refused as e:
         print(refusal.use("card", str(e)) if session_routes.settled(e) else refusal.retry(str(e)))
+        if not session_routes.settled(e):
+            print(f"if this write may have been made, resend it with --retry={key}", file=sys.stderr)
     if verb == "scope":
         print(f"to retry this scope under the same card, send it with --card {rest[1]}", file=sys.stderr)
     return 1
 
 
-def _scoped(token: str, verb: str, rest: list[str], usage: str, local, held: dict | None = None) -> int:
+def _scoped(token: str, verb: str, rest: list[str], usage: str, local) -> int:
     if verb == "scope" and rest[:1] != ["--card"]:
         # The id is minted here, before anything is sent, so the same write can be made again
         # under it: a rerun with it is answered from the record (doc 125 §3).
         rest = ["--card", new_ulid(), *rest]
-        code = _send(token, verb, rest, usage, local, held)
+        code = _send(token, verb, rest, usage, local)
         if code:
             print(f"to retry this scope under the same card, send it with --card {rest[1]}", file=sys.stderr)
         return code
-    return _send(token, verb, rest, usage, local, held)
+    return _send(token, verb, rest, usage, local)
 
 
-def _send(token: str, verb: str, rest: list[str], usage: str, local, held: dict | None = None) -> int:
-    if local is not None:
-        code = local(token, verb, rest, usage)
-        if code is not None:
-            return code
-    # Judged here first: a verb this file would refuse is refused in this file's words and
-    # with its own exit code, rather than becoming a round trip answered by the door.
-    _built, bad_grammar = built(verb, rest)
-    if bad_grammar:
-        print(usage if bad_grammar == USAGE_REFUSAL else f"refused: {bad_grammar}", file=sys.stderr)
-        return 2
-    # The verb crosses as a line; the token rides in the request body, never in a URL or an argument.
-    # `shlex` both ways: a card's name has spaces in it, so the door's copy of the line
-    # has to be split the way a shell would split the argv this file was given.
-    reply = door.say(" ".join(["card:", "token", token, verb, shlex.join(rest)]).strip())
-    if held is not None:
-        import lease as lease_mod
-        if lease_mod.dead(reply):
-            print(lease_mod.gone(held, reply))
-            return 1
-    print(reply)
-    return 0 if reply.startswith("carded:") else 1
+def _send(token: str, verb: str, rest: list[str], usage: str, local) -> int:
+    code = local(token, verb, rest, usage)
+    if code is not None:
+        return code
+    print("refused: the ledger is not this machine's; send the verb with card.py --lease", file=sys.stderr)
+    return 2
 
 
 if __name__ == "__main__":

@@ -1,9 +1,7 @@
 // What the module reads and writes as text: hold.py's frame lines, the frame recording, the
 // fixed rows it may append, and the version floor. Nothing here touches `$`.
 
-// `routine` rides a kick the daemon says moved nothing: the module answers it without a model turn.
-export type Routine = { at: string; interval: number }
-export type Line = { id: string | null; kind: string; wakes: boolean; routine?: Routine }
+export type Line = { id: string | null; kind: string; wakes: boolean }
 
 export const POINTER = 'A steering frame is waiting. Call mcp__2mw2lt__frames to read it.'
 export const CHECKPOINT = 'Compaction is near. Write your checkpoint (/2mw2lt:checkpoint) now.'
@@ -45,13 +43,6 @@ export function atLeast(version: string, floor: readonly number[] = FLOOR): bool
     if (have !== want) return have > want
   }
   return true
-}
-
-// Whether a routine kick may be answered at `now`: not while the turn running has been going longer
-// than the kick's own interval, which is the silence doc 70 §3 counts. A turn whose start was never
-// seen (a reload mid-turn) is not known to be that long.
-export function answerable(busy: boolean, turnStart: number | undefined, now: number, intervalS: number): boolean {
-  return !busy || turnStart === undefined || now - turnStart <= intervalS * 1000
 }
 
 // The recording holds `data: {json}` lines. Every frame carries the daemon's `id`, which hold.py
@@ -120,7 +111,7 @@ export function asksSeat(kind: string): boolean {
 // goes. The module never holds the token; the client fills it from the store.
 export type SeatCall = { client: 'say'; stdin: string } | { client: 'post'; path: string; stdin: string } | { client: 'card'; argv: string[] }
 type Field = { type: 'string' | 'integer' | 'boolean' | 'array'; description: string; word?: boolean; enum?: string[] }
-type SeatTool = { description: string; fields: Record<string, Field>; required: string[]; build: (a: Record<string, unknown>) => SeatCall }
+type SeatTool = { description: string; fields: Record<string, Field>; required: string[]; oneOf?: string[]; build: (a: Record<string, unknown>) => SeatCall }
 
 const str = (a: Record<string, unknown>, k: string) => String(a[k] ?? '')
 const word = (description: string): Field => ({ type: 'string', description, word: true })
@@ -128,7 +119,7 @@ const text = (description: string): Field => ({ type: 'string', description })
 
 export const SEAT_TOOLS: Record<string, SeatTool> = {
   relay: {
-    description: 'Seat only: relay a directive to a session, on the stored lease. The daemon frames it as on the owner\'s behalf.',
+    description: 'Seat only: relay a directive to a session. The daemon frames it as on the owner\'s behalf.',
     fields: { to: word('The session to direct.'), epoch: { type: 'integer', description: 'The session\'s enrolment epoch, when it must be that one.' }, text: text('The directive, naming the card.') },
     required: ['to', 'text'],
     build: a => ({ client: 'say', stdin: `relay: token @lease to ${str(a, 'to')}${a.epoch !== undefined ? `@${str(a, 'epoch')}` : ''} ${str(a, 'text')}` }),
@@ -140,10 +131,13 @@ export const SEAT_TOOLS: Record<string, SeatTool> = {
     build: a => ({ client: 'say', stdin: `dispose: token @lease ${str(a, 'item')} ${str(a, 'reason')}` }),
   },
   retire: {
-    description: 'Seat only: retire a worker the agent launched. Refused while it has unpublished work.',
-    fields: { worker: word('The worker\'s session.'), node: word('The machine it runs on.') },
-    required: ['worker', 'node'],
-    build: a => ({ client: 'say', stdin: `retire: token @lease ${str(a, 'worker')} on ${str(a, 'node')}` }),
+    description: 'Seat only: retire a session, ending its process and its enrolment. Refused while it has unpublished work. A Go workspace takes the reason; the incumbent takes the node.',
+    fields: { worker: word('The worker\'s session.'), node: word('The machine it runs on, on the incumbent.'), reason: text('Why, on a Go workspace.') },
+    required: ['worker'],
+    oneOf: ['node', 'reason'],
+    build: a => ({ client: 'say', stdin: a.node !== undefined
+      ? `retire: token @lease ${str(a, 'worker')} on ${str(a, 'node')}`
+      : `retire: token @lease ${str(a, 'worker')} because ${str(a, 'reason')}` }),
   },
   wake: {
     description: 'Seat only: wake a session that has gone dark.',
@@ -201,6 +195,7 @@ export function seatCall(name: string, args: Record<string, unknown>): SeatCall 
   const t = SEAT_TOOLS[name]
   if (!t) return { refused: `no seat tool ${name}` }
   for (const k of t.required) if (args[k] === undefined || args[k] === '') return { refused: `${k} is required` }
+  if (t.oneOf && t.oneOf.filter(k => args[k] !== undefined && args[k] !== '').length !== 1) return { refused: `${name} takes one of ${t.oneOf.join(' or ')}` }
   for (const [k, v] of Object.entries(args)) {
     const f = t.fields[k]
     if (!f) return { refused: `${name} takes no ${k}` }

@@ -7,19 +7,13 @@ import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
-import python_floor  # noqa: E402
-
-python_floor.require()
-
 import os  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 from local_workspace import required_workspace_root  # noqa: E402
-from door import say  # noqa: E402
 from ack import token_path  # noqa: E402
-import lease  # noqa: E402
 from bind import records  # noqa: E402
 from verb_help import current_args, error, help_requested, script_help  # noqa: E402
 
@@ -62,14 +56,9 @@ def main(argv: list[str]) -> int:
         print(f"{session} is not this session's enrolment: disconnect ends only its own; "
               "the brain ends another session with `retire:`", file=sys.stderr); return 1
     import session_routes  # noqa: E402
-    if session_routes.on_coordination(ws):
-        answer = session_routes.detach(session, known[session]["token"], handover=handover or "")
-    else:
-        answer = say(f"detach: {session} token {known[session]['token']}" + (f" handover {handover}" if handover else ""))
+    answer = session_routes.detach(session, known[session]["token"], handover=handover or "")
     if answer.startswith("detached:"):
         token_path(ws, session).unlink(missing_ok=True)  # the token died with the epoch
-        if minted:
-            lease.remove(ws, minted)                      # and a lease it held is no one's to use
     print(f"{session}: {answer}")
     return 0 if answer.startswith("detached:") else 1
 

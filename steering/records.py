@@ -39,12 +39,3 @@ def integers(rec: dict, keys, *, least: int, what: str) -> str | None:
     return None
 
 
-def machine_of(fact: dict) -> str | None:
-    """The machine a fact or observation names: `machine_id`, or `tailnet_node` on one written
-    before doc 143 §7, which the ledger and the observation store keep as written."""
-    return fact.get("machine_id") or fact.get("tailnet_node")
-
-
-def naming_machine(machine: str | None) -> dict:
-    """The fields a fact or observation written now names its machine by."""
-    return {"machine_id": machine}

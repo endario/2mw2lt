@@ -1,7 +1,6 @@
 """`ghtoken.py`: this session's GitHub token, an installation token of the workspace's App (doc 181
 §4), printed for the `gh` wrapper a launched worker runs. Kept in a 0600 file until five minutes
-before the life the door promised runs out, then asked of the door again on the session's own
-enrolment token."""
+before the life Go answered runs out, then asked of Go again on the session's own credential."""
 from __future__ import annotations
 
 import sys
@@ -16,21 +15,18 @@ import hashlib
 import json
 import os
 import time
-import urllib.error
-import urllib.request
+import uuid
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 from bind import Refused  # noqa: E402
 from connect import speaking_as  # noqa: E402
-import door  # noqa: E402
 from local_workspace import required_workspace_root  # noqa: E402
+import session_routes  # noqa: E402
 import spool  # noqa: E402
 import verb_help  # noqa: E402
 
-ROUTE = "/steering/session/forge-token"
-HEADER = "X-Steering-Session"
 MARGIN = 300
 TIMEOUT = 30.0
 
@@ -56,35 +52,32 @@ def _keep(path: Path, token: str, until: float) -> None:
     spool.write_atomic(path, json.dumps({"token": token, "until": until}), mode=0o600)
 
 
-def ask(enrolment: str) -> tuple[int, dict]:
-    """The door's answer to a mint, on the enrolment token and, off this machine, its credential."""
-    req = urllib.request.Request(door.door_url() + ROUTE, data=b"{}", method="POST",
-                                 headers={"Content-Type": "application/json", HEADER: enrolment})
-    try:
-        with door.send(req, timeout=TIMEOUT) as r:
-            status, body = r.status, r.read()
-    except urllib.error.HTTPError as e:
-        status, body = e.code, e.read()
-    try:
-        out = json.loads(body or b"{}")
-    except ValueError:
-        out = {}
-    return status, out if isinstance(out, dict) else {}
+def ask(session: str, enrolment: str) -> dict:
+    """Go's answer to a mint on the session's own credential. Go records nothing to replay, so the
+    key is fresh; a paced answer is waited out by `session_routes.post`."""
+    return session_routes.post(f"/sessions/{session}/forge-token", {}, uuid.uuid4().hex,
+                               session_routes.SESSION_CARRIER, enrolment, TIMEOUT)
 
 
 def token(ws: Path, now=time.time, asked=ask) -> str:
-    """The session's token, kept or minted. Raises `Refused` with the door's reason."""
+    """The session's token, kept or minted. Raises `Refused` with Go's reason."""
     session, enrolment = speaking_as(ws, None, {})
     path = cache_path(ws, session)
     kept = _kept(path, now())
     if kept:
         _configure(kept)
         return kept
-    status, out = asked(enrolment)
+    try:
+        out = asked(session, enrolment)
+    except session_routes.Refused as e:
+        raise Refused(f"Go minted no GitHub token for {session}: {e}") from None
+    if not isinstance(out, dict):
+        raise Refused(f"Go answered {session}'s GitHub token with a {type(out).__name__}, not an object")
     minted, life = out.get("token"), out.get("fresh_for")
-    if status != 200 or not isinstance(minted, str) or not minted or not isinstance(life, (int, float)):
-        raise Refused(f"the door minted no GitHub token for {session} ({status}): "
-                      f"{out.get('refused') or out.get('error') or 'no reason given'}")
+    if not isinstance(minted, str) or not minted:
+        raise Refused(f"Go answered {session}'s GitHub token with no token")
+    if not isinstance(life, int) or isinstance(life, bool) or life <= 0:
+        raise Refused(f"Go answered {session}'s GitHub token with fresh_for {life!r}, not a positive count of seconds")
     _keep(path, minted, now() + life - MARGIN)
     _configure(minted)
     return minted

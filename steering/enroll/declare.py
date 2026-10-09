@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import sys
 from pathlib import Path
 
@@ -13,7 +12,6 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 from ack import token_path, valid_token  # noqa: E402
-from door import display_reply, say  # noqa: E402
 from ulids import new_ulid, valid_ulid  # noqa: E402
 from local_workspace import required_workspace_root  # noqa: E402
 
@@ -56,21 +54,14 @@ def main(argv: list[str]) -> int:
         return 1
     import refusal
     import session_routes
-    if session_routes.on_coordination(ws):
-        try:
-            reply = session_routes.declare_card(card, fact["name"], fact.get("anchors") or {}, token,
-                                                repo=session_routes.card_repo(ws) if fact.get("anchors") else "")
-        except session_routes.Refused as e:
-            reply = refusal.use("declare", f"{card}: {e}")
-        except session_routes.Unsent as e:
-            reply = refusal.retry(str(e))
-        print(reply)
-        if not reply.startswith("declared:"):
-            print(f"to retry this declaration under the same card, send it with --card {card}", file=sys.stderr)
-            return 1
-        return 0
-    reply = say(f"declare: {session} token {token} card {card} {shlex.join(rest)}")
-    print(display_reply(reply))
+    try:
+        reply = session_routes.declare_card(card, fact["name"], fact.get("anchors") or {}, token,
+                                            repo=session_routes.card_repo(ws) if fact.get("anchors") else "")
+    except session_routes.Refused as e:
+        reply = refusal.use("declare", f"{card}: {e}")
+    except session_routes.Unsent as e:
+        reply = refusal.retry(str(e))
+    print(reply)
     if not reply.startswith("declared:"):
         print(f"to retry this declaration under the same card, send it with --card {card}", file=sys.stderr)
         return 1

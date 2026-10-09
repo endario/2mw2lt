@@ -1,7 +1,6 @@
 import type { Register, EngineInterface, Timer, HookStream, ProcessSpawnChunk, ProcessSpawnResult } from 'claude-code'
-import { lines, atLeast, pick, invokes, answerable, tokensOf, due, owed, nextSeat, asksSeat, seatCall, seatSchema, resendId, entryRefusal, READ_KEPT, POINTER, CHECKPOINT, CONNECT_AGAIN, SEAT_SECTION, SEAT_TOOLS } from './frames'
+import { lines, atLeast, pick, invokes, tokensOf, due, owed, nextSeat, asksSeat, seatCall, seatSchema, resendId, entryRefusal, READ_KEPT, POINTER, CHECKPOINT, CONNECT_AGAIN, SEAT_SECTION, SEAT_TOOLS } from './frames'
 import type { SeatCall } from './frames'
-import type { Routine } from './frames'
 
 // The plugin's hooks module (#3872): it holds a connected Claude session's steering stream through
 // hold.py's `--wake plugin` mode, wakes the session with a fixed pointer, and hands the frames to
@@ -10,7 +9,6 @@ import type { Routine } from './frames'
 // holder claim and the session keeps the model-run recipe.
 
 const BUSY = { plugin: '2mw2lt', key: 'busy' } as const
-const TURN_AT = { plugin: '2mw2lt', key: 'turnAt' } as const
 const PENDING = { plugin: '2mw2lt', key: 'pending' } as const
 const READ = { plugin: '2mw2lt', key: 'read' } as const
 const POINTED = { plugin: '2mw2lt', key: 'pointed' } as const
@@ -187,7 +185,7 @@ async function askHolder($: EngineInterface) {
   if ((await $.state.get(SEAT)).value) askSeat($, false)
 }
 
-// One seat verb, through its Python client, on this provider session's stored lease. A send whose
+// One seat verb, through its Python client. A send whose
 // answer was lost goes once more under the id the client printed. A client that did not answer
 // with success is the call's error, in its own words.
 async function runSeatCall($: EngineInterface, call: SeatCall): Promise<{ result: string } | { deny: string }> {
@@ -232,24 +230,6 @@ function stop() {
   child = undefined
 }
 
-// A routine kick (#3995): the daemon counts it answered by any evidence of the session later than
-// the kick, which a turn's end gives and an idle session's does not, so the answer is posted here,
-// with no model turn. Not while the running turn is older than the kick's interval: that kick goes
-// unanswered and counts as it always has.
-async function answerKick($: EngineInterface, ps: string, session: string, kick: Routine, gen: number) {
-  const { value: busy = false } = await $.state.get(BUSY)
-  const { value: began } = await $.state.get(TURN_AT)
-  if (!answerable(busy, began, await $.clock.now(), kick.interval)) {
-    $.ui.log(`2mw2lt: the kick at ${kick.at} goes unanswered: a turn has run past ${kick.interval} s`, { to: 'debug' })
-    return
-  }
-  if (gen !== generation) return
-  const r = await $.process.run(
-    ['python3', script($, 'hold.py'), '--answer-kick', kick.at, '--provider', 'claude', '--provider-session', ps, session],
-    { cwd: root })
-  if (r.exitCode !== 0) $.ui.log(`2mw2lt: answering the kick at ${kick.at} exited ${r.exitCode}: ${r.stderr.trim()}`, { to: 'debug' })
-}
-
 // One child, read to its end: its exit code, and whether a frame it gave woke the session.
 async function holdOnce($: EngineInterface, ps: string, session: string, gen: number) {
   const held = $.process.spawn({
@@ -268,10 +248,6 @@ async function holdOnce($: EngineInterface, ps: string, session: string, gen: nu
     for (const l of complete) {
       if (l.kind === 'seat') askSeat($, true)
       else if (asksSeat(l.kind)) await askHolder($)
-      if (l.routine && !l.wakes) {
-        void answerKick($, ps, session, l.routine, gen).catch(err => $.ui.log(`2mw2lt: answering a kick broke: ${String(err)}`, { to: 'debug' }))
-        continue
-      }
       if (!l.wakes || l.kind === 'closed') continue
       woke = true
       await locked(async () => {
@@ -436,7 +412,6 @@ export const register: Register = on => {
 
   on('turn.start', async ($, e, next) => {
     // A subagent's turn starts inside ours, and the run is the outer turn's.
-    if (!(await $.state.get(BUSY)).value) await $.state.set(TURN_AT, await $.clock.now())
     await $.state.set(BUSY, true)
     return next(e)
   })

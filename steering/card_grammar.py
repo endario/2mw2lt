@@ -306,12 +306,19 @@ def built(verb: str, rest: list[str]) -> tuple[list[dict], str | None]:
             weight, tail = _weight(rest[3:])
             return [scoped(rest[1], rest[2], card=rest[0], anchors=_anchors(tail),
                            major=weight)], None
-        if verb in ("branch", "unbranch") and len(rest) == 3:
-            return [_fact(f"card-{verb}", rest[0], repo=rest[1], branch=rest[2])], None
+        if verb == "branch" and len(rest) == 3:
+            return [_fact("card-branch", rest[0], repo=rest[1], branch=rest[2])], None
+        if verb == "unbranch" and len(rest) in (3, 4):
+            # An ending's why is the client's to carry: Go refuses an unbranch without one
+            # (association-why-invalid) and an add with one, and the local ledger keeps the ending's
+            # why as it keeps every ending's.
+            return [_fact("card-unbranch", rest[0], repo=rest[1], branch=rest[2],
+                          **({"why": rest[3]} if len(rest) == 4 else {}))], None
         if verb == "session" and len(rest) == 3:
             return [_fact("card-session", rest[0], session=rest[1], role=rest[2])], None
-        if verb == "unsession" and len(rest) == 2:
-            return [_fact("card-unsession", rest[0], session=rest[1])], None
+        if verb == "unsession" and len(rest) in (2, 3):
+            return [_fact("card-unsession", rest[0], session=rest[1],
+                          **({"why": rest[2]} if len(rest) == 3 else {}))], None
         if verb == "conclude" and len(rest) in (3, 4):
             if len(rest) == 4 and rest[3] != KEEP_BRANCH:
                 return [], USAGE_REFUSAL

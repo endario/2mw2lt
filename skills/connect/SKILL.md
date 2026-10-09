@@ -69,7 +69,7 @@ When it exits, read its complete frame. For an envelope, acknowledge it, then re
 hold **before doing the work**:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ack.py" <session> <ulid>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ack.py" <session> <directive id>
 ```
 
 A `say` needs no acknowledgement. A `seat` frame means load `/2mw2lt:brain`. Read a directive's

@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""`bind.py [<session>]`: bind this incarnation to its enrollment (DOOR.md `bind:`).
+"""`bind.py [<session>]`: bind this incarnation to its enrollment.
 
 A restarted process is a new incarnation, and a directive queued for the old one can only be
-claimed by the old one. What `bind:` needs is derived from the running process — the session
+claimed by the old one. What a bind needs is derived from the running process — the session
 id the harness exports and the runtime id of the harness process, which is the same identity
-the observation hooks send — so this reads no registry and works through the remote door,
-where the registry does not exist.
+the observation hooks send — so this reads no registry.
 """
 from __future__ import annotations
 
@@ -24,7 +23,6 @@ import machine_harness as harness  # noqa: E402
 from process_probe import Undetermined  # noqa: E402
 import runtime_id  # noqa: E402
 from local_workspace import required_workspace_root  # noqa: E402
-from door import say  # noqa: E402
 from ack import records, token_path, valid_token  # noqa: E402
 from verb_help import current_args, error, help_requested, script_help  # noqa: E402
 
@@ -156,16 +154,12 @@ def account_identity(provider: str) -> str | None:
 
 def bind(session: str, token: str, psession: str | None = None,
          pid: int | None = None, provider: str = _SELF_DESCRIBING) -> tuple[str, str]:
-    """(the door's answer to `bind:`, the runtime id it named). The caller gets the id back
+    """(Go's answer to the bind, the runtime id it named). The caller gets the id back
     because the stream this session holds at its agent carries it too (doc 35 §2), and nothing
     else in the recipe derives it."""
     ps, rid = incarnation(psession, pid, provider)
     import session_routes  # noqa: E402
-    if session_routes.on_coordination():
-        return session_routes.bind(session, token, provider, ps, rid), rid
-    account_id = account_identity(provider)
-    suffix = f" account-id {account_id}" if account_id else ""
-    return say(f"bind: {session} provider-session {ps} runtime {rid}{suffix} token {token}"), rid
+    return session_routes.bind(session, token, provider, ps, rid, account_identity(provider)), rid
 
 
 def main(argv: list[str]) -> int:

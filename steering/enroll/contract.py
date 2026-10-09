@@ -10,6 +10,7 @@ AccessDTO = typing.TypedDict("AccessDTO", {
     "teams": "list[TeamDTO] | None",
     "collaborations": "list[CollaborationDTO] | None",
     "subject_binding": "str",
+    "subject": "str | None",
     "invitations": "list[InvitationDTO] | None",
 })
 
@@ -51,6 +52,521 @@ InvitationDTO = typing.TypedDict("InvitationDTO", {
     "expires_at": "str",
 })
 
+# AccountPolicy is a completed read of one native source's self-exclusions.
+AccountPolicy = typing.TypedDict("AccountPolicy", {
+    "off_at": "str",
+    "off": "dict[str, str | None] | None",
+})
+
+AccountReadingsBody = typing.TypedDict("AccountReadingsBody", {
+    "uplink": "str",
+    "readings": "list[typing.Any] | None",
+})
+
+AccountPolicyBody = typing.TypedDict("AccountPolicyBody", {
+    "uplink": "str",
+    "readings": "list[typing.Any] | None",
+    "off": "dict[str, str | None] | None",
+    "off_at": "str",
+})
+
+AccountReportResult = typing.TypedDict("AccountReportResult", {
+    "stored": "typing.NotRequired[bool | None]",
+    "why": "typing.NotRequired[str]",
+    "refused": "typing.NotRequired[str]",
+})
+
+AccountReportAnswer = typing.TypedDict("AccountReportAnswer", {
+    "results": "list[AccountReportResult] | None",
+    "policy": "typing.NotRequired[AccountReportResult | None]",
+})
+
+# ActionBody asks a machine to act on a session's process: to wake it, set its level or end it.
+ActionBody = typing.TypedDict("ActionBody", {
+    "kind": "str",
+    "to": "str",
+    "value": "typing.NotRequired[str]",
+    "reason": "str",
+})
+
+# ActionAnswer is the action recorded, and its state when answered.
+ActionAnswer = typing.TypedDict("ActionAnswer", {
+    "id": "str",
+    "kind": "str",
+    "state": "str",
+    "replayed": "bool",
+})
+
+# WakeReceipt is what a machine answers of a wake it was offered: the attempt, and its result as
+# the agent reports it, a state of sent, closed-refused or closed-uncertain with what it kept.
+WakeReceipt = typing.TypedDict("WakeReceipt", {
+    "uplink": "str",
+    "attempt": "str",
+    "result": "typing.Any",
+})
+
+# WakeReceiptAnswer is the state the wake took on that answer.
+WakeReceiptAnswer = typing.TypedDict("WakeReceiptAnswer", {
+    "attempt": "str",
+    "state": "str",
+    "replayed": "bool",
+})
+
+# ControlReceipt is what a machine answers of a control it was offered: the control, and its result
+# as the agent reports it, a state of typed, refused or uncertain with what it read.
+ControlReceipt = typing.TypedDict("ControlReceipt", {
+    "uplink": "str",
+    "id": "str",
+    "result": "typing.Any",
+})
+
+# ControlReceiptAnswer is the state the control took on that answer.
+ControlReceiptAnswer = typing.TypedDict("ControlReceiptAnswer", {
+    "id": "str",
+    "state": "str",
+    "replayed": "bool",
+})
+
+# RetireReceipt is what a machine answers of a retire it was offered: the retire, and whether it
+# retired the session, whether the session detached itself, how, or why it refused.
+RetireReceipt = typing.TypedDict("RetireReceipt", {
+    "uplink": "str",
+    "retire": "str",
+    "result": "typing.Any",
+})
+
+# RetireReceiptAnswer is the state the retire took on that answer.
+RetireReceiptAnswer = typing.TypedDict("RetireReceiptAnswer", {
+    "retire": "str",
+    "state": "str",
+    "replayed": "bool",
+})
+
+# AgentInjectionBody is the body of POST /steering/agent/injection: whether the machine may hand
+# the directive ulid names to a session that holds no stream. The attempt is the carry's own id: a
+# lost answer is asked again under it, and a second carry of the same directive names another.
+AgentInjectionBody = typing.TypedDict("AgentInjectionBody", {
+    "session": "str",
+    "ulid": "str",
+    "attempt": "str",
+    "provider_session": "str",
+})
+
+# AgentInjectionAnswer says whether the carry may go ahead; a 409 answers the same shape with ready
+# false and the check that refused it.
+AgentInjectionAnswer = typing.TypedDict("AgentInjectionAnswer", {
+    "session": "str",
+    "ulid": "str",
+    "ready": "bool",
+    "refused": "typing.NotRequired[str]",
+})
+
+# AgentInjectedBody is the body of POST /steering/agent/injected: what the session's harness did
+# with a carried directive, queued, already or refused, and why when it refused.
+AgentInjectedBody = typing.TypedDict("AgentInjectedBody", {
+    "session": "str",
+    "ulid": "str",
+    "provider_session": "str",
+    "outcome": "str",
+    "reason": "typing.NotRequired[str]",
+})
+
+# AgentInjectedAnswer acknowledges the report.
+AgentInjectedAnswer = typing.TypedDict("AgentInjectedAnswer", {
+    "session": "str",
+    "ulid": "str",
+    "recorded": "bool",
+})
+
+# AgentUndeliveredBody is the body of POST /steering/agent/undelivered: the machine held no local
+# stream for a frame it was written under hold.
+AgentUndeliveredBody = typing.TypedDict("AgentUndeliveredBody", {
+    "session": "str",
+    "hold": "typing.NotRequired[str]",
+    "ulid": "typing.NotRequired[str]",
+})
+
+# AgentUndeliveredAnswer says whether the frame was the directive that hold was handed, which the
+# session's next hold is then written.
+AgentUndeliveredAnswer = typing.TypedDict("AgentUndeliveredAnswer", {
+    "session": "str",
+    "ulid": "str | None",
+    "requeued": "bool",
+})
+
+# AgentHoldBody is the body of POST /steering/agent/hold: a session on this machine holds its stream
+# over the machine's uplink, on the session's own token, in the incarnation the machine observed.
+AgentHoldBody = typing.TypedDict("AgentHoldBody", {
+    "session": "str",
+    "token": "str",
+    "runtime": "str",
+    "uplink": "str",
+})
+
+# AgentReachBody is the body of POST /steering/agent/reach: the machine's delivery to a session that
+# holds no stream, which presents no token, because the machine's observation is the proof.
+AgentReachBody = typing.TypedDict("AgentReachBody", {
+    "session": "str",
+    "provider_session": "str",
+    "uplink": "str",
+})
+
+# AgentHoldAnswer is what a hold or a reach answers: the session held, at its epoch, in the
+# incarnation it was admitted in, and the hold's id, which its release names.
+AgentHoldAnswer = typing.TypedDict("AgentHoldAnswer", {
+    "held": "str",
+    "epoch": "int",
+    "provider_session": "str",
+    "runtime": "str",
+    "hold_id": "str",
+})
+
+# AgentReleaseBody is the body of POST /steering/agent/release: one hold of the machine's, by its id.
+AgentReleaseBody = typing.TypedDict("AgentReleaseBody", {
+    "session": "str",
+    "hold_id": "str",
+})
+
+# AgentReleaseAnswer says the hold is gone, and whether it was still held when asked.
+AgentReleaseAnswer = typing.TypedDict("AgentReleaseAnswer", {
+    "released": "bool",
+    "was_held": "bool",
+})
+
+# AgentRenewBody is the body of POST /steering/agent/renew: the uplink whose stream the fresh
+# credential on the carrier extends.
+AgentRenewBody = typing.TypedDict("AgentRenewBody", {
+    "uplink": "str",
+})
+
+# AgentRenewAnswer is when the uplink's stream now ends, in Unix seconds.
+AgentRenewAnswer = typing.TypedDict("AgentRenewAnswer", {
+    "until": "float",
+})
+
+# AgentReadingBody is the body of POST /steering/agent/reading: what a held session's own record
+# says it last ran, as the machine read it.
+AgentReadingBody = typing.TypedDict("AgentReadingBody", {
+    "session": "str",
+    "uplink": "str",
+    "reading": "SessionReading",
+})
+
+# SessionReading is one reading of a session: the provider session it was read from, when, and the
+# model, effort, turn and context it names. Turn is open, ended or aborted.
+SessionReading = typing.TypedDict("SessionReading", {
+    "provider_session": "str",
+    "observed_at": "str",
+    "model": "str",
+    "vendor": "str",
+    "turn": "str",
+    "stop_reason": "str",
+    "effort": "str",
+    "context_window": "int | None",
+    "tokens": "ReadingTokens",
+})
+
+# ReadingTokens is the tokens a reading counts.
+ReadingTokens = typing.TypedDict("ReadingTokens", {
+    "input": "int | None",
+})
+
+# AgentReadingAnswer says whether the reading was recorded.
+AgentReadingAnswer = typing.TypedDict("AgentReadingAnswer", {
+    "recorded": "bool",
+})
+
+# StreamUplink opens a generation of the machine's uplink: every later call names its id.
+StreamUplink = typing.TypedDict("StreamUplink", {
+    "kind": "str",
+    "id": "str",
+})
+
+# StreamEnvelope is a directive written to a hold.
+StreamEnvelope = typing.TypedDict("StreamEnvelope", {
+    "kind": "str",
+    "ulid": "str",
+    "text": "str",
+    "runtime": "str",
+    "provider_session": "str",
+    "to": "str",
+    "hold": "str",
+    "id": "str",
+    "directive": "str",
+    "recipient_epoch": "int",
+    "seat_generation": "int | None",
+    "recovery_epoch": "str",
+    "lapses_at": "float",
+})
+
+# StreamSay is a session's say written to a hold, its id the say's own, which the agent's receipt
+# settles it by.
+StreamSay = typing.TypedDict("StreamSay", {
+    "kind": "str",
+    "id": "str",
+    "from": "str",
+    "text": "str",
+    "to": "str",
+    "hold": "str",
+})
+
+# StreamRequestSay is a member's request written to the seat's holder as a say, its id the
+# request's. It carries no ulid, so nothing acknowledges it; the holder's answer settles it.
+StreamRequestSay = typing.TypedDict("StreamRequestSay", {
+    "kind": "str",
+    "id": "str",
+    "from": "str",
+    "text": "str",
+    "to": "str",
+    "hold": "str",
+    "directive": "str",
+})
+
+# StreamSeat tells a hold its session holds the seat, at the generation its answers are fenced by.
+StreamSeat = typing.TypedDict("StreamSeat", {
+    "kind": "str",
+    "id": "str",
+    "to": "str",
+    "hold": "str",
+    "generation": "int",
+})
+
+# StreamRevoked ends a hold that no longer stands.
+StreamRevoked = typing.TypedDict("StreamRevoked", {
+    "kind": "str",
+    "to": "str",
+    "hold": "str",
+})
+
+# StreamLaunch is a launch offer: its id the offer's action, the harness it starts, and the vendor
+# and account the attempt was admitted on. DeadlineAt is when the offer lapses undelivered; the
+# agent refuses to start after it.
+StreamLaunch = typing.TypedDict("StreamLaunch", {
+    "kind": "str",
+    "id": "str",
+    "harness": "str",
+    "vendor": "typing.NotRequired[str]",
+    "account_id": "typing.NotRequired[str]",
+    "model": "typing.NotRequired[str]",
+    "thinking": "typing.NotRequired[str]",
+    "effort": "typing.NotRequired[str]",
+    "window": "typing.NotRequired[bool]",
+    "deadline_at": "typing.NotRequired[str]",
+})
+
+# StreamGateRun is a gate run offered to this machine.
+StreamGateRun = typing.TypedDict("StreamGateRun", {
+    "kind": "str",
+    "id": "str",
+    "run": "str",
+    "provider": "str",
+    "model": "str",
+    "effort": "str",
+    "deeper": "bool",
+    "account": "str",
+    "brief": "GateBrief",
+    "timeout": "int",
+})
+
+# MachineAction is what a wake or a control types into a session on this machine: the session and
+# its incarnation, where it runs, and why. Role is brain when the session holds the seat; Stuck says
+# a directive it has not acknowledged is waiting. A control adds its Value, and an effort control
+# its Effort beside it.
+MachineAction = typing.TypedDict("MachineAction", {
+    "session": "str",
+    "epoch": "int",
+    "provider_session": "str",
+    "psession": "str",
+    "runtime": "str",
+    "provider": "str",
+    "node": "str",
+    "os_user": "str",
+    "reason": "str",
+    "pid": "int",
+    "cwd": "str",
+    "entrypoint": "str",
+    "tmux_socket": "typing.NotRequired[str]",
+    "tmux_pane": "typing.NotRequired[str]",
+    "user_data_dir": "typing.NotRequired[str]",
+    "app_pid": "typing.NotRequired[int]",
+    "nonce": "typing.NotRequired[str]",
+    "role": "typing.NotRequired[str]",
+    "stuck": "typing.NotRequired[bool]",
+    "value": "typing.NotRequired[str]",
+    "effort": "typing.NotRequired[str]",
+})
+
+# RetireAction is what a retire carries: the worker, pinned to its incarnation on this machine, the
+# checkout it ran in, and the branches it held, those landed among them.
+RetireAction = typing.TypedDict("RetireAction", {
+    "worker": "str",
+    "session": "str",
+    "epoch": "int",
+    "machine_id": "str",
+    "psession": "str",
+    "runtime": "str",
+    "cwd": "typing.NotRequired[str]",
+    "branches": "typing.NotRequired[list[str] | None]",
+    "landed": "typing.NotRequired[list[str] | None]",
+})
+
+# StreamWake is a wake, by the attempt the agent answers with.
+StreamWake = typing.TypedDict("StreamWake", {
+    "kind": "str",
+    "attempt": "str",
+    "session": "str",
+    "epoch": "int",
+    "provider_session": "str",
+    "psession": "str",
+    "runtime": "str",
+    "provider": "str",
+    "node": "str",
+    "os_user": "str",
+    "reason": "str",
+    "pid": "int",
+    "cwd": "str",
+    "entrypoint": "str",
+    "tmux_socket": "typing.NotRequired[str]",
+    "tmux_pane": "typing.NotRequired[str]",
+    "user_data_dir": "typing.NotRequired[str]",
+    "app_pid": "typing.NotRequired[int]",
+    "nonce": "typing.NotRequired[str]",
+    "role": "typing.NotRequired[str]",
+    "stuck": "typing.NotRequired[bool]",
+    "value": "typing.NotRequired[str]",
+    "effort": "typing.NotRequired[str]",
+})
+
+# StreamControl is a control, by its id.
+StreamControl = typing.TypedDict("StreamControl", {
+    "kind": "str",
+    "id": "str",
+    "session": "str",
+    "epoch": "int",
+    "provider_session": "str",
+    "psession": "str",
+    "runtime": "str",
+    "provider": "str",
+    "node": "str",
+    "os_user": "str",
+    "reason": "str",
+    "pid": "int",
+    "cwd": "str",
+    "entrypoint": "str",
+    "tmux_socket": "typing.NotRequired[str]",
+    "tmux_pane": "typing.NotRequired[str]",
+    "user_data_dir": "typing.NotRequired[str]",
+    "app_pid": "typing.NotRequired[int]",
+    "nonce": "typing.NotRequired[str]",
+    "role": "typing.NotRequired[str]",
+    "stuck": "typing.NotRequired[bool]",
+    "value": "typing.NotRequired[str]",
+    "effort": "typing.NotRequired[str]",
+})
+
+# StreamRetire is a retire, by its id.
+StreamRetire = typing.TypedDict("StreamRetire", {
+    "kind": "str",
+    "id": "str",
+    "worker": "str",
+    "session": "str",
+    "epoch": "int",
+    "machine_id": "str",
+    "psession": "str",
+    "runtime": "str",
+    "cwd": "typing.NotRequired[str]",
+    "branches": "typing.NotRequired[list[str] | None]",
+    "landed": "typing.NotRequired[list[str] | None]",
+})
+
+# AgentLaunchBody is the body of POST /steering/agent/launch: the machine's answer to a launch
+# offer, by the offer's id.
+AgentLaunchBody = typing.TypedDict("AgentLaunchBody", {
+    "launch": "str",
+    "uplink": "str",
+    "result": "AgentLaunchResult",
+})
+
+# AgentLaunchResult is one session the machine started and enrolled, or one refusal.
+AgentLaunchResult = typing.TypedDict("AgentLaunchResult", {
+    "session": "typing.NotRequired[str]",
+    "refused": "typing.NotRequired[str]",
+})
+
+# AgentLaunchAnswer is the launch's receipt as recorded.
+AgentLaunchAnswer = typing.TypedDict("AgentLaunchAnswer", {
+    "launch": "str",
+    "status": "str",
+})
+
+# AgentGateBody is the body of POST /steering/agent/gate: the machine's answer to one offered gate
+# run, by the commission and run the offer named.
+AgentGateBody = typing.TypedDict("AgentGateBody", {
+    "uplink": "str",
+    "commission": "str",
+    "run": "str",
+    "result": "AgentGateResult",
+})
+
+# AgentGateResult is one of: the run's verdict, why this machine cannot take the run, or why it
+# was refused or failed. The verdict is the run's own report, which the gate reads as it was sent.
+AgentGateResult = typing.TypedDict("AgentGateResult", {
+    "verdict": "typing.NotRequired[typing.Any]",
+    "unavailable": "typing.NotRequired[str]",
+    "refused": "typing.NotRequired[str]",
+    "failed": "typing.NotRequired[str]",
+})
+
+# AgentGateAnswer is the run's receipt as recorded.
+AgentGateAnswer = typing.TypedDict("AgentGateAnswer", {
+    "commission": "str",
+    "run": "str",
+    "status": "str",
+})
+
+# AgentJudgesBody is the body of POST /steering/agent/judges: the judges this machine runs, and
+# how it may be placed.
+AgentJudgesBody = typing.TypedDict("AgentJudgesBody", {
+    "uplink": "str",
+    "judges": "list[str] | None",
+    "placement": "AgentPlacement",
+})
+
+# AgentPlacement is the machine's role, dedicated or workstation; the share of it work may take,
+# in (0, 1]; how many gate runs it takes at once, 0 to 256; how many workers it may run; and how many
+# gate runs it takes on one account and in all, 0 to 256, which a machine that names none leaves to
+# the default.
+AgentPlacement = typing.TypedDict("AgentPlacement", {
+    "role": "str",
+    "soft": "float",
+    "capacity": "int",
+    "workers": "typing.NotRequired[int | None]",
+    "vendor_limit": "typing.NotRequired[int | None]",
+    "agent_limit": "typing.NotRequired[int | None]",
+})
+
+# AgentWatchBody is the body of POST /steering/agent/watch: one reader's report on its uplink.
+AgentWatchBody = typing.TypedDict("AgentWatchBody", {
+    "uplink": "str",
+    "deploy": "str",
+    "cadence_s": "float",
+    "breaches": "list[WatchBreach] | None",
+})
+
+# WatchReport is what a reader reports each read: the deploy marker it read, its cadence, and the
+# causes the difference from its last read breached; none is a quiet read and still a heartbeat.
+WatchReport = typing.TypedDict("WatchReport", {
+    "deploy": "str",
+    "cadence_s": "float",
+    "breaches": "list[WatchBreach] | None",
+})
+
+# WatchBreach is one cause a reader's report names.
+WatchBreach = typing.TypedDict("WatchBreach", {
+    "signal": "str",
+    "why": "str",
+})
+
 # NeedRaiseBody is a session's need to the owner (EL4 decision 7): an ask, offering options when
 # it has choices, or a recommendation, whose question is its proposal and which offers none.
 NeedRaiseBody = typing.TypedDict("NeedRaiseBody", {
@@ -71,6 +587,13 @@ NeedTransitionBody = typing.TypedDict("NeedTransitionBody", {
     "reason": "typing.NotRequired[str]",
     "choices": "typing.NotRequired[list[str] | None]",
     "text": "typing.NotRequired[str]",
+})
+
+# RulingBody records a ruling: the owner's own, or the seat's on their behalf, which says why.
+RulingBody = typing.TypedDict("RulingBody", {
+    "card": "typing.NotRequired[str]",
+    "text": "str",
+    "reason": "typing.NotRequired[str]",
 })
 
 # RulingTransitionBody acknowledges a ruling the seat made on the owner's behalf, or corrects it.
@@ -130,6 +653,14 @@ RulingDTO = typing.TypedDict("RulingDTO", {
     "at": "str",
     "on_behalf": "bool",
     "acknowledged": "bool",
+    "asked": "typing.NotRequired[RulingAsked | None]",
+})
+
+# RulingAsked is the need a ruling answered: its kind, its question and the session that raised it.
+RulingAsked = typing.TypedDict("RulingAsked", {
+    "kind": "str",
+    "question": "str",
+    "session": "typing.NotRequired[str]",
 })
 
 # NeedAnswer and RulingAnswer are a need's or a ruling's command answer, as IntentAnswer is.
@@ -145,13 +676,14 @@ RulingAnswer = typing.TypedDict("RulingAnswer", {
     "position": "int",
 })
 
-# NeedList is the needs raised to an audience, and RulingList the unacknowledged rulings, oldest first.
+# NeedList is the needs raised to an audience, oldest first.
 NeedList = typing.TypedDict("NeedList", {
     "needs": "list[NeedDTO] | None",
 })
 
 RulingList = typing.TypedDict("RulingList", {
     "rulings": "list[RulingDTO] | None",
+    "next": "typing.NotRequired[str]",
 })
 
 # Authorities answers the plugin's connect and install which repository the workspace its door
@@ -242,6 +774,28 @@ DirectiveAnswer = typing.TypedDict("DirectiveAnswer", {
 NameAnswer = typing.TypedDict("NameAnswer", {
     "key": "str",
     "status": "str",
+})
+
+# CheckoutCensus is one checkout as its machine last read it. A reported checkout is filed under
+# its repository's owner/name with its list of worktrees, empty or not; an unreadable one says why
+# and carries none, absent or null, since it is not the same answer as a checkout that holds none. WorktreesDropped counts those the machine
+# held and did not carry.
+CheckoutCensus = typing.TypedDict("CheckoutCensus", {
+    "state": "str",
+    "repo": "str",
+    "observed_at": "str",
+    "why": "typing.NotRequired[str]",
+    "worktrees": "list[CheckoutWorktree] | None",
+    "worktrees_dropped": "typing.NotRequired[int]",
+})
+
+# CheckoutWorktree is one worktree. Dirty and OnOrigin are each null when their own probe failed,
+# which is unknown, not clean.
+CheckoutWorktree = typing.TypedDict("CheckoutWorktree", {
+    "branch": "str",
+    "head": "str",
+    "dirty": "bool | None",
+    "on_origin": "bool | None",
 })
 
 # CheckpointBody is a session's checkpoint at a boundary of its work (doc 154 §5): its client's
@@ -622,20 +1176,27 @@ FactItem = typing.TypedDict("FactItem", {
     "fact": "Fact",
 })
 
+# FactsPage is a page of facts, oldest first. Next continues forward from it; Before, on a page
+# read newest first (`latest` or `before`), reads the page older than it while one may exist.
+# Exhausted says nothing newer matches; history ends where Before is absent.
 FactsPage = typing.TypedDict("FactsPage", {
     "items": "list[FactItem] | None",
     "next": "str",
+    "before": "typing.NotRequired[str | None]",
     "exhausted": "bool",
 })
 
 # GateRow is one commission, under the incumbent's wire names where it has them. By names the
 # requesting session; Why is the commission's reason, or its result's; Findings counts the
-# verdict's findings; Review is the published review's URL.
+# verdict's findings; Review is the published review's URL. A review names its PR, a critique its
+# Branch and the Doc it judges.
 GateRow = typing.TypedDict("GateRow", {
     "id": "str",
     "kind": "str",
     "repo": "str",
-    "pr": "int",
+    "pr": "int | None",
+    "branch": "str | None",
+    "doc": "str | None",
     "round": "int",
     "cap": "int",
     "final": "bool",
@@ -662,6 +1223,8 @@ GateReviewer = typing.TypedDict("GateReviewer", {
     "account": "str",
     "model": "str | None",
     "model_source": "str | None",
+    "deeper": "typing.NotRequired[bool]",
+    "reused": "typing.NotRequired[bool]",
 })
 
 # GateRun is the attempt's offer while it stands: when it was offered, delivered and is due.
@@ -682,7 +1245,9 @@ GateRead = typing.TypedDict("GateRead", {
     "id": "str",
     "kind": "str",
     "repo": "str",
-    "pr": "int",
+    "pr": "int | None",
+    "branch": "str | None",
+    "doc": "str | None",
     "round": "int",
     "cap": "int",
     "final": "bool",
@@ -723,9 +1288,135 @@ GateFinding = typing.TypedDict("GateFinding", {
     "status": "str",
 })
 
-# GateStats answers GET /gates/stats: the open commissions by phase.
+# GateStats answers GET /gates/stats: the open commissions by phase and by the incumbent's
+# priority names, and, over each window, the throughput and per-vendor run facts the incumbent's
+# panel reads. Go commissions carry no priority, so every open one counts as normal; hosts are
+# this workspace's gate hosts, which Go does not record yet, and work sizes are what a Go run
+# does not report, so their counts are 0 and their medians nil.
 GateStats = typing.TypedDict("GateStats", {
     "open": "dict[str, int] | None",
+    "open_by_priority": "dict[str, int] | None",
+    "hosts": "list[GateHost] | None",
+    "windows": "dict[str, GateWindow] | None",
+})
+
+# GateHost is a machine of this workspace that runs gates, with its declared limit.
+GateHost = typing.TypedDict("GateHost", {
+    "machine_id": "str",
+    "gate_host_limit": "int | None",
+    "gate_runs": "int",
+})
+
+# GateWindow is one window of the stats: what was commissioned in it, how the commissions that
+# ended in it ended, and the timings and per-vendor facts over those ends.
+GateWindow = typing.TypedDict("GateWindow", {
+    "commissioned": "int",
+    "verdict": "int",
+    "refused": "int",
+    "unresolved": "int",
+    "cancelled": "int",
+    "handed_on": "int",
+    "median_seconds_to_first_offer": "float | None",
+    "median_seconds_to_verdict": "float | None",
+    "vendors": "dict[str, GateVendor] | None",
+})
+
+# GateVendor is one vendor's ends within a stats window.
+GateVendor = typing.TypedDict("GateVendor", {
+    "verdicts": "int",
+    "timeouts": "int",
+    "failures": "int",
+    "median_run_seconds": "float | None",
+    "p90_run_seconds": "float | None",
+    "max_run_seconds": "float | None",
+    "work_size": "GateWorkSize",
+})
+
+# GateWorkSize is how much the runs carried, which a Go run does not report.
+GateWorkSize = typing.TypedDict("GateWorkSize", {
+    "review": "GateWorkSizeReview",
+    "critic": "GateWorkSizeCritic",
+})
+
+GateWorkSizeReview = typing.TypedDict("GateWorkSizeReview", {
+    "count": "int",
+    "median_files": "float | None",
+    "median_text_lines": "float | None",
+})
+
+GateWorkSizeCritic = typing.TypedDict("GateWorkSizeCritic", {
+    "count": "int",
+    "median_bytes": "float | None",
+})
+
+# GateAnalysis answers GET /gates/analysis: the ends of a window, per vendor and route, per
+# machine, and per series the round that first passed.
+GateAnalysis = typing.TypedDict("GateAnalysis", {
+    "window": "str",
+    "kind": "str",
+    "since": "str | None",
+    "routes": "list[GateRouteStats] | None",
+    "machines": "list[GateMachine] | None",
+    "series": "GateSeriesStats",
+})
+
+# GateRouteStats is one vendor and route's ends in the window: its verdicts and how they passed,
+# its ends without a verdict, its queue wait and run seconds, and its findings per verdict.
+GateRouteStats = typing.TypedDict("GateRouteStats", {
+    "vendor": "str",
+    "route": "str",
+    "models": "list[str] | None",
+    "efforts": "list[str] | None",
+    "verdicts": "int",
+    "passed": "int",
+    "started_failed": "int",
+    "timed_out": "int",
+    "busy": "int",
+    "indeterminate": "int",
+    "wait": "GateSpread",
+    "run": "GateSpread",
+    "findings_per_verdict": "float | None",
+})
+
+# GateMachine is one machine's ends in the window, by the host its attempts ran on.
+GateMachine = typing.TypedDict("GateMachine", {
+    "machine_id": "str | None",
+    "vendors": "list[str] | None",
+    "verdicts": "int",
+    "passed": "int",
+    "started_failed": "int",
+    "timed_out": "int",
+    "busy": "int",
+    "indeterminate": "int",
+    "run": "GateSpread",
+})
+
+# GateSeriesStats is the window's series whose pass fell in it: the round each first passed at.
+GateSeriesStats = typing.TypedDict("GateSeriesStats", {
+    "passed": "int",
+    "rounds": "GateRounds",
+    "longest": "list[GateSeriesRun] | None",
+})
+
+GateRounds = typing.TypedDict("GateRounds", {
+    "median": "float | None",
+    "p90": "float | None",
+    "max": "int | None",
+})
+
+GateSeriesRun = typing.TypedDict("GateSeriesRun", {
+    "repo": "str",
+    "pr": "int",
+    "doc": "str | None",
+    "rounds": "int",
+    "cap": "int",
+})
+
+# GateSpread is a sample of seconds: how many, their median and their p90, nearest rank.
+GateSpread = typing.TypedDict("GateSpread", {
+    "n": "int",
+    "median": "float | None",
+    "p90": "float | None",
 })
 
 KnowledgeUnit = typing.TypedDict("KnowledgeUnit", {
@@ -793,7 +1484,19 @@ LaunchAnswer = typing.TypedDict("LaunchAnswer", {
     "request": "str",
     "state": "str",
     "reason": "typing.NotRequired[str]",
+    "account": "typing.NotRequired[LaunchAccount | None]",
+    "outcome": "str | None",
+    "refused": "str | None",
     "replayed": "bool",
+})
+
+# LaunchAccount is a numbered account: the vendor's own id, the number the team gave it, and the
+# member who brought it.
+LaunchAccount = typing.TypedDict("LaunchAccount", {
+    "vendor": "str",
+    "number": "int",
+    "account_id": "str",
+    "brought_by": "str",
 })
 
 # LaunchOffer is how the offered launch starts its harness, as the seat asked.
@@ -872,6 +1575,17 @@ FleetSource = typing.TypedDict("FleetSource", {
     "policy": "MachineEvidence | None",
     "worker_census": "FleetCensus | None",
     "worker_census_alternatives": "typing.NotRequired[list[FleetCensusAlternative] | None]",
+    "checkout": "FleetCheckout | None",
+})
+
+FleetCheckout = typing.TypedDict("FleetCheckout", {
+    "state": "str",
+    "repo": "str",
+    "observed_at": "str",
+    "why": "typing.NotRequired[str]",
+    "worktrees": "list[CheckoutWorktree] | None",
+    "worktrees_dropped": "typing.NotRequired[int]",
+    "registration": "str",
 })
 
 FleetMachine = typing.TypedDict("FleetMachine", {
@@ -889,6 +1603,101 @@ MachineFleetPage = typing.TypedDict("MachineFleetPage", {
 
 MachineReportAnswer = typing.TypedDict("MachineReportAnswer", {
     "status": "str",
+})
+
+# Momentum answers GET /momentum: where the workspace's live work is stuck, how its gates are
+# pressed, who is free while work waits, and how often work merges (go-momentum-design.md). It is
+# the incumbent's wire shape, console/src/desk/momentum.ts's `Momentum`. Merges is each UTC hour
+# in the window that holds a merge, `[hours since the epoch, merged]`, oldest first.
+Momentum = typing.TypedDict("Momentum", {
+    "window": "str",
+    "since": "str",
+    "repo": "str | None",
+    "merged": "int",
+    "merges": "list[list[int] | None] | None",
+    "stuck": "int",
+    "ageing": "MomentumAgeing",
+    "placement": "MomentumPlacement",
+    "gates": "MomentumGates",
+})
+
+# MomentumCard is a card as a momentum list names it: Since is the time it has stood from.
+MomentumCard = typing.TypedDict("MomentumCard", {
+    "id": "str",
+    "name": "str | None",
+    "lane": "str | None",
+    "st": "str | None",
+    "since": "str | None",
+    "pr": "int | None",
+    "session": "str | None",
+})
+
+# MomentumCards is a list's count over every card it holds and its oldest rows.
+MomentumCards = typing.TypedDict("MomentumCards", {
+    "n": "int",
+    "rows": "list[MomentumCard] | None",
+})
+
+# MomentumAgeing is live work in the first bucket each card meets. Unheld is in flight with no live
+# executor, which Go cannot hold: being in flight is having one.
+MomentumAgeing = typing.TypedDict("MomentumAgeing", {
+    "unheld": "MomentumCards",
+    "ungated": "MomentumCards",
+    "still": "MomentumCards",
+})
+
+MomentumIdle = typing.TypedDict("MomentumIdle", {
+    "name": "str",
+})
+
+MomentumPlacement = typing.TypedDict("MomentumPlacement", {
+    "idle": "list[MomentumIdle] | None",
+    "waiting": "MomentumCards",
+})
+
+# MomentumQueued is a commission still waiting for a reviewer.
+MomentumQueued = typing.TypedDict("MomentumQueued", {
+    "id": "str",
+    "kind": "str | None",
+    "pr": "int | None",
+    "repo": "str | None",
+    "state": "str",
+    "commissioned_at": "str | None",
+})
+
+MomentumQueue = typing.TypedDict("MomentumQueue", {
+    "n": "int",
+    "rows": "list[MomentumQueued] | None",
+})
+
+# MomentumRounds is a card's open pull request by the review rounds it has taken. Outcome is the
+# newest result's: pass, fail or unresolved.
+MomentumRounds = typing.TypedDict("MomentumRounds", {
+    "id": "str",
+    "name": "str | None",
+    "pr": "int",
+    "rounds": "int",
+    "ceiling": "int | None",
+    "outcome": "str | None",
+    "verdict": "str | None",
+})
+
+MomentumRoundList = typing.TypedDict("MomentumRoundList", {
+    "n": "int",
+    "rows": "list[MomentumRounds] | None",
+})
+
+# MomentumLatency is the median seconds from commission to verdict over the verdicts given in the
+# window, nil when none was.
+MomentumLatency = typing.TypedDict("MomentumLatency", {
+    "n": "int",
+    "median": "float | None",
+})
+
+MomentumGates = typing.TypedDict("MomentumGates", {
+    "queued": "MomentumQueue",
+    "rounds": "MomentumRoundList",
+    "latency": "MomentumLatency",
 })
 
 ApproveDeviceRequest = typing.TypedDict("ApproveDeviceRequest", {
@@ -958,6 +1767,20 @@ WorkspaceCreateAnswer = typing.TypedDict("WorkspaceCreateAnswer", {
     "replayed": "typing.NotRequired[bool]",
 })
 
+# TeamNameBody is the name a team's owner gives it; TeamNameAnswer is the name kept, trimmed.
+TeamNameBody = typing.TypedDict("TeamNameBody", {
+    "name": "str",
+})
+
+TeamNameAnswer = typing.TypedDict("TeamNameAnswer", {
+    "name": "str",
+})
+
+# WorkspaceRetireAnswer names the workspace retired, by the alias it was reached at.
+WorkspaceRetireAnswer = typing.TypedDict("WorkspaceRetireAnswer", {
+    "retired": "str",
+})
+
 # TeamIntentBody is an operator's authorization of a team of one's own for a GitHub identity, which
 # need not have signed up yet: its numeric id, and its login for display.
 TeamIntentBody = typing.TypedDict("TeamIntentBody", {
@@ -994,6 +1817,89 @@ InstallationHeld = typing.TypedDict("InstallationHeld", {
     "held": "bool",
     "installation_id": "typing.NotRequired[int]",
     "repository": "typing.NotRequired[str]",
+})
+
+# Problem is every refusal's body (RFC 9457), on every route. Code names the check that refused,
+# never a value; Title is a human sentence and never carries a secret or token.
+Problem = typing.TypedDict("Problem", {
+    "type": "str",
+    "status": "int",
+    "code": "str",
+    "field": "typing.NotRequired[str]",
+    "title": "typing.NotRequired[str]",
+    "detail": "typing.NotRequired[str]",
+    "remedy": "typing.Literal[\"reconnect\", \"fix-input\", \"resend\", \"wait\", \"update-plugin\", \"none\"]",
+    "wait_seconds": "typing.NotRequired[int]",
+})
+
+# PushSubscriptionBody is the body of POST /push/subscriptions: the browser's PushSubscription as
+# its toJSON() writes it. The expiry is taken and not kept.
+PushSubscriptionBody = typing.TypedDict("PushSubscriptionBody", {
+    "endpoint": "str",
+    "expirationTime": "float | None",
+    "keys": "PushSubscriptionKeys",
+})
+
+# PushSubscriptionKeys are the browser's two keys, base64url: its P-256 public key and its
+# authentication secret.
+PushSubscriptionKeys = typing.TypedDict("PushSubscriptionKeys", {
+    "p256dh": "str",
+    "auth": "str",
+})
+
+# PushSubscriptionAnswer is a registration's answer: the subscription and the revision it now holds.
+PushSubscriptionAnswer = typing.TypedDict("PushSubscriptionAnswer", {
+    "id": "str",
+    "revision": "int",
+})
+
+# PushSubscriptionList is GET /push/subscriptions: the reader's own active subscriptions, never
+# where they deliver.
+PushSubscriptionList = typing.TypedDict("PushSubscriptionList", {
+    "subscriptions": "list[PushSubscriptionDTO] | None",
+})
+
+PushSubscriptionDTO = typing.TypedDict("PushSubscriptionDTO", {
+    "id": "str",
+    "revision": "int",
+    "created_at": "str",
+})
+
+# PushRevocationAnswer is a revocation's answer: the subscription it ended.
+PushRevocationAnswer = typing.TypedDict("PushRevocationAnswer", {
+    "id": "str",
+})
+
+# PushKey is the workspace's VAPID public key, base64url of its uncompressed P-256 point: the
+# applicationServerKey a browser subscribes with.
+PushKey = typing.TypedDict("PushKey", {
+    "public_key": "str",
+})
+
+# PushCommandBody is the body of a push command its path names whole: the key's and a
+# revocation's, {}.
+PushCommandBody = typing.TypedDict("PushCommandBody", {})
+
+# PushTestAnswer is a test's answer: the one push it enqueued to the caller's own subscription.
+PushTestAnswer = typing.TypedDict("PushTestAnswer", {
+    "effect": "str",
+})
+
+# PushRaiseBody is the body of POST /sessions/{session}/push/raises: the seat's generation, what
+# the push shows, and the need or session its click lands on.
+PushRaiseBody = typing.TypedDict("PushRaiseBody", {
+    "generation": "int",
+    "title": "str",
+    "text": "str",
+    "need": "typing.NotRequired[str]",
+    "session": "typing.NotRequired[str]",
+})
+
+# PushRaiseAnswer is a raise's answer: the raise and how many pushes it enqueued. Each is sent
+# later; none has been delivered yet.
+PushRaiseAnswer = typing.TypedDict("PushRaiseAnswer", {
+    "raise": "str",
+    "enqueued": "int",
 })
 
 RoomAuthor = typing.TypedDict("RoomAuthor", {
@@ -1079,6 +1985,18 @@ SayReceiptAnswer = typing.TypedDict("SayReceiptAnswer", {
     "received": "bool",
 })
 
+# SessionForgeTokenRequest asks for the session's GitHub token. It names nothing: the repository
+# and permissions are the workspace's and doc 181's, never the caller's.
+SessionForgeTokenRequest = typing.TypedDict("SessionForgeTokenRequest", {})
+
+# SessionForgeTokenAnswer is an App installation token for the workspace's repository, and the
+# seconds of life it had when answered.
+SessionForgeTokenAnswer = typing.TypedDict("SessionForgeTokenAnswer", {
+    "token": "str",
+    "repo": "str",
+    "fresh_for": "int",
+})
+
 # DetachExit is why a session left, kept with the epoch it ended (doc 123 §4): a handover's
 # checkpoint URL, or a one-line reason it abandoned or retired.
 DetachExit = typing.TypedDict("DetachExit", {
@@ -1100,6 +2018,17 @@ SessionCredential = typing.TypedDict("SessionCredential", {
     "epoch": "int",
 })
 
+# BindBody is a bind's body: the incarnation the session now runs in, and optionally the account it
+# spends from. The account is the harness's own opaque id for it, claimed by the session and read by
+# the usage join; it names no credential. Only a harness that spends an OpenAI login has one: Codex,
+# or Claude Code proxied to such a login.
+BindBody = typing.TypedDict("BindBody", {
+    "provider": "str",
+    "provider_session": "str",
+    "runtime_id": "str",
+    "account_id": "typing.NotRequired[str]",
+})
+
 # SessionList is GET /sessions: the workspace's sessions at their current epochs, by name.
 SessionList = typing.TypedDict("SessionList", {
     "items": "list[ListedSession] | None",
@@ -1108,17 +2037,50 @@ SessionList = typing.TypedDict("SessionList", {
 # ListedSession is one session on the fleet. Machine is the registration holding it. Status is
 # what the session last said, at the epoch it said it, or nil when it has said nothing. Observed is
 # what its machine saw this epoch run, newest first. Cards are the live cards it executes at this
-# epoch, by wire id, first engaged first.
+# epoch, by wire id, first engaged first. Presence is how an agent's stream delivers to it now,
+# "stream" or "reach", or nil when none does. Vitals is this epoch's latest reading, nil before its
+# first.
 ListedSession = typing.TypedDict("ListedSession", {
     "name": "str",
     "epoch": "int",
     "state": "str",
     "machine": "str",
     "machine_registration": "str",
+    "presence": "str | None",
     "enrolled_at": "str",
     "status": "ListedStatus | None",
     "observed": "list[ObservedReport] | None",
     "cards": "list[str] | None",
+    "account": "ListedAccount | None",
+    "vitals": "SessionVitals | None",
+})
+
+# SessionVitals is what a session epoch's latest reading says of it (#4756). ObservedAt is when its
+# harness took it; Turn is open, ended or aborted, and TurnSince when the reading that first said so
+# was taken. Each is nil when no reading stated it, which a client draws as unreported, never idle.
+SessionVitals = typing.TypedDict("SessionVitals", {
+    "observed_at": "str | None",
+    "turn": "str | None",
+    "turn_since": "str | None",
+    "model": "str | None",
+    "effort": "str | None",
+    "context": "SessionContext",
+})
+
+# SessionContext is the tokens a session's context holds, against the window its harness states;
+# Window is nil when the harness states none, as Claude Code does not.
+SessionContext = typing.TypedDict("SessionContext", {
+    "used": "int | None",
+    "window": "int | None",
+})
+
+# ListedAccount is the account a session's last bind said it spends from, nil when it named none.
+# Vendor is whose account it is; AccountID is that vendor's own opaque id for it, the key a reading carries.
+# Number is the team's number for it, the one a seat names it by, nil until a machine of the team reports it.
+ListedAccount = typing.TypedDict("ListedAccount", {
+    "vendor": "str",
+    "account_id": "str",
+    "number": "int | None",
 })
 
 # ObservedReport is one model a session's machine observed it run. Vendor is its maker, empty when
@@ -1152,6 +2114,22 @@ SourceState = typing.TypedDict("SourceState", {
     "expired": "bool",
     "partial": "bool",
     "gaps": "list[str] | None",
+})
+
+# StatusAnswer answers a status: its state, and for an announce naming a branch what its claim bound,
+# or why it bound nothing (#5084).
+StatusAnswer = typing.TypedDict("StatusAnswer", {
+    "status": "str",
+    "bound": "typing.NotRequired[BranchBound | None]",
+    "unbound": "typing.NotRequired[str]",
+})
+
+# BranchBound is the card an announce's branch claim gave the branch, by its wire id, and the branch
+# that claim displaced from it.
+BranchBound = typing.TypedDict("BranchBound", {
+    "card": "str",
+    "branch": "str",
+    "displaced": "typing.NotRequired[str]",
 })
 
 # SessionStatus is what a session says of itself (steering/verb_grammar.py parse_status): announce
@@ -1227,6 +2205,23 @@ Snapshot = typing.TypedDict("Snapshot", {
     "feeds": "list[SnapshotFeed] | None",
     "cursor": "str",
     "provenance": "SnapshotProvenance",
+})
+
+TargetingRecord = typing.TypedDict("TargetingRecord", {
+    "provider": "str",
+    "provider_session": "str",
+    "runtime_id": "str",
+    "entrypoint": "str",
+    "pid": "int",
+    "cwd": "str",
+    "tmux_socket": "typing.NotRequired[str]",
+    "tmux_pane": "typing.NotRequired[str]",
+    "user_data_dir": "typing.NotRequired[str]",
+    "app_pid": "typing.NotRequired[int]",
+})
+
+TargetingAnswer = typing.TypedDict("TargetingAnswer", {
+    "stored": "bool",
 })
 
 # SessionWait is what a session waits for (steering/verb_grammar.py parse_status): a pull
@@ -1350,6 +2345,7 @@ TrackBody = typing.TypedDict("TrackBody", {
 WorkActor = typing.TypedDict("WorkActor", {
     "kind": "str",
     "session": "typing.NotRequired[str]",
+    "login": "str | None",
 })
 
 WorkEnding = typing.TypedDict("WorkEnding", {
@@ -1529,6 +2525,7 @@ TracksRead = typing.TypedDict("TracksRead", {
     "failed": "TracksFailed | None",
     "awaited": "TracksAwaited | None",
     "off_track": "CardTally",
+    "unbound": "bool",
 })
 
 LaneDTO = typing.TypedDict("LaneDTO", {
@@ -1563,15 +2560,6 @@ TracksAwaited = typing.TypedDict("TracksAwaited", {
 IntentList = typing.TypedDict("IntentList", {
     "intents": "list[IntentDTO] | None",
     "next": "typing.NotRequired[str]",
-})
-
-# WorkProblem is a refusal as both carriers answer it: the check that refused, and the body field
-# it refused when it was one.
-WorkProblem = typing.TypedDict("WorkProblem", {
-    "type": "str",
-    "status": "int",
-    "code": "str",
-    "field": "typing.NotRequired[str]",
 })
 
 # SourceBody registers the repository a workspace reads, through the App installation its team
@@ -1625,10 +2613,20 @@ WorkerCensus = typing.TypedDict("WorkerCensus", {
     "gaps": "list[str] | None",
 })
 
-# WorkerCensusBody is the native census body before admission binds its uplink.
+# WorkerCensusBody is the native census body before admission binds its uplink. Interactive is the
+# accounts the machine's declared launchers can start a Claude session on (doc 121 §2), nil when
+# this census does not say, which leaves the last one standing.
 WorkerCensusBody = typing.TypedDict("WorkerCensusBody", {
     "uplink": "str",
     "worker_census": "WorkerCensus",
+    "interactive": "typing.NotRequired[list[LauncherAccount] | None]",
+    "checkout": "typing.NotRequired[CheckoutCensus | None]",
+})
+
+# LauncherAccount is an account one of a machine's launchers is signed in to.
+LauncherAccount = typing.TypedDict("LauncherAccount", {
+    "vendor": "str",
+    "account_id": "str",
 })
 
 # Every route serve mounts, by its pattern.
@@ -1649,9 +2647,11 @@ ROUTES = frozenset({
     "POST /api/v1/teams/{team}/installations",
     "POST /api/v1/teams/{team}/invitations",
     "POST /api/v1/teams/{team}/invitations/{invitation}/redeem",
+    "POST /api/v1/teams/{team}/name",
     "POST /api/v1/teams/{team}/workspaces",
     "POST /forge/hook",
     "GET /healthz",
+    "POST /w/{workspace}/api/v1/actions",
     "GET /w/{workspace}/api/v1/board",
     "GET /w/{workspace}/api/v1/brain/requests",
     "POST /w/{workspace}/api/v1/brain/requests",
@@ -1683,6 +2683,7 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/facts",
     "GET /w/{workspace}/api/v1/gates",
     "POST /w/{workspace}/api/v1/gates",
+    "GET /w/{workspace}/api/v1/gates/analysis",
     "POST /w/{workspace}/api/v1/gates/carries",
     "POST /w/{workspace}/api/v1/gates/lifts",
     "GET /w/{workspace}/api/v1/gates/stats",
@@ -1699,10 +2700,17 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/launches",
     "POST /w/{workspace}/api/v1/machine-renewals",
     "GET /w/{workspace}/api/v1/machines",
+    "GET /w/{workspace}/api/v1/momentum",
     "POST /w/{workspace}/api/v1/names",
     "GET /w/{workspace}/api/v1/needs",
     "POST /w/{workspace}/api/v1/needs",
     "POST /w/{workspace}/api/v1/needs/{need}/transitions",
+    "GET /w/{workspace}/api/v1/push/key",
+    "POST /w/{workspace}/api/v1/push/key",
+    "GET /w/{workspace}/api/v1/push/subscriptions",
+    "POST /w/{workspace}/api/v1/push/subscriptions",
+    "POST /w/{workspace}/api/v1/push/subscriptions/{subscription}/revocation",
+    "POST /w/{workspace}/api/v1/push/subscriptions/{subscription}/tests",
     "GET /w/{workspace}/api/v1/rooms",
     "POST /w/{workspace}/api/v1/rooms",
     "GET /w/{workspace}/api/v1/rooms/{room}",
@@ -1712,6 +2720,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/rooms/{room}/messages/{message}/redaction",
     "GET /w/{workspace}/api/v1/rooms/{room}/requests",
     "GET /w/{workspace}/api/v1/rulings",
+    "POST /w/{workspace}/api/v1/rulings",
     "POST /w/{workspace}/api/v1/rulings/{ruling}/transitions",
     "GET /w/{workspace}/api/v1/seat",
     "POST /w/{workspace}/api/v1/seat/appointment",
@@ -1722,19 +2731,24 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/sessions/{session}/detachment",
     "POST /w/{workspace}/api/v1/sessions/{session}/directives",
     "POST /w/{workspace}/api/v1/sessions/{session}/directives/{directive}/acknowledgement",
+    "POST /w/{workspace}/api/v1/sessions/{session}/forge-token",
+    "POST /w/{workspace}/api/v1/sessions/{session}/push/raises",
     "POST /w/{workspace}/api/v1/sessions/{session}/says",
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/acquisition",
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/handover",
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/release",
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/renewal",
     "POST /w/{workspace}/api/v1/sessions/{session}/status",
+    "POST /w/{workspace}/api/v1/sessions/{session}/targeting",
     "POST /w/{workspace}/api/v1/sessions/{session}/waits",
     "GET /w/{workspace}/api/v1/snapshot",
     "POST /w/{workspace}/api/v1/sources",
     "GET /w/{workspace}/api/v1/tracks",
     "POST /w/{workspace}/api/v1/tracks",
+    "POST /w/{workspace}/api/v1/workspace/retirement",
     "POST /w/{workspace}/steering/agent/accounts",
     "POST /w/{workspace}/steering/agent/census",
+    "POST /w/{workspace}/steering/agent/control",
     "POST /w/{workspace}/steering/agent/facts",
     "POST /w/{workspace}/steering/agent/gate",
     "POST /w/{workspace}/steering/agent/gate/lost",
@@ -1750,9 +2764,11 @@ ROUTES = frozenset({
     "POST /w/{workspace}/steering/agent/received",
     "POST /w/{workspace}/steering/agent/release",
     "POST /w/{workspace}/steering/agent/renew",
+    "POST /w/{workspace}/steering/agent/retire",
     "GET /w/{workspace}/steering/agent/stream",
     "GET /w/{workspace}/steering/agent/target",
     "POST /w/{workspace}/steering/agent/undelivered",
+    "POST /w/{workspace}/steering/agent/wake",
     "POST /w/{workspace}/steering/agent/watch",
     "GET /w/{workspace}/steering/authorities",
     "POST /w/{workspace}/steering/door",
