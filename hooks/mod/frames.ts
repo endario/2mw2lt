@@ -47,23 +47,31 @@ export function atLeast(version: string, floor: readonly number[] = FLOOR): bool
 
 // The recording holds `data: {json}` lines. Every frame carries the daemon's `id`, which hold.py
 // prints; return the pending ones verbatim and in order, with each envelope's ulid for ack.py.
-export function pick(recording: string, pending: readonly string[]): { text: string; envelopes: string[]; envelopeIds: string[]; found: string[] } {
+export function pick(recording: string, pending: readonly string[]): { text: string; envelopes: string[]; envelopeIds: string[]; found: string[]; read: { directives: string[]; seatGeneration?: number; seatFrameId?: string } } {
   const want = new Set(pending)
   const out: string[] = []
   const envelopes: string[] = []
   const envelopeIds: string[] = []
   const found: string[] = []
+  const directives: string[] = []
+  let seatGeneration: number | undefined
+  let seatFrameId: string | undefined
   for (const raw of recording.split('\n')) {
     if (!raw.startsWith('data: ')) continue
-    let f: { kind?: unknown; ulid?: unknown; id?: unknown }
+    let f: { kind?: unknown; ulid?: unknown; id?: unknown; directive?: unknown; generation?: unknown }
     try { f = JSON.parse(raw.slice(6)) } catch { continue }
     if (!f || typeof f.id !== 'string' || !want.has(f.id)) continue
     want.delete(f.id)
     found.push(f.id)
     out.push(raw.slice(6))
-    if (f.kind === 'envelope' && typeof f.ulid === 'string') { envelopes.push(f.ulid); envelopeIds.push(f.id) }
+    if (f.kind === 'envelope' && typeof f.ulid === 'string') { envelopes.push(f.ulid); envelopeIds.push(f.id); directives.push(f.ulid) }
+    if (f.kind === 'say') directives.push(typeof f.directive === 'string' ? f.directive : f.id)
+    if (f.kind === 'seat' && typeof f.generation === 'number' && Number.isSafeInteger(f.generation)) {
+      seatGeneration = f.generation
+      seatFrameId = f.id
+    }
   }
-  return { text: out.join('\n'), envelopes, envelopeIds, found }
+  return { text: out.join('\n'), envelopes, envelopeIds, found, read: { directives, ...(seatGeneration !== undefined ? { seatGeneration, seatFrameId } : {}) } }
 }
 
 // How many ids of frames the model has read are kept to recognise a replay by.
@@ -74,6 +82,16 @@ export const READ_KEPT = 256
 // reopens and the daemon replays frames it holds, so the same id arrives again and again.
 export function owed(id: string | null, pending: readonly string[], read: readonly string[]): id is string {
   return id !== null && !pending.includes(id) && !read.includes(id)
+}
+
+export function framesEntry(agentId: string | undefined, origin: string): boolean {
+  return agentId === undefined && origin === 'engine'
+}
+
+// lease.py preserves a superseded generation inside its holder wrapper, but reports an expired one
+// as the Refused form itself. Only those native forms make their returned seat notice obsolete.
+export function obsoleteSeatRefusal(deny: string): boolean {
+  return /^(?:refused: this session does not hold the seat \(refused \(\d+\): seat-generation-stale(?: \[[^\]\r\n]+\])?(?: request [^\s)\r\n]+)?\)|refused: refused \(\d+\): seat-lapsed(?: \[[^\]\r\n]+\])?(?: request [^\s\r\n]+)?)$/.test(deny)
 }
 
 // That a Bash command runs the named client: python3 (or python) on a path ending

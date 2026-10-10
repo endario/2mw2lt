@@ -15,7 +15,8 @@ PLAIN = re.compile(r"[A-Za-z0-9_./:@+-]+")
 
 
 def new_id() -> str:
-    return secrets.token_hex(12)
+    """32 lowercase hex, a W3C trace id's shape, as the Go service mints."""
+    return secrets.token_hex(16)
 
 
 def of_key(key: str) -> str:
@@ -24,6 +25,13 @@ def of_key(key: str) -> str:
     is written down is its digest, and one digest greps across the client, the request log, the
     ledger and the journal."""
     return hashlib.sha256(key.encode()).hexdigest()[:32]
+
+
+def served(headers, sent: str) -> dict:
+    """`served=<id>` when the service answered under an id other than the one sent, which is the
+    id its journal names; nothing when it kept ours or names none."""
+    got = headers.get(HEADER) if headers is not None else None
+    return {"served": got} if isinstance(got, str) and got != sent and REQUEST_ID.fullmatch(got) else {}
 
 
 def accepted(raw: str | None) -> tuple[str, str]:

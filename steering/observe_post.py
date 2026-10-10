@@ -20,7 +20,7 @@ from door import door_url, remote, brain_route, send  # noqa: E402
 # What Go's targeting record holds of the one `targeting.build` makes: `source` is its `provider`,
 # and the record's version and observation time are not Go's to keep.
 GO_TARGETING = ("provider_session", "runtime_id", "entrypoint", "pid", "cwd",
-                "tmux_socket", "tmux_pane", "user_data_dir", "app_pid")
+                "tmux_socket", "tmux_pane", "tmux_attached", "user_data_dir", "app_pid")
 
 
 def go_session(workspace: Path, provider_session: object) -> str | None:

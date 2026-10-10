@@ -22,7 +22,7 @@ TAB_ENTRYPOINT = "claude-vscode"
 TMUX_ENTRYPOINT = "tmux"
 
 _FIELDS = {"v", "source", "provider_session", "runtime_id", "observed_at",
-           "pid", "user_data_dir", "app_pid", "entrypoint", "cwd", "tmux_socket", "tmux_pane"}
+           "pid", "user_data_dir", "app_pid", "entrypoint", "cwd", "tmux_socket", "tmux_pane", "tmux_attached"}
 _REQUIRED = {"v", "source", "provider_session", "runtime_id", "observed_at", "entrypoint"}
 _TMUX = ("tmux_socket", "tmux_pane")
 _INSTANCE = ("user_data_dir", "app_pid")
@@ -32,7 +32,7 @@ _PANE = re.compile(r"%[0-9]+")
 def build(*, provider_session: str, runtime_id: str, observed_at: str, entrypoint: str,
          pid: int | None = None, instance: tuple[str, int] | None = None,
          cwd: str | None = None, tmux: tuple[str, str] | None = None,
-         source: str = SOURCE) -> dict:
+         tmux_attached: bool | None = None, source: str = SOURCE) -> dict:
     """The record's field shape, assembled from already-known values — the one place a
     targeting record is built, whether captured by the Stop hook (`read`, below), handed over by
     `connect.py` from the pane it runs in, or self-backfilled from a wake's own local discovery
@@ -47,6 +47,8 @@ def build(*, provider_session: str, runtime_id: str, observed_at: str, entrypoin
         out["user_data_dir"], out["app_pid"] = instance
     if tmux is not None:
         out["tmux_socket"], out["tmux_pane"] = tmux
+    if tmux_attached is not None:
+        out["tmux_attached"] = tmux_attached
     return out
 
 
@@ -117,9 +119,11 @@ def validate(rec: object) -> str | None:
             return "tmux_socket must be an absolute path"
         if not _PANE.fullmatch(rec["tmux_pane"]):
             return "tmux_pane must be % and digits"
+        if not isinstance(rec.get("tmux_attached", False), bool):
+            return "tmux_attached must be true or false"
     elif rec["entrypoint"] != TAB_ENTRYPOINT:
         return "entrypoint must be claude-vscode or tmux"
-    elif set(_TMUX) & set(rec):
+    elif (set(_TMUX) | {"tmux_attached"}) & set(rec):
         return "a claude-vscode record carries no tmux pane"
     why = records.integers(rec, ("pid", "app_pid"), least=1, what="a positive integer")
     if why:

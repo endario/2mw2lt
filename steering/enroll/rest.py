@@ -3,12 +3,12 @@
 key>]] <path> [--all]`: a call to the steering API (doc 126) from any machine.
 
 The path is relative to `/api/v1`, as `/knowledge/units` or `/cards?state=live`. It goes
-to the door this workspace names. A session's enrolment token on stdin goes on Go's session carrier,
-and alone: Go refuses a bearer, or a machine credential beside it. It stays out of the process
-table; `--lease` sends the seat holder's own enrolment, which Go judges at each call. With nothing
-on stdin, this session's own enrolment token goes, found as `say.py` finds it (#3551). `--all`
-follows a page's `next` until the head. `--post` sends the path a POST with no body, or with
-`--json`'s body and `--key` as its `Idempotency-Key`, as a room's messages take (doc 156).
+to the door this workspace names. A session's enrolment token on stdin goes with the current
+machine credential on Go's paired session carriers. It stays out of the process table; `--lease`
+sends the seat holder's own enrolment, which Go judges at each call. With nothing on stdin, this
+session's own enrolment token goes, found as `say.py` finds it (#3551). `--all` follows a page's
+`next` until the head. `--post` sends the path a POST with no body, or with `--json`'s body and
+`--key` as its `Idempotency-Key`, as a room's messages take (doc 156).
 
 Exits 0 with the JSON on stdout; otherwise 1, with the problem's title and remedy on stderr.
 """
@@ -59,7 +59,7 @@ def fetch(url: str, token: str | None, method: str = "GET", body: bytes | None =
           key: str | None = None) -> tuple[int, dict]:
     headers = {"Accept": "application/json", "User-Agent": door.USER_AGENT}
     if token:
-        headers[session_routes.SESSION_CARRIER] = token
+        headers.update(session_routes.session_headers(token))
     if body is not None:
         headers["Content-Type"] = "application/json"
     if key:
@@ -160,7 +160,8 @@ def main(argv: list[str], stdin) -> int:
             if why_none and status in (401, 403):
                 print(f"no credential was sent: {why_none}", file=sys.stderr)
             return 1
-        if "--all" not in argv or answer.get("exhausted", True) or not answer.get("next"):
+        # The facts page says when it is exhausted; the machines page ends with no `next`.
+        if "--all" not in argv or answer.get("exhausted") is True or not answer.get("next"):
             out = answer if not pages else {**answer, "items": [i for p in pages for i in p] + answer.get("items", [])}
             break
         pages.append(answer.get("items", []))

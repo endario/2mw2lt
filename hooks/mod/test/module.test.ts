@@ -1,6 +1,7 @@
 import type { On } from 'claude-code'
+import { register } from '../register'
 import { test, expect, mock } from 'claude-code/testing'
-import { lines, atLeast, pick, invokes, nextSeat, asksSeat, seatCall, entryRefusal, resendId, POINTER, CHECKPOINT, CONNECT_AGAIN, SEAT_SECTION } from '../frames'
+import { lines, atLeast, pick, invokes, nextSeat, asksSeat, seatCall, entryRefusal, framesEntry, obsoleteSeatRefusal, resendId, POINTER, CHECKPOINT, CONNECT_AGAIN, SEAT_SECTION } from '../frames'
 
 test('lines are whole only once their newline arrives', async () => {
   const a = lines('{"id":"f1","kind":"say","wakes":true}\n{"id":"f2","ki')
@@ -38,6 +39,24 @@ test('a frame of any kind is picked by its id, and only an envelope is acked', a
   expect(envelopes).toEqual([])
   expect(pick(RECORDING, ['01JENV']).text).toBe('')
   expect(pick(RECORDING, ['nothing-recorded']).text).toBe('')
+})
+
+test('pick records only returned frames as foreground semantic identities', async () => {
+  const request = 'e20adafc-2cda-48c9-bae2-7bae3d4bfcbd'
+  const directive = 'edaed9f7-42bd-479a-baa9-ddc2d4fdffba'
+  const ordinary = 'bb48a465-45e5-4e38-85c8-2223890d4f47'
+  const envelope = '86340b22-765e-4b5c-93b2-ddc8653052b2'
+  const raw = [
+    JSON.stringify({ kind: 'say', id: request, directive, text: 'answer me' }),
+    JSON.stringify({ kind: 'say', id: ordinary, text: 'ordinary' }),
+    JSON.stringify({ kind: 'envelope', id: 'envelope-frame', ulid: envelope }),
+    JSON.stringify({ kind: 'seat', id: 'seat:4', generation: 4 }),
+    JSON.stringify({ kind: 'unknown', id: 'unknown-frame' }),
+  ].map(frame => `data: ${frame}`).join('\n')
+  const got = pick(raw, [request, ordinary, 'envelope-frame', 'seat:4', 'unknown-frame'])
+  expect(got.read).toEqual({ directives: [directive, ordinary, envelope], seatGeneration: 4, seatFrameId: 'seat:4' })
+  expect(pick(`data: ${JSON.stringify({kind:'say', id:request, directive, text:'answer me'})}\n`, [request]).read.directives).toEqual([directive])
+  expect(pick(raw, []).read).toEqual({ directives: [] })
 })
 
 // The behaviour tests fake the engine beneath the plugin: the session, the clock, the files,
@@ -87,6 +106,9 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
     seat: { code: 1, stdout: '' },
     // Held until released: a seat_section.py run still out.
     seatGate: undefined as Promise<void> | undefined,
+    // Held until released: a lease or acknowledgement client still out.
+    wireGate: undefined as Promise<void> | undefined,
+    wireStarted: undefined as (() => void) | undefined,
     // What each lease client was handed on stdin, and what it answers in turn.
     stdins: [] as (string | undefined)[],
     leaseOut: [] as string[],
@@ -119,9 +141,15 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
     w.runs.push([...e.argv])
     w.cwds.push(e.init?.cwd)
     if (/\/(lease|card)\.py$/.test(String(e.argv[1]))) {
+      w.wireStarted?.()
+      if (w.wireGate) await w.wireGate
       w.stdins.push(e.init?.stdin)
       const out = w.leaseOut.shift() ?? 'relayed: 01AB to amber'
       return { value: { exitCode: /^(REJECTED|refused)/.test(out) ? 1 : 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    if (e.argv.some(a => a.endsWith('/ack.py'))) {
+      w.wireStarted?.()
+      if (w.wireGate) await w.wireGate
     }
     if (String(e.argv[1]).endsWith('/seat_section.py')) {
       if (w.seatGate) await w.seatGate
@@ -242,9 +270,24 @@ test('a frame replayed after the model read it submits no pointer', async ($, on
   expect(w.state.get('pending')).toEqual([])
 })
 
-test('an envelope whose ack failed is not read: its replay wakes the session again', async ($, on) => {
+test('an envelope whose ack failed stays pending without a second pointer loop', async ($, on) => {
   const { w } = await replays($, on, 'envelope', { ackFails: true })
-  expect(w.submits).toEqual([POINTER, POINTER])
+  expect(w.submits).toEqual([POINTER])
+  expect(w.state.get('pending')).toEqual(['f1'])
+})
+
+test('a failed envelope acknowledgement is refused and stays pending', async ($, on) => {
+  const w = world(on, {
+    ackFails: true,
+    rounds: [{ lines: [line('e1', 'envelope', true)], code: 0, hold: never }],
+    recording: 'data: {"kind":"envelope","id":"e1","ulid":"01JENV"}\n',
+  })
+  await begin($)
+  await w.clock.settle()
+  const got = await $.tool.call({ tool: TOOL } as never)
+  expect((got as { deny?: string }).deny).toContain('foreground frame acknowledgement')
+  expect(w.state.get('pending')).toEqual(['e1'])
+  expect(w.stdins).toEqual([JSON.stringify({ directives: ['01JENV'] })])
 })
 
 test('an envelope replayed after its ack landed submits no pointer', async ($, on) => {
@@ -284,6 +327,240 @@ test('envelopes are acked only after the frames tool, once each, and the tool re
   const answered = await $.tool.call({ tool: TOOL } as never)
   expect(acks()).toEqual([['python3', `${w.root}/steering/enroll/ack.py`, 's1', '01JENV']])
   expect((answered as { result: unknown }).result).toBe(`${ENV}\n${SAID}`)
+})
+
+test('the main frames tool proves exactly its returned native frames', async ($, on) => {
+  const request = 'e20adafc-2cda-48c9-bae2-7bae3d4bfcbd'
+  const directive = 'edaed9f7-42bd-479a-baa9-ddc2d4fdffba'
+  const ordinary = 'bb48a465-45e5-4e38-85c8-2223890d4f47'
+  const w = world(on, {
+    rounds: [{ lines: [line(request, 'say', true), line(ordinary, 'say', true), line('seat:4', 'seat', true)], code: 0, hold: never }],
+    recording: [
+      { kind: 'say', id: request, directive, text: 'answer me' },
+      { kind: 'say', id: ordinary, text: 'ordinary' },
+      { kind: 'seat', id: 'seat:4', generation: 4 },
+    ].map(frame => `data: ${JSON.stringify(frame)}`).join('\n') + '\n',
+  })
+  await begin($)
+  await w.clock.settle()
+  await $.tool.call({ tool: TOOL } as never)
+  expect(w.stdins).toContain(JSON.stringify({ directives: [directive, ordinary], seat_generation: 4 }))
+})
+
+test('a stale seat frame is retired without discarding the ordinary frame beside it', async ($, on) => {
+  const ordinary = 'bb48a465-45e5-4e38-85c8-2223890d4f47'
+  const w = world(on, {
+    rounds: [{ lines: [line('seat:4', 'seat', true), line(ordinary, 'say', true)], code: 0, hold: never }],
+    recording: [
+      { kind: 'seat', id: 'seat:4', generation: 4 },
+      { kind: 'say', id: ordinary, text: 'ordinary' },
+    ].map(frame => `data: ${JSON.stringify(frame)}`).join('\n') + '\n',
+  })
+  w.leaseOut.push('refused: this session does not hold the seat (refused (409): seat-generation-stale)')
+  await begin($)
+  await w.clock.settle()
+  const first = await $.tool.call({ tool: TOOL } as never)
+  expect((first as { deny?: string }).deny).toContain('seat-generation-stale')
+  expect(w.state.get('pending')).toEqual([ordinary])
+  expect(w.state.get('read')).toEqual(['seat:4'])
+  expect(w.submits).toEqual([POINTER])
+  expect(w.appends).toEqual([POINTER])
+  const second = await $.tool.call({ tool: TOOL } as never)
+  expect((second as { result?: string }).result).toBe(JSON.stringify({ kind: 'say', id: ordinary, text: 'ordinary' }))
+  expect(w.stdins).toEqual([
+    JSON.stringify({ directives: [ordinary], seat_generation: 4 }),
+    JSON.stringify({ directives: [ordinary] }),
+  ])
+  expect(w.state.get('pending')).toEqual([])
+})
+
+test('a lapsed seat frame is retired without claiming a replacement seat', async ($, on) => {
+  const ordinary = 'bb48a465-45e5-4e38-85c8-2223890d4f47'
+  const w = world(on, {
+    rounds: [{ lines: [line('seat:4', 'seat', true), line(ordinary, 'say', true)], code: 0, hold: never }],
+    recording: [
+      { kind: 'seat', id: 'seat:4', generation: 4 },
+      { kind: 'say', id: ordinary, text: 'ordinary' },
+    ].map(frame => `data: ${JSON.stringify(frame)}`).join('\n') + '\n',
+  })
+  w.leaseOut.push('refused: refused (409): seat-lapsed')
+  await begin($)
+  await w.clock.settle()
+  const first = await $.tool.call({ tool: TOOL } as never)
+  expect((first as { deny?: string }).deny).toContain('seat-lapsed')
+  expect(w.state.get('pending')).toEqual([ordinary])
+  const second = await $.tool.call({ tool: TOOL } as never)
+  expect((second as { result?: string }).result).toBe(JSON.stringify({ kind: 'say', id: ordinary, text: 'ordinary' }))
+  expect(w.stdins).toEqual([
+    JSON.stringify({ directives: [ordinary], seat_generation: 4 }),
+    JSON.stringify({ directives: [ordinary] }),
+  ])
+})
+
+test('a failed foreground proof keeps returned frames pending', async ($, on) => {
+  const id = 'bb48a465-45e5-4e38-85c8-2223890d4f47'
+  const w = world(on, {
+    rounds: [{ lines: [line(id, 'say', true)], code: 0, hold: never }],
+    recording: `data: ${JSON.stringify({ kind: 'say', id, text: 'ordinary' })}\n`,
+  })
+  w.leaseOut.push('refused: seat-generation-stale')
+  await begin($)
+  await w.clock.settle()
+  const got = await $.tool.call({ tool: TOOL } as never)
+  expect((got as { deny?: string }).deny).toContain('seat-generation-stale')
+  expect(w.state.get('pending')).toEqual([id])
+})
+
+async function refusalLeavesRoomForTheNextPointer($: any, on: On, kind: 'say' | 'envelope') {
+  const id = kind === 'say' ? 'bb48a465-45e5-4e38-85c8-2223890d4f47' : 'e1'
+  const next = 'cc48a465-45e5-4e38-85c8-2223890d4f47'
+  let arrive!: () => void
+  const w = world(on, {
+    ackFails: kind === 'envelope',
+    rounds: [{ lines: [line(id, kind, true), new Promise<void>(resolve => { arrive = resolve }), line(next, 'say', true)], code: 0, hold: never }],
+    recording: kind === 'envelope'
+      ? `data: ${JSON.stringify({ kind, id, ulid: '86340b22-765e-4b5c-93b2-ddc8653052b2' })}\n`
+      : `data: ${JSON.stringify({ kind, id, text: 'ordinary' })}\n`,
+  })
+  if (kind === 'say') w.leaseOut.push('refused: seat-generation-stale')
+  await begin($)
+  await w.clock.settle()
+  const result = await $.tool.call({ tool: TOOL } as never)
+  arrive()
+  await w.clock.settle()
+  return { w, result }
+}
+
+test('a proof refusal clears its outstanding pointer for a new arrival', async ($, on) => {
+  const { w, result } = await refusalLeavesRoomForTheNextPointer($, on, 'say')
+  expect((result as { deny?: string }).deny).toContain('foreground frame read')
+  expect(w.state.get('pending')).toEqual(['bb48a465-45e5-4e38-85c8-2223890d4f47', 'cc48a465-45e5-4e38-85c8-2223890d4f47'])
+  expect(w.submits).toEqual([POINTER, POINTER])
+})
+
+test('an acknowledgement refusal clears its outstanding pointer for a new arrival', async ($, on) => {
+  const { w, result } = await refusalLeavesRoomForTheNextPointer($, on, 'envelope')
+  expect((result as { deny?: string }).deny).toContain('foreground frame acknowledgement')
+  expect(w.state.get('pending')).toEqual(['e1', 'cc48a465-45e5-4e38-85c8-2223890d4f47'])
+  expect(w.submits).toEqual([POINTER, POINTER])
+})
+
+async function arrivalDuringRefusal($: any, on: On, kind: 'say' | 'envelope') {
+  const id = kind === 'say' ? 'bb48a465-45e5-4e38-85c8-2223890d4f47' : 'e1'
+  const next = 'cc48a465-45e5-4e38-85c8-2223890d4f47'
+  let arrive!: () => void
+  let release!: () => void
+  let started!: () => void
+  const clientStarted = new Promise<void>(resolve => { started = resolve })
+  const w = world(on, {
+    ackFails: kind === 'envelope',
+    rounds: [{ lines: [line(id, kind, true), new Promise<void>(resolve => { arrive = resolve }), line(next, 'say', true)], code: 0, hold: never }],
+    recording: kind === 'envelope'
+      ? `data: ${JSON.stringify({ kind, id, ulid: '86340b22-765e-4b5c-93b2-ddc8653052b2' })}\n`
+      : `data: ${JSON.stringify({ kind, id, text: 'ordinary' })}\n`,
+  })
+  if (kind === 'say') w.leaseOut.push('refused: unavailable')
+  w.wireGate = new Promise<void>(resolve => { release = resolve })
+  w.wireStarted = started
+  await begin($)
+  await w.clock.settle()
+  const reading = $.tool.call({ tool: TOOL } as never)
+  await clientStarted
+  arrive()
+  await w.clock.settle()
+  release()
+  const result = await reading
+  await w.clock.settle()
+  return { w, result, id, next }
+}
+
+test('a proof refusal re-wakes for an arrival during its client call', async ($, on) => {
+  const { w, result, id, next } = await arrivalDuringRefusal($, on, 'say')
+  expect((result as { deny?: string }).deny).toContain('foreground frame read')
+  expect(w.state.get('pending')).toEqual([id, next])
+  expect(w.submits).toEqual([POINTER])
+  expect(w.appends).toEqual([POINTER])
+})
+
+test('an acknowledgement refusal re-wakes for an arrival during its client call', async ($, on) => {
+  const { w, result, id, next } = await arrivalDuringRefusal($, on, 'envelope')
+  expect((result as { deny?: string }).deny).toContain('foreground frame acknowledgement')
+  expect(w.state.get('pending')).toEqual([id, next])
+  expect(w.submits).toEqual([POINTER])
+  expect(w.appends).toEqual([POINTER])
+})
+
+test('a failed proof is never preceded by an envelope acknowledgement', async ($, on) => {
+  const w = world(on, {
+    rounds: [{ lines: [line('e1', 'envelope', true)], code: 0, hold: never }],
+    recording: `data: ${JSON.stringify({ kind: 'envelope', id: 'e1', ulid: '86340b22-765e-4b5c-93b2-ddc8653052b2' })}\n`,
+  })
+  w.leaseOut.push('refused: seat-generation-stale')
+  await begin($)
+  await w.clock.settle()
+  const result = await $.tool.call({ tool: TOOL } as never)
+  expect((result as { deny?: string }).deny).toContain('foreground frame read')
+  expect(w.runs.filter(argv => String(argv[1]).endsWith('/ack.py'))).toEqual([])
+})
+
+test('a subagent frames call does not consume the main loop\'s pending frames', async ($, on) => {
+  const id = 'bb48a465-45e5-4e38-85c8-2223890d4f47'
+  const w = world(on, {
+    rounds: [{ lines: [line(id, 'say', true)], code: 0, hold: never }],
+    recording: `data: ${JSON.stringify({ kind: 'say', id, text: 'ordinary' })}\n`,
+  })
+  await begin($)
+  await w.clock.settle()
+  const got = await $.tool.call({ tool: TOOL, agentId: 'subagent-1' } as never)
+  expect((got as { result?: string }).result).toBe('No steering frame is waiting.')
+  expect(w.state.get('pending')).toEqual([id])
+  expect(w.runs.filter(argv => argv.some(arg => String(arg).endsWith('/ack.py') || String(arg).endsWith('/lease.py')))).toEqual([])
+})
+
+test('the actual frames tool hook leaves pending frames untouched for another plugin', async ($, on) => {
+  const id = 'bb48a465-45e5-4e38-85c8-2223890d4f47'
+  const w = world(on)
+  const recording = `data: ${JSON.stringify({ kind: 'say', id, text: 'ordinary' })}\n`
+  w.state.set('session', 's1')
+  w.state.set('pending', [id])
+  let frames: ((...args: any[]) => Promise<unknown>) | undefined
+  register(((event: string, matcher: { tool?: string }, handler: unknown) => {
+    if (event === 'tool.call' && matcher.tool === TOOL) frames = handler as typeof frames
+    return { catch: () => undefined }
+  }) as never)
+  const engine = {
+    plugin: { root: '/plugin' },
+    session: { id: async () => 'ps-1' },
+    state: {
+      get: async (ref: { key: string }) => ({ value: w.state.get(ref.key) }),
+      set: async (ref: { key: string }, value: unknown) => { w.state.set(ref.key, value) },
+    },
+    fs: { read: async () => recording },
+    process: {
+      run: async (argv: string[]) => {
+        w.runs.push([...argv])
+        return { exitCode: 0, stdout: argv.includes('--frame-path') ? `${FRAME_PATH}\n` : 'read: frames', stderr: '' }
+      },
+    },
+    ui: { log: () => undefined },
+  }
+  const got = await frames!(engine, { tool: TOOL }, { origin: { plugin: 'other-plugin' } }) as { result?: string }
+  expect(got.result).toBe('No steering frame is waiting.')
+  expect(w.state.get('pending')).toEqual([id])
+  expect(w.runs).toEqual([])
+})
+
+test('only the engine main loop may consume the frames tool', async () => {
+  expect(framesEntry(undefined, 'engine')).toBe(true)
+  expect(framesEntry('subagent-1', 'engine')).toBe(false)
+  expect(framesEntry(undefined, 'other-plugin')).toBe(false)
+})
+
+test('only explicit stale or lapsed seat refusals retire a seat notice', async () => {
+  expect(obsoleteSeatRefusal('refused: this session does not hold the seat (refused (409): seat-generation-stale)')).toBe(true)
+  expect(obsoleteSeatRefusal('refused: refused (409): seat-lapsed [generation] request abc')).toBe(true)
+  expect(obsoleteSeatRefusal('refused: unavailable: seat-lapsed')).toBe(false)
+  expect(obsoleteSeatRefusal('refused: this session does not hold the seat (seat-lapsed)')).toBe(false)
 })
 
 test('every child and client the module runs is its own version\'s, never the launcher', async ($, on) => {

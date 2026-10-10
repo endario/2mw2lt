@@ -31,6 +31,7 @@ _RAW_FORMS = {
     "say": ["say: <session> [to <target>] token <t> <text>"],
     "note": ["note: token <lease token> <text>"],
     "launch": ["launch: token <lease token> <harness> [on <node>] [vendor <vendor>] [account <n>] [model <model>] [thinking <level>] [effort <level>] [window] because <reason>"],
+    "withdraw": ["withdraw: token <lease token> <launch id>"],
     "relay": ["relay: token <lease token> to <session>[@<epoch>] <text>"],
     "retire": ["retire: token <lease token> <worker> on <node>"],
     "card": ["card: token <lease token> <verb> <args…>"],
@@ -52,7 +53,7 @@ _RAW_FORMS = {
 
 _AUDIENCE = {
     **{verb: "session" for verb in ("announce", "blocked", "wait", "done", "recommend", "ask", "claim", "taking", "declare", "checkpoint", "holds", "enroll", "bind", "ack", "say", "detach", "gate")},
-    **{verb: "seat" for verb in ("note", "launch", "relay", "retire", "card", "effort", "wake", "control", "roster", "lift", "authorship", "dispose", "promote", "backlog", "night")},
+    **{verb: "seat" for verb in ("note", "launch", "withdraw", "relay", "retire", "card", "effort", "wake", "control", "roster", "lift", "authorship", "dispose", "promote", "backlog", "night")},
     "rebind": "operator",
     "supersede": "operator",
 }
@@ -78,6 +79,7 @@ _EXAMPLES = {
     "say": ["say: violet to amber token <t> please review this"],
     "note": ["note: token <lease token> review is waiting"],
     "launch": ["launch: token <lease token> claude on build vendor anthropic model opus-5.5 effort high because review"],
+    "withdraw": ["withdraw: token <lease token> 1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00"],  # gitleaks:allow (a placeholder launch id)
     "relay": ["relay: token <lease token> to violet@1 review the branch"],
     "retire": ["retire: token <lease token> worker-1 on build"],
     "card": ["card: token <lease token> reclassify 010101010101010101010101 state live"],

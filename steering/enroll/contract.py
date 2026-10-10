@@ -20,19 +20,25 @@ TeamDTO = typing.TypedDict("TeamDTO", {
     "recovery_epoch": "str",
     "owner": "bool",
     "workspaces": "list[WorkspaceDTO] | None",
+    "slug": "str",
+    "formerly": "typing.NotRequired[list[str] | None]",
 })
 
-# WorkspaceDTO's id is the /w/<alias> route; repo is the workspace's name.
+# WorkspaceDTO's id is the /w/<alias> route; repo is the workspace's name; address is
+# `<team>/<workspace>`, the route by name.
 WorkspaceDTO = typing.TypedDict("WorkspaceDTO", {
     "id": "str",
     "team_id": "str",
     "repo": "str",
     "state": "str",
+    "address": "str",
+    "formerly": "typing.NotRequired[list[str] | None]",
 })
 
 CollaborationDTO = typing.TypedDict("CollaborationDTO", {
     "collaborator": "str",
     "workspace": "str",
+    "address": "str",
     "room_grants": "list[RoomGrantDTO] | None",
     "board": "bool",
 })
@@ -52,10 +58,12 @@ InvitationDTO = typing.TypedDict("InvitationDTO", {
     "expires_at": "str",
 })
 
-# AccountPolicy is a completed read of one native source's self-exclusions.
+# AccountPolicy is a completed read of one native source's self-exclusions, and of what its accounts
+# are for (go-account-purposes-design.md): both are one snapshot, stamped once.
 AccountPolicy = typing.TypedDict("AccountPolicy", {
     "off_at": "str",
     "off": "dict[str, str | None] | None",
+    "uses": "typing.NotRequired[dict[str, list[str] | None] | None]",
 })
 
 AccountReadingsBody = typing.TypedDict("AccountReadingsBody", {
@@ -66,7 +74,8 @@ AccountReadingsBody = typing.TypedDict("AccountReadingsBody", {
 AccountPolicyBody = typing.TypedDict("AccountPolicyBody", {
     "uplink": "str",
     "readings": "list[typing.Any] | None",
-    "off": "dict[str, str | None] | None",
+    "off": "typing.NotRequired[dict[str, str | None] | None]",
+    "uses": "typing.NotRequired[dict[str, list[str] | None] | None]",
     "off_at": "str",
 })
 
@@ -79,6 +88,114 @@ AccountReportResult = typing.TypedDict("AccountReportResult", {
 AccountReportAnswer = typing.TypedDict("AccountReportAnswer", {
     "results": "list[AccountReportResult] | None",
     "policy": "typing.NotRequired[AccountReportResult | None]",
+})
+
+# AccountList is GET /accounts: the team's accounts, each folded across the machines that read it
+# with its published verdict (documentation/architecture/go-usage-frames-design.md §4), and the
+# directories a machine read whose credential names no account.
+AccountList = typing.TypedDict("AccountList", {
+    "items": "list[ListedAccountUsage] | None",
+    "unnamed": "list[UnnamedDirectory] | None",
+})
+
+# ListedAccountUsage is one account. Provider is the harness its folded reading came from, Reading
+# that reading, and Machines the names of the machines whose readings of it stand, the folded one's
+# first. Number is the team's number for it, nil until numbered. Sessions are the names of the
+# workspace's sessions drawing on it.
+ListedAccountUsage = typing.TypedDict("ListedAccountUsage", {
+    "vendor": "str",
+    "account_id": "str",
+    "number": "int | None",
+    "provider": "str",
+    "reading": "UsageReading",
+    "machines": "list[str] | None",
+    "verdict": "AccountVerdict",
+    "incentive": "AccountIncentive | None",
+    "sessions": "list[str] | None",
+})
+
+# UsageReading is an account's reading as its machine sent it (doc 77 §2): a field the wire did not
+# carry in its expected type is nil. Plan and Credits are the vendor's, which nothing places by.
+UsageReading = typing.TypedDict("UsageReading", {
+    "taken_at": "str",
+    "plan": "str | None",
+    "credits": "UsageCredits | None",
+    "limits": "list[UsageLimit] | None",
+})
+
+# UsageCredits is the spend past an account's windows, as its vendor states it.
+UsageCredits = typing.TypedDict("UsageCredits", {
+    "enabled": "bool",
+    "used": "float | None",
+    "limit": "float | None",
+    "currency": "str | None",
+})
+
+# UsageLimit is one limit of a reading. Used is a fraction and a floor; ResetsAt is as the wire
+# wrote it.
+UsageLimit = typing.TypedDict("UsageLimit", {
+    "name": "str",
+    "window_minutes": "float | None",
+    "used": "float | None",
+    "resets_at": "str | None",
+    "held": "bool | None",
+    "basis": "str | None",
+    "role": "str | None",
+    "scope": "str | None",
+    "projection": "UsageProjection | None",
+})
+
+# UsageProjection is unlimited's forecast for a window: AtReset is where use is heading at the
+# reset, low and high, and RunOut the odds it runs out before then.
+UsageProjection = typing.TypedDict("UsageProjection", {
+    "at_reset": "list[float] | None",
+    "recent_at_reset": "float | None",
+    "exhausts_at": "str | None",
+    "run_out": "float | None",
+    "past_windows": "float | None",
+})
+
+# AccountVerdict is what an account's reading says for an hour's work (doc 117 §3): ranked, with
+# its tier, score and rank among its vendor's accounts; excluded, with the reason, the window by
+# which and until when; or unread, with the reason. The figures are the scored window's, where the
+# reading had one.
+AccountVerdict = typing.TypedDict("AccountVerdict", {
+    "state": "str",
+    "reason": "typing.NotRequired[str]",
+    "tier": "typing.NotRequired[int | None]",
+    "score": "typing.NotRequired[float | None]",
+    "rank": "typing.NotRequired[int | None]",
+    "window": "typing.NotRequired[str]",
+    "used": "typing.NotRequired[float | None]",
+    "at_reset": "typing.NotRequired[list[float] | None]",
+    "resets_at": "typing.NotRequired[str | None]",
+    "exhausts_at": "typing.NotRequired[str | None]",
+    "exhausts_by": "typing.NotRequired[str]",
+    "runway": "typing.NotRequired[float | None]",
+    "by": "typing.NotRequired[str]",
+    "until": "typing.NotRequired[str | None]",
+})
+
+# UsageTightest is an account's open window with the highest use.
+UsageTightest = typing.TypedDict("UsageTightest", {
+    "name": "str",
+    "used": "float",
+    "resets_at": "str | None",
+})
+
+# AccountIncentive is the strongest live multiplier the owner set on an account, across the machines
+# that read it (doc 117 §4.1): above 1 the owner asks for spend on it, below 1 the opposite.
+AccountIncentive = typing.TypedDict("AccountIncentive", {
+    "multiplier": "float",
+    "until": "str",
+    "target": "str | None",
+})
+
+# UnnamedDirectory is a directory a machine read whose credential names no account.
+UnnamedDirectory = typing.TypedDict("UnnamedDirectory", {
+    "provider": "str",
+    "directory": "str",
+    "machine": "str",
 })
 
 # ActionBody asks a machine to act on a session's process: to wake it, set its level or end it.
@@ -159,6 +276,7 @@ AgentInjectionAnswer = typing.TypedDict("AgentInjectionAnswer", {
     "ulid": "str",
     "ready": "bool",
     "refused": "typing.NotRequired[str]",
+    "request": "typing.NotRequired[str]",
 })
 
 # AgentInjectedBody is the body of POST /steering/agent/injected: what the session's harness did
@@ -264,6 +382,7 @@ SessionReading = typing.TypedDict("SessionReading", {
     "effort": "str",
     "context_window": "int | None",
     "tokens": "ReadingTokens",
+    "entrypoint": "str",
 })
 
 # ReadingTokens is the tokens a reading counts.
@@ -724,9 +843,19 @@ SeatHandover = typing.TypedDict("SeatHandover", {
     "to_epoch": "int",
 })
 
-# SeatGeneration is the body of a renewal or a release: the generation the caller holds.
+# SeatGeneration is the body of a release: the generation the caller holds.
 SeatGeneration = typing.TypedDict("SeatGeneration", {
     "generation": "int",
+})
+
+SeatRead = typing.TypedDict("SeatRead", {
+    "directives": "typing.NotRequired[list[str] | None]",
+    "seat": "typing.NotRequired[bool]",
+})
+
+SeatRenewal = typing.TypedDict("SeatRenewal", {
+    "generation": "int",
+    "read": "typing.NotRequired[SeatRead | None]",
 })
 
 # SeatAppointment is the body of POST /seat/appointment: the session, at its epoch, a member seats.
@@ -757,6 +886,7 @@ SeatView = typing.TypedDict("SeatView", {
     "generation": "int",
     "vacancy_generation": "int",
     "expires_at": "str | None",
+    "progress_at": "str | None",
 })
 
 # SeatAnswer is a seat command's answer.
@@ -774,6 +904,60 @@ DirectiveAnswer = typing.TypedDict("DirectiveAnswer", {
 NameAnswer = typing.TypedDict("NameAnswer", {
     "key": "str",
     "status": "str",
+})
+
+# BrainRequestBody is the body of POST /brain/requests: a member's words to the brain.
+BrainRequestBody = typing.TypedDict("BrainRequestBody", {
+    "text": "str",
+})
+
+# BrainRequestAnswer is where a request was queued: its id, whether the key had sent it already,
+# and its place on the workspace's requests.
+BrainRequestAnswer = typing.TypedDict("BrainRequestAnswer", {
+    "id": "str",
+    "replayed": "bool",
+    "position": "int",
+})
+
+# BrainAnswerBody is the body of POST /brain/requests/{request}/answer: the holder's answer, spoken
+# as its own session under the seat generation it was given the request under.
+BrainAnswerBody = typing.TypedDict("BrainAnswerBody", {
+    "session": "str",
+    "generation": "int",
+    "answer": "str",
+})
+
+# BrainAnswered is an answer's outcome.
+BrainAnswered = typing.TypedDict("BrainAnswered", {
+    "status": "str",
+})
+
+# BrainRequestView is a request as its member reads it.
+BrainRequestView = typing.TypedDict("BrainRequestView", {
+    "id": "str",
+    "state": "str",
+    "text": "str",
+    "own": "bool",
+    "holder": "typing.NotRequired[str | None]",
+    "answer": "typing.NotRequired[str | None]",
+    "answered_at": "typing.NotRequired[str | None]",
+    "failure": "typing.NotRequired[str | None]",
+    "bootstrap": "typing.NotRequired[BootstrapView | None]",
+    "created_at": "str",
+})
+
+# BrainTranscript is GET /brain/requests: the workspace's latest requests, oldest first, and the
+# bootstrap a vacant seat waits on, if any.
+BrainTranscript = typing.TypedDict("BrainTranscript", {
+    "requests": "list[BrainRequestView] | None",
+    "bootstrap": "BootstrapView | None",
+})
+
+# BootstrapView is the vacant seat's bootstrap as a waiting request's member reads it (§2.3): waiting
+# for a resource, with EL2's reason, or launching.
+BootstrapView = typing.TypedDict("BootstrapView", {
+    "state": "str",
+    "reason": "typing.NotRequired[str]",
 })
 
 # CheckoutCensus is one checkout as its machine last read it. A reported checkout is filed under
@@ -1046,6 +1230,39 @@ GateBrief = typing.TypedDict("GateBrief", {
     "prior": "list[GatePriorRound] | None",
     "knowledge": "str",
     "knowledge_ids": "list[str] | None",
+    "pr_body": "str",
+    "plan_rows": "list[GatePlanRow] | None",
+    "rulings": "list[GateRuling] | None",
+    "lifted": "GateLifted | None",
+    "required_checks": "list[str] | None",
+})
+
+# GateContext is what a review is told of its pull request beyond the diff, as its commission
+# keeps it.
+GateContext = typing.TypedDict("GateContext", {
+    "pr_body": "typing.NotRequired[str]",
+    "plan_rows": "typing.NotRequired[list[GatePlanRow] | None]",
+    "rulings": "typing.NotRequired[list[GateRuling] | None]",
+    "required_checks": "list[str] | None",
+})
+
+# GatePlanRow is one plan table row whose label names the pull request's unit.
+GatePlanRow = typing.TypedDict("GatePlanRow", {
+    "file": "str",
+    "row": "str",
+})
+
+# GateRuling is a pull request comment its writer marked as a brief.
+GateRuling = typing.TypedDict("GateRuling", {
+    "by": "str",
+    "at": "str",
+    "text": "str",
+})
+
+# GateLifted is a lift's reason, and who gave it: the seat's session, or the owner.
+GateLifted = typing.TypedDict("GateLifted", {
+    "reason": "str",
+    "by": "str",
 })
 
 GatePriorRound = typing.TypedDict("GatePriorRound", {
@@ -1113,6 +1330,21 @@ GateLiftBody = typing.TypedDict("GateLiftBody", {
     "branch": "typing.NotRequired[str]",
     "generation": "typing.NotRequired[int]",
     "reason": "str",
+})
+
+# GateBenchLiftBody ends a benched judge's streak: the vendor whose route serves it and the model it
+# serves, as the bench names them, the seat generation, and the reason.
+GateBenchLiftBody = typing.TypedDict("GateBenchLiftBody", {
+    "vendor": "str",
+    "model": "str",
+    "generation": "int",
+    "reason": "str",
+})
+
+# GateBenchLiftAnswer is the lift, and whether this answer replays the first.
+GateBenchLiftAnswer = typing.TypedDict("GateBenchLiftAnswer", {
+    "id": "str",
+    "replayed": "bool",
 })
 
 # GateLiftAnswer is the lifted series and the rounds it may now run.
@@ -1214,6 +1446,7 @@ GateRow = typing.TypedDict("GateRow", {
     "review": "str | None",
     "reviewer": "GateReviewer | None",
     "run": "GateRun | None",
+    "passed_over": "typing.NotRequired[dict[str, list[str] | None] | None]",
 })
 
 # GateReviewer is who the commission's attempt was given to, and, once judged, the model its
@@ -1265,6 +1498,7 @@ GateRead = typing.TypedDict("GateRead", {
     "review": "str | None",
     "reviewer": "GateReviewer | None",
     "run": "GateRun | None",
+    "passed_over": "typing.NotRequired[dict[str, list[str] | None] | None]",
     "result": "GateResult | None",
 })
 
@@ -1468,6 +1702,7 @@ KnowledgeSyncAnswer = typing.TypedDict("KnowledgeSyncAnswer", {
 LaunchBody = typing.TypedDict("LaunchBody", {
     "harness": "str",
     "machine": "typing.NotRequired[str | None]",
+    "machine_name": "typing.NotRequired[str]",
     "vendor": "typing.NotRequired[str]",
     "account": "typing.NotRequired[str]",
     "model": "typing.NotRequired[str]",
@@ -1476,6 +1711,9 @@ LaunchBody = typing.TypedDict("LaunchBody", {
     "window": "typing.NotRequired[bool]",
     "reason": "str",
 })
+
+# LaunchWithdrawal withdraws a launch still waiting. It names nothing: the launch is the route's.
+LaunchWithdrawal = typing.TypedDict("LaunchWithdrawal", {})
 
 # LaunchAnswer is the launch recorded and its request's state: admitted, its offer on its way to a
 # machine, or waiting with the reason no machine took it yet.
@@ -1593,6 +1831,7 @@ FleetMachine = typing.TypedDict("FleetMachine", {
     "identity_scope": "str",
     "registrations": "list[str] | None",
     "sources": "list[FleetSource] | None",
+    "name": "str | None",
 })
 
 MachineFleetPage = typing.TypedDict("MachineFleetPage", {
@@ -1776,6 +2015,20 @@ TeamNameAnswer = typing.TypedDict("TeamNameAnswer", {
     "name": "str",
 })
 
+# SlugBody is the slug a team's owner moves the team or a workspace to; TeamSlugAnswer is the team's
+# new slug, and WorkspaceAddressAnswer the workspace's new `<team>/<workspace>`.
+SlugBody = typing.TypedDict("SlugBody", {
+    "slug": "str",
+})
+
+TeamSlugAnswer = typing.TypedDict("TeamSlugAnswer", {
+    "slug": "str",
+})
+
+WorkspaceAddressAnswer = typing.TypedDict("WorkspaceAddressAnswer", {
+    "address": "str",
+})
+
 # WorkspaceRetireAnswer names the workspace retired, by the alias it was reached at.
 WorkspaceRetireAnswer = typing.TypedDict("WorkspaceRetireAnswer", {
     "retired": "str",
@@ -1830,6 +2083,7 @@ Problem = typing.TypedDict("Problem", {
     "detail": "typing.NotRequired[str]",
     "remedy": "typing.Literal[\"reconnect\", \"fix-input\", \"resend\", \"wait\", \"update-plugin\", \"none\"]",
     "wait_seconds": "typing.NotRequired[int]",
+    "request": "typing.NotRequired[str]",
 })
 
 # PushSubscriptionBody is the body of POST /push/subscriptions: the browser's PushSubscription as
@@ -2053,6 +2307,35 @@ ListedSession = typing.TypedDict("ListedSession", {
     "cards": "list[str] | None",
     "account": "ListedAccount | None",
     "vitals": "SessionVitals | None",
+    "origin": "SessionOrigin",
+})
+
+# SessionOrigin is where a session epoch runs and what launched it (#5026), read from its launch
+# and its current incarnation's targeting record. LaunchedBy is nil when no launch started it;
+# Tmux and VSCode are nil where no current record says the session runs there.
+SessionOrigin = typing.TypedDict("SessionOrigin", {
+    "launched_by": "OriginLauncher | None",
+    "tmux": "OriginTmux | None",
+    "vscode": "OriginVSCode | None",
+})
+
+# OriginLauncher is who asked for the launch: the seat, by its session's name, or the owner.
+OriginLauncher = typing.TypedDict("OriginLauncher", {
+    "kind": "str",
+    "session": "typing.NotRequired[str]",
+})
+
+# OriginTmux is the pane a session runs in, and whether a window was on its tmux session when the
+# session last stopped; Attached is nil when that was not measured.
+OriginTmux = typing.TypedDict("OriginTmux", {
+    "socket": "str",
+    "pane": "str",
+    "attached": "bool | None",
+})
+
+# OriginVSCode is the VS Code a session runs in, by the base name of its user data directory.
+OriginVSCode = typing.TypedDict("OriginVSCode", {
+    "app": "str",
 })
 
 # SessionVitals is what a session epoch's latest reading says of it (#4756). ObservedAt is when its
@@ -2065,6 +2348,7 @@ SessionVitals = typing.TypedDict("SessionVitals", {
     "model": "str | None",
     "effort": "str | None",
     "context": "SessionContext",
+    "entrypoint": "str | None",
 })
 
 # SessionContext is the tokens a session's context holds, against the window its harness states;
@@ -2199,6 +2483,18 @@ StreamEvent = typing.TypedDict("StreamEvent", {
     "fact": "Fact",
 })
 
+# StampsFrame is a frame of the workspace's stamps (`GET …/stamps`): a stamp per projection the
+# desk reads, named as its loaders name them, which moves when the projection may have.
+StampsFrame = typing.TypedDict("StampsFrame", {
+    "pending": "str",
+    "work": "str",
+    "ledger": "str",
+    "brain": "str",
+    "machines": "str",
+    "gates": "str",
+    "momentum": "str",
+})
+
 # Snapshot is the workspace's state and the cursor that resumes after it, read in one transaction.
 Snapshot = typing.TypedDict("Snapshot", {
     "sections": "SnapshotSections",
@@ -2218,6 +2514,7 @@ TargetingRecord = typing.TypedDict("TargetingRecord", {
     "tmux_pane": "typing.NotRequired[str]",
     "user_data_dir": "typing.NotRequired[str]",
     "app_pid": "typing.NotRequired[int]",
+    "tmux_attached": "typing.NotRequired[bool | None]",
 })
 
 TargetingAnswer = typing.TypedDict("TargetingAnswer", {
@@ -2440,6 +2737,9 @@ CardDTO = typing.TypedDict("CardDTO", {
     "major": "bool",
     "state": "str",
     "track": "typing.NotRequired[str]",
+    "lane": "str",
+    "placed": "str",
+    "low": "bool",
     "by": "WorkActor",
     "at": "str",
     "retired": "typing.NotRequired[WorkEnding | None]",
@@ -2621,6 +2921,7 @@ WorkerCensusBody = typing.TypedDict("WorkerCensusBody", {
     "worker_census": "WorkerCensus",
     "interactive": "typing.NotRequired[list[LauncherAccount] | None]",
     "checkout": "typing.NotRequired[CheckoutCensus | None]",
+    "machine_name": "typing.NotRequired[str | None]",
 })
 
 # LauncherAccount is an account one of a machine's launchers is signed in to.
@@ -2648,9 +2949,11 @@ ROUTES = frozenset({
     "POST /api/v1/teams/{team}/invitations",
     "POST /api/v1/teams/{team}/invitations/{invitation}/redeem",
     "POST /api/v1/teams/{team}/name",
+    "POST /api/v1/teams/{team}/slug",
     "POST /api/v1/teams/{team}/workspaces",
     "POST /forge/hook",
     "GET /healthz",
+    "GET /w/{workspace}/api/v1/accounts",
     "POST /w/{workspace}/api/v1/actions",
     "GET /w/{workspace}/api/v1/board",
     "GET /w/{workspace}/api/v1/brain/requests",
@@ -2684,6 +2987,7 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/gates",
     "POST /w/{workspace}/api/v1/gates",
     "GET /w/{workspace}/api/v1/gates/analysis",
+    "POST /w/{workspace}/api/v1/gates/bench-lifts",
     "POST /w/{workspace}/api/v1/gates/carries",
     "POST /w/{workspace}/api/v1/gates/lifts",
     "GET /w/{workspace}/api/v1/gates/stats",
@@ -2698,6 +3002,7 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/knowledge/units",
     "GET /w/{workspace}/api/v1/knowledge/units/{id}",
     "POST /w/{workspace}/api/v1/launches",
+    "POST /w/{workspace}/api/v1/launches/{launch}/withdrawal",
     "POST /w/{workspace}/api/v1/machine-renewals",
     "GET /w/{workspace}/api/v1/machines",
     "GET /w/{workspace}/api/v1/momentum",
@@ -2743,9 +3048,11 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/sessions/{session}/waits",
     "GET /w/{workspace}/api/v1/snapshot",
     "POST /w/{workspace}/api/v1/sources",
+    "GET /w/{workspace}/api/v1/stamps",
     "GET /w/{workspace}/api/v1/tracks",
     "POST /w/{workspace}/api/v1/tracks",
     "POST /w/{workspace}/api/v1/workspace/retirement",
+    "POST /w/{workspace}/api/v1/workspace/slug",
     "POST /w/{workspace}/steering/agent/accounts",
     "POST /w/{workspace}/steering/agent/census",
     "POST /w/{workspace}/steering/agent/control",

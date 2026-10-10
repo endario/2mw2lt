@@ -1024,15 +1024,20 @@ def tmux_state(pid: int, *, run=subprocess.run, socket: str | None = None) -> st
     """`attached` when a client is attached to the session of the tmux pane `pid` runs in,
     `detached` when none is, None when it is in no pane or tmux does not say. A session a person
     watches is the one with a window on it, which is all "headed" is."""
+    return pane_state(pid, run=run, socket=socket)[1]
+
+
+def pane_state(pid: int, *, run=subprocess.run, socket: str | None = None) -> tuple[tuple[str, str] | None, str | None]:
+    """The (socket, pane) `pid` runs in and `tmux_state`'s answer for it, from one lookup."""
     found = pane_of(pid, run=run, socket=socket)
     if found is None:
-        return None
+        return None, None
     try:
         out = Tmux(*found, run=run)._tmux("display-message", "-p", "-t", found[1], "#{session_attached}")
     except Refused:
-        return None
+        return found, None
     n = out.strip()
-    return None if not n.isdigit() else "attached" if int(n) > 0 else "detached"
+    return found, None if not n.isdigit() else "attached" if int(n) > 0 else "detached"
 
 
 class Tmux:

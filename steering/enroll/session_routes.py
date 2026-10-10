@@ -1,7 +1,7 @@
 """The session commands on Go (C5, documentation/architecture/go-c5-session-client-design.md).
 
-The machine observes and enrols on its own carrier; the session binds and detaches on its own,
-and no request carries both.
+The machine observes and enrols on its own carrier. Session requests present their bearer with this
+machine's credential.
 """
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 import door  # noqa: E402
 import refusal  # noqa: E402
+import requestlog  # noqa: E402
 
 MACHINE_CARRIER = "X-Steering-Agent-Credential"
 SESSION_CARRIER = "X-Steering-Session-Credential"
@@ -39,9 +40,10 @@ RETRY_ATTEMPTS = 5
 class Refused(Exception):
     """Go refused the request. `code` and `field` are its problem's."""
 
-    def __init__(self, status: int, code: str, field: str = "", wait: int | None = None):
-        super().__init__(f"refused ({status}): {code}" + (f" [{field}]" if field else ""))
-        self.status, self.code, self.field, self.wait = status, code, field, wait
+    def __init__(self, status: int, code: str, field: str = "", wait: int | None = None, request: str = ""):
+        super().__init__(f"refused ({status}): {code}" + (f" [{field}]" if field else "")
+                         + (f" request {request}" if request else ""))
+        self.status, self.code, self.field, self.wait, self.request = status, code, field, wait, request
 
 
 class Unsent(OSError):
@@ -65,14 +67,20 @@ def _machine_token() -> str:
     return token
 
 
+def session_headers(token: str) -> dict[str, str]:
+    """The paired credentials for one direct session request."""
+    return {SESSION_CARRIER: token, MACHINE_CARRIER: _machine_token(), "User-Agent": door.USER_AGENT}
+
+
 def post(path: str, body: dict, key: str, carrier: str, token: str, timeout: float = 10.0) -> dict:
     """One write under `key`, sent again under the same key while Go asks it to wait."""
     data = json.dumps(body).encode()
     started, attempts = time.monotonic(), 0
     while True:
-        req = urllib.request.Request(_base() + path, data=data, method="POST", headers={
-            "Content-Type": "application/json", "Idempotency-Key": key, carrier: token,
-            "User-Agent": door.USER_AGENT})
+        headers = (session_headers(token) if carrier == SESSION_CARRIER
+                   else {carrier: token, "User-Agent": door.USER_AGENT})
+        headers.update({"Content-Type": "application/json", "Idempotency-Key": key})
+        req = urllib.request.Request(_base() + path, data=data, method="POST", headers=headers)
         try:
             with door.open_direct(req, timeout) as r:
                 return json.loads(r.read() or b"{}")
@@ -83,7 +91,7 @@ def post(path: str, body: dict, key: str, carrier: str, token: str, timeout: flo
             if pause is None or attempts >= RETRY_ATTEMPTS or time.monotonic() - started + pause > RETRY_LIMIT:
                 wait = problem.get("wait_seconds")
                 raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
-                              wait if isinstance(wait, int) else None) from None
+                              wait if isinstance(wait, int) else None, _request(e, problem)) from None
             time.sleep(pause)
         except (urllib.error.URLError, OSError, TimeoutError) as e:
             raise Unsent(f"{_base()}{path}: no answer ({e})") from None
@@ -95,6 +103,12 @@ def _problem(e: urllib.error.HTTPError) -> dict:
     except ValueError:
         return {}
     return got if isinstance(got, dict) else {}
+
+
+def _request(e: urllib.error.HTTPError, problem: dict) -> str:
+    """The id Go refused the request under, which its journal names, so a refusal is found there."""
+    got = (e.headers.get(requestlog.HEADER) if e.headers else None) or problem.get("request")
+    return got if isinstance(got, str) and requestlog.REQUEST_ID.fullmatch(got) else ""
 
 
 def _retry_after(e: urllib.error.HTTPError) -> float | None:
@@ -114,6 +128,10 @@ def settled(e: Refused) -> bool:
     """Whether Go's refusal means nothing was issued: it answered, and not with a request to
     wait. A 5xx answer leaves the request's outcome unknown."""
     return 400 <= e.status < 500 and e.status not in (408, 429)
+
+
+def _current_machine_refusal(e: Refused) -> str:
+    return refusal.resend(str(e), "from the session's current machine")
 
 
 def _incarnation(provider: str, psession: str, runtime: str) -> dict:
@@ -194,6 +212,8 @@ def bind(session: str, token: str, provider: str, psession: str, runtime: str,
     except Unsent as e:
         return refusal.retry(str(e))
     except Refused as e:
+        if e.code == "session-binding-moved":
+            return _current_machine_refusal(e)
         if not settled(e):  # Go asked to wait past the retries, or did not say: the binding may land later
             return refusal.retry(str(e))
         if e.code in INVALID_TOKEN:
@@ -212,6 +232,8 @@ def detach(session: str, token: str, key: str | None = None, handover: str = "")
     except Unsent as e:
         return refusal.retry(str(e))
     except Refused as e:
+        if e.code == "session-binding-moved":
+            return _current_machine_refusal(e)
         if e.code in INVALID_TOKEN:
             return refusal.reconnect(f"{session} can no longer act: its token is not valid")
         if e.status == 400 and handover:  # a handover Go does not take: sent again it fails again
@@ -233,6 +255,8 @@ def checkpoint(token: str, body: dict) -> tuple[str, bool]:
     except Unsent as e:
         return refusal.retry(str(e)), True
     except Refused as e:
+        if e.code == "session-binding-moved":
+            return _current_machine_refusal(e), False
         if e.code in INVALID_TOKEN:
             return refusal.reconnect("the session's token is not valid"), False
         if not settled(e):
@@ -252,6 +276,8 @@ def acknowledge(session: str, token: str, directive: str) -> str:
     except Unsent as e:
         return refusal.retry(str(e))
     except Refused as e:
+        if e.code == "session-binding-moved":
+            return _current_machine_refusal(e)
         if e.code in INVALID_TOKEN:
             return refusal.reconnect(f"unknown, detached or stale token for {session}")
         if not settled(e):
@@ -293,9 +319,28 @@ def seat_hand(session: str, token: str, generation: int, to: str, to_epoch: int)
 
 
 def seat_renew(session: str, token: str, generation: int) -> dict:
-    """The holder moves its lease. Every renewal is its own request: one key per generation would be
-    answered from the first and never move the lease again. Raises `Refused` or `Unsent`."""
     return post(f"/sessions/{session}/seat/renewal", {"generation": generation}, uuid.uuid4().hex, SESSION_CARRIER, token)
+
+
+def seat_read(session: str, token: str, directives: list[str], seat_generation: int | None, ws: Path) -> None:
+    """Record foreground frames this native session returned to its main loop.
+
+    The Go authority, unlike the incumbent, records each semantic proof under a stable key. A
+    returned seat generation is its frame's identity and must not be replaced by a newer read.
+    """
+    import ack  # noqa: E402
+    if (ack.records(ws).get(session) or {}).get("authority") != "coordination":
+        return
+    ids = sorted({str(uuid.UUID(directive)) for directive in directives})
+    if not ids and seat_generation is None:
+        return
+    generation = seat_generation if seat_generation is not None else globals()["seat_generation"](session, token)
+    chunks = [ids[i:i + 16] for i in range(0, len(ids), 16)] or [[]]
+    for i, directives in enumerate(chunks):
+        seat = seat_generation is not None and i == 0
+        body = {"generation": generation, "read": {"directives": directives, "seat": seat}}
+        key = _own_key("seat.read", session, str(generation), str(seat), *directives)
+        post(f"/sessions/{session}/seat/renewal", body, key, SESSION_CARRIER, token)
 
 
 def seat_release(session: str, token: str, generation: int) -> dict:
@@ -378,15 +423,27 @@ def edge_card(card: str, unlink: bool, kind: str, to: dict, why: str, token: str
 
 def get(path: str, token: str, timeout: float = 10.0) -> dict:
     """One read on the session's carrier. Raises `Refused` or `Unsent` as a write does."""
-    req = urllib.request.Request(_base() + path, headers={SESSION_CARRIER: token, "User-Agent": door.USER_AGENT})
+    req = urllib.request.Request(_base() + path, headers=session_headers(token))
     try:
         with door.open_direct(req, timeout) as r:
             return json.loads(r.read() or b"{}")
     except urllib.error.HTTPError as e:
         problem = _problem(e)
-        raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "") from None
+        raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
+                      request=_request(e, problem)) from None
     except (urllib.error.URLError, OSError, TimeoutError) as e:
         raise Unsent(f"{_base()}{path}: no answer ({e})") from None
+
+
+def machines_here(token: str) -> str:
+    """The workspace's machines as a launch's `on` may name them, for a refusal of one it named
+    wrongly: each by its name and registration, or its registration alone when it reports no name."""
+    try:
+        items = get("/machines", token).get("items") or []
+    except (Refused, Unsent) as e:
+        return f"the machines here could not be read ({e})"
+    named = [f"{m['name']} ({m['id']})" if m.get("name") else m["id"] for m in items if m.get("id")]
+    return f"machines here: {', '.join(named)}" if named else "no machine reaches this workspace"
 
 
 def executing_card(session: str, token: str) -> dict | None:
@@ -543,6 +600,14 @@ def seat_launch(session: str, token: str, body: dict, key: str) -> str:
     return f"launch waiting: {answer['id']} {answer.get('reason') or answer.get('state')}{on}"
 
 
+def seat_withdraw(session: str, token: str, launch: str, key: str) -> str:
+    """The holder withdraws a launch still waiting (`POST /launches/{launch}/withdrawal`), keyed by the
+    line's own key. Raises `NotSeated`, `Refused` or `Unsent`."""
+    seat_generation(session, token)
+    answer = post(f"/launches/{launch}/withdrawal", {}, key, SESSION_CARRIER, token)
+    return f"withdrawn: {answer.get('id', launch)}"
+
+
 def seat_action(session: str, token: str, body: dict, key: str) -> str:
     """The holder asks the machine a session runs on to wake, control or retire it
     (`POST /actions`), keyed by the line's own key so a rerun after a lost answer is answered from
@@ -564,6 +629,15 @@ def lift(session: str, token: str, kind: str, repo: str, at: int | str, reason: 
             **({"pr": at} if kind == "review" else {"branch": at})}
     post("/gates/lifts", body, _own_key("gate.lift", session, key), SESSION_CARRIER, token)
     return f"lifted: review {repo}#{at}" if kind == "review" else f"lifted: critic {repo} {at}"
+
+
+def bench_lift(session: str, token: str, vendor: str, model: str, reason: str, key: str) -> str:
+    """The holder ends a benched judge's streak (`POST /gates/bench-lifts`) at the generation it
+    holds. `key` is the line's occurrence id, so a resend after a lost answer is answered from the
+    first. Raises `NotSeated`, `Refused` or `Unsent`."""
+    body = {"vendor": vendor, "model": model, "generation": seat_generation(session, token), "reason": reason}
+    post("/gates/bench-lifts", body, _own_key("gate.bench.lift", session, key), SESSION_CARRIER, token)
+    return f"lifted: bench {vendor} {model}"
 
 
 def raise_owner(session: str, token: str, title: str, text: str, need: str = "", about: str = "") -> int:
@@ -624,7 +698,6 @@ RULED_OUT = {
     "card reclassify priority": "a Go card has no priority, and nothing on Go reads one (#4812)",
     "card outcome": "Go has no outcome brief (#4812)",
     "effort": "a Go card has no effort (#4812)",
-    "lift bench": "Go has no reviewer bench (#4812)",
     "authorship": "Go attests a model only from what the machine observed (#4812)",
 }
 

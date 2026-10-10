@@ -142,7 +142,22 @@ def opencode_pid_of(worker: str) -> int | None:
     """The server serving this worker: the chain holds and it holds the transcript. A shell
     command inherits the descriptor too, which is why the file alone names nobody (#870)."""
     named = opencode_declared_pid(worker)
-    return named if named is not None and named in writers(opencode_transcript(worker)) else None
+    if named is None:
+        return None
+    return named if any(_descends(w, named) for w in writers(opencode_transcript(worker))) else None
+
+
+def _descends(pid: int, ancestor: int, hops: int = 4) -> bool:
+    """`pid` is `ancestor` or a few forks below it: on Linux the server named is the cage's outer
+    bubblewrap, which closes the transcript and leaves it to the server it forked (2026-10-10)."""
+    for _ in range(hops + 1):
+        if pid == ancestor:
+            return True
+        parent = runtime_id.parent_of(pid)
+        if parent is None or parent <= 1:
+            return False
+        pid = parent
+    return False
 
 
 def opencode_loaded(worker: str) -> bool:

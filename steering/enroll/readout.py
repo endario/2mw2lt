@@ -102,25 +102,26 @@ def due(ws: Path, hook: dict, now: float) -> bool:
     return True
 
 
-def with_tmux(rec: dict, left: float) -> None:
+def with_tmux(rec: dict, left: float) -> tuple[str, str] | None:
     """Whether a window is on the tmux session this process runs in, stated on the reading. Said
     only inside a pane, and never at the cost of the reading: the lookup makes up to three tmux calls
     in a row, each held to a sixth of what is left, half a second at most. A reading without it
-    would read as a window gone, so a mid-turn one carries it too."""
+    would read as a window gone, so a mid-turn one carries it too. Answers the (socket, pane)."""
     if left < 0.5:
-        return
+        return None
     each = min(0.5, left / 6)
     import subprocess
     import wakeexec
     tmux = os.environ.get("TMUX")
     try:
-        state = wakeexec.tmux_state(
+        where, state = wakeexec.pane_state(
             os.getppid(), socket=tmux.split(",", 1)[0] if tmux else None,
             run=lambda *a, **k: subprocess.run(*a, **{**k, "timeout": each}))
     except Exception:
-        return
+        return None
     if state:
         rec["tmux"] = state
+    return where
 
 
 def midturn(hook: dict, ws: Path, rid: str | None, timeout: float) -> None:
@@ -160,7 +161,7 @@ def main() -> int:
     left = deadline - time.monotonic()
     if left < 0.2:
         return finish()
-    with_tmux(rec, left)
+    pane = with_tmux(rec, left)
     left = deadline - time.monotonic()
     sent_at = time.monotonic(); anchor = Path(os.environ.get("CLAUDE_PROJECT_DIR") or hook.get("cwd") or os.getcwd()); where = anchor
     ws = anchor  # a fallback the targeting block below can still post through if resolution fails
@@ -177,7 +178,21 @@ def main() -> int:
     # entry (`vitals.read()`'s own `entry.get("entrypoint")`), so nothing here needs re-reading
     # the transcript just to decide whether to proceed.
     left = deadline - time.monotonic()
-    if rec.get("entrypoint") == targeting.TAB_ENTRYPOINT and left > 1.0:
+    # A pane is the session's route wherever it runs, as connect handed it over (doc 118 §3.1), with
+    # whether a window is on it, which the desk marks (#5026).
+    if pane is not None and rec.get("runtime_id") and left > 1.0:
+        try:
+            trec = targeting.build(provider_session=hook.get("session_id"),
+                                   runtime_id=rec["runtime_id"], observed_at=adapter.utc(),
+                                   entrypoint=targeting.TMUX_ENTRYPOINT, pid=os.getppid(), cwd=str(anchor),
+                                   tmux=pane, tmux_attached=rec.get("tmux") == "attached" if rec.get("tmux") else None)
+            why = targeting.validate(trec)
+            if why:
+                raise RuntimeError(why)
+            observe_post.post(trec, ws, min(1.0, deadline - time.monotonic()), route="targeting")
+        except Exception as e:
+            record("readout", f"tmux targeting capture failed: {failure(e)}", where)
+    elif rec.get("entrypoint") == targeting.TAB_ENTRYPOINT and left > 1.0:
         try:
             entry = last_assistant_entry(hook)
             if entry is None:

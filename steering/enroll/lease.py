@@ -33,6 +33,7 @@ def held(flags: dict[str, str]) -> dict | None:
     provider session cannot be told. There is no lease token: Go judges at each verb whether the
     session holds the seat."""
     import connect
+    import ack
     try:
         ws = connect.required_workspace_root(connect.project_dir(), timeout=2.0)
         psession = connect.provider_session(flags)
@@ -42,20 +43,24 @@ def held(flags: dict[str, str]) -> dict | None:
         session, token = connect.own_enrolment(ws, psession)
     except connect.Refused:
         return None
-    return {"provider_session": psession, "session": session, "token": token, "ws": ws}
+    authority = (ack.records(ws).get(session) or {}).get("authority")
+    return {"provider_session": psession, "session": session, "token": token, "ws": ws, "authority": authority}
 
 
 GO_NOT_SEATED = "refused: this session does not hold the seat ({why})"
 # Go's refusals of a holder whose seat moved between its read of the seat and its command.
 SEAT_LOST = frozenset({"seat-not-holder", "seat-generation-stale"})
 _NEED = re.compile(r"^(?P<verb>dispose|promote):\s*token\s+@lease\s+(?P<item>\S+)\s+(?P<reason>.+)$", re.S)
-# A launch on Go: the machine is the `machine` `GET /sessions` lists (not its `machine_registration`),
-# and the account the number its team gave it or the vendor's own id, never one machine's launcher.
+# A launch on Go: the machine is the `machine` `GET /sessions` lists, a registration `GET /machines`
+# lists (`m-<id>`), or the name a machine's census reports (quoted when it has a space), and the account the number its team gave
+# it or the vendor's own id, never one machine's launcher.
 _LAUNCH = re.compile(r"^launch:\s*token\s+@lease\s+(?P<harness>[a-z][a-z0-9-]{0,31})"
-                     r"(?:\s+on\s+(?P<machine>[0-9a-f-]{36}))?(?:\s+vendor\s+(?P<vendor>[a-z0-9][a-z0-9-]{0,31}))?"
+                     r"(?:\s+on\s+(?:(?:m-)?(?P<machine>[0-9a-f-]{36})|\"(?P<quoted>[^\"\n]{1,64})\"|(?P<machine_name>[^\s\"]{1,64})))?"
+                     r"(?:\s+vendor\s+(?P<vendor>[a-z0-9][a-z0-9-]{0,31}))?"
                      r"(?:\s+account\s+(?P<account>\S{1,256}))?(?:\s+model\s+(?P<model>\S{1,128}))?"
                      r"(?:\s+thinking\s+(?P<thinking>[a-z]{1,32}))?(?:\s+effort\s+(?P<effort>low|medium|high|xhigh|max))?"
                      r"(?:\s+(?P<window>window))?\s+because\s+(?P<reason>\S.*?)\s*$", re.S)
+_WITHDRAW = re.compile(r"^withdraw:\s*token\s+@lease\s+(?P<launch>[0-9a-f-]{36})\s*$")
 _BACKLOG = re.compile(r"^backlog:\s*token\s+@lease\s*$")
 _ROSTER = re.compile(r"^roster:\s*token\s+@lease(?P<gone>\s+with\s+gone)?\s*$")
 # The seat's machine actions on Go, each naming the session it acts on.
@@ -74,6 +79,8 @@ _ACTION_USAGE = {
 _RELAY = re.compile(r"^relay:\s*token\s+@lease\s+to\s+(?P<target>[^\s@]+)(?:@(?P<epoch>[0-9]{1,9}))?\s+(?P<text>.+)$", re.S)
 # `lift:` of a review series by its pull request or a critic series by its branch (speak.py _LIFT).
 _LIFT = re.compile(r"^lift:\s*token\s+@lease\s+(?P<kind>review|critic)\b(?P<rest>.*)$", re.S)
+# `lift:` of a reviewer's bench, by the vendor and model its bench reason names (speak.py _LIFT).
+_BENCH = re.compile(r"^lift:\s*token\s+@lease\s+bench\s+(?P<vendor>\S+)\s+(?P<model>\S+)\s+(?P<reason>\S.*)$", re.S)
 _LIFT_AT = {"review": re.compile(r"\s+(?P<repo>\S+)\s+pr\s+(?P<at>[0-9]{1,9})\s+(?P<reason>\S.*)$", re.S),
             "critic": re.compile(r"\s+(?P<repo>\S+)\s+branch\s+(?P<at>\S+)\s+(?P<reason>\S.*)$", re.S)}
 
@@ -90,14 +97,18 @@ def go_say(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         return _go_need(rec, verb, line)
     if verb == "launch":
         return _go_launch(rec, line, key)
+    if verb == "withdraw":
+        return _go_withdraw(rec, line, key)
     if verb in _ACTION:
         return _go_action(rec, verb, line, key)
     lift = _LIFT.match(line)
     if lift:
         return _go_lift(rec, lift, key)
+    if re.match(r"^lift:\s*token\s+@lease\s+bench\b", line):
+        return _go_bench_lift(rec, line, key)
     if verb in ("backlog", "roster"):
         return _go_read(rec, verb, line)
-    ruled = session_routes.ruled_out("lift bench" if re.match(r"^lift:\s*token\s+@lease\s+bench\b", line) else verb)
+    ruled = session_routes.ruled_out(verb)
     if ruled:
         return 1, ruled, False
     if verb != "relay":
@@ -153,10 +164,12 @@ def _go_launch(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
     import session_routes
     m = _LAUNCH.match(line)
     if not m:
-        return 2, refusal.use("launch", "malformed launch: its clauses go in the order on, vendor, account, model, thinking, effort, window; on Go, `on` names a machine as /sessions lists it in `machine`, not its `machine_registration`"), False
+        return 2, refusal.use("launch", "malformed launch: its clauses go in the order on, vendor, account, model, thinking, effort, window; on Go, `on` names a machine as /sessions lists it in `machine`, a registration as /machines lists it, or the machine's name"), False
     if m["harness"] == "claude" and not (m["model"] and m["effort"]):
         return 2, refusal.use("launch", "a claude launch names its model (as Claude Code takes it) and its effort"), False
-    body = {k: m[k] for k in ("harness", "machine", "vendor", "account", "model", "thinking", "effort") if m[k]}
+    body = {k: m[k] for k in ("harness", "machine", "machine_name", "vendor", "account", "model", "thinking", "effort") if m[k]}
+    if m["quoted"]:
+        body["machine_name"] = m["quoted"]
     body["reason"] = " ".join(m["reason"].split())
     if m["window"]:
         body["window"] = True
@@ -169,8 +182,32 @@ def _go_launch(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
     except session_routes.Refused as e:
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
+        if e.code in ("launch-machine-unknown", "launch-machine-ambiguous"):
+            return 1, refusal.use("launch", f"{e}; {session_routes.machines_here(rec['token'])}"), False
         if session_routes.settled(e):
             return 1, refusal.use("launch", str(e)), False
+        return 1, refusal.retry(str(e)), True
+    return 0, said, False
+
+
+def _go_withdraw(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
+    """`withdraw:` on Go: the brain withdraws a launch still waiting, so it is never placed."""
+    import refusal
+    import session_routes
+    m = _WITHDRAW.match(line)
+    if not m:
+        return 2, refusal.use("withdraw", "malformed withdraw: withdraw: token @lease <launch id>"), False
+    try:
+        said = session_routes.seat_withdraw(rec["session"], rec["token"], m["launch"], key)
+    except session_routes.NotSeated as why:
+        return 1, GO_NOT_SEATED.format(why=why), False
+    except session_routes.Unsent as e:
+        return 1, refusal.retry(str(e)), True
+    except session_routes.Refused as e:
+        if e.code in SEAT_LOST:
+            return 1, GO_NOT_SEATED.format(why=e), False
+        if session_routes.settled(e):
+            return 1, refusal.use("withdraw", str(e)), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 
@@ -225,6 +262,30 @@ def _go_lift(rec: dict, lift: re.Match, key: str) -> tuple[int, str, bool]:
     return 0, said, False
 
 
+def _go_bench_lift(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
+    """`lift: bench` on Go: ends a benched judge's streak, as the seat. `key` is the line's occurrence,
+    so a resend under `--retry` is answered from the first lift."""
+    import refusal
+    import session_routes
+    m = _BENCH.match(line)
+    if not m:
+        return 2, refusal.use("lift", "malformed lift: bench invocation"), False
+    try:
+        said = session_routes.bench_lift(rec["session"], rec["token"], m["vendor"], m["model"],
+                                         " ".join(m["reason"].split()), key)
+    except session_routes.NotSeated as why:
+        return 1, GO_NOT_SEATED.format(why=why), False
+    except session_routes.Unsent as e:
+        return 1, refusal.retry(str(e)), True
+    except session_routes.Refused as e:
+        if e.code in SEAT_LOST:
+            return 1, GO_NOT_SEATED.format(why=e), False
+        if session_routes.settled(e):
+            return 1, refusal.use("lift", str(e)), False
+        return 1, refusal.retry(str(e)), True
+    return 0, said, False
+
+
 def _go_read(rec: dict, verb: str, line: str) -> tuple[int, str, bool]:
     """`backlog:` or `roster:` on Go: a read the brain makes as the seat's holder — the Needs You
     rows open for it and for the owner, or the workspace's sessions."""
@@ -247,6 +308,41 @@ def _go_read(rec: dict, verb: str, line: str) -> tuple[int, str, bool]:
         return 1, refusal.use(verb, str(e)) if session_routes.settled(e) else refusal.retry(str(e)), False
 
 
+def go_read(rec: dict, body: bytes) -> tuple[int, str]:
+    """Record frames the module actually returned, or leave an incumbent workspace alone."""
+    import refusal
+    import session_routes
+    try:
+        proof = json.loads(body or b"null")
+    except ValueError:
+        proof = None
+    if not isinstance(proof, dict) or set(proof) - {"directives", "seat_generation"}:
+        return 2, "refused: a seat read is a JSON object with directives and an optional seat_generation"
+    directives = proof.get("directives")
+    generation = proof.get("seat_generation")
+    if not isinstance(directives, list) or not all(isinstance(directive, str) for directive in directives):
+        return 2, "refused: a seat read names directives as strings"
+    if generation is not None and (not isinstance(generation, int) or isinstance(generation, bool)):
+        return 2, "refused: a seat read's seat_generation is a whole number"
+    if rec.get("authority") != "coordination":
+        return 0, "read: no native authority"
+    try:
+        session_routes.seat_read(rec["session"], rec["token"], directives, generation, rec["ws"])
+    except session_routes.NotSeated as why:
+        if generation is None:
+            return 0, "read: this session does not hold the seat"
+        return 1, GO_NOT_SEATED.format(why=why)
+    except session_routes.Unsent as e:
+        return 1, refusal.retry(str(e))
+    except session_routes.Refused as e:
+        if e.code in SEAT_LOST:
+            return 1, GO_NOT_SEATED.format(why=e)
+        return 1, f"refused: {e}" if session_routes.settled(e) else refusal.retry(str(e))
+    except ValueError as e:
+        return 2, f"refused: a seat read's directive id is invalid ({e})"
+    return 0, "read: frames"
+
+
 def go_post(rec: dict, target: str, body: bytes) -> tuple[int, str]:
     """A lease post: (exit code, answer). The seat's reply to a say answers the
     request the say was (`session_routes.answer`), at the generation the holder holds; Go has no
@@ -255,6 +351,8 @@ def go_post(rec: dict, target: str, body: bytes) -> tuple[int, str]:
     import refusal
     import session_routes
     target = target.rstrip("/")
+    if target == "/steering/seat/read":
+        return go_read(rec, body)
     if target not in ("/steering/brain/reply", "/steering/brain/attach", "/steering/brain/detach", "/steering/push/raise"):
         return 1, refusal.escalate(f"post {target}: not served by Go yet", to="seat")
     try:

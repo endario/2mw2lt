@@ -8,8 +8,10 @@ this file exists to close (design.md §3, round 3 critic finding).
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tomllib
+import unicodedata
 from pathlib import Path
 
 import agentjob
@@ -38,7 +40,7 @@ _cache = _Cache()
 def validate(data) -> dict:
     if not isinstance(data, dict):
         raise ValueError("is not a table")
-    extra = set(data) - {"schema", "capacity", "placement", "routing"}
+    extra = set(data) - {"schema", "capacity", "placement", "routing", "machine"}
     if extra:
         raise ValueError(f"has an unknown top-level key ({', '.join(sorted(extra))})")
     if "schema" in data and data["schema"] != 1:
@@ -68,7 +70,7 @@ def validate(data) -> dict:
     routing = data.get("routing", {})
     if not isinstance(routing, dict):
         raise ValueError("[routing] is not a table")
-    extra = set(routing) - {"judges_exclude", "claude_launchers", "worker_forge"}
+    extra = set(routing) - {"judges_exclude", "claude_launchers", "worker_forge", "account_uses"}
     if extra:
         raise ValueError(f"[routing] has an unknown key ({', '.join(sorted(extra))})")
     if "judges_exclude" in routing and not (isinstance(routing["judges_exclude"], list)
@@ -79,11 +81,55 @@ def validate(data) -> dict:
     if "claude_launchers" in routing and not (isinstance(routing["claude_launchers"], list)
                                               and routing["claude_launchers"]):
         raise ValueError("[routing].claude_launchers is not a non-empty list")
+    if "account_uses" in routing:
+        problem = account_uses_problem(routing["account_uses"])
+        if problem:
+            raise ValueError(f"[routing].account_uses {problem}")
     if routing.get("worker_forge", "login") not in ("login", "app"):
         raise ValueError(f"[routing].worker_forge={routing['worker_forge']!r} is not login or app")
+    machine = data.get("machine", {})
+    if not isinstance(machine, dict):
+        raise ValueError("[machine] is not a table")
+    extra = set(machine) - {"name"}
+    if extra:
+        raise ValueError(f"[machine] has an unknown key ({', '.join(sorted(extra))})")
+    if "name" in machine and not valid_machine_name(machine["name"]):
+        raise ValueError(f"[machine].name={machine['name']!r} is not 1 to 64 bytes, trimmed, without a control character")
     # Kept beside the limits under keys no `[capacity]` entry can take, so one cache holds them all.
     return {**table, **({"placement": placing} if placing else {}),
-            **({"routing": routing} if routing else {})}
+            **({"routing": routing} if routing else {}), **({"machine": machine} if machine else {})}
+
+
+# What an account can be declared for, as the daemon reads it (go-account-purposes-design.md §1).
+PURPOSES = ("seat", "work", "gate")
+_TARGET = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}(/[^\x00-\x1f\x7f]{1,200})?$")
+
+
+def account_uses_problem(value: object) -> str | None:
+    """Why `[routing].account_uses` is not one the daemon would take, or None: at most 64 targets,
+    each `vendor` or `vendor/account`, naming a list of distinct purposes. Checked here so a typo
+    is caught on the machine and does not cost it its readings."""
+    if not isinstance(value, dict) or len(value) > 64:
+        return "is not a table of at most 64 accounts"
+    for target, purposes in value.items():
+        if not isinstance(target, str) or not _TARGET.match(target) or target != target.strip():
+            return f"names {target!r}, which is not a vendor or vendor/account"
+        if (not isinstance(purposes, list) or any(p not in PURPOSES for p in purposes)
+                or len(set(purposes)) != len(purposes)):
+            return f"gives {target!r} {purposes!r}, not a list of distinct purposes from {', '.join(PURPOSES)}"
+    return None
+
+
+def account_uses(path: Path = DEFAULT_PATH) -> dict[str, list[str]]:
+    """What this machine declares each account for, `{target: [purpose, ...]}`; none declared is
+    every account for every purpose."""
+    return {k: list(v) for k, v in capacity(path).get("routing", {}).get("account_uses", {}).items()}
+
+
+def valid_machine_name(value: object) -> bool:
+    """The bound Go's census holds a machine's name to, so a name it would refuse is never sent."""
+    return (isinstance(value, str) and 0 < len(value.encode()) <= 64 and value.strip() == value
+            and not any(unicodedata.category(c) in ("Cc", "Cf") for c in value))
 
 
 def _state(path: Path) -> tuple[dict, str | None]:
@@ -126,8 +172,8 @@ def _state(path: Path) -> tuple[dict, str | None]:
 
 
 def capacity(path: Path = DEFAULT_PATH) -> dict:
-    """The raw `[capacity]` table (with `[placement]` and `[routing]` under the keys `placement` and
-    `routing` when set), or `{}` when the file is absent or malformed with nothing yet
+    """The raw `[capacity]` table (with `[placement]`, `[routing]` and `[machine]` under the keys `placement`,
+    `routing` and `machine` when set), or `{}` when the file is absent or malformed with nothing yet
     cached for it — otherwise the last good table this process parsed for it (the keep-last-good
     discipline this module implements, round 2 review)."""
     return _state(path)[0]
@@ -226,3 +272,9 @@ def worker_forge(path: Path = DEFAULT_PATH) -> str:
     """Whose GitHub credential a worker launched here holds (doc 181 §5): `login`, the machine's
     own, until the App's is proven on one worker; `app` for the App's installation token."""
     return capacity(path).get("routing", {}).get("worker_forge", "login")
+
+
+def machine_name(path: Path = DEFAULT_PATH) -> str | None:
+    """The name the console shows this machine by, or None when the file names none and the
+    hostname stands in."""
+    return capacity(path).get("machine", {}).get("name")

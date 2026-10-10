@@ -1,5 +1,5 @@
 import type { Register, EngineInterface, Timer, HookStream, ProcessSpawnChunk, ProcessSpawnResult } from 'claude-code'
-import { lines, atLeast, pick, invokes, tokensOf, due, owed, nextSeat, asksSeat, seatCall, seatSchema, resendId, entryRefusal, READ_KEPT, POINTER, CHECKPOINT, CONNECT_AGAIN, SEAT_SECTION, SEAT_TOOLS } from './frames'
+import { lines, atLeast, pick, invokes, tokensOf, due, owed, framesEntry, obsoleteSeatRefusal, nextSeat, asksSeat, seatCall, seatSchema, resendId, entryRefusal, READ_KEPT, POINTER, CHECKPOINT, CONNECT_AGAIN, SEAT_SECTION, SEAT_TOOLS } from './frames'
 import type { SeatCall } from './frames'
 
 // The plugin's hooks module (#3872): it holds a connected Claude session's steering stream through
@@ -110,6 +110,30 @@ async function repoint($: EngineInterface) {
 async function unpoint($: EngineInterface) {
   await $.state.set(POINTED, false)
   await $.state.set(APPENDED, false)
+}
+
+// A frame arriving while a client call is outstanding was added to PENDING while its prior pointer
+// still stood. A refusal keeps the original batch untouched, but re-points that genuinely new row.
+async function refuseFrames($: EngineInterface, pending: readonly string[]) {
+  await locked(async () => {
+    await unpoint($)
+    const { value: now = [] } = await $.state.get(PENDING)
+    if (now.some(id => !pending.includes(id))) await point($)
+  })
+}
+
+// A returned seat notice identifies one generation. When that exact generation has gone stale,
+// remembering its id as read prevents its replay from blocking the ordinary frames beside it.
+async function retireStaleSeatFrame($: EngineInterface, seatFrameId: string) {
+  await locked(async () => {
+    const { value: now = [] } = await $.state.get(PENDING)
+    const left = now.filter(id => id !== seatFrameId)
+    await $.state.set(PENDING, left)
+    const { value: read = [] } = await $.state.get(READ)
+    if (!read.includes(seatFrameId)) await $.state.set(READ, [...read, seatFrameId].slice(-READ_KEPT))
+    await unpoint($)
+    if (left.length) await point($)
+  })
 }
 
 // A fixed text the model must read: a turn of its own on an idle session, a row in the running
@@ -355,7 +379,9 @@ export const register: Register = on => {
     return runSeatCall($, call)
   })
 
-  on('tool.call', { tool: TOOL }, async $ => {
+  on('tool.call', { tool: TOOL }, async ($, e, next) => {
+    const { agentId } = e as unknown as { agentId?: string }
+    if (!framesEntry(agentId, next.origin.plugin)) return { result: 'No steering frame is waiting.' }
     const { value: session = '' } = await $.state.get(SESSION)
     const pending = await locked(async () => (await $.state.get(PENDING)).value ?? [])
     let recording = ''
@@ -363,23 +389,39 @@ export const register: Register = on => {
       const at = await $.process.run(['python3', script($, 'hold.py'), '--frame-path', session], { cwd: root })
       if (at.exitCode === 0) recording = String(await $.fs.read(at.stdout.trim()).catch(() => ''))
     }
-    const { text, envelopes, envelopeIds, found } = pick(recording, pending)
-    // An envelope whose ack failed is replayed until it lands, and its replay must still wake.
-    const unacked = new Set<string>()
-    // Answering the tool is the ack: "acked" keeps meaning the model has the envelope.
-    for (const [i, ulid] of envelopes.entries()) {
+    const { text, envelopes, found, read } = pick(recording, pending)
+    if (read.directives.length || read.seatGeneration !== undefined) {
+      const proof = await runSeatCall($, { client: 'post', path: '/steering/seat/read',
+        stdin: JSON.stringify({ directives: read.directives, ...(read.seatGeneration !== undefined ? { seat_generation: read.seatGeneration } : {}) }) })
+      if ('deny' in proof) {
+        if (read.seatFrameId && obsoleteSeatRefusal(proof.deny)) await retireStaleSeatFrame($, read.seatFrameId)
+        else await refuseFrames($, pending)
+        return { deny: `refused: foreground frame read: ${proof.deny}` }
+      }
+    }
+    // Prove the selected envelope before its receipt lets the daemon stop replaying it: a refused
+    // proof then remains recoverable even if this local recording later trims it.
+    const ackFailures: string[] = []
+    for (const ulid of envelopes) {
       const acked = await $.process.run(['python3', script($, 'ack.py'), session, ulid], { cwd: root })
-      if (acked.exitCode !== 0) unacked.add(envelopeIds[i] ?? '')
+      if (acked.exitCode !== 0) {
+        ackFailures.push(`ack.py ${ulid} exited ${acked.exitCode}${acked.stderr.trim() ? `: ${acked.stderr.trim()}` : ''}`)
+      }
       if (acked.exitCode !== 0) $.ui.log(`2mw2lt: ack.py ${ulid} exited ${acked.exitCode}: ${acked.stderr.trim()}`, { to: 'debug' })
+    }
+    if (ackFailures.length) {
+      await refuseFrames($, pending)
+      return { deny: `refused: foreground frame acknowledgement: ${ackFailures.join('; ')}` }
     }
     // Only what was returned leaves PENDING: an id the recording does not hold yet stays, and does
     // not wake the session again. A frame that arrived while this ran gets its own pointer.
     await locked(async () => {
       const { value: now = [] } = await $.state.get(PENDING)
-      const left = now.filter(id => !found.includes(id))
+      const readNow = found
+      const left = now.filter(id => !readNow.includes(id))
       await $.state.set(PENDING, left)
       const { value: read = [] } = await $.state.get(READ)
-      await $.state.set(READ, [...read, ...found.filter(id => !unacked.has(id))].slice(-READ_KEPT))
+      await $.state.set(READ, [...read, ...readNow].slice(-READ_KEPT))
       await unpoint($)
       if (left.some(id => !pending.includes(id))) await point($)
     })

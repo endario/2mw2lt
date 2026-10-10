@@ -57,8 +57,6 @@ from verb_help import current_args, error, help_requested, script_help  # noqa: 
 
 REOPEN_AFTER = 2.0    # seconds between opens; the loop the skills carried slept the same
 HOLD_READ = 90.0      # the agent keeps the stream alive every 20s; several missed means dead
-SEAT_CHECK = 1800.0   # seconds between reads of the seat this session may hold
-SEAT_RENEW = 6300.0   # seconds left on the lease below which its holder renews: half of Go's SeatLease
 MAX_FRAME_RECORD_BYTES = 64 * 1024
 # The frames `--until-event` ends on. Presence, usage and fleet are state a later frame restates,
 # and `closed` for an uplink is reopened here; a revoked hold is the session's to answer. A say that
@@ -216,32 +214,6 @@ def who(ws: Path, h: harness_mod.Harness, psession: str | None, pid: int | None,
     psession, rid = incarnation(psession, pid, h.provider)
     name, token = own_enrolment(ws, psession, session)
     return name, token, rid, psession
-
-
-def seat_renewer(ws: Path, session: str, token: str,
-                 clock: Callable[[], float] = time.time) -> Callable[[], None]:
-    """What renews this session's seat on Go while its hold runs. Go lets a seat lapse unrenewed,
-    and a held stream is the holder still answering, as an answered kick was to the incumbent.
-    Called on every line the hold reads; it reads the seat at most once every `SEAT_CHECK`, and
-    renews while this session holds it with less than half its lease left
-    (go-unit8-seat-design.md §1). A failure is recorded and never ends the hold."""
-    import session_routes
-    due = clock()
-
-    def renew() -> None:
-        nonlocal due
-        now = clock()
-        if now < due:
-            return
-        due = now + SEAT_CHECK
-        try:
-            seat = session_routes.read_seat(token)
-            if seat.get("holder") == session and moment(seat["expires_at"]).timestamp() - now < SEAT_RENEW:
-                session_routes.seat_renew(session, token, int(seat["generation"]))
-        except (Exception, SystemExit) as e:  # a door it cannot name exits
-            door.record("hold", f"renewing the seat failed: {door.failure(e)}", ws)
-
-    return renew
 
 
 def frame_path(ws: Path, session: str) -> Path:
@@ -444,8 +416,7 @@ def close_recording(recorded) -> None:
 def hold(port: str, session: str, token: str, rid: str, frames: Path, until: bool = False,
          service: bool = False, workspace: Path | None = None,
          plugin: bool = False,
-         lapsed: Callable[[], str | None] | None = None, config: Path | None = None,
-         renew: Callable[[], None] | None = None) -> int:
+         lapsed: Callable[[], str | None] | None = None, config: Path | None = None) -> int:
     """Open the stream and yield its frames, until a 403 says no reopen would help.
 
     A 403 is the one answer this loop cannot retry: the token, the node or the incarnation is
@@ -458,7 +429,6 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
     `lapsed` is asked on every line read, keepalives included, and a reason it gives ends the
     hold with 1. `config` is the session's Claude config directory, which the agent reads the
     session's transcript under: it runs outside the session's environment and cannot know it.
-    `renew` is called on every line read.
     """
     url = f"http://127.0.0.1:{port}/steering/session/{session}/stream"
     quiet = False    # the standing failure has been named; naming it again every 2s is noise
@@ -484,8 +454,6 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                         if why:
                             print(why, file=sys.stderr)
                             return 1
-                        if renew:
-                            renew()
                         if raw.startswith(b"data: ") and recorded:
                             recorded = record(recorded, frames, raw)
                             if recorded is None and (lost := recording_lost(plugin)):
@@ -640,8 +608,7 @@ def main(argv: list[str]) -> int:
                   f"the holder claim for {psession} is no longer fresh; the plugin's module that "
                   f"started this hold is gone, so it ends") if plugin else None
         return hold(port, session, token, rid, frames, until, service, ws, plugin, lapsed,
-                    h.config_dir() if h.provider == "claude" else None,
-                    renew=seat_renewer(ws, session, token))
+                    h.config_dir() if h.provider == "claude" else None)
 
 
 if __name__ == "__main__":

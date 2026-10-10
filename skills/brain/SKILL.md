@@ -455,8 +455,10 @@ account default decides the level. The daemon picks the best-ranked account of t
 to, and one whose usage it cannot read only after every ranked one, as unknown. `account <n>` starts
 that vendor's account, as the usage frames number it, or refuses; it never falls back to another. On
 Go the number is the one the team gave the account when it was first seen, never a machine's launcher
-name; the launch's answer names it with the account's id and whose it is, and `on` names the
-`machine` `/sessions` lists. Name the vendor
+name; the launch's answer names it with the account's id and whose it is. `on` names a machine by the name `/machines` shows (`on M4`, `on "M4 Pro"`), as
+`/machines` lists it (`m-<id>`), or as `/sessions` names its `machine`, and one naming no live
+machine is refused at once. A launch still waiting is withdrawn with
+`withdraw: token @lease <launch id>`, so it is never placed. Name the vendor
 whenever the model is that vendor's: passed to another vendor's endpoint, a model name may be
 mapped to that vendor's own model without a word. `worker-launched` names the vendor and
 launcher the session runs on; the agent starts it in tmux through that launcher, answers the
@@ -779,7 +781,13 @@ Today's models are strong enough that `high` everywhere buys little and spends a
 | A standard large epic's design | Opus 5.5 at `high` |
 | Standard engineering, from the start or once its spec settles | Opus 5.5 at `medium`, or `low` where the work is simple; or an equal such as the latest GPT Sol |
 | Standard engineering that is well scoped and low-risk | Sonnet 5.5 at `high` or `xhigh`, or an equal |
-| Small, routine work | GLM 5.3 Flash, or an equal such as the latest GPT Luna |
+| Small, routine work | GLM 5.3 Flash at `high` (its `high` is about a frontier model's `low`), or an equal such as the latest GPT Luna |
+
+**`high` is a phase, not a setting** (owner's ruling, 2026-10-10). Opus 5.5 and GPT Sol 6.1 run at
+`high` only for design and initial debugging. Mildly challenging work runs at `medium`, and common
+issues at `low`. Once a session's plan settles or its bug is found, lower it yourself with
+`control: … effort medium` (or `low`); don't wait for the session to ask. Retire a session with no
+work left to build, so its slot goes to work that has none (owner's ruling, 2026-10-10).
 
 A design session hands its implementation to engineering's model routing once the spec settles: the
 same session lowered with `control:`, or a fresh launch. The rules below govern a session that is
@@ -920,10 +928,9 @@ that are not there already, so they survive this session.
 - **Delegate by the account's rank as well as by level.** The kick's `usage` rows rank each
   account. When two sessions fit the level, choose the one whose own account ranks higher.
 - **Check who already holds it, then say who has it.** Before handing an issue out, search open
-  and merged pull requests, remote branches, and every machine's worktrees as the board reports
-  them, never a `git` command run in the checkout you happen to be in, which only ever sees this
-  one machine. Go's census does not carry each machine's worktrees yet (#5081), so a holder found
-  only in a worktree is asked of the fleet, not assumed absent. Match on the files the work would own
+  and merged pull requests, remote branches, and every machine's worktrees from `rest.py --lease
+  /machines --all`, never a `git` command run in the checkout you happen to be in, which only ever
+  sees this one machine. Match on the files the work would own
   rather than the number. Hand out one item per named session, and announce the holder where the
   whole fleet reads it in the same minute: a list offered to several sessions at once was taken
   by three of them in forty seconds.

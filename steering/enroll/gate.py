@@ -154,7 +154,8 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
     except Refused as why:
         print(str(why), file=sys.stderr)
         return 1
-    tier = tier[1] if tier else "standard"
+    # A round that names no tier keeps the one its series was last commissioned at (Go decides).
+    tier = tier[1] if tier else None
     # Go pins what it observed of the pull request, or a critique at the branch head its mirror holds;
     # naming this checkout's head refuses a stale one.
     at = head(here)
@@ -163,11 +164,13 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
         if not on or not at:
             print("this checkout names no branch or no commit to critique", file=sys.stderr)
             return 1
-        body = {"kind": "critic", "repo": repo, "branch": on, "doc": what, "tier": tier, "head": at}
+        body = {"kind": "critic", "repo": repo, "branch": on, "doc": what, "head": at}
     else:
-        body = {"repo": repo, "pr": int(what.lstrip("#")), "tier": tier}
+        body = {"repo": repo, "pr": int(what.lstrip("#"))}
         if at:
             body["head"] = at
+    if tier:
+        body["tier"] = tier
     if final:
         body["final"] = True
     this = retry_id or occurrence()
@@ -249,7 +252,18 @@ def gate_row(r: dict) -> str:
         said += f", {r['verdict']}"
     if r.get("why"):
         said += f" ({r['why']})"
+    if r.get("passed_over"):
+        said += "; passed over: " + passed_over(r["passed_over"])
     return said + (f" {r['review']}" if r.get("review") else "")
+
+
+def passed_over(by_vendor: dict) -> str:
+    """Why each vendor was not chosen, the vendors grouped under each reason: `codex, glm: host-full`."""
+    vendors: dict[str, list[str]] = {}
+    for vendor, reasons in sorted(by_vendor.items()):
+        for reason in reasons:
+            vendors.setdefault(reason, []).append(vendor)
+    return "; ".join(f"{', '.join(v)}: {reason}" for reason, v in sorted(vendors.items()))
 
 
 def gate_read(r: dict) -> str:
