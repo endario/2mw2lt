@@ -45,7 +45,7 @@ review's run details say the tier and how the final round ran.
 The reviewer holds its own full tool set — shell, network, builds and tests — in a clone with no
 remote, under a cage that keeps the machine's credentials and every other checkout out of its
 reach — all but the reviewing CLI's own sign-in, which only Codex keeps from its tools.
-`--sandbox` gives it the reading tools only; later rounds keep it until one names `--full`. It reads the repository's own persona,
+It reads the repository's own persona,
 `.claude/agents/code-reviewer.md` (or the one `.claude/independent-gates.map` routes the change
 to) or `architecture-critic.md`, from the base commit, so a change cannot rewrite its own
 reviewer; the bundled persona is the fallback. The run details name the harness and the persona.
@@ -58,7 +58,7 @@ In a repository 2mw2lt steers this gate replaces `/independent-review` and `/ind
 |---|---|---|
 | reviewer | a vendor that wrote none of the branch, chosen by usage | routed by round and usage, away from the host |
 | tier, final round | `--tier`, `--final`; the final round deeper, from a vendor no earlier round used | `--tier`, `--complement-of` |
-| tools | full inside a cage that withholds every credential but the reviewer's own; `--sandbox` to read only | full with the host's access; `--sandbox` |
+| tools | full inside a cage that withholds every credential but the reviewer's own | full with the host's access; `--sandbox` |
 | persona | the project's, read from the base commit | the project's, read from the checkout |
 | record | a fact per round, published by `2mw2lt[bot]` with a status pinned to the commit | a local artifact, published as the user |
 | rounds | capped centrally, lifted by the brain, briefed with earlier findings | counted by the caller |
@@ -69,6 +69,10 @@ each finding as `severity file:line claim`, and the reviewer's report, in severa
 long. A review is also published to the pull request by `2mw2lt[bot]`, pinned to the commit it
 read, with a `2mw2lt/review` status on that commit, unless the pull request closed or that commit
 left it first. A critique is on the stream only.
+
+On a major card, a review is refused `critique-not-converged` until a critique on one of the card's
+branches ends `build it`. Commission the critic on the design, or ask the brain to waive it: a
+`lift` of the pull request's review series, which the card then shows with who gave it.
 
 A harness that holds no stream, Codex, is never sent that frame. It asks instead, and gets the same
 text, or `pending: …` while the run is out:
@@ -138,8 +142,13 @@ sweep after the verdict or the carry, and you are told when it lands: a `say` fr
 `from: forge #<n>` reading `review status posted on <sha>; merge now`. Merge then, not before:
 
 ```bash
-gh pr merge <pr number> -R <repo> --squash --match-head-commit <head sha>
+git fetch origin && .githooks/check-migrations.sh origin/main <head sha> &&
+  gh pr merge <pr number> -R <repo> --squash --match-head-commit <head sha>
 ```
+
+The first line matters only in a repository with numbered migrations, and only where the script
+exists. `pre-push` ran it when you pushed, but another branch can take the same number before you
+merge, and nothing re-checks it at merge. If it refuses, renumber and push.
 
 Not `--auto`. Never merge a pull request whose base is another branch: it would merge into that branch. Do
 not poll GitHub to learn what happens next either. The pull request's moves come to you as a

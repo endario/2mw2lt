@@ -38,6 +38,7 @@ _RAW_FORMS = {
     "effort": ["effort: token <lease token> <item> <level>"],
     "wake": ["wake: token <lease token> <session> because <reason>"],
     "control": ["control: token <lease token> <session> effort <level> because <reason>", "control: token <lease token> <session> model <name>-<version> because <reason>", "control: token <lease token> <session> compact [without checkpoint] because <reason>"],
+    "rehome": ["rehome: token <lease token> <session> to <account> [compact [without checkpoint]] because <reason>"],
     "roster": ["roster: token <lease token> [with gone]"],
     "gate": ["gate: review <repo> <branch> pr <n> [head <sha>] [tier <tier>] [harness <harness>] [exclude <vendor>[,<vendor>]] [final] token <t>", "gate: critic <repo> <branch> doc <path> [head <sha>] [tier <tier>] [harness <harness>] [exclude <vendor>[,<vendor>]] [final] token <t>", "gate: status <commission> token <t>", "gate: cancel <commission> token <t>", "gate: pr <n> token <t>", "gate: carry <n> head <sha> [equivalent] token <t>"],
     "lift": ["lift: token <lease token> review <repo> pr <n> <reason>", "lift: token <lease token> critic <repo> branch <branch> <reason>", "lift: token <lease token> bench <vendor> <model> <reason>"],
@@ -53,7 +54,7 @@ _RAW_FORMS = {
 
 _AUDIENCE = {
     **{verb: "session" for verb in ("announce", "blocked", "wait", "done", "recommend", "ask", "claim", "taking", "declare", "checkpoint", "holds", "enroll", "bind", "ack", "say", "detach", "gate")},
-    **{verb: "seat" for verb in ("note", "launch", "withdraw", "relay", "retire", "card", "effort", "wake", "control", "roster", "lift", "authorship", "dispose", "promote", "backlog", "night")},
+    **{verb: "seat" for verb in ("note", "launch", "withdraw", "relay", "retire", "card", "effort", "wake", "control", "rehome", "roster", "lift", "authorship", "dispose", "promote", "backlog", "night")},
     "rebind": "operator",
     "supersede": "operator",
 }
@@ -86,6 +87,7 @@ _EXAMPLES = {
     "effort": ["effort: token <lease token> 3384 high"],
     "wake": ["wake: token <lease token> violet because review arrived"],
     "control": ["control: token <lease token> violet effort high because review", "control: token <lease token> violet model opus-5.5 because review", "control: token <lease token> violet compact without checkpoint because context full"],
+    "rehome": ["rehome: token <lease token> violet to 3 compact because account 2 is spent"],
     "roster": ["roster: token <lease token> with gone"],
     "gate": ["gate: review endario/repo feat/help pr 1 token <t>", "gate: critic endario/repo feat/help doc documentation/plan.md token <t>", "gate: status 010101010101010101010101 token <t>", "gate: cancel 010101010101010101010101 token <t>", "gate: pr 1 token <t>", "gate: carry 1 head abababababababababababababababababababab token <t>"],
     "lift": ["lift: token <lease token> review endario/repo pr 1 needs another round", "lift: token <lease token> critic endario/repo branch feat/help needs another round", "lift: token <lease token> bench anthropic opus-5.5 retry it"],
@@ -109,7 +111,7 @@ VERBS = {
 
 # Runnable entrypoints own client syntax once; wire forms reference these by script and topic.
 _SPEAKER_USAGE = "[--provider <harness>] [--provider-session <id>]"
-_COMMISSION_USAGE = "[--tier standard|heavy] [--sandbox|--full] [--exclude <vendors>] [--final] [--retry=<id>]"
+_COMMISSION_USAGE = "[--tier standard|heavy] [--exclude <vendors>] [--final] [--retry=<id>]"
 TOOLS = {
     "ack": {"verb": "ack", "forms": [
         {"topic": "send", "usage": "<session> <directive id>", "example": "ack violet 1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00"},

@@ -53,6 +53,16 @@ def _read(p: Path) -> dict | None:
     return d if d.get("secret") or (d.get("native") and d.get("credential")) else None
 
 
+def _held(p: Path) -> dict:
+    """The enrolment at `p` read again under its lock. One gone meanwhile was moved, as the door
+    rewrite moves a credential to its address door, or removed: renewing the copy read before the
+    lock would write it back where nothing wants it."""
+    d = _read(p)
+    if d is None:
+        raise NoCredential(f"{p} was moved or removed while this renewal waited for it; ask again")
+    return d
+
+
 def _write(p: Path, d: dict) -> None:
     p.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     spool.write_atomic(p, json.dumps(d), mode=0o600)
@@ -79,6 +89,10 @@ def entry_for(url: str) -> Path | None:
         root_path = urllib.parse.urlsplit(root).path
         if workspace is None and any(decoded == f"{root_path}/{namespace}" or decoded.startswith(f"{root_path}/{namespace}/")
                                      for namespace in ("w", "t")):
+            continue
+        # A workspace's address under a bare door is that workspace's, as `/w/<alias>` is.
+        under = decoded[len(root_path):].split("/")
+        if workspace is None and len(under) >= 3 and split(f"{root}/{under[1]}/{under[2]}")[1] is not None:
             continue
         return p
     return None
@@ -153,7 +167,7 @@ def current(p: Path, clock=time.time) -> str:
     lock = os.open(p.with_suffix(".lock"), os.O_WRONLY | os.O_CREAT, 0o600)
     try:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        d = _read(p) or d            # another process may have renewed it while this one waited
+        d = _held(p)                 # another process may have renewed or moved it while this one waited
         if _fresh(d, clock):
             return d["credential"]
         os_node = _own_os_node()
@@ -299,12 +313,19 @@ def _holder() -> dict:
         raise NoCredential(f"this machine's hardware identity cannot be read: {e}")
 
 
-def approve(origin: str, workspace: str, terminal_token: str, key: str, profile: str = "worker", reach: str = "workspace") -> dict:
-    """This machine's approval to `workspace`, asked on the person's terminal session: its
-    `approval_id` and one-time `secret`, which `enrol_native` exchanges. `key` makes a retry the
-    same approval."""
+def routes(door: str) -> str:
+    """The path a door's workspace routes are under, which is the door's own: an address door's
+    `/<team>/<workspace>`, and an alias door's `/w/<alias>` until the alias cut. The credential's
+    `workspace` field is never what a route is built from (go-alias-removal-design.md D8)."""
+    return urllib.parse.urlsplit(door.rstrip("/")).path
+
+
+def approve(origin: str, door: str, terminal_token: str, key: str, profile: str = "worker", reach: str = "workspace") -> dict:
+    """This machine's approval to the workspace `door` opens, asked on the person's terminal
+    session: its `approval_id` and one-time `secret`, which `enrol_native` exchanges. `key` makes a
+    retry the same approval."""
     body = {**_holder(), "profile": profile, "reach": reach}
-    _, got = _native_post(origin, f"/w/{workspace}/api/v1/device-approvals", body,
+    _, got = _native_post(origin, f"{routes(door)}/api/v1/device-approvals", body,
                           {"Authorization": f"Bearer {terminal_token}", "Idempotency-Key": key})
     if not isinstance(got.get("secret"), str) or not got["secret"]:
         raise NoCredential("coordination's approval carried no secret")
@@ -362,7 +383,7 @@ def _native_current(p: Path, d: dict, clock) -> str:
     lock = os.open(p.with_suffix(".lock"), os.O_WRONLY | os.O_CREAT, 0o600)
     try:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        d = _read(p) or d
+        d = _held(p)
         if _native_fresh(d, clock):
             return d["credential"]
         holder = _holder()
@@ -374,7 +395,7 @@ def _native_current(p: Path, d: dict, clock) -> str:
             d["pending"] = str(uuid.uuid4())
             _write(p, d)
         exchanging = not d.get("credential")
-        path = f"/w/{d['workspace']}/api/v1/" + ("device-exchanges" if exchanging else "machine-renewals")
+        path = f"{routes(d['door'])}/api/v1/" + ("device-exchanges" if exchanging else "machine-renewals")
         try:
             status, got = _native_post(d["origin"], path, holder if exchanging else {},
                                        {HEADER: d["secret"] if exchanging else d["credential"], "Idempotency-Key": d["pending"]})

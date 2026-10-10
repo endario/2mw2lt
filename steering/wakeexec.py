@@ -161,11 +161,12 @@ def session_gone(psession: str, runtime: str) -> bool:
 
 
 def terminate(psession: str, runtime: str, *, wait_s: float = 10.0, kill=os.kill, row=None,
-              derive=None, sleep=time.sleep, clock=time.monotonic) -> str:
+              derive=None, sleep=time.sleep, clock=time.monotonic, stopped: tuple[str, ...] = ("idle",)) -> str:
     """End the Claude Code process `runtime` names on this machine by its pid, for a session no
     pane route reaches (doc 186 §4). Only an idle one: its harness's own registry row says so, as
     the pane route's idle, empty composer does there. `SIGTERM` alone; a process that outlives it is
-    a refusal, never a `SIGKILL`."""
+    a refusal, never a `SIGKILL`. A rehome (#5430) also takes `shell`, a session out of its turn
+    whose background commands, its own hold among them, end with its process."""
     derive = derive or (lambda pid: runtime_id.derive("claude", pid=pid))
     if runtime_id.provider_of(runtime) != "claude" or runtime_id.node_of(runtime) != runtime_id.node_id():
         raise Refused("only a Claude Code session on this machine is ended by its pid")
@@ -173,7 +174,7 @@ def terminate(psession: str, runtime: str, *, wait_s: float = 10.0, kill=os.kill
     pid = found.get("pid")
     if not isinstance(pid, int) or isinstance(pid, bool) or derive(pid) != runtime:
         raise Refused(f"its registry row names pid {pid}, which is not this session's process")
-    if found.get("status") != "idle":
+    if found.get("status") not in stopped:
         raise Refused(f"its harness says it is {found.get('status') or 'in no stated status'}; retire it when idle")
     try:
         kill(pid, signal.SIGTERM)

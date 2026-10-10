@@ -43,8 +43,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" --help
 It needs Python 3.11 or later. An older `python3` stops at once with a line saying so: the person
 installs a newer one (`brew install python` on macOS), then run it again.
 
-Its pauses outlast a foreground command: it waits up to 30 minutes for the sign-in, 15 for the
-grant and 10 for a new team's silo. In Claude Code, run it with Bash `run_in_background: true` and
+Its pauses outlast a foreground command: it waits up to 30 minutes for the sign-in and 15 for the
+grant. In Claude Code, run it with Bash `run_in_background: true` and
 read its output as it goes; you are told when it exits. In Codex, give the command a timeout of
 at least 60 minutes, or poll its running session for output until it exits. The person acts only
 where it pauses:
@@ -59,10 +59,10 @@ where it pauses:
   the account menu is the same step, and the engine prints that address. A team that already holds an
   installation is not asked: the engine prints GitHub's page where the owner adds the repository.
 
-A team new to the platform prints `team` lines while its silo is made, naming the host's state
-and the time waited; that needs no one. `waiting on the host's enrolment watcher` is still
-progress: tell the person, and keep waiting. A line ending `; retrying` is a console or door that
-did not answer; the engine asks again on its own.
+A team new to the platform is created on the spot, from the team the operator gave the person's
+GitHub account. A line `the platform is at its … cap; waiting to create your team (…)` is
+progress, not a stop: tell the person, and keep waiting. A line ending `; retrying` is a console or
+door that did not answer; the engine asks again on its own.
 
 At each pause, tell the person in one line what to click, then keep waiting. The engine polls on
 its own and carries on once the grant lands. Do not ask the person to confirm they have done it.
@@ -78,10 +78,9 @@ Its last line is a JSON object: `{workspace, door, port, tracks, tracks_missing}
 When it stops, its last line names the step and the remedy. Do what that line says, then run the
 engine again. These are the stops that need a person:
 
-- **`the team's silo was refused: …`**, **`the team's silo would not hold <repo>: …`**,
-  **`this team has no silo yet`** or **`this team's silo serves no workspace`**: the platform
-  will not make or use the team's silo. Tell the person the reason, and stop: the operator
-  settles it.
+- **`coordination would not create your team (…)`** or **`coordination would not install <repo> (…)`**:
+  the platform refused the team or the workspace, and the line names why. Tell the person the
+  line, and stop: the operator settles it.
 - **`sign-in ended: That invitation code …`** or **`sign-in ended: The console does not know that invitation code …`**: the line says whether the code is unknown, used,
   lapsed or for a different GitHub account or address, and what to do. Tell the person that line; a
   code for a different account runs again with the same code once they are signed in to GitHub as
@@ -96,8 +95,6 @@ engine again. These are the stops that need a person:
   and stop: they sign in with the account that owns the team, or the operator settles it.
 - **`you own no team by that id`**: `--team` named a team the person does not own. Run again
   with an id from the `you own several teams` line, or without `--team`.
-- **`a new team's silo is made for a team of its one owner`**: a new team gets its silo only
-  while its owner is its one member. Stop: the operator settles it.
 - **`you own several teams; name one with --team: …`**: the line lists each team's id and name.
   Ask the person which team the repository belongs to, then run the engine again with
   `--team <id>`.
@@ -126,12 +123,8 @@ Other stops, and what to do; one not listed here names its own remedy:
 - **`the device token is not a live session`**: the sign-in lapsed mid-run. Run again.
 - **`sign-in ended: …`** or **`the sign-in code expired`**: the person denied the sign-in, or took
   over 30 minutes. Run again for a fresh code.
-- **`the team's silo is still being made`**: the new team's silo took over ten minutes to start.
-  Run again: it waits on the same request.
-- **`the console would not admit this machine`**: enrolling the machine failed. Run again; if it
-  repeats, the operator reads the console's log.
-- **`this machine's credential was refused: …`**: the console would not exchange the secret it
-  just issued. Run again; if it repeats, give the operator the line.
+- **`coordination would not admit this machine: …`**: enrolling the machine failed. Run again; if
+  it repeats, give the operator the line.
 - **`the workspace's door answered <status> …`**: the door is up and erring. Run again; if it
   repeats, give the operator the line.
 - **`the App does not reach <repository> yet`**: the grant took over 15 minutes. Run again once

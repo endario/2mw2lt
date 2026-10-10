@@ -38,12 +38,32 @@ RETRY_ATTEMPTS = 5
 
 
 class Refused(Exception):
-    """Go refused the request. `code` and `field` are its problem's."""
+    """Go refused the request. `code`, `field` and `remedy` are its problem's."""
 
-    def __init__(self, status: int, code: str, field: str = "", wait: int | None = None, request: str = ""):
+    def __init__(self, status: int, code: str, field: str = "", wait: int | None = None, request: str = "",
+                 remedy: str = ""):
         super().__init__(f"refused ({status}): {code}" + (f" [{field}]" if field else "")
                          + (f" request {request}" if request else ""))
         self.status, self.code, self.field, self.wait, self.request = status, code, field, wait, request
+        self.remedy = remedy
+
+
+def reconnect(e: Refused, reason: str | None = None) -> str:
+    """A refusal connecting again repairs, unless Go named this client older than its contract."""
+    if e.remedy == "update-plugin":
+        return refusal.outdated(str(e))
+    return refusal.reconnect(reason or str(e))
+
+
+def outdated(e: Refused) -> str | None:
+    """The refusal to give when Go named this client older than its contract, which no resend or
+    reconnect repairs; None otherwise."""
+    return refusal.outdated(str(e)) if e.remedy == "update-plugin" else None
+
+
+def _remedy(problem: dict) -> str:
+    got = problem.get("remedy")
+    return got if isinstance(got, str) else ""
 
 
 class Unsent(OSError):
@@ -51,11 +71,12 @@ class Unsent(OSError):
 
 
 def _base() -> str:
-    """The workspace's routes: the door, which on Go names its workspace (`/w/<id>`)."""
+    """The workspace's routes: the door, which on Go names its workspace (`/<team>/<workspace>`, or
+    `/w/<alias>`)."""
     base, _ = door.door()
     _, workspace = door.split(base)
     if not workspace:
-        raise SystemExit(f"STEERING_DOOR {base}: a Go workspace's door names it (…/w/<id>)")
+        raise SystemExit(f"STEERING_DOOR {base}: a Go workspace's door names it (…/<team>/<workspace>)")
     return f"{base}/api/v1"
 
 
@@ -91,7 +112,7 @@ def post(path: str, body: dict, key: str, carrier: str, token: str, timeout: flo
             if pause is None or attempts >= RETRY_ATTEMPTS or time.monotonic() - started + pause > RETRY_LIMIT:
                 wait = problem.get("wait_seconds")
                 raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
-                              wait if isinstance(wait, int) else None, _request(e, problem)) from None
+                              wait if isinstance(wait, int) else None, _request(e, problem), _remedy(problem)) from None
             time.sleep(pause)
         except (urllib.error.URLError, OSError, TimeoutError) as e:
             raise Unsent(f"{_base()}{path}: no answer ({e})") from None
@@ -218,7 +239,7 @@ def bind(session: str, token: str, provider: str, psession: str, runtime: str,
             return refusal.retry(str(e))
         if e.code in INVALID_TOKEN:
             return refusal.reconnect(f"unknown, detached or stale token for {session}")
-        return refusal.reconnect(str(e))
+        return reconnect(e)
     return f"bound: {psession} to {session}"
 
 
@@ -234,12 +255,14 @@ def detach(session: str, token: str, key: str | None = None, handover: str = "")
     except Refused as e:
         if e.code == "session-binding-moved":
             return _current_machine_refusal(e)
+        if e.remedy == "update-plugin":
+            return refusal.outdated(str(e))
         if e.code in INVALID_TOKEN:
             return refusal.reconnect(f"{session} can no longer act: its token is not valid")
         if e.status == 400 and handover:  # a handover Go does not take: sent again it fails again
             return refusal.resend(str(e), "a --handover that is a https://github.com/ comment URL")
         if e.status == 400:  # no handover was sent, so what Go refused is the session it names
-            return refusal.reconnect(str(e))
+            return reconnect(e)
         return refusal.retry(str(e))
     return f"detached: {session}"
 
@@ -257,6 +280,8 @@ def checkpoint(token: str, body: dict) -> tuple[str, bool]:
     except Refused as e:
         if e.code == "session-binding-moved":
             return _current_machine_refusal(e), False
+        if e.remedy == "update-plugin":
+            return refusal.outdated(str(e)), False
         if e.code in INVALID_TOKEN:
             return refusal.reconnect("the session's token is not valid"), False
         if not settled(e):
@@ -278,6 +303,8 @@ def acknowledge(session: str, token: str, directive: str) -> str:
     except Refused as e:
         if e.code == "session-binding-moved":
             return _current_machine_refusal(e)
+        if e.remedy == "update-plugin":
+            return refusal.outdated(str(e))
         if e.code in INVALID_TOKEN:
             return refusal.reconnect(f"unknown, detached or stale token for {session}")
         if not settled(e):
@@ -430,7 +457,7 @@ def get(path: str, token: str, timeout: float = 10.0) -> dict:
     except urllib.error.HTTPError as e:
         problem = _problem(e)
         raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
-                      request=_request(e, problem)) from None
+                      request=_request(e, problem), remedy=_remedy(problem)) from None
     except (urllib.error.URLError, OSError, TimeoutError) as e:
         raise Unsent(f"{_base()}{path}: no answer ({e})") from None
 
@@ -609,12 +636,12 @@ def seat_withdraw(session: str, token: str, launch: str, key: str) -> str:
 
 
 def seat_action(session: str, token: str, body: dict, key: str) -> str:
-    """The holder asks the machine a session runs on to wake, control or retire it
+    """The holder asks the machine a session runs on to wake, control, retire or rehome it
     (`POST /actions`), keyed by the line's own key so a rerun after a lost answer is answered from
     the first. Raises `NotSeated`, `Refused` or `Unsent`."""
     seat_generation(session, token)
     answer = post("/actions", body, key, SESSION_CARRIER, token)
-    doing = {"wake": "waking", "control": "controlling", "retire": "retiring"}[body["kind"]]
+    doing = {"wake": "waking", "control": "controlling", "retire": "retiring", "rehome": "rehoming"}[body["kind"]]
     value = f" {body['value']}" if body.get("value") else ""
     return f"{doing}: {answer['id']} {body['to']}{value}, offered"
 
@@ -631,13 +658,19 @@ def lift(session: str, token: str, kind: str, repo: str, at: int | str, reason: 
     return f"lifted: review {repo}#{at}" if kind == "review" else f"lifted: critic {repo} {at}"
 
 
-def bench_lift(session: str, token: str, vendor: str, model: str, reason: str, key: str) -> str:
-    """The holder ends a benched judge's streak (`POST /gates/bench-lifts`) at the generation it
-    holds. `key` is the line's occurrence id, so a resend after a lost answer is answered from the
-    first. Raises `NotSeated`, `Refused` or `Unsent`."""
-    body = {"vendor": vendor, "model": model, "generation": seat_generation(session, token), "reason": reason}
+# The parts a bench is kept per (go-gate-failure-attribution-design.md §2), as a lift names them.
+BENCH_DIMENSIONS = ("model", "route", "account", "machine", "signed-out")
+
+
+def bench_lift(session: str, token: str, first: str, second: str, reason: str, key: str) -> str:
+    """The holder ends a bench (`POST /gates/bench-lifts`) at the generation it holds: one part's, as
+    `<dimension> <key>` names it in the bench's reason, or a judge's by its vendor and model. `key` is
+    the line's occurrence id, so a resend after a lost answer is answered from the first. Raises
+    `NotSeated`, `Refused` or `Unsent`."""
+    names = {"dimension": first, "key": second} if first in BENCH_DIMENSIONS else {"vendor": first, "model": second}
+    body = {**names, "generation": seat_generation(session, token), "reason": reason}
     post("/gates/bench-lifts", body, _own_key("gate.bench.lift", session, key), SESSION_CARRIER, token)
-    return f"lifted: bench {vendor} {model}"
+    return f"lifted: bench {first} {second}"
 
 
 def raise_owner(session: str, token: str, title: str, text: str, need: str = "", about: str = "") -> int:

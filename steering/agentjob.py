@@ -407,6 +407,25 @@ def migrate_github(home: Path, jobs: list[tuple[Path, dict]]) -> None:
     write(path, f"{text}STEERING_GH_ACCOUNT={name}\n".encode())
 
 
+def migrate_doors(home: Path) -> None:
+    """Each workspace registered at an alias door moved to its address door before the agent that
+    serves it starts (go-alias-removal-design.md D5). The activation's own output is not kept, so
+    what the rewrite says goes to the machine job's startup log too. A failure leaves the
+    workspaces on their alias doors, which the window still answers, and never stops the activation."""
+    import machine_workspaces
+    _, startup = logs(home, MACHINE_LABEL)
+
+    def say(line: str) -> None:
+        print(line, file=sys.stderr)
+        with contextlib.suppress(OSError), open(startup, "a") as log:
+            log.write(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {line}\n")
+    try:
+        import door_rewrite
+        door_rewrite.rewrite(machine_workspaces.directory(home), say)
+    except Exception as e:  # the agent still starts on the doors it has
+        say(f"door rewrite: not run: {type(e).__name__}: {e}")
+
+
 def migrate_settings(home: Path, jobs: list[tuple[Path, dict]]) -> Path:
     destination = settings(home)
     if destination.exists():
@@ -665,6 +684,7 @@ def _activate(release: Path, home: Path, launch_agents: Path, run: Run, domain: 
     if migrate_jobs(home, launch_agents, run):
         jobs = steering_jobs(launch_agents)
     migrate_github(home, jobs)
+    migrate_doors(home)
     try:
         previous = (root(home) / "current").resolve(strict=True)
     except OSError:

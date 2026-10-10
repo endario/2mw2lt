@@ -70,17 +70,22 @@ _ACTION = {
                           r"(?P<value>effort\s+(?:low|medium|high|xhigh|max)|model\s+[a-z]+-[0-9]+(?:\.[0-9]+)?|compact(?:\s+without\s+checkpoint)?)"
                           r"\s+because\s+(?P<reason>\S.*?)\s*$", re.S),
     "retire": re.compile(r"^retire:\s*token\s+@lease\s+(?P<to>\S+)\s+because\s+(?P<reason>\S.*?)\s*$", re.S),
+    "rehome": re.compile(r"^rehome:\s*token\s+@lease\s+(?P<to>\S+)\s+to\s+(?P<account>\S+)"
+                         r"(?P<compact>\s+compact(?:\s+without\s+checkpoint)?)?"
+                         r"\s+because\s+(?P<reason>\S.*?)\s*$", re.S),
 }
 _ACTION_USAGE = {
     "wake": "wake: token @lease <session> because <reason>",
     "control": "control: token @lease <session> effort <level> | model <name>-<version> | compact [without checkpoint] because <reason>",
     "retire": "retire: token @lease <session> because <reason>",
+    "rehome": "rehome: token @lease <session> to <account> [compact [without checkpoint]] because <reason>",
 }
 _RELAY = re.compile(r"^relay:\s*token\s+@lease\s+to\s+(?P<target>[^\s@]+)(?:@(?P<epoch>[0-9]{1,9}))?\s+(?P<text>.+)$", re.S)
 # `lift:` of a review series by its pull request or a critic series by its branch (speak.py _LIFT).
 _LIFT = re.compile(r"^lift:\s*token\s+@lease\s+(?P<kind>review|critic)\b(?P<rest>.*)$", re.S)
-# `lift:` of a reviewer's bench, by the vendor and model its bench reason names (speak.py _LIFT).
-_BENCH = re.compile(r"^lift:\s*token\s+@lease\s+bench\s+(?P<vendor>\S+)\s+(?P<model>\S+)\s+(?P<reason>\S.*)$", re.S)
+# `lift:` of a bench, by the dimension and key its bench reason names, or a judge's vendor and model
+# (speak.py _LIFT).
+_BENCH = re.compile(r"^lift:\s*token\s+@lease\s+bench\s+(?P<first>\S+)\s+(?P<second>\S+)\s+(?P<reason>\S.*)$", re.S)
 _LIFT_AT = {"review": re.compile(r"\s+(?P<repo>\S+)\s+pr\s+(?P<at>[0-9]{1,9})\s+(?P<reason>\S.*)$", re.S),
             "critic": re.compile(r"\s+(?P<repo>\S+)\s+branch\s+(?P<at>\S+)\s+(?P<reason>\S.*)$", re.S)}
 
@@ -124,6 +129,8 @@ def go_say(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
     except session_routes.Unsent as e:
         return 1, refusal.retry(str(e)), True
     except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale, False
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
@@ -150,6 +157,8 @@ def _go_need(rec: dict, verb: str, line: str) -> tuple[int, str, bool]:
     except session_routes.Unsent as e:
         return 1, refusal.retry(str(e)), True
     except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale, False
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
@@ -180,6 +189,8 @@ def _go_launch(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
     except session_routes.Unsent as e:
         return 1, refusal.retry(str(e)), True
     except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale, False
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if e.code in ("launch-machine-unknown", "launch-machine-ambiguous"):
@@ -204,6 +215,8 @@ def _go_withdraw(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
     except session_routes.Unsent as e:
         return 1, refusal.retry(str(e)), True
     except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale, False
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
@@ -213,7 +226,7 @@ def _go_withdraw(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
 
 
 def _go_action(rec: dict, verb: str, line: str, key: str) -> tuple[int, str, bool]:
-    """`wake:`, `control:` or `retire:` on Go: the brain asks the session's machine to act on it."""
+    """`wake:`, `control:`, `retire:` or `rehome:` on Go: the brain asks the session's machine to act on it."""
     import refusal
     import session_routes
     m = _ACTION[verb].match(line)
@@ -222,6 +235,8 @@ def _go_action(rec: dict, verb: str, line: str, key: str) -> tuple[int, str, boo
     body = {"kind": verb, "to": m["to"], "reason": " ".join(m["reason"].split())}
     if verb == "control":
         body["value"] = " ".join(m["value"].split())
+    if verb == "rehome":
+        body["value"] = " ".join([m["account"], *(m["compact"] or "").split()])
     try:
         said = session_routes.seat_action(rec["session"], rec["token"], body, key)
     except session_routes.NotSeated as why:
@@ -229,6 +244,8 @@ def _go_action(rec: dict, verb: str, line: str, key: str) -> tuple[int, str, boo
     except session_routes.Unsent as e:
         return 1, refusal.retry(str(e)), True
     except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale, False
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
@@ -254,6 +271,8 @@ def _go_lift(rec: dict, lift: re.Match, key: str) -> tuple[int, str, bool]:
     except session_routes.Unsent as e:
         return 1, refusal.retry(str(e)), True
     except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale, False
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
@@ -271,13 +290,15 @@ def _go_bench_lift(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
     if not m:
         return 2, refusal.use("lift", "malformed lift: bench invocation"), False
     try:
-        said = session_routes.bench_lift(rec["session"], rec["token"], m["vendor"], m["model"],
+        said = session_routes.bench_lift(rec["session"], rec["token"], m["first"], m["second"],
                                          " ".join(m["reason"].split()), key)
     except session_routes.NotSeated as why:
         return 1, GO_NOT_SEATED.format(why=why), False
     except session_routes.Unsent as e:
         return 1, refusal.retry(str(e)), True
     except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale, False
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
@@ -303,6 +324,8 @@ def _go_read(rec: dict, verb: str, line: str) -> tuple[int, str, bool]:
     except session_routes.Unsent as e:
         return 1, refusal.retry(str(e)), False
     except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale, False
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         return 1, refusal.use(verb, str(e)) if session_routes.settled(e) else refusal.retry(str(e)), False
@@ -335,6 +358,8 @@ def go_read(rec: dict, body: bytes) -> tuple[int, str]:
     except session_routes.Unsent as e:
         return 1, refusal.retry(str(e))
     except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e)
         return 1, f"refused: {e}" if session_routes.settled(e) else refusal.retry(str(e))
@@ -377,6 +402,8 @@ def go_post(rec: dict, target: str, body: bytes) -> tuple[int, str]:
     except session_routes.Unsent as e:
         return 1, refusal.retry(str(e))
     except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale
         return 1, f"refused: {e}" if session_routes.settled(e) else refusal.retry(str(e))
     return 0, f"answered: {obj['key']}"
 
@@ -397,6 +424,8 @@ def go_raise(rec: dict, obj: dict) -> tuple[int, str]:
     except session_routes.Unsent as e:
         return 1, refusal.retry(str(e))
     except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale
         if e.code == "push-raise-window":
             wait = f"in {e.wait} seconds" if e.wait else "later"
             return 1, f"refused: the owner was raised less than fifteen minutes ago; raise again {wait} (push-raise-window)"
@@ -429,6 +458,8 @@ def go_seat(rec: dict, target: str, obj: dict) -> tuple[int, str]:
     except session_routes.Unsent as e:
         return 1, refusal.retry(str(e))
     except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale
         return 1, f"refused: {e}" if session_routes.settled(e) else refusal.retry(str(e))
     return 0, f"handed: the seat to {to}@{epoch}"
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import http.client
 import ipaddress
 import json
 import socket
@@ -25,13 +26,38 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None  # a redirect would carry the door's headers to another origin
 
 
+class _Unclosed(http.client.HTTPSConnection):
+    """Sends no `Connection: close`, which urllib puts on every request. Measured on 2026-10-10:
+    through the console's Cloudflare tunnel an answer to a request carrying it was cut short or
+    lost, on nearly every request from a distant client; without it, none was. The client still
+    closes the connection once the answer is read."""
+
+    def putheader(self, header, *values):
+        if header.lower() != "connection":
+            super().putheader(header, *values)
+
+
+class _UnclosedHTTPS(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_Unclosed, req, context=self._context)
+
+
 # The proxy environment on a developer machine hijacks loopback and tailnet traffic (doc 08), and
 # a system proxy drops TLS to the console's own hosts; so the door and the console are always
 # reached directly, like the mirror's homeserver. Every client of either uses this opener.
-_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
-# A door or console behind Cloudflare refuses urllib's default `Python-urllib/<version>` with a
-# 403 (`error code: 1010`) before the request reaches it.
-USER_AGENT = "2mw2lt-agent/1"
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect(), _UnclosedHTTPS())
+
+
+def _version() -> str:
+    try:
+        return (Path(__file__).resolve().parents[2] / "version.txt").read_text().strip() or "unknown"
+    except (OSError, UnicodeDecodeError):
+        return "unknown"
+
+
+# Every client we ship names itself and its version (#5388): the edge refuses a door or console
+# request from any other, as Cloudflare refused urllib's own `Python-urllib/<version>` (1010).
+USER_AGENT = f"2mw2lt-plugin/{_version()} (python)"
 
 
 class CredentialRefused(OSError):
@@ -96,13 +122,45 @@ def is_loopback(host: str) -> bool:
         return False
 _LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
 _HOST = rf"{_LABEL}(?:\.{_LABEL})*\.?"  # a name or a dotted IPv4; no bracketed literal is a door
-# The ingress may name a silo and the one workspace it opens, not an endpoint.
+# The ingress may name a silo and the one workspace it opens, not an endpoint: by its alias, or on Go
+# by its team's and its own slugs (go-workspace-address-design.md D4), which `_match` judges by the
+# contract's grammar.
 _WS = r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
 _SILO = r"(?!(?:console|bridge)(?:/|$)|tunnel-)[a-z][a-z0-9_-]{0,15}"
-_PATH = rf"(?-i:(?P<prefix>/t/{_SILO})?(?:/w/(?P<workspace>{_WS}))?/?)"
+_PATH = (rf"(?-i:(?:(?P<prefix>/t/{_SILO})?(?:/w/(?P<workspace>{_WS}))?"
+         rf"|/(?P<team>[a-z0-9-]{{1,39}})/(?P<slug>[a-z0-9._-]{{1,64}}))/?)")
 _DOOR = re.compile(
     rf"^(?P<scheme>https?)://(?P<host>{_HOST})(?::(?P<port>[0-9]{{1,5}}))?(?P<path>{_PATH})$",
     re.IGNORECASE)
+GRAMMAR = "a door is scheme://host[:port]/<team>/<workspace>, or scheme://host[:port][/t/<silo>][/w/<alias>]"
+
+
+def _match(url: str) -> re.Match | None:
+    """The door's parts, or None when it is no door: an address whose team is reserved or either of
+    whose slugs is out of the contract's grammar is none. The contract is read only for an
+    address, so a hook on an alias door does not load it."""
+    m = _DOOR.match(url)
+    if m is None or m["team"] is None:
+        return m
+    if str(Path(__file__).resolve().parent) not in sys.path:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import contract
+    if (len(m["team"]) > contract.TEAM_SLUG_MAX or m["team"] in contract.RESERVED_TEAM_SLUGS
+            or not re.fullmatch(contract.TEAM_SLUG, m["team"]) or not re.fullmatch(contract.WORKSPACE_SLUG, m["slug"])):
+        return None
+    return m
+
+
+def _workspace(m: re.Match) -> str | None:
+    """The workspace a door's match names, as a route's {workspace} takes it: its alias, or
+    `<team>/<workspace>`."""
+    return f"{m['team']}/{m['slug']}" if m["team"] is not None else m["workspace"]
+
+
+def routed(workspace: str) -> str:
+    """The path a workspace's routes are under: `/<team>/<workspace>` for an address, as serve's
+    Addressed answers it, and `/w/<alias>` for an alias."""
+    return f"/{workspace}" if "/" in workspace else f"/w/{workspace}"
 
 
 # The workspace a caller in a process serving several is acting for (doc 130 §5). Set, it names
@@ -177,9 +235,9 @@ def door() -> tuple[str, bool]:
     base = configured_door().rstrip("/")
     if not base:
         return f"http://127.0.0.1:{os.environ.get('STEERING_PORT', '9999')}", False
-    m = _DOOR.match(base)
+    m = _match(base)
     if not m or (m["port"] is not None and not 1 <= int(m["port"]) <= 65535):
-        raise InvalidDoor(f"STEERING_DOOR {base}: a door is scheme://host[:port][/t/<silo>][/w/<workspace>]")
+        raise InvalidDoor(f"STEERING_DOOR {base}: {GRAMMAR}")
     loopback = is_loopback(m["host"])
     if m["scheme"].lower() != "https" and not loopback:
         raise InvalidDoor(f"STEERING_DOOR {base}: off this machine the door is https or nothing")
@@ -187,17 +245,18 @@ def door() -> tuple[str, bool]:
 
 
 def split(url: str) -> tuple[str, str | None]:
-    """A door as (root, workspace): the base every authority shares, and the one it names.
+    """A door as (root, workspace): the base every authority shares, and the one it names, as a
+    route's {workspace} takes it; `root + routed(workspace)` is the door again.
 
     The root is what `GET /steering/authorities` is asked on and what a workspace prefix is
     joined to. Appending to the door as given produced `…/w/x/w/x` when it already named
     one.
     """
-    m = _DOOR.match(url.rstrip("/"))
+    m = _match(url.rstrip("/"))
     if not m:
         return url.rstrip("/"), None
     root = url.rstrip("/")[:m.start("path")] + (m["prefix"] or "")
-    return root, m["workspace"]
+    return root, _workspace(m)
 
 
 def door_url() -> str:

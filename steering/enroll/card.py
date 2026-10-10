@@ -12,6 +12,8 @@ import python_floor  # noqa: E402
 
 python_floor.require()
 
+import hashlib  # noqa: E402
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
@@ -108,14 +110,15 @@ def _on_go(held: dict, verb: str, rest: list[str], usage: str, retry: str | None
     if ruled:
         print(ruled)
         return 1
+    key = retry or door.occurrence()
+    # A scope with no --card is named by its write, so `--retry=<id>` resends the same card.
     if verb == "scope" and rest[:1] != ["--card"]:
-        rest = ["--card", new_ulid(), *rest]
+        rest = ["--card", hashlib.sha256(f"card:{key}".encode()).hexdigest()[:24], *rest]
     facts, bad_grammar = built(verb, rest)
     if bad_grammar:
         print(usage if bad_grammar == USAGE_REFUSAL else f"refused: {bad_grammar}", file=sys.stderr)
         return 2
     fact = facts[0]
-    key = retry or door.occurrence()
     print(f"id {key}", file=sys.stderr)
     try:
         anchored = fact.get("anchors") or fact["state"] == "card-reanchored" and fact["after"]

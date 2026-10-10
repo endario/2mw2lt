@@ -337,11 +337,17 @@ def environment(env: dict | None = None) -> list[str]:
     return [f"{k}={src[k]}" for k in KEPT if k in src]
 
 
-def argv(launcher: dict, workspace: str, model: str, effort: str, name: str, env: dict | None = None,
+def argv(launcher: dict, workspace: str, model: str | None, effort: str | None, name: str, env: dict | None = None,
          tmux: str = "tmux", scope: list[str] | None = None, *, token_file: Path | None = None,
-         forge_env: dict[str, str] | None = None) -> list[str]:
+         forge_env: dict[str, str] | None = None, resume: str | None = None,
+         cwd: str | None = None) -> list[str]:
     """The `tmux new-session` that starts the session: argv, never a shell line, with its
     environment replaced whole, since a tmux server copies its own into every pane.
+
+    A rehome (#5430) names the conversation to `resume` and the checkout it ran in, `cwd`, since
+    the harness finds a transcript by the directory it is started in. Its model and effort are
+    the account's own when none is named. The prompt is the literal connect either way: a resumed
+    session's enrolment refuses any other first prompt.
 
     Under `scope`, by default the agent's own: the first `new-session` forks the tmux server,
     which in a systemd unit would otherwise die with the unit's next stop (#2968)."""
@@ -353,7 +359,8 @@ def argv(launcher: dict, workspace: str, model: str, effort: str, name: str, env
         "Read(~/Library/Containers)", "Read(~/Library/Containers/**)",
         "Read(~/Library/Group Containers)", "Read(~/Library/Group Containers/**)",
     ]}})] if sys.platform == "darwin" else []
-    return [*scope, tmux, "-L", SOCKET, "new-session", "-d", "-s", name, "-c", workspace, "--",
+    level = [*(["--model", model] if model else []), *(["--effort", effort] if effort else [])]
+    return [*scope, tmux, "-L", SOCKET, "new-session", "-d", "-s", name, "-c", cwd or workspace, "--",
             "/usr/bin/env", "-i", *[kv for kv in environment(env) if kv.partition("=")[0] not in (forge_env or {})],
             *[f"{k}={v}" for k, v in (forge_env or {}).items()], *bootstrap,
-            *_claude(launcher), *settings, "--model", model, "--effort", effort, "/2mw2lt:connect"]
+            *_claude(launcher), *settings, *(["--resume", resume] if resume else []), *level, "/2mw2lt:connect"]

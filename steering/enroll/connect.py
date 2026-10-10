@@ -40,7 +40,6 @@ from process_probe import Undetermined  # noqa: E402
 import hooks  # noqa: E402
 import checkout_binding  # noqa: E402
 import holder  # noqa: E402
-import refusal  # noqa: E402
 import witness as witness_mod  # noqa: E402
 from verb_help import current_args, error, help_requested, script_help  # noqa: E402
 
@@ -274,7 +273,7 @@ def enrol(ws: Path, session: str, account: str, doing: str, psession: str,
     try:
         return session_routes.enrol(ws, session, h.provider, psession, rid)["credential"]
     except session_routes.Refused as e:
-        raise Refused(refusal.reconnect(str(e))) from None
+        raise Refused(session_routes.reconnect(e)) from None
     except session_routes.Unsent as e:
         raise Refused(f"{e}\nthe enrolment is kept, and the next connect sends it again") from None
 
@@ -549,7 +548,9 @@ def repo_line(ws: Path) -> str:
             wid = None
     if wid is None:
         return "repo: unknown (this checkout is bound to no workspace)"
-    mine = [r for r in rows if isinstance(r, dict) and r.get("id") == wid]
+    # A door by address names the workspace by it; a checkout is bound to its uuid, the row's
+    # workspace_id, or, until the door rewrite reaches it, to its alias, the row's id.
+    mine = [r for r in rows if isinstance(r, dict) and wid in (r.get("id"), r.get("address"), r.get("workspace_id"))]
     if len(mine) != 1:
         return f"repo: unknown (the door does not list the workspace {wid})"
     if not mine[0].get("repo"):
@@ -567,7 +568,7 @@ def repo_line(ws: Path) -> str:
                     f"origin is {slug}; uninstall here, then install again)")
         if slug is not None:
             try:
-                checkout_binding.bind(ws, wid)
+                checkout_binding.bind(ws, mine[0].get("workspace_id") or mine[0]["id"])
             except OSError:
                 pass   # best-effort: a checkout that cannot be written still gets its line
     return f"repo: {mine[0]['repo']}"

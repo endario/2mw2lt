@@ -1314,6 +1314,17 @@ test('seatCall: word fields are one word, enums hold, and unknown fields are ref
   expect(resendId('done')).toBeNull()
 })
 
+test('seatCall: a rehome names the account, and compacts first only when asked', async () => {
+  const line = (a: Record<string, unknown>) => seatCall('rehome', { session: 'teal', account: '3', reason: 'account 2 is spent', ...a })
+  expect(line({})).toEqual({ client: 'say', stdin: 'rehome: token @lease teal to 3 because account 2 is spent' })
+  expect(line({ compact: true })).toEqual({ client: 'say', stdin: 'rehome: token @lease teal to 3 compact because account 2 is spent' })
+  expect(line({ compact: true, without_checkpoint: true })).toEqual(
+    { client: 'say', stdin: 'rehome: token @lease teal to 3 compact without checkpoint because account 2 is spent' })
+  expect(line({ compact: false, without_checkpoint: true })).toEqual({ refused: 'without_checkpoint is only with compact' })
+  expect(line({ account: 'acct 3' })).toEqual({ refused: 'account is one word' })
+  expect(seatCall('rehome', { session: 'teal', reason: 'r' })).toEqual({ refused: 'account is required' })
+})
+
 test('a client that refused is the call\'s error, in its words, never a result', async ($, on) => {
   const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
   w.leaseOut = ['refused: this session no longer holds the seat (refused: this token does not hold the lease); its stored lease is removed.']

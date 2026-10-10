@@ -6,9 +6,9 @@ The console routes the owner's messages to whoever holds the steering role. By d
 the daemon's own resident brain. This puts them through to **this** session, with its context.
 
 From any machine: the seat is the workspace's on Go, which the door this workspace is wired to
-names (`STEERING_DOOR` carries `/w/<workspace>`). You take it only while it is vacant: nobody
-holds it, its holder's enrolment has ended, or its holder's lease has lapsed unrenewed. A holder
-that is answering keeps it, and `promote.py` then says who holds it; the owner hands it on from the
+names (`STEERING_DOOR` carries `/<team>/<workspace>`, or `/w/<alias>`). You take it only while it
+is vacant: nobody holds it, its holder's enrolment has ended, or its holder's lease has lapsed
+unrenewed. A holder that is answering keeps it, and `promote.py` then says who holds it; the owner hands it on from the
 console, or the holder hands it on itself. The owner can hand it to another session or reclaim it
 from the console at any time, and the next lease verb you send then answers
 `refused: this session does not hold the seat (…)`. Do not take it back unless the owner asks.
@@ -104,9 +104,9 @@ with `ack.py <you> <its directive id>` once you have read it;
 `data: {"kind": "presence", "sessions": [...]}` is who you can reach, sent when you take the
 seat and again whenever it changes. It is the whole roster every time, not a delta, so the one
 you last received is the answer — there is nothing to accumulate and nothing to acknowledge.
-Each row carries the session's `model`, `effort`, `machine` (its host name) and `verdict` (its own
-account's, as in the `fleet` frame), each `null` when nothing has been read: delegate by those, and
-never ask a session its level, since it cannot read its own.
+Each row carries the session's `model`, `effort` and `machine` (its host name), each `null` when
+nothing has been read: delegate by those, and never ask a session its level, since it cannot read
+its own. Its account's verdict is the `fleet` row naming it in `sessions`.
 `data: {"kind": "kick", "idle": [...], "executing": [...], "finished": [...], "changed": {...}, "turn": …, "delegation": {...}, "advice": {...}, "gates": {...}, "night": {...}, "moved": …, "missed": …}`
 is the daemon's timer, not a person.
 It arrives every interval because silence sends nothing else, and on the next poll that is
@@ -114,8 +114,8 @@ neither `quiet`, `debounced` nor `refused` once a session finishes a turn. `move
 change or a stalled gate; a kick that has neither wakes no model turn for a brain the plugin holds. `finished` is the daemon's own reading of who is waiting for work — do not ask
 the fleet to report it, and do not read its absence for a harness that posts no turn end as
 busy. It overlaps `executing`, because a session that has just finished is still recently heard.
-`changed.reset` lists each spent account whose window has just reset, `[{account, vendor, window,
-used_before, sessions}]`: resume every session in `sessions` with `wake:`.
+A say `from: account <id>` is a spent account's reset: resume each session it names that stopped
+for that account with `wake:`, and place queued work on it by its rank.
 `delegation` is each reachable session's `{model, effort, machine, verdict}`, so a quiet brain is
 re-told rather than left to remember. `advice` is the daemon's suggestion for each session that
 has one:
@@ -162,8 +162,13 @@ nothing in it is new to them.
 
 `data: {"kind": "fleet", "accounts": [{"account", "provider", "vendor", "verdict", "tightest", "incentive", "sessions"}]}`
 is every account's verdict,
-sent when you take the seat, when you hold, and whenever any account's verdict or rank moves; the
-kick carries the same rows under `usage`. The daemon ranks; you follow the ranking and quote it,
+`account` its number and `sessions` this workspace's sessions drawing on it, sent when you take the
+seat, when you hold, and whenever any account's verdict or rank moves. It is the whole fleet every
+time, so the last one is the answer. Every held session, you included, is also sent
+`data: {"kind": "usage", "account", "verdict", "tightest", "incentive"}`: its own account's row,
+on each hold and when that row's verdict or rank moves. `account` is `null` with an `unread` verdict
+when the session names no account (`no-account`) or no machine has read it yet (`no-reading`).
+The daemon ranks; you follow the ranking and quote it,
 and do not weigh room yourself. New work goes to a session whose account ranks highest among its
 harness's (`rank` 1 first), and never to one `excluded` or whose `runway` is shorter than the
 work. The rank spends quota that would otherwise expire: an account near its reset with quota
@@ -234,8 +239,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" ask <your session> 'json
 ## Raise the owner
 
 `brain/reply` reaches an owner who is looking at the console. This reaches one who is not: it
-sends a notification to their phone. Go does not send it yet (#4748), and `lease.py` refuses it
-before sending.
+sends a notification to their phone, at most once in fifteen minutes. A session's ask, and a row
+you promote, raise the phone too and spend the same fifteen minutes.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" post /steering/push/raise <<'JSON'
@@ -507,6 +512,11 @@ or its pane yourself.
 
 ## Rescue a session an error has stopped
 
+A Claude Code session whose process died, with its machine or on its own, needs no rescue: `wake:` it.
+Its machine's agent resumes it from its own transcript, where it connects and is handed what was
+waiting, and the wake is recorded `sent` with `resumed`. When the agent cannot resume it, the refusal says
+why after `not resumed:`, and what follows is for that case.
+
 Some errors stop a session outright, and no wake can start it again: `Please run /login`,
 `API Error: 403 WebSocket upgrade was rejected`, a 409 or 403 that drops its host, a permission
 prompt in a harness you cannot answer, or a VS Code host that has gone. When you see one, raise
@@ -517,12 +527,28 @@ If the owner has not dealt with it by then and the session can be rescued direct
 and continue its work. It can be rescued directly when it ran on your own machine and you know
 its session id, working directory and wrapper; without all three, leave it to the owner. Resume
 its own transcript in tmux, from its working directory, through the wrapper it ran under, which
-carries its account's config directory: `claude --resume <session id> "<prompt>"`, or that
-account's wrapper, such as `claude-codex --resume <session id> "<prompt>"`. The prompt, given on
-that command line rather than typed into the pane, tells it to run `/2mw2lt:connect`, re-arm its
-hold and continue. Tell the owner to close the dead tab, to avoid two processes driving one session.
+carries its account's config directory: `claude --resume <session id> /2mw2lt:connect`, or that
+account's wrapper, such as `claude-codex --resume <session id> /2mw2lt:connect`. The prompt is
+that literal command, given on the command line rather than typed into the pane: its connect
+refuses a prose request to connect. Tell the owner to close the dead tab, to avoid two processes driving one session.
 This is the one case where you start a harness yourself; everything else is started with
 `launch:`.
+
+## Rehome a stopped session
+
+A Claude Code session that stopped on its limit, or is about to, can continue on another account
+on the same machine with its conversation, name and card:
+
+```bash
+say "rehome: token @lease <session> to <account id> [compact [without checkpoint]] because <why>"
+```
+
+Prefer it to a pack-up whenever an account on that machine has runway. The session must
+be out of its turn: a busy one is refused, and stopping one early is your deliberate call.
+`compact` runs on the account it leaves, so ask for it only while that account can still run it,
+and never on one already stopped by its limit; compact on the new account afterwards with
+`control:` instead. A move across Anthropic organizations keeps the conversation but not the
+session's earlier thinking. Once it settles `rehomed`, relay the session to continue its card.
 
 ## Keep a session fit for its work
 
@@ -783,6 +809,15 @@ Today's models are strong enough that `high` everywhere buys little and spends a
 | Standard engineering that is well scoped and low-risk | Sonnet 5.5 at `high` or `xhigh`, or an equal |
 | Small, routine work | GLM 5.3 Flash at `high` (its `high` is about a frontier model's `low`), or an equal such as the latest GPT Luna |
 
+**Spend the cheapest model that can do the work well** (owner's ruling, 2026-10-10: the budget is
+tight). Choose the provider, model and effort per card, not per habit. GLM 5.3 Flash is the
+default for less complicated pieces: mechanical fixes, guard backfills, doc edits, small ports,
+dependency bumps. Sonnet 5.5 at `high` takes well-scoped engineering, which is most follow-through
+once a spec settles. Opus 5.5 is reserved for design, hard debugging and cross-cutting or
+security-shaped work, and runs at `medium` or below once that phase ends. When a card could go to
+either of two rows of the table above, take the cheaper one. Escalate only on evidence: a gate
+the session keeps failing, or a bug it cannot find.
+
 **`high` is a phase, not a setting** (owner's ruling, 2026-10-10). Opus 5.5 and GPT Sol 6.1 run at
 `high` only for design and initial debugging. Mildly challenging work runs at `medium`, and common
 issues at `low`. Once a session's plan settles or its bug is found, lower it yourself with
@@ -925,8 +960,9 @@ that are not there already, so they survive this session.
   accepted it; the thread has it once the session acknowledges it. When no acknowledgement
   follows, check whether Codex Desktop has unloaded the thread. An unloaded thread takes
   nothing until the owner opens it, so tell them.
-- **Delegate by the account's rank as well as by level.** The kick's `usage` rows rank each
-  account. When two sessions fit the level, choose the one whose own account ranks higher.
+- **Delegate by the account's rank as well as by level.** The `fleet` rows rank each account and
+  name the sessions on it. When two sessions fit the level, choose the one whose own account ranks
+  higher.
 - **Check who already holds it, then say who has it.** Before handing an issue out, search open
   and merged pull requests, remote branches, and every machine's worktrees from `rest.py --lease
   /machines --all`, never a `git` command run in the checkout you happen to be in, which only ever

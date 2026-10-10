@@ -37,21 +37,16 @@ MADE = re.compile(r"^(?:commit(?: \((?:amend|merge)\))?:|cherry-pick:|revert:|"
 
 
 def gate_flags(argv: list[str]) -> tuple[list[str], str] | None:
-    """The arguments without `--tier`, `--sandbox`, `--exclude` and `--final`, and what they add to
-    a commission's line (doc 127): the tier a series runs at, the read-only harness in place of the
-    full one, vendors that wrote the branch though no session held it (doc 161 §6), and a round
-    declared final."""
-    rest, tier, harness, exclude, final = [], "", "", "", ""
+    """The arguments without `--tier`, `--exclude` and `--final`, and what they add to a commission's
+    line (doc 127): the tier a series runs at, vendors that wrote the branch though no session held
+    it (doc 161 §6), and a round declared final."""
+    rest, tier, exclude, final = [], "", "", ""
     it = iter(argv)
     for a in it:
         if a == "--final":
             if final:
                 return None
             final = " final"
-        elif a in ("--sandbox", "--full"):
-            if harness:
-                return None
-            harness = f" harness {a[2:]}"
         elif a == "--tier" or a.startswith("--tier="):
             named = a.split("=", 1)[1] if "=" in a else next(it, "")
             if named not in ("standard", "heavy") or tier:
@@ -67,7 +62,7 @@ def gate_flags(argv: list[str]) -> tuple[list[str], str] | None:
             exclude = f" exclude {named}"
         else:
             rest.append(a)
-    return rest, tier + harness + exclude + final
+    return rest, tier + exclude + final
 
 
 from verb_help import error, help_requested, script_help  # noqa: E402
@@ -81,6 +76,9 @@ def main(argv: list[str]) -> int:
         argv, retry_id = retry_args(argv)
     except ValueError as why:
         return error("gate", str(why))
+    if gone := [a for a in argv if a in ("--sandbox", "--full")]:
+        print(f"{gone[0]} is gone: every round runs the full harness, inside its cage", file=sys.stderr)
+        return 1
     split = gate_flags(argv)
     if split is None:
         return error("gate", "malformed gate flags")
@@ -140,8 +138,8 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
         return go_read(ws, session, flags, kind, what)
     tier = re.search(r" tier (\S+)", extra)
     final = " final" in extra
-    if extra.replace(tier[0] if tier else "", "").replace(" harness full", "").replace(" final", ""):
-        print(f"a {kind} on a Go workspace takes --tier, --final and the full harness only, so far", file=sys.stderr)
+    if extra.replace(tier[0] if tier else "", "").replace(" final", ""):
+        print(f"a {kind} on a Go workspace takes --tier and --final only, so far", file=sys.stderr)
         return 1
     here = Path.cwd()
     repo = origin_slug(here, timeout=5)

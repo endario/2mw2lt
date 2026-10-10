@@ -129,7 +129,7 @@ export function asksSeat(kind: string): boolean {
 // goes. The module never holds the token; the client fills it from the store.
 export type SeatCall = { client: 'say'; stdin: string } | { client: 'post'; path: string; stdin: string } | { client: 'card'; argv: string[] }
 type Field = { type: 'string' | 'integer' | 'boolean' | 'array'; description: string; word?: boolean; enum?: string[] }
-type SeatTool = { description: string; fields: Record<string, Field>; required: string[]; oneOf?: string[]; build: (a: Record<string, unknown>) => SeatCall }
+type SeatTool = { description: string; fields: Record<string, Field>; required: string[]; oneOf?: string[]; refuse?: (a: Record<string, unknown>) => string | null; build: (a: Record<string, unknown>) => SeatCall }
 
 const str = (a: Record<string, unknown>, k: string) => String(a[k] ?? '')
 const word = (description: string): Field => ({ type: 'string', description, word: true })
@@ -162,6 +162,16 @@ export const SEAT_TOOLS: Record<string, SeatTool> = {
     fields: { target: word('The session to wake.'), reason: text('Why.') },
     required: ['target', 'reason'],
     build: a => ({ client: 'say', stdin: `wake: token @lease ${str(a, 'target')} because ${str(a, 'reason')}` }),
+  },
+  rehome: {
+    description: 'Seat only: move a stopped Claude Code session to another account on the same machine, keeping its conversation. compact runs /compact on the account it leaves first; without_checkpoint, only with compact, skips the checkpoint that compact otherwise requires.',
+    fields: { session: word('The session to move.'), account: word('The account to move it to, as the machine\'s census names it.'),
+              compact: { type: 'boolean', description: 'Compact the session before it moves.' },
+              without_checkpoint: { type: 'boolean', description: 'Compact without a current checkpoint.' }, reason: text('Why.') },
+    required: ['session', 'account', 'reason'],
+    refuse: a => a.without_checkpoint === true && a.compact !== true ? 'without_checkpoint is only with compact' : null,
+    build: a => ({ client: 'say', stdin: `rehome: token @lease ${str(a, 'session')} to ${str(a, 'account')}${a.compact === true
+      ? (a.without_checkpoint === true ? ' compact without checkpoint' : ' compact') : ''} because ${str(a, 'reason')}` }),
   },
   card_reclassify: {
     description: 'Seat only: correct a card\'s track, significance, state, priority or major mark.',
@@ -226,6 +236,8 @@ export function seatCall(name: string, args: Record<string, unknown>): SeatCall 
     if (f.enum && !f.enum.includes(String(v))) return { refused: `${k} is one of ${f.enum.join(', ')}` }
     if (f.type === 'integer' && !Number.isInteger(v)) return { refused: `${k} is a whole number` }
   }
+  const why = t.refuse?.(args)
+  if (why) return { refused: why }
   return t.build(args)
 }
 

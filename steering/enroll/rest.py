@@ -119,8 +119,8 @@ def main(argv: list[str], stdin) -> int:
             return error("rest", "--json requires valid JSON")
     body = valued["--json"].encode() if "--json" in valued else None
     base = door.door_url()
-    if "/w/" not in base:
-        print("this workspace's door names no authority; set STEERING_DOOR to …/w/<authority>", file=sys.stderr)
+    if door.split(base)[1] is None:
+        print("this workspace's door names no workspace; set STEERING_DOOR to …/<team>/<workspace>", file=sys.stderr)
         return 2
     why_none = None
     if "--lease" in rest:

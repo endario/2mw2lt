@@ -33,7 +33,8 @@ import runtime_id  # noqa: E402
 import targeting  # noqa: E402
 import verb_help  # noqa: E402
 import vitals as adapter  # noqa: E402
-from local_workspace import workspace_root  # noqa: E402
+from local_workspace import KEY_HEADER, agent_key, agent_port, workspace_header, workspace_root  # noqa: E402
+import door  # noqa: E402
 from door import failure, record  # noqa: E402
 import observe_post  # noqa: E402
 
@@ -102,6 +103,22 @@ def due(ws: Path, hook: dict, now: float) -> bool:
     return True
 
 
+def tell_agent(ws: Path, hook: dict, timeout: float) -> None:
+    """Tell this machine's agent the turn ended, so it reads the session's transcript now rather
+    than at its next poll (#5411). One attempt, never the cost of the hook: an agent that is down,
+    older than the route, or slow reads the session at its poll all the same. Raises what the call
+    raises."""
+    sid = hook.get("session_id")
+    if not isinstance(sid, str) or not sid or timeout <= 0:
+        return
+    import urllib.request
+    port = agent_port(ws, timeout=min(1.0, timeout))
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/steering/turn", data=json.dumps({"provider_session": sid}).encode(), method="POST",
+        headers={"Content-Type": "application/json", KEY_HEADER: agent_key(ws, port) or "", **workspace_header(ws)})
+    door.send(req, timeout=timeout).close()
+
+
 def with_tmux(rec: dict, left: float) -> tuple[str, str] | None:
     """Whether a window is on the tmux session this process runs in, stated on the reading. Said
     only inside a pane, and never at the cost of the reading: the lookup makes up to three tmux calls
@@ -167,6 +184,10 @@ def main() -> int:
     ws = anchor  # a fallback the targeting block below can still post through if resolution fails
     try:
         ws = workspace_root(anchor, timeout=1.0); where = ws
+        try:
+            tell_agent(ws, hook, min(0.5, deadline - time.monotonic()))
+        except Exception as e:  # the agent's poll reads the session anyway
+            record("readout", f"the agent was not told the turn ended: {failure(e)}", where)
         observe_post.post(rec, ws, min(2.0, left))
     except Exception as e:  # a reading is worth exactly one attempt; the next turn end brings another
         record("readout", f"post failed after {time.monotonic() - sent_at:.2f}s: {failure(e)}", where)

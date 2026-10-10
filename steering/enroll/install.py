@@ -58,6 +58,7 @@ sys.path.insert(0, str(HERE))
 import agentjob  # noqa: E402
 import credential  # noqa: E402
 import door as door_mod  # noqa: E402
+import door_rewrite  # noqa: E402
 import machine_workspaces  # noqa: E402
 import checkout_binding  # noqa: E402
 import spool  # noqa: E402
@@ -88,7 +89,7 @@ def say(step: str, text: str) -> None:
 
 
 def platform_url() -> str:
-    """The console this plugin serves; a workspace's door is `<console url>/w/<id>`."""
+    """The console this plugin serves; a workspace's door is `<console url>/<team>/<workspace>`."""
     named = os.environ.get("STEERING_PLATFORM", "").split()
     if named:
         return named[0].rstrip("/")
@@ -323,7 +324,10 @@ def checked_door(value: object, authority: str) -> str:
             os.environ.pop("STEERING_DOOR", None)
         else:
             os.environ["STEERING_DOOR"] = previous
-    if door_mod.split(door)[1] != authority:
+    named = door_mod.split(door)[1]
+    # A door by address names the workspace by its slugs, not the uuid the checkout is bound to:
+    # the door's own authorities view, which names the uuid, is checked against the binding.
+    if named != authority and (named is None or "/" not in named):
         raise Stop(f"the workspace door does not name {authority}")
     return door
 
@@ -364,10 +368,12 @@ def let_go(prior: tuple[str, str] | None, authority: str, door: str) -> bool:
     with contextlib.suppress(FileNotFoundError):
         credential.path_for(left_door).unlink()
         gone.append("credential")
+    credential.path_for(left_door).with_suffix(".lock").unlink(missing_ok=True)
     if left_id != authority:
         with contextlib.suppress(FileNotFoundError):
             (machine_workspaces.directory(Path.home()) / f"{left_id}.json").unlink()
             gone.append("registration")
+            machine_workspaces.poke()
     say("machine", f"{left_door}: {' and '.join(gone)} removed from this machine" if gone
         else f"{left_door}: nothing of it was left on this machine")
     return True
@@ -377,7 +383,10 @@ def admit_on_go(console: str, token: str, access: dict, repo: str, team: str | N
     """This machine admitted to the workspace serving `repo`, on the person's terminal session, by
     what coordination says the repository is (go-dc2-onboarding-design.md §5): a team of theirs
     serves it; they own a team, which installs it; or they hold an operator's team of their own,
-    which they create with it. Its door, workspace id, team id, and whether the person owns that team."""
+    which they create with it. Its door, workspace uuid, team id, and whether the person owns that team.
+
+    The door is the workspace's address, whatever door the checkout recorded before
+    (go-alias-removal-design.md D2): the alias door a checkout held is replaced, not kept."""
     # A team without an id is passed over, as a malformed workspace is; one without a name is named by its id.
     teams = [{**t, "name": t.get("name") or t["id"]} for t in access["teams"]
              if isinstance(t, dict) and isinstance(t.get("id"), str) and (team is None or t["id"] == team)]
@@ -414,20 +423,20 @@ def admit_on_go(console: str, token: str, access: dict, repo: str, team: str | N
             raise Stop("you are in no team yet, and no team of your own was given to your GitHub account; "
                        "ask the platform's operator for one, or a team's owner for an invitation")
         t, w = create_team(console, token, intents[0], repo)
-    door = f"{console}/w/{w['id']}"
+    workspace_id, address = w.get("workspace_id"), w.get("address")
+    if not door_rewrite.is_uuid(workspace_id):
+        raise Stop(f"coordination named {w['id']} with no workspace_id ({workspace_id!r}), which this "
+                   "plugin binds a checkout to; it runs a release before the alias window, so ask its operator")
+    if not isinstance(address, str) or door_mod.split(f"{console}/{address}")[1] != address:
+        raise Stop(f"coordination named {w['id']} with no address ({address!r}) to reach it at; ask its operator")
+    door = f"{console}/{address}"
     try:
-        approval = credential.approve(console, w["id"], token, key=str(uuid.uuid4()))
+        approval = credential.approve(console, door, token, key=str(uuid.uuid4()))
+        # The credential names the alias while the window is open, so a rollback renews (D8).
         credential.enrol_native(door, console, w["id"], approval["secret"])
     except credential.NoCredential as e:
         raise Stop(f"coordination would not admit this machine: {e}") from None
-    return door, w["id"], t["id"], t.get("owner") is True
-
-
-def go_alias(repo: str) -> str:
-    """A route alias for `repo`'s workspace: its name, kept to the route grammar, and a suffix,
-    since an alias is unique across every team."""
-    name = re.sub(r"[^A-Za-z0-9._-]", "-", repo.split("/")[-1]).lstrip("._-")[:48] or "workspace"
-    return f"{name}-{uuid.uuid4().hex[:6]}"
+    return door, workspace_id, t["id"], t.get("owner") is True
 
 
 def go_created(console: str, path: str, body: dict, token: str, what: str) -> dict:
@@ -449,8 +458,8 @@ def go_created(console: str, path: str, body: dict, token: str, what: str) -> di
 
 def create_workspace(console: str, token: str, team: str, repo: str) -> dict:
     """`repo` installed in the owner's team (§5, case 2): its new workspace."""
-    got = go_created(console, f"/api/v1/teams/{team}/workspaces", {"repository": repo, "alias": go_alias(repo)},
-                     token, f"install {repo}")
+    # No alias: coordination mints the workspace's, and answers its address, the door's.
+    got = go_created(console, f"/api/v1/teams/{team}/workspaces", {"repository": repo}, token, f"install {repo}")
     if not isinstance(got.get("id"), str):
         raise Stop(f"coordination installed {repo} and named no workspace id: {got}")
     say("workspace", f"{got['id']} created" + (", reading the team's GitHub installation" if got.get("source") else ""))
@@ -462,8 +471,7 @@ def create_team(console: str, token: str, intent: dict, repo: str) -> tuple[dict
     case 5): the team, and the workspace."""
     owner = repo.split("/")[0]
     got = go_created(console, "/api/v1/teams", {"authorization": intent.get("id"), "team_name": owner,
-                                                "workspace_name": repo, "alias": go_alias(repo)},
-                     token, "create your team")
+                                                "workspace_name": repo}, token, "create your team")
     made = got.get("workspace")
     if not isinstance(got.get("id"), str) or not isinstance(made, dict) or not isinstance(made.get("id"), str):
         raise Stop(f"coordination created your team and named no team or workspace id: {got}")
@@ -533,6 +541,13 @@ def serves(view: dict) -> str | None:
     """The repository the door's workspace serves, as its authorities view names it."""
     rows = view.get("authorities")
     return rows[0].get("repo") if isinstance(rows, list) and len(rows) == 1 and isinstance(rows[0], dict) else None
+
+
+def opened(view: dict) -> str | None:
+    """The uuid of the workspace the door opens, as its authorities view names it."""
+    rows = view.get("authorities")
+    got = rows[0].get("workspace_id") if isinstance(rows, list) and len(rows) == 1 and isinstance(rows[0], dict) else None
+    return got if door_rewrite.is_uuid(got) else None
 
 
 def agent_answers(port: int, root: Path) -> bool:
@@ -725,7 +740,19 @@ def install(root: Path, codex: bool = False, team: str | None = None,
     label = f"{socket.gethostname().split('.')[0]} as {getpass.getuser()}"
     bound = checkout_binding.id_at(root)
     door = recorded_door(root, bound) if bound else None
-    view = authorities(door) if door else None
+    if door:
+        # A workspace held at an alias door moves to its address door on the credential it holds,
+        # with no sign-in, while the window's serve still answers the alias (D5).
+        door_rewrite.rewrite(machine_workspaces.directory(Path.home()), lambda line: say("door", line), only=root)
+        bound = checkout_binding.id_at(root)
+        door = recorded_door(root, bound) if bound else None
+    # A door the rewrite could not move is admitted again at the address, as a new checkout is.
+    aliased = door is not None and door_rewrite.alias_door(door) is not None
+    view = authorities(door) if door and not aliased else None
+    if view is not None and view.get("coordination") is True and bound not in (opened(view), view.get("primary")):
+        # A door by address is checked here, by the uuid its authorities view names (checked_door).
+        raise Stop(f"{root} is bound to {bound}, and its door {door} opens {opened(view) or view.get('primary')}; "
+                   f"run `install.py uninstall` here, then install again")
     if view is not None and ((other := serves(view)) or "").lower() != repo.lower():
         # Before any write: a checkout whose origin moved would otherwise keep reporting to the
         # workspace of the repository it came from (#2618). GitHub reads a name in any case.
@@ -742,6 +769,9 @@ def install(root: Path, codex: bool = False, team: str | None = None,
     if moved:
         say("platform", f"moving {bound} from {door} to coordination")
         view = None
+    if aliased:
+        say("machine", f"{door} is the workspace's alias door, which the alias cut retires; admitting this "
+                       "machine at its address")
     if view is None:
         # The workspace's GitHub login is the account the person most likely signs in as (#3954).
         token = sign_in(console, f"install {repo} on {label}", invite, login or name, named=login is not None)
@@ -753,14 +783,19 @@ def install(root: Path, codex: bool = False, team: str | None = None,
             left = let_go(prior, authority, door)
         finally:
             end_session(console, token)
-    authority = door_mod.split(door)[1]
-    if authority is None:
-        raise Stop("the workspace door names no workspace")
+    else:
+        # The recorded door is this workspace's address (checked_door); the checkout is bound to its
+        # uuid, which the registry and the hooks key by.
+        authority = opened(view)
+        if authority is None:
+            raise Stop(f"the workspace's door {door} names no workspace_id in its authorities; it runs a "
+                       "release before the alias window, so ask its operator")
     wire(root, door, authority, codex)
     say("hooks", "none for Codex" if codex else "written")
     held = machine_workspaces.at(root)
-    machine_workspaces.write(machine_workspaces.directory(Path.home()), authority, machine_workspaces.Entry(
+    machine_workspaces.replace(machine_workspaces.directory(Path.home()), authority, machine_workspaces.Entry(
         root.resolve(), door, held.capability_file if held else None, held.port if held else None, name))
+    machine_workspaces.poke()
     port = ensure_agent(root, authority, door)
     say("agent", f"serving {authority} on 127.0.0.1:{port}")
     if left:
@@ -973,7 +1008,8 @@ def uninstall(root: Path, retire: bool) -> int:
         door = None
         say("credential", f"kept: {e}")
     if retire and bound:
-        retire_on(console, bound)
+        # The binding is a uuid, which no route takes: the workspace is reached at its door.
+        retire_on(console, (door_mod.split(door)[1] if door else None) or bound)
     elif retire:
         say("workspace", "not retired: this checkout is bound to no workspace; "
                          "name the workspace with `install.py retire <id>`")
@@ -990,6 +1026,7 @@ def uninstall(root: Path, retire: bool) -> int:
         # The machine's agent stops serving it on its next read of the registry; the job serves
         # the machine's other workspaces and stays.
         (machine_workspaces.directory(Path.home()) / f"{bound}.json").unlink(missing_ok=True)
+        machine_workspaces.poke()
         if door:
             credential.path_for(door).unlink(missing_ok=True)
         say("agent", f"{bound} deregistered from this machine's agent")
@@ -1001,7 +1038,7 @@ def retire_on(console: str, wid: str) -> None:
     # Its own scope: an install's carries the approval page on to GitHub for the repository (#4015).
     token = sign_in(console, f"retire {wid}")
     try:
-        status, got = call("POST", f"{console}/w/{wid}/api/v1/workspace/retirement", {}, token,
+        status, got = call("POST", f"{console}{door_mod.routed(wid)}/api/v1/workspace/retirement", {}, token,
                            key=str(uuid.uuid4()))
         if status != 200:
             raise Stop(f"coordination would not retire {wid} ({status}): {got.get('code') or got}")

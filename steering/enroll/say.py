@@ -37,6 +37,9 @@ def _on_go(session: str, token: str, this: str, text: str, target: str | None) -
         print(session_routes.say(session, token, this, text, target))
         return 0
     except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            print(stale)
+            return 1
         # A token Go no longer takes is the enrolment's to repair; sending the say again cannot.
         if e.code in session_routes.INVALID_TOKEN:
             print(refusal.reconnect(f"{session}'s token is not valid: {e}"))

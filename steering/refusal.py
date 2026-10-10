@@ -113,6 +113,13 @@ def reconnect(reason: str, to: str = "session") -> str:
     return refuse(reason, send="/2mw2lt:connect", to=to)
 
 
+def outdated(reason: str) -> str:
+    """The server named this client older than its contract: connecting again sends the same call,
+    and only a newer plugin, in a restarted session, can make it."""
+    return refuse(f"{reason}: this plugin is older than the server's contract",
+                  wait=("this machine's 2mw2lt plugin is updated and the session restarted", "/2mw2lt:connect"))
+
+
 def resend(reason: str, change: str) -> str:
     """The line was refused for something about how it was sent, not what it said: send it again
     with `change`. For a protocol fault such as a reused message id, where no verb is the fix."""

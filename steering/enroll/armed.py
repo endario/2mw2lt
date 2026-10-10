@@ -37,6 +37,7 @@ import shlex
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
+import holder  # noqa: E402
 import hooks  # noqa: E402
 import verb_help  # noqa: E402
 from connect import minted_name, records  # noqa: E402
@@ -115,7 +116,9 @@ def main() -> int:
         session = minted_name(records(ws), psession)
     except Exception:
         return DONE   # not a workspace, or not a session steering knows: nothing is owed
-    if not session or holding(ws, session):
+    # The plugin's module holding the stream is a hold too, and asking this session for a
+    # second one is refused by the daemon as another carrier (#5334).
+    if not session or holder.fresh(ws, psession) or holding(ws, session):
         return DONE
     json.dump({"decision": "block", "reason": reason(session, ws)}, sys.stdout)
     return DONE

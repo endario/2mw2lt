@@ -81,6 +81,49 @@ def write(where: Path, authority: str, entry: Entry) -> Path:
     return path
 
 
+def poke(timeout: float = 1.0) -> bool:
+    """Tell this machine's agent the registry changed, so it reads it now rather than at its next
+    poll (#5411). One attempt, never the cost of the install or deregistration that called it: an
+    agent that is down, older than the route, or slow reads the registry at its poll all the same.
+    Whether the agent accepted."""
+    import sys
+    import urllib.request
+    here = Path(__file__).resolve().parent
+    for path in (here, here / "enroll"):
+        if str(path) not in sys.path:
+            sys.path.insert(0, str(path))
+    try:
+        import door
+        import local_workspace
+        port = os.environ.get("STEERING_AGENT_PORT") or local_workspace.DEFAULT_AGENT_PORT
+        keyed = local_workspace.key_file(port)
+        if not keyed.exists():
+            keyed = local_workspace.legacy_key_file(port)
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/steering/sync", data=b"", method="POST",
+            headers={local_workspace.KEY_HEADER: keyed.read_text().strip()})
+        with door.send(req, timeout) as r:
+            return r.status == 202
+    except Exception:
+        return False
+
+
+def replace(where: Path, authority: str, entry: Entry) -> Path:
+    """The entry for `authority`, and no other naming its root: two would leave the root served by
+    neither (`entries`), as an entry an install keyed by another name would."""
+    path = write(where, authority, entry)
+    for f in sorted(where.glob("*.json")):
+        if f == path:
+            continue
+        try:
+            other = parse(f.read_text())
+        except ValueError:
+            continue
+        if other.root.resolve() == entry.root.resolve():
+            f.unlink(missing_ok=True)
+    return path
+
+
 def at(root: Path) -> Entry | None:
     """The registered checkout, including a cwd in one of its worktrees."""
     from local_workspace import common_root

@@ -65,7 +65,11 @@ def entry(workspace: Path, orch: str, local: bool) -> tuple[str, machine_workspa
     named = re.search(r"/w/([A-Za-z0-9._-]+)$", door)
     held = machine_workspaces.at(workspace)
     name = held.gh_account if held is not None else value("STEERING_GH_ACCOUNT")
-    return (named.group(1) if named else workspace.name), machine_workspaces.Entry(
+    # The registry keys a workspace by the uuid its checkout is bound to (go-alias-removal-design.md
+    # D2); an alias door's own name stands for a checkout bound to nothing yet.
+    import checkout_binding
+    authority = checkout_binding.id_at(workspace) or (named.group(1) if named else workspace.name)
+    return authority, machine_workspaces.Entry(
         workspace, door, capability, held.port if held else None, name)
 
 
@@ -124,7 +128,8 @@ def install(workspace: Path, orch: str, local: bool = False) -> Path:
     agentjob.provision_tools(agentjob.active_release(Path.home())[0], wait=True)
     # The entry first: a job started below finds it, and one already running reads it within
     # its poll, with no restart (doc 130 §2).
-    machine_workspaces.write(machine_workspaces.directory(Path.home()), authority, found)
+    machine_workspaces.replace(machine_workspaces.directory(Path.home()), authority, found)
+    machine_workspaces.poke()
     print(f"agent: {found.root} registered as {authority}")
     named = label()
     try:

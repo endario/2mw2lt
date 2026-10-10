@@ -79,8 +79,8 @@ def main(argv: list[str]) -> int:
         print(f"{e}: declare the work first, or give doing", file=sys.stderr)
         return 1
     except session_routes.Refused as e:
-        said = refusal_mod.use("taking", str(e)) if session_routes.settled(e) \
-            else refusal_mod.retry(str(e))
+        said = session_routes.outdated(e) or (refusal_mod.use("taking", str(e)) if session_routes.settled(e)
+                                              else refusal_mod.retry(str(e)))
         reply = said
     except session_routes.Unsent as e:
         reply = refusal_mod.retry(str(e))
