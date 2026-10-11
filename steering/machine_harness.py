@@ -331,7 +331,8 @@ def _claude_reading(psession: str, config: str | None = None) -> dict | None:
     rec = vitals.of_entry(vitals.last_assistant(vitals.tail(path)), {"session_id": psession}, restated=True)
     if rec is None:
         raise Refused(f"no assistant entry with an instant in {path}")
-    return rec
+    at = vitals.active_at(vitals.last_write(path))
+    return {**rec, "active_at": at} if at else rec
 
 
 def _codex_reading(psession: str) -> dict | None:
@@ -340,7 +341,9 @@ def _codex_reading(psession: str) -> dict | None:
     import codex_probe as codex
     import vitals
     path = _codex_rollout(psession)
-    return vitals.stated("codex", codex.reading(path, psession) if path is not None else None)
+    rec = vitals.stated("codex", codex.reading(path, psession) if path is not None else None)
+    at = vitals.active_at(vitals.last_write(path)) if rec is not None else None
+    return {**rec, "active_at": at} if at else rec
 
 
 def _codex_loaded(psession: str) -> bool:

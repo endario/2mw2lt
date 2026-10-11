@@ -413,9 +413,12 @@ AgentReadingBody = typing.TypedDict("AgentReadingBody", {
 # SessionReading is one reading of a session: the provider session it was read from, when, and the
 # model, effort, turn and context it names. Turn is open, ended or aborted. Directory is the label of
 # the config directory the machine found the session's transcript under, absent where it read none.
+# ActiveAt is when the machine last saw the harness write its record, a subagent's included, to the
+# minute; absent from an agent that does not say.
 SessionReading = typing.TypedDict("SessionReading", {
     "provider_session": "str",
     "observed_at": "str",
+    "active_at": "typing.NotRequired[str]",
     "model": "str",
     "vendor": "str",
     "turn": "str",
@@ -1870,6 +1873,8 @@ GateAttempt = typing.TypedDict("GateAttempt", {
     "run": "GateRun | None",
     "persona": "GatePersona | None",
     "declined": "GateDeclined | None",
+    "lost_at": "str | None",
+    "refusals": "list[str] | None",
 })
 
 # GatePersona is where a judge's lens came from: the project's, at its path, or the bundled one.
@@ -1910,8 +1915,8 @@ GateFinding = typing.TypedDict("GateFinding", {
 # GateStats answers GET /gates/stats: the open commissions by phase and by the incumbent's
 # priority names, and, over each window, the throughput and per-vendor run facts the incumbent's
 # panel reads. Go commissions carry no priority, so every open one counts as normal; hosts are
-# this workspace's gate hosts, which Go does not record yet, and work sizes are what a Go run
-# does not report, so their counts are 0 and their medians nil.
+# this workspace's gate hosts; work sizes are what a Go run does not report, so their counts are 0
+# and their medians nil.
 GateStats = typing.TypedDict("GateStats", {
     "open": "dict[str, int] | None",
     "open_by_priority": "dict[str, int] | None",
@@ -1919,7 +1924,8 @@ GateStats = typing.TypedDict("GateStats", {
     "windows": "dict[str, GateWindow] | None",
 })
 
-# GateHost is a machine of this workspace that runs gates, with its declared limit.
+# GateHost is a machine of this workspace that runs gates, by the name its runs' machine is read by,
+# with its gate slots and the gate runs held on it now, of any team.
 GateHost = typing.TypedDict("GateHost", {
     "machine_id": "str",
     "gate_host_limit": "int | None",
@@ -2170,6 +2176,7 @@ LaunchBody = typing.TypedDict("LaunchBody", {
     "effort": "typing.NotRequired[str]",
     "window": "typing.NotRequired[bool]",
     "reason": "str",
+    "brief": "typing.NotRequired[str]",
 })
 
 # LaunchWithdrawal withdraws a launch still waiting. It names nothing: the launch is the route's.
@@ -2186,6 +2193,13 @@ LaunchAnswer = typing.TypedDict("LaunchAnswer", {
     "outcome": "str | None",
     "refused": "str | None",
     "replayed": "bool",
+    "reclaimable": "typing.NotRequired[list[ReclaimableSession] | None]",
+})
+
+# ReclaimableSession is a session a waiting launch names, with its standing.
+ReclaimableSession = typing.TypedDict("ReclaimableSession", {
+    "name": "str",
+    "standing": "SessionStanding",
 })
 
 # LaunchAccount is a numbered account: the vendor's own id, the number the team gave it, and the
@@ -2688,6 +2702,7 @@ SayAnswer = typing.TypedDict("SayAnswer", {
     "state": "str",
     "to": "typing.NotRequired[str]",
     "epoch": "typing.NotRequired[int]",
+    "held": "typing.NotRequired[bool]",
 })
 
 # SayReceipt is the agent's report that a say it was written is in its session's hands.
@@ -2808,7 +2823,8 @@ ListedSession = typing.TypedDict("ListedSession", {
 # than deriving its own. It is nil for the seat's holder, and for a session never read that is
 # neither kept nor yet stale. Activity is working, waiting, concluded or idle, nil when the session
 # has not reported one; Since is when its activity began, or its enrolment where it has none. Stale
-# is no sign of life for 30 minutes with no keep, whatever the session is doing but working (#5615).
+# is no sign of life for 30 minutes with no keep, whatever the session is doing; a turn's is its
+# harness's last write, and a turn waiting on a dialog is not stale (#5615).
 SessionStanding = typing.TypedDict("SessionStanding", {
     "activity": "str | None",
     "since": "str | None",
@@ -2861,10 +2877,12 @@ OriginVSCode = typing.TypedDict("OriginVSCode", {
 })
 
 # SessionVitals is what a session epoch's latest reading says of it (#4756). ObservedAt is when its
-# harness took it; Turn is open, ended or aborted, and TurnSince when the reading that first said so
-# was taken. Each is nil when no reading stated it, which a client draws as unreported, never idle.
+# harness took it, and ActiveAt when the machine last saw that harness write; Turn is open, ended
+# or aborted, and TurnSince when the reading that first said so was taken. Each is nil when no
+# reading stated it, which a client draws as unreported, never idle.
 SessionVitals = typing.TypedDict("SessionVitals", {
     "observed_at": "str | None",
+    "active_at": "str | None",
     "turn": "str | None",
     "turn_since": "str | None",
     "model": "str | None",

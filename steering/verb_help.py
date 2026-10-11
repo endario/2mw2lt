@@ -30,7 +30,7 @@ _RAW_FORMS = {
     "ack": ["ack: <ulid> token <t>"],
     "say": ["say: <session> [to <target>] token <t> <text>"],
     "note": ["note: token <lease token> <text>"],
-    "launch": ["launch: token <lease token> <harness> [on <node>] [vendor <vendor>] [account <n>] [model <model>] [thinking <level>] [effort <level>] [window] because <reason>"],
+    "launch": ["launch: token <lease token> <harness> [on <node>] [vendor <vendor>] [account <n>] [model <model>] [thinking <level>] [effort <level>] [window] because <reason> [<newline> brief: <directive>]"],
     "withdraw": ["withdraw: token <lease token> <launch id>"],
     "relay": ["relay: token <lease token> to <session>[@<epoch>] <text>"],
     "retire": ["retire: token <lease token> <worker> on <node>"],
@@ -168,6 +168,7 @@ TOOLS = {
         {"topic": "--frame-path", "usage": "--frame-path <session>", "example": "hold --frame-path violet"},
         {"topic": "--claim-path", "usage": "--claim-path <provider-session>", "example": "hold --claim-path 0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"},
         {"topic": "--session-of", "usage": "--session-of <provider-session>", "example": "hold --session-of 0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"},
+        {"topic": "--plugin-state", "usage": "--plugin-state <provider-session>", "example": "hold --plugin-state 0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"},
         {"topic": "stream", "usage": "[--until-event|--service|--wake plugin] [--provider <provider>] [--provider-session <id>] [--pid <pid>] [session]", "example": "hold --current"},
     ]},
     "holds": {"verb": "holds", "forms": [

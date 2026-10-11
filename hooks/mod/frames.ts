@@ -1,11 +1,10 @@
 // What the module reads and writes as text: hold.py's frame lines, the frame recording, the
 // fixed rows it may append, and the version floor. Nothing here touches `$`.
 
-export type Line = { id: string | null; kind: string; wakes: boolean }
+export type Line = { id: string | null; kind: string; wakes: boolean; hold?: string; why?: string; retry?: boolean; remedy?: string }
 
 export const POINTER = 'A steering frame is waiting. Call mcp__2mw2lt__frames to read it.'
 export const CHECKPOINT = 'Compaction is near. Write your checkpoint (/2mw2lt:checkpoint) now.'
-export const CONNECT_AGAIN = 'The steering stream was refused. Run /2mw2lt:connect again.'
 export const FLOOR = [2, 1, 289] as const
 
 // The checkpoint prompt goes this far along the way to the engine's auto-compact point, which its

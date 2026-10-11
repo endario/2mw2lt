@@ -59,7 +59,9 @@ _LAUNCH = re.compile(r"^launch:\s*token\s+@lease\s+(?P<harness>[a-z][a-z0-9-]{0,
                      r"(?:\s+vendor\s+(?P<vendor>[a-z0-9][a-z0-9-]{0,31}))?"
                      r"(?:\s+account\s+(?P<account>\S{1,256}))?(?:\s+model\s+(?P<model>\S{1,128}))?"
                      r"(?:\s+thinking\s+(?P<thinking>[a-z]{1,32}))?(?:\s+effort\s+(?P<effort>low|medium|high|xhigh|max))?"
-                     r"(?:\s+(?P<window>window))?\s+because\s+(?P<reason>\S.*?)\s*$", re.S)
+                     r"(?:\s+(?P<window>window))?\s+because\s+(?P<reason>\S.*?)"
+                     # The launched session's first directive follows on its own line (doc 192).
+                     r"(?:\nbrief:[ \t]*(?P<brief>.*?))?\s*$", re.S)
 _WITHDRAW = re.compile(r"^withdraw:\s*token\s+@lease\s+(?P<launch>[0-9a-f-]{36})\s*$")
 _BACKLOG = re.compile(r"^backlog:\s*token\s+@lease\s*$")
 _ROSTER = re.compile(r"^roster:\s*token\s+@lease(?P<gone>\s+with\s+gone)?\s*$")
@@ -203,6 +205,12 @@ def _go_launch(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
     if m["quoted"]:
         body["machine_name"] = m["quoted"]
     body["reason"] = " ".join(m["reason"].split())
+    if m["brief"] is not None:
+        if not m["brief"].strip():
+            return 2, refusal.use("launch", "an empty brief: write the launched session's first directive after `brief:`, or leave the line out"), False
+        if m["harness"] == "claude-brain":
+            return 2, refusal.use("launch", "a seat brain is briefed by its host, not by a launch"), False
+        body["brief"] = m["brief"]
     if m["window"]:
         body["window"] = True
     try:

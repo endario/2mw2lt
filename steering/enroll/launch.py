@@ -74,16 +74,17 @@ def complete(d: Path) -> bool:
 
 
 def recorded(config: Path) -> Path | None:
-    """The install path the harness records for this plugin, when it is there and complete."""
+    """The install path the harness records for this plugin, when it is there and complete.
+    A user-scope and a project-scope record can name different versions, and one lags the
+    other for hours (#5619), so the newest complete record wins rather than the first."""
     try:
         doc = json.loads((config / "plugins" / "installed_plugins.json").read_text())
     except (OSError, ValueError):
         return None
-    for entry in (doc.get("plugins") or {}).get(PLUGIN) or []:
-        p = entry.get("installPath")
-        if isinstance(p, str) and p and Path(p).is_dir() and complete(Path(p)):
-            return Path(p)
-    return None
+    found = [Path(p) for entry in (doc.get("plugins") or {}).get(PLUGIN) or []
+             if isinstance(p := entry.get("installPath"), str) and p
+             and Path(p).is_dir() and complete(Path(p))]
+    return max(found, key=lambda d: _key(d.name)) if found else None
 
 
 def _key(name: str) -> tuple:

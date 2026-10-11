@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -42,11 +43,13 @@ class Refused(Exception):
     """Go refused the request. `code`, `field` and `remedy` are its problem's."""
 
     def __init__(self, status: int, code: str, field: str = "", wait: int | None = None, request: str = "",
-                 remedy: str = ""):
+                 remedy: str = "", detail: str = ""):
         super().__init__(f"refused ({status}): {code}" + (f" [{field}]" if field else "")
                          + (f" request {request}" if request else ""))
         self.status, self.code, self.field, self.wait, self.request = status, code, field, wait, request
         self.remedy = remedy
+        # What Go's refusal names beyond its code, where it names one: a commission's id.
+        self.detail = detail
 
 
 def reconnect(e: Refused, reason: str | None = None) -> str:
@@ -112,8 +115,10 @@ def post(path: str, body: dict, key: str, carrier: str, token: str, timeout: flo
             attempts += 1
             if pause is None or attempts >= RETRY_ATTEMPTS or time.monotonic() - started + pause > RETRY_LIMIT:
                 wait = problem.get("wait_seconds")
+                detail = problem.get("detail")
                 raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
-                              wait if isinstance(wait, int) else None, _request(e, problem), _remedy(problem)) from None
+                              wait if isinstance(wait, int) else None, _request(e, problem), _remedy(problem),
+                              detail if isinstance(detail, str) and len(detail) <= 200 else "") from None
             time.sleep(pause)
         except (urllib.error.URLError, OSError, TimeoutError) as e:
             raise Unsent(f"{_base()}{path}: no answer ({e})") from None
@@ -635,7 +640,28 @@ def seat_launch(session: str, token: str, body: dict, key: str) -> str:
         return f"launched: {answer['id']} {body['harness']}{on}"
     if answer.get("state") == "admitted":
         return f"launching: {answer['id']} {body['harness']}{on}"
-    return f"launch waiting: {answer['id']} {answer.get('reason') or answer.get('state')}{on}"
+    return f"launch waiting: {answer['id']} {answer.get('reason') or answer.get('state')}{on}{_reclaimable(answer.get('reclaimable'))}"
+
+
+def _reclaimable(sessions: list | None) -> str:
+    """The sessions a launch waiting for room names, each as its standing reads: kept, with until and
+    why, or what it is doing since when, and stale."""
+    if not sessions:
+        return ""
+    said = []
+    for s in sessions:
+        st = s["standing"]
+        if st.get("keep"):
+            keep = st["keep"]
+            words = f"kept until {keep['until'][11:16]} UTC{', over' if keep['over'] else ''}: {keep['reason']}"
+        else:
+            words = st.get("activity") or "never read"
+            if st.get("since"):
+                words += f" since {st['since'][11:16]} UTC"
+            if st.get("stale"):
+                words += ", stale"
+        said.append(f"{s['name']} ({words})")
+    return "; reclaimable: " + ", ".join(said)
 
 
 def seat_withdraw(session: str, token: str, launch: str, key: str) -> str:
@@ -793,6 +819,26 @@ def seat_card(session: str, token: str, verb: str, fact: dict, repo: str, key: s
     return f"carded: {verb} {fact['card']}"
 
 
+def over_branches(token: str, card: str, rest: list[str]) -> str:
+    """Go's `conclusion-over-branches`, said as Python said it (cards.py _conclusion_over_branches):
+    the branches the card still holds, and the lines that conclude it. A merge Go has not read yet
+    reads as no merge, so concluding with the branch kept is the line for that too: the card lands
+    once Go reads the merge."""
+    try:
+        branches = [b for b in get(f"/cards/{card}", token).get("card", {}).get("branches") or []
+                    if not b.get("ended") and b.get("repo") and b.get("branch")]
+    except (Refused, Unsent):
+        branches = []
+    held = ", ".join(f"{b['repo']} {b['branch']}" for b in branches) or "a branch"
+    return refusal.refuse(
+        f"card {card} holds {held}, and Go reads it as not landed: no merge read, or a pull request still open",
+        send=[(f"card: token <lease token> conclude {shlex.join(rest)} --branch-is-the-work",
+               "if its pull request merged before Go read it, or the branch is still the work"),
+              *((f"card: token <lease token> unbranch {card} {b['repo']} {b['branch']} <why>", "if the work landed another way")
+                for b in branches)],
+        to="seat")
+
+
 def seat_reanchor(session: str, token: str, fact: dict, repo: str) -> str:
     """The seat's reanchor on Go, which has no replacement of a card's anchors: each live anchor the
     fact does not name is ended with its why, and each it names that the card lacks is added. A
@@ -854,9 +900,13 @@ def roster(session: str, token: str, include_gone: bool) -> str:
 
 def say(session: str, token: str, occurrence: str, text: str, to: str | None = None) -> str:
     """The session's say on Go (go-session-say-design.md): to `to`, or to the brain when none is
-    named. The occurrence makes a resend the same say. Raises `Refused` or `Unsent`."""
+    named. The occurrence makes a resend the same say. The answer names what happened to the
+    words: handed to a stream that stood, or spooled for the session's next hold (#5674). Raises
+    `Refused` or `Unsent`."""
     body = {"occurrence": occurrence, "text": text, **({"to": to} if to else {})}
     answer = post(f"/sessions/{session}/says", body, _own_key("say", session, occurrence), SESSION_CARRIER, token)
     if answer.get("state") == "unheard":
         return f"nobody holds the seat; kept on the brain's Needs You as unheard:{answer.get('id')}"
+    if answer.get("held"):
+        return f"delivered to {answer.get('to')}@{answer.get('epoch')} as {answer.get('id')}: their stream holds"
     return f"queued for {answer.get('to')}@{answer.get('epoch')} as {answer.get('id')}: queued until they hold"

@@ -134,6 +134,9 @@ def _on_go(held: dict, verb: str, rest: list[str], usage: str, retry: str | None
         print(refusal.retry(str(e)))
         print(f"if this write may have been made, resend it with --retry={key}", file=sys.stderr)
     except session_routes.Refused as e:
+        if verb == "conclude" and e.code == "conclusion-over-branches":
+            print(session_routes.over_branches(held["token"], fact["card"], rest))
+            return 1
         print(refusal.use("card", str(e)) if session_routes.settled(e) else refusal.retry(str(e)))
         if not session_routes.settled(e):
             print(f"if this write may have been made, resend it with --retry={key}", file=sys.stderr)

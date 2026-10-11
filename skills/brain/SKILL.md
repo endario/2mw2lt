@@ -58,7 +58,7 @@ top of it closes after every frame, and in each gap the brain cannot answer and 
 it (#4520). A line that says the module
 holds no stream here may mean this process fetched its plugins before the module existed, and a
 long-lived brain stays that way until it is restarted or resumed
-(#4551); hold by hand until then. While you hold the seat
+(#4551); resume it so the plugin holds the stream, since a hold armed by hand revokes the plugin's (#5641). While you hold the seat
 the plugin also places the knowledge's standing decisions last in your system prompt, so a compaction
 does not lose them; any other harness reads them with `seat_section.py`. The
 rest of this section is for a harness the plugin does not hold.
@@ -108,9 +108,13 @@ say `from: session <id>` naming the session it is about:
 
 - **`session-concluded`**: the session said done and holds no work. It is free now: delegate to it.
 - **`session-stale`**: no sign of life for 30 minutes and no keep, whether it is idle, concluded,
-  waiting on work it holds, or never read since it enrolled. Close it, drive it, or keep it with a
+  waiting on work it holds, never read since it enrolled, or in a turn whose harness has written
+  nothing, which may be hung or gone. Close it, drive it, or keep it with a
   reason. A stale wait may still be alive: check before you retire it, and keep a wait you trust
   (a review round, say) with what it waits on.
+- **`session-quiet`**: a worker holding a card ended its turn without saying done 15 minutes ago,
+  with nothing it waits on open, and has written nothing since. Drive it, or keep it with what it
+  waits on.
 - **`session-lapsing`**: its prompt cache lapses within 15 minutes. Resumed after that, it re-reads
   its whole context.
 - **`session-kept-over`**: its keep's until passed and no work reached it.
@@ -126,9 +130,9 @@ unkeep: token @lease <session>
 
 `until` defaults to 30 minutes and has no ceiling; the owner sees each keep with its reason. Work
 you place on it ends the keep. On `session-lapsing`, decide while it is cheap: drive it now, let it
-lapse knowingly, or close it. On `session-stale` or `session-kept-over`, act in that turn. Only
-Anthropic's cache lifetime, one hour, is stated; another vendor's session carries no cache and
-raises no `session-lapsing`.
+lapse knowingly, or close it. On `session-stale`, `session-quiet` or `session-kept-over`, act in
+that turn. Only Anthropic's cache lifetime, one hour, is stated; another vendor's session carries no
+cache and raises no `session-lapsing`.
 
 A session executing a live card reads as waiting, not concluded, even after its branch merged
 (#5588): conclude its card when its unit is done. Each notice is a suggestion; Go closes,
@@ -434,19 +438,37 @@ An opencode worker runs confined, in a clone of its own, and its branch is pushe
 `launching: <id> <harness> on <node>` means the agent there was handed it. Read how it ended
 through the API, from any machine: `requested`, `refused`, `lapsed`, `launched` naming the
 session, or `launch-refused` with the agent's reason. Go waits a launch with no room rather than
-refusing it (`worker-full`, `host-full`): read `/sessions`' `standing` for the sessions on that
-machine you can close. Go has no read of one launch yet (#5081).
+refusing it (`worker-full`, `host-full`), and the waiting line names the sessions it could
+reclaim, each as its standing reads: close or drive one, or drop a keep you no longer need. Go has no read of one launch yet (#5081).
 
 `rest.py` reads `/facts?state=<kind>` (the ledger, redacted, a page at a time; `--all` follows it
 to the head). Read it; do not reach for the ledger on the host.
-The worker then appears in `/sessions`, and you delegate to it like any idle session. One launch
-is in flight per machine, and an agent refuses one past `STEERING_MAX_WORKERS` live workers.
+**Launch with the work.** A `brief:` line after the launch line is the worker's first directive,
+written as you would relay it. Send it through a quoted heredoc, so nothing in the brief is
+expanded by the shell:
+
+```bash
+say "$(cat <<'LAUNCH'
+launch: token @lease claude model <model> effort <level> because <why>
+brief: <the card, its issue, PR and design doc, and what done reports>
+LAUNCH
+)"
+```
+
+The daemon keeps it with the launch and hands it to the session the launch starts, under your
+`from:` line, as soon as it has connected, so you relay nothing to it. If it is not
+taken, you are told `launch-brief-unheard`: the launch was refused or lapsed, or the session has
+not acknowledged it after ten minutes. A launch without a brief appears in `/sessions` and you
+delegate to it like any idle session. One launch is in flight per machine, and an agent refuses
+one past `STEERING_MAX_WORKERS` live workers.
 
 An interactive Claude Code session, one a person can watch and type into, is a `launch:` too:
 
 ```bash
 say "launch: token @lease claude [on <node>] [vendor <vendor>] [account <n>] model <model> effort <level> [window] because <why>"
 ```
+
+with its `brief:` line sent as above.
 
 `model` is Claude Code's own (`opus`, `opus[1m]`) and both it and `effort` are required, so no
 account default decides the level. The daemon picks the best-ranked account of the vendor named
@@ -1010,8 +1032,10 @@ brain between holds, and what they send to it is spooled for a session that will
   (503) — the agent is running but the orchestrator is down, restarting, or slow to admit;
   the script reopens and is held once it answers. Persisting past a minute: the daemon on the
   brain machine, not this one.
-- **queued for <them>, which is between holds (normal)** on a `--to` — that session is enrolled but not
-  holding its stream, so the words are spooled and handed over when it holds one (#1601). It is
+- **queued for <them>@<epoch> as <id>: queued until they hold** on a `--to` — that session is enrolled but not
+  holding its stream, so the words are spooled and handed over when it holds one (#1601). A peer
+  whose stream stands answers `delivered to <them>@<epoch> as <id>: their stream holds` instead,
+  which is not a promise they have read it — only that the words went down a live stream (#5674). It is
   not evidence the session has stopped: a long turn outlives a hold, and this is the normal state
   of a working session (#1500). `relay:` remains
   yours for a directive, which is an envelope with a ULID to acknowledge; a `say` is speech and

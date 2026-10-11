@@ -42,12 +42,20 @@ def store(ws: Path, session: str, token: str, provider_session: str | None = Non
     return p
 
 
+def _written(p: Path) -> tuple[float, str]:
+    try:
+        return p.stat().st_mtime, p.name
+    except OSError:
+        return 0.0, p.name
+
+
 def records(ws: Path) -> dict[str, dict]:
-    """The workspace's stored `enroll:` records by session name. A file whose name is not the
-    hash of the session it claims is ignored: the name is the only thing tying the two."""
+    """The workspace's stored `enroll:` records by session name, the newest written first. A file
+    whose name is not the hash of the session it claims is ignored: the name is the only thing
+    tying the two."""
     out: dict[str, dict] = {}
     d = ws / ".claude" / "steering-tokens"
-    for p in sorted(d.glob("*")) if d.is_dir() else []:
+    for p in sorted(d.glob("*"), key=_written, reverse=True) if d.is_dir() else []:
         try:
             rec = json.loads(p.read_text())
             session, token = rec["session"], rec["token"]
@@ -63,7 +71,7 @@ def minted_for(ws: Path, provider_session: object) -> str | None:
     `connect.own_enrolment` picks it when no name is given: the record minted for it, else a lone
     record that names no session. None otherwise; the door checks whatever is sent."""
     known = records(ws)
-    mine = [rec for _, rec in sorted(known.items())
+    mine = [rec for rec in known.values()
             if provider_session and rec.get("provider_session") == provider_session]
     if not mine and len(known) == 1 and not next(iter(known.values())).get("provider_session"):
         mine = list(known.values())

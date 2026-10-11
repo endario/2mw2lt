@@ -81,6 +81,16 @@ repair and connect again before another hold; repeating the refused hold cannot 
 credential or incarnation. For truncated notifications, other harnesses, usage limits and
 frame handling, read [the stream reference](stream-reference.md).
 
+**The plugin's hold** resumes by itself after a revoke, a curable refusal or a resume; never arm one beside
+it, since a second hold revokes the plugin's. When it is retrying or has stopped, the hook says so
+(attempt, refusal, next try, or the remedy), and once more when it holds again. Its full state is
+always one command away:
+
+```bash
+ws="${STEERING_WORKSPACE:-$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")}"
+python3 "$ws/.claude/steering-launch.py" exec hold --plugin-state "$CLAUDE_CODE_SESSION_ID"
+```
+
 ## Work and report
 
 Run issue-taking from the workspace, and branch-taking/announce from the worktree you will
@@ -94,6 +104,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" blocked <session> on "<b
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" wait <session> for checks <pr>  # or merged <pr>, verdict <pr>, comment <pr>, at <UTC time>: told once it holds, instead of polling
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" done <session> "<result>"
 ```
+
+A `say` from `kick <id>` means you hold a card and your turn ended with nothing you wait on open.
+Carry on with the work, declare what you wait on with `wait`, or say `done` or `blocked`. Do not
+answer it in words.
 
 When work needs a card and has neither an owning issue nor a gate yet, declare it:
 
@@ -133,12 +147,14 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/say.py" --to <their session> <you
 ```
 
 Both go on your own enrollment token, and your name travels with the words. **To reach the brain,
-leave `--to` out**: you need no name. The answer names the session that heard you, `the brain
-heard <you>: <holder>`, or `queued for the brain (<holder>), which is between holds
-(normal): …` when it is between holds: the words reach it on its next hold. When nobody holds the seat the answer is `nobody holds the seat; kept on the brain's Needs You as unheard:<id>`: the
-words are kept for whoever takes it, so do not send them again or post them anywhere else. A peer between
-holds is not a refusal: `--to` answers `queued for <them>, which is between holds (normal): …`,
-and the words are spooled for the hold that returns. Neither needs resending. `<them> has no live enrollment here` is still a
+leave `--to` out**: you need no name. The answer names what happened to the words. `delivered to
+<holder>@<epoch> as <id>: their stream holds` means the seated session's stream stood and the words
+went down it at once; `queued for <holder>@<epoch> as <id>: queued until they hold` means the seat
+is held but its stream is down, and the words reach it on its next hold. When nobody holds the seat the answer is `nobody holds the seat; kept on the brain's Needs You as unheard:<id>`: the
+words are kept for whoever takes it, so do not send them again or post them anywhere else. A peer
+between holds is not a refusal: `--to` answers `queued for <them>@<epoch> as <id>: queued until
+they hold`, and the words are spooled for the hold that returns; a peer whose stream stands
+answers `delivered to <them>@<epoch> as <id>: their stream holds`. Neither needs resending. `<them> has no live enrollment here` is still a
 refusal, because nothing under that name will hold again.
 
 A send whose answer was lost is not a second say either: `say.py` prints `id <id>` as `verb.py`

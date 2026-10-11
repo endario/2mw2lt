@@ -34,7 +34,9 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import time
+import uuid
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
@@ -48,7 +50,7 @@ import holder  # noqa: E402
 from local_workspace import agent_port, path_header, required_workspace_root, workspace_header  # noqa: E402
 from moments import moment  # noqa: E402
 import door  # noqa: E402
-from bind import Refused, incarnation, pid_arg  # noqa: E402
+from bind import Refused, bind, incarnation, pid_arg  # noqa: E402
 from connect import agent_says, harness_of, minted_name, own_enrolment, project_dir, records  # noqa: E402
 import machine_harness as harness_mod  # noqa: E402
 from process_probe import Undetermined  # noqa: E402
@@ -66,6 +68,13 @@ ACTS = frozenset({"envelope", "say", "seat", "kick", "room"})
 # Except a usage frame moving this session's account to this verdict: the pack-up trigger
 # (doc 117 §5).
 PACK_UP = "excluded"
+# The refusals a plugin's hold outlives by holding again: the process is not observed yet (its
+# presence is spooled for the agent to relay), or coordination could not answer just then. Any
+# other refusal of the stream or of a rebind is the enrolment's or the incarnation's, which
+# holding again cannot change, so the plugin stops and says why (#5641).
+CURABLE = frozenset({"incarnation-unobserved", "parent-unavailable", "standing-epoch-unsettled", "uplink-stale"})
+REFUSAL_CODE = re.compile(r"refused \(\d+\): ([a-z][a-z-]*)")
+STOPPED_REMEDY = "run /2mw2lt:connect, which the plugin's hold follows"
 
 
 def _frame(line: str) -> dict | None:
@@ -239,8 +248,49 @@ def who(ws: Path, h: harness_mod.Harness, psession: str | None, pid: int | None,
     """(session, token, runtime id, provider session) — the enrollment of the process this runs
     inside."""
     psession, rid = incarnation(psession, pid, h.provider)
-    name, token = own_enrolment(ws, psession, session)
+    try:
+        name, token = own_enrolment(ws, psession, session)
+    except Refused as why:
+        raise Unenrolled(str(why)) from None
     return name, token, rid, psession
+
+
+class Unenrolled(Refused):
+    """No enrolment here is this session's: holding again cannot mint one (#5641)."""
+
+
+def told(kind: str, **fields: object) -> None:
+    """One line of the plugin protocol on stdout, beside the frames' own (#5641)."""
+    sys.stdout.write(json.dumps({"id": None, "kind": kind, "wakes": False, **fields}) + "\n")
+    sys.stdout.flush()
+
+
+def present(ws: Path, psession: str, rid: str) -> None:
+    """Spool this process's presence for the agent to relay, which makes a resumed process that
+    has fired no hook yet an observed incarnation Go will bind (`supervision.WITNESSED`). One
+    file per incarnation, however often the plugin asks."""
+    key = "present-" + hashlib.sha256(f"{psession} {rid}".encode()).hexdigest()[:32]
+    spool.admit_at(spool.spool_dir(ws), key, {
+        "v": 4, "source": "claude", "session": psession, "runtime_id": rid, "event": "Present",
+        "occurrence": key, "observed_at": datetime.now(timezone.utc).isoformat()})
+
+
+def rebound(ws: Path, session: str, token: str, psession: str, rid: str, pid: int | None,
+            provider: str) -> str | None:
+    """None once this process is bound to the session's own enrolment, else the refusal. A bind
+    mints nothing: Go refuses it for an enrolment that was retired or detached, so a plugin's
+    hold revives no session (#5641). Its answer is said either way."""
+    try:
+        answer, _ = bind(session, token, psession, pid, provider)
+    except (Refused, Undetermined) as why:
+        answer = str(why)
+    print(f"the stream named a runtime {session} is not bound to; rebinding: {answer}", file=sys.stderr)
+    if answer.startswith("bound:"):
+        return None
+    code = REFUSAL_CODE.search(answer)
+    if code and code.group(1) == "incarnation-unobserved":
+        present(ws, psession, rid)
+    return code.group(1) if code else answer
 
 
 def frame_path(ws: Path, session: str) -> Path:
@@ -443,7 +493,8 @@ def close_recording(recorded) -> None:
 def hold(port: str, session: str, token: str, rid: str, frames: Path, until: bool = False,
          service: bool = False, workspace: Path | None = None,
          plugin: bool = False,
-         lapsed: Callable[[], str | None] | None = None, config: Path | None = None) -> int:
+         lapsed: Callable[[], str | None] | None = None, config: Path | None = None,
+         rebind: Callable[[], str | None] | None = None) -> int:
     """Open the stream and yield its frames, reopening transport failures.
 
     A 503
@@ -455,6 +506,10 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
     `lapsed` is asked on every line read, keepalives included, and a reason it gives ends the
     hold with 4 for the plugin to refresh and restart, otherwise 1. `config` is the session's Claude config directory, which the agent reads the
     session's transcript under: it runs outside the session's environment and cannot know it.
+    `rebind` binds this process's runtime to the session's own enrolment, once, when the stream
+    refuses a runtime the enrolment is not bound to: a resumed or restarted process (#5641). A
+    plugin hold says `held` when coordination admits it, and `refused` before it ends on a
+    refusal, with whether holding again can outlive it.
     """
     url = f"http://127.0.0.1:{port}/steering/session/{session}/stream"
     quiet = False    # the standing failure has been named; naming it every attempt is noise
@@ -492,6 +547,13 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                             say_read(port, session, raw)
                         if line.startswith(": keepalive") or not line.strip():
                             continue
+                        if plugin and line.startswith(": connected "):
+                            try:
+                                admitted = json.loads(line[line.index("{"):])
+                            except ValueError:
+                                admitted = {}
+                            told("held", hold=admitted.get("hold_id"))
+                            continue
                         wakes, found = acts(line, seen, seated), exclusion(line)
                         seen = None if lifted(line) else seen if found is None else found
                         if (generation := seat_of(line)) is not None:
@@ -524,9 +586,18 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                 if not isinstance(body, dict):
                     body = {"refused": body}
                 why = body.get("refused")
+                if e.code == 403 and why == "hold-runtime-not-current" and rebind:
+                    refused, rebind = rebind(), None
+                    if refused is None:
+                        continue
+                    why = refused
                 # An empty workspace registry can be an agent still starting.
                 if e.code == 403 or (e.code == 404 and isinstance(body.get("serves"), list) and body["serves"]):
                     serves = f" The agent serves {body['serves']}." if body.get("serves") else ""
+                    if plugin:
+                        cures = why in CURABLE
+                        told("refused", why=f"refused {e.code}: {why}.{serves}", retry=cures,
+                             **({} if cures else {"remedy": STOPPED_REMEDY}))
                     print(f"refused {e.code}{f': {why}' if why else ''}.{serves} "
                           f"nothing this loop retries will change that; run /2mw2lt:connect, "
                           f"then hold this stream again", file=sys.stderr if plugin else sys.stdout)
@@ -593,6 +664,7 @@ def main(argv: list[str]) -> int:
     # the rule: the recording, the holder claim's path, and the enrolment of a provider session.
     for flag, what, answer in (("--frame-path", "session name", frame_path),
                                ("--claim-path", "provider session", holder.claim_path),
+                               ("--plugin-state", "provider session", holder.describe),
                                ("--session-of", "provider session",
                                 lambda ws, ps: minted_name(records(ws), ps))):
         if args[:1] == [flag]:
@@ -615,9 +687,8 @@ def main(argv: list[str]) -> int:
             if not h.holds:
                 raise Refused(f"a {h.provider} session is reached by injection; do not hold a stream")
             ws = required_workspace_root(project, timeout=2.0)
-            session, token, rid, psession = who(ws, h, psession,
-                                                pid or (plugin_pid(h, psession) if plugin else None),
-                                                session)
+            pid = pid or (plugin_pid(h, psession) if plugin else None)
+            session, token, rid, psession = who(ws, h, psession, pid, session)
             if plugin and not holder.fresh(ws, psession):
                 raise Refused(f"refused: no fresh holder claim for {psession}; "
                               f"the plugin's module starts this hold")
@@ -633,6 +704,9 @@ def main(argv: list[str]) -> int:
                 if why:
                     raise Refused(why)
         except (Refused, Undetermined) as why:
+            if plugin:
+                ended = isinstance(why, Unenrolled)
+                told("refused", why=str(why), retry=not ended, **({"remedy": STOPPED_REMEDY} if ended else {}))
             print(str(why), file=sys.stderr)
             return 1
         until = "--until-event" in args
@@ -645,7 +719,8 @@ def main(argv: list[str]) -> int:
                   f"the holder claim for {psession} is no longer fresh; this hold ends so the "
                   f"plugin's module can refresh its claim and restart it") if plugin else None
         return hold(port, session, token, rid, frames, until, service, ws, plugin, lapsed,
-                    h.config_dir() if h.provider == "claude" else None)
+                    h.config_dir() if h.provider == "claude" else None,
+                    rebind=(lambda: rebound(ws, session, token, psession, rid, pid, h.provider)) if plugin else None)
 
 
 if __name__ == "__main__":

@@ -25,6 +25,7 @@ import uuid
 
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
+import holder  # noqa: E402
 import hooks  # noqa: E402
 import readout  # noqa: E402
 import runtime_id  # noqa: E402
@@ -152,6 +153,7 @@ def main() -> int:
                 readout.midturn(hook, ws, o.get("runtime_id"), min(1.5, left))
         except Exception as e:  # a reading is worth one attempt; the next window brings another
             record("readout", f"mid-turn post failed: {failure(e)}", ws)
+    notice = plugin_notice(ws, o, notice)
     return finish(o["event"], notice) if notice else finish()
 
 
@@ -178,6 +180,43 @@ def received_notice(ws: Path, o: dict, notice: str | None, now: float) -> str | 
     except OSError:
         pass  # The notice still reaches the session when its local window cannot be kept.
     return notice
+
+
+STREAM_DOWN = "Your steering stream is down as "
+
+
+def plugin_notice(ws: Path, o: dict, notice: str | None) -> str | None:
+    """For a session the plugin holds, its own account in place of the daemon's stream-down
+    notice, whose remedy (arm a hold) would revoke the plugin's. It speaks on a bad state, when
+    that changes or a person prompts, and once on recovery; it is silent while the plugin holds
+    (owner ruling, 2026-10-11, #5641). `hold.py --plugin-state` gives the state on demand."""
+    psession = str(o.get("session") or "")
+    if o.get("event") not in ("UserPromptSubmit", "PostToolUse"):
+        return notice
+    hold = holder.state(ws, psession)
+    if hold is None:
+        return notice
+    if notice and notice.startswith(STREAM_DOWN):
+        notice = None
+    bad = hold.get("state") in ("retrying", "stopped")
+    key = f"{hold.get('state')}:{hold.get('refusal') or ''}" if bad else "holding"
+    mark = holder.claim_path(ws, psession).with_suffix(".said")
+    try:
+        last = mark.read_text()
+    except OSError:
+        last = ""
+    if bad and (key != last or o["event"] == "UserPromptSubmit"):
+        line = holder.said(hold)
+    elif not bad and last and last != "holding" and hold.get("state") == "holding":
+        line = holder.said(hold).replace("holds this session's stream", "holds this session's stream again", 1)
+    else:
+        line = None
+    if line:
+        try:
+            mark.write_text(key)
+        except OSError:
+            pass   # said again next time: a missed mark costs a repeat, never a silence
+    return "\n".join(x for x in (line, notice) if x) or None
 
 
 def notice_in(r) -> str | None:

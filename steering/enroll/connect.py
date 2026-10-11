@@ -140,9 +140,10 @@ def minted_name(taken: dict[str, dict], psession: str) -> str | None:
     Asked before the name is derived, because a derived name is only stable while the sessions
     it was derived against stay enrolled: the session that had to grow its name would otherwise
     shrink back to the base once the collider detached, and enrol again under a second name
-    while its own enrolment still stood.
+    while its own enrolment still stood. Two records minted for one session (a detached one's can
+    outlive it, #5661) resolve to the first `records` gives, the newest written (#5641).
     """
-    for name, rec in sorted(taken.items()):
+    for name, rec in taken.items():
         if rec.get("provider_session") == psession:
             return name
     return None

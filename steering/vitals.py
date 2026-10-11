@@ -34,7 +34,7 @@ _FIELDS = {"v", "source", "source_version", "provider_session", "runtime_id", "o
            "model", "vendor", "tokens", "branch", "cwd", "permission_mode", "effort",
            "context_window",
            "stop_reason", "background_tasks", "session_crons", "entrypoint", "agent_type",
-           "machine_id", "hostname", "turn", "tmux"}
+           "machine_id", "hostname", "turn", "tmux", "active_at"}
 _REQUIRED = {"v", "source", "source_version", "provider_session", "observed_at"}
 _TOKENS = ("input", "output", "thinking", "cache_read", "cache_creation")
 # Claude Code's own permission modes; anything else is a string this does not recognise.
@@ -215,6 +215,8 @@ def validate(rec: object) -> str | None:
     # takes an age from one: a stamp that is not an instant is newest for good and ageless.
     if not is_instant(rec["observed_at"]):
         return "observed_at must be an instant"
+    if rec.get("active_at") is not None and not is_instant(rec["active_at"]):
+        return "active_at must be an instant"
     why = records.short_strings(rec, ("model", "vendor", "branch", "cwd", "entrypoint", "stop_reason",
                                       "agent_type", "runtime_id", "machine_id", "hostname"),
                                 200, optional=True)
@@ -322,6 +324,27 @@ def project(binding: dict, latest: dict, enrolled: dict) -> dict[str, dict]:
         if held is None or rec["observed_at"] > held["observed_at"]:
             per[session] = rec
     return per
+
+
+def last_write(path: Path) -> float | None:
+    """When the transcript at `path`, or a subagent's beside it, was last written, as a POSIX
+    time: a forked skill or a foreground agent writes only its own file while the session waits on
+    it (#5615). None when none can be read."""
+    times = []
+    for p in [path, *path.with_suffix("").joinpath("subagents").glob("*.jsonl")]:
+        try:
+            times.append(p.stat().st_mtime)
+        except OSError:
+            pass
+    return max(times, default=None)
+
+
+def active_at(mtime: float | None) -> str | None:
+    """A reading's active_at for a write at `mtime`, to the minute, so a working session's reading
+    changes once a minute rather than at every write."""
+    if mtime is None:
+        return None
+    return time.strftime("%Y-%m-%dT%H:%M:00Z", time.gmtime(mtime))
 
 
 def utc() -> str:

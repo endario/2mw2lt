@@ -1,6 +1,6 @@
 import type { Register, EngineInterface, Timer, HookStream, ProcessSpawnChunk, ProcessSpawnResult } from 'claude-code'
-import { lines, atLeast, pick, invokes, tokensOf, due, owed, framesEntry, obsoleteSeatRefusal, nextSeat, asksSeat, seatCall, seatSchema, resendId, entryRefusal, READ_KEPT, POINTER, CHECKPOINT, CONNECT_AGAIN, SEAT_SECTION, SEAT_TOOLS } from './frames'
-import type { SeatCall } from './frames'
+import { lines, atLeast, pick, invokes, tokensOf, due, owed, framesEntry, obsoleteSeatRefusal, nextSeat, asksSeat, seatCall, seatSchema, resendId, entryRefusal, READ_KEPT, POINTER, CHECKPOINT, SEAT_SECTION, SEAT_TOOLS } from './frames'
+import type { Line, SeatCall } from './frames'
 
 // The plugin's hooks module (#3872): it holds a connected Claude session's steering stream through
 // hold.py's `--wake plugin` mode, wakes the session with a fixed pointer, and hands the frames to
@@ -16,7 +16,6 @@ const APPENDED = { plugin: '2mw2lt', key: 'appended' } as const
 const WARNED = { plugin: '2mw2lt', key: 'warned' } as const
 const POINT = { plugin: '2mw2lt', key: 'point' } as const
 const SESSION = { plugin: '2mw2lt', key: 'session' } as const
-const CONNECTED = { plugin: '2mw2lt', key: 'connected' } as const
 const SEAT = { plugin: '2mw2lt', key: 'seat' } as const
 
 const TOOL = 'mcp__2mw2lt__frames'
@@ -64,7 +63,7 @@ async function claim($: EngineInterface, live: boolean, ps?: string): Promise<bo
   const path = await claimPath($, id)
   if (!path) return false
   const at = live ? (await $.clock.now()) / 1000 : 0
-  await $.fs.write(path, JSON.stringify({ provider_session: id, module: version, at }))
+  await $.fs.write(path, JSON.stringify({ provider_session: id, module: version, at, ...(hold ? { hold } : {}) }))
   return true
 }
 
@@ -102,7 +101,7 @@ async function repoint($: EngineInterface) {
     if ((await $.state.get(BUSY)).value) return            // the next turn's end asks again
     await unpoint($)
     // Nothing is owed a pointer once the module no longer holds the stream.
-    if (!yielded && (await $.state.get(SESSION)).value && ((await $.state.get(PENDING)).value ?? []).length) await point($)
+    if ((await $.state.get(SESSION)).value && ((await $.state.get(PENDING)).value ?? []).length) await point($)
   })
 }
 
@@ -241,10 +240,10 @@ let claimed: { id: string; path: string } | undefined
 let version = ''
 let generation = 0
 let refresh: Timer | undefined
-// Set when a hold is refused after a connect: connecting did not repair it, so the module hands the
-// stream back to the model-run recipe for the rest of this process rather than loop on it.
-let yielded = false
 let child: HookStream<ProcessSpawnChunk, ProcessSpawnResult> | undefined
+// The plugin's own account of the hold, written into its claim for the session to read (#5641):
+// holding only once coordination admitted it, retrying with the last refusal, or stopped.
+let hold: Record<string, unknown> | undefined
 // The model whose window the engine did not recognise, once named in the log.
 let named = ''
 
@@ -264,12 +263,19 @@ async function holdOnce($: EngineInterface, ps: string, session: string, gen: nu
   let buffer = ''
   let said = ''                                // the end of what it wrote to stderr: why it stopped
   let woke = false
+  let refused: Line | undefined
   for await (const { stream, text } of held) {
-    if (gen !== generation) return { code: null, woke, said }   // leaving the loop kills the child
+    if (gen !== generation) return { code: null, woke, said, refused }   // leaving the loop kills the child
     if (stream !== 'stdout') { said = (said + text).slice(-STDERR_TAIL); continue }
     const { complete, rest } = lines(buffer + text)
     buffer = rest
     for (const l of complete) {
+      if (l.kind === 'held') {
+        hold = { state: 'holding', hold: l.hold ?? null, since: (await $.clock.now()) / 1000 }
+        await claim($, true, ps).catch(() => undefined)
+        continue
+      }
+      if (l.kind === 'refused') { refused = l; continue }
       if (l.kind === 'seat') askSeat($, true)
       else if (asksSeat(l.kind)) await askHolder($)
       if (!l.wakes || l.kind === 'closed') continue
@@ -286,17 +292,19 @@ async function holdOnce($: EngineInterface, ps: string, session: string, gen: nu
       })
     }
   }
-  if (gen !== generation) return { code: null, woke, said }
-  return { code: (await held.result).code, woke, said }
+  if (gen !== generation) return { code: null, woke, said, refused }
+  return { code: (await held.result).code, woke, said, refused }
 }
 
 async function holdLoop($: EngineInterface, session: string, gen: number) {
   const ps = await $.session.id()
   let wait = 1000
   let retry = false
+  let attempt = 0
   while (gen === generation) {
     const began = await $.clock.now()
     let code: number | null = null
+    let refused: Line | undefined
     try {
       // Sleep can expire the claim before its periodic refresh runs.
       if (retry) await claim($, true, ps)
@@ -304,26 +312,28 @@ async function holdLoop($: EngineInterface, session: string, gen: number) {
       retry = true
       const ended = await holdOnce($, ps, session, gen)
       code = ended.code
+      refused = ended.refused
       if (ended.woke) wait = 1000
       if (code !== 0) $.ui.log(`2mw2lt: the hold exited ${code}: ${ended.said.trim()}`, { to: 'debug' })
     } catch (err) {                            // a child that broke is held again, as one that exited
       $.ui.log(`2mw2lt: the hold broke: ${String(err)}`, { to: 'debug' })
     }
     if (gen !== generation) return
-    // 3: the stream was revoked. 1: the hold was refused. Neither is retried; connecting again
-    // is the recipe's repair. A refusal before this process ever connected adds no row: the
-    // recipe is about to connect anyway. Any other end (4: its recording failed) is held again.
-    const connected = (await $.state.get(CONNECTED)).value
-    if (code === 1 && connected) {
-      yielded = true
-      refresh?.cancel()
-      await claim($, false).catch(() => undefined)   // connect now prints today's reply: arm a hold
+    // The plugin holds every session's stream, the seat's included, and never hands that to the
+    // session (owner ruling, #5641): a revoked (3) or refused (1) hold is held again like any
+    // other end, and the session is asked nothing. Those two keep backing off however long the
+    // hold lasted. A refusal hold.py names as one no retry outlives stops the loop, and says so.
+    const now = await $.clock.now()
+    if (refused && refused.retry === false) {
+      hold = { state: 'stopped', refusal: refused.why ?? `the hold exited ${code}`, remedy: refused.remedy ?? '', at: now / 1000 }
+      await claim($, true, ps).catch(() => undefined)
+      return
     }
-    if (code === 3 || (code === 1 && connected)) {
-      await tell($, CONNECT_AGAIN)
-    }
-    if (code === 1 || code === 3) return
-    if ((await $.clock.now()) - began > 60_000) wait = 1000   // it held: this is no crash loop
+    if (code !== 1 && code !== 3 && now - began > 60_000) { wait = 1000; attempt = 0 }   // it held: this is no crash loop
+    attempt++
+    hold = { state: 'retrying', attempt, at: now / 1000, next_at: (now + wait) / 1000,
+      refusal: refused?.why ?? (code === 3 ? 'another hold took this stream' : `the hold ended (${code ?? 'broke'})`) }
+    await claim($, true, ps).catch(() => undefined)
     await new Promise<void>(resolve => { $.clock.after(wait, resolve) })
     wait = Math.min(wait * 2, 60_000)
   }
@@ -332,6 +342,7 @@ async function holdLoop($: EngineInterface, session: string, gen: number) {
 async function start($: EngineInterface, session: string) {
   stop()
   const gen = generation
+  hold = { state: 'starting' }
   await $.state.set(SESSION, session)
   askSeat($, true)
   void holdLoop($, session, gen).catch(err => $.ui.log(`2mw2lt: the hold loop ended: ${String(err)}`, { to: 'debug' }))
@@ -346,7 +357,7 @@ export const register: Register = on => {
     refresh?.cancel()
     // The root is fixed for the session: where no claim path is named (a project that is no
     // workspace), asking again every minute would only fail again.
-    if (await claim($, true)) refresh = $.clock.every(REFRESH_MS, () => { if (!yielded) void claim($, true).catch(() => undefined) })
+    if (await claim($, true)) refresh = $.clock.every(REFRESH_MS, () => { void claim($, true).catch(() => undefined) })
     await $.tool.register({
       name: 'frames',
       description: 'Read the steering frames waiting for this session, each with its daemon-written from: line. Acknowledges the envelopes it returns.',
@@ -435,14 +446,13 @@ export const register: Register = on => {
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const result = await next(e)
-    // The completed call is a trigger only; its output is never parsed (design D3).
-    if (!root || result.deny !== undefined || result.isError) return result
-    if (!yielded && invokes(e.command, 'connect')) {
+    // The completed call is a trigger only; its output is never parsed (design D3). A subagent's
+    // command is its own, never the session's: only the parent's loop moves its hold (#5688).
+    const { agentId } = e as unknown as { agentId?: string }
+    if (!root || agentId !== undefined || result.deny !== undefined || result.isError) return result
+    if (invokes(e.command, 'connect')) {
       const session = await sessionOf($)
-      if (session) {
-        await $.state.set(CONNECTED, true)
-        await start($, session)
-      }
+      if (session) await start($, session)
     } else if (invokes(e.command, 'promote', 'steering') || ((invokes(e.command, 'door') || invokes(e.command, 'lease')) && /\/steering\/brain\/(attach|detach)\b/.test(e.command))) {
       // Taking the seat, handing it on or handing it back: no frame tells the session that left it.
       askSeat($, true)
@@ -450,7 +460,8 @@ export const register: Register = on => {
       // The session chose to leave: hold nothing, and ask nothing of it. The claim stays, since
       // the module is still live for a later connect.
       stop()
-      await $.state.set(CONNECTED, false)
+      hold = { state: 'stopped', refusal: 'this session disconnected', remedy: 'run /2mw2lt:connect', at: (await $.clock.now()) / 1000 }
+      await claim($, true).catch(() => undefined)
       await $.state.set(SESSION, '')
       await $.state.set(SEAT, '')
     }
@@ -515,7 +526,8 @@ export const register: Register = on => {
         await $.state.set(WARNED, false)             // a fresh context is owed its own prompt
         await unpoint($)
       })
-      if (!yielded) await claim($, true, e.session_id)
+      hold = undefined                             // the new id holds nothing until it connects
+      await claim($, true, e.session_id)
       askSeat($, true)
     }
     return next(e)

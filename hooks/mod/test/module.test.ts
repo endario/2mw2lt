@@ -1,7 +1,7 @@
 import type { On } from 'claude-code'
 import { register } from '../register'
 import { test, expect, mock } from 'claude-code/testing'
-import { lines, atLeast, pick, invokes, nextSeat, asksSeat, seatCall, entryRefusal, framesEntry, obsoleteSeatRefusal, resendId, POINTER, CHECKPOINT, CONNECT_AGAIN, SEAT_SECTION } from '../frames'
+import { lines, atLeast, pick, invokes, nextSeat, asksSeat, seatCall, entryRefusal, framesEntry, obsoleteSeatRefusal, resendId, POINTER, CHECKPOINT, SEAT_SECTION } from '../frames'
 
 test('lines are whole only once their newline arrives', async () => {
   const a = lines('{"id":"f1","kind":"say","wakes":true}\n{"id":"f2","ki')
@@ -622,41 +622,38 @@ test('a compaction with no keep line from rebrief.py still keeps the session', a
   expect(w.compacts[0]?.instructions).toBe('Keep verbatim: steering session s1.')
 })
 
-test('a revoked stream asks the model to connect again, and is not held again', async ($, on) => {
+// The plugin holds every session's stream, the seat's included; a session is never asked to arm or
+// reconnect one (owner ruling, 2026-10-11, #5641). Today a session told its stream was down armed
+// its own hold, which revoked the plugin's, and the plugin then asked it to connect again.
+test('a revoked stream is held again by the plugin, and the session is asked nothing', async ($, on) => {
   const w = world(on, { rounds: [{ lines: [line(null, 'closed', true)], code: 3 }, { lines: [], code: 0, hold: never }] })
   await begin($)
   await w.clock.settle()
   await w.clock.advance(120_000)
-  expect(w.submits).toEqual([CONNECT_AGAIN])   // idle: nothing would read a row until the person typed
-  expect(w.appends).toEqual([])
-  expect(w.spawns.length).toBe(1)
-})
-
-test('a busy session is asked to connect again in the turn it is in', async ($, on) => {
-  const w = world(on, { rounds: [{ lines: [line(null, 'closed', true)], code: 3, hold: undefined }] })
-  w.enrolled = false
-  await begin($)
-  await w.clock.settle()
-  await $.turn.start({ text: 'working', turnId: 't-1' } as never)
-  w.enrolled = true
-  await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/enroll/connect.py --current' } as never)
-  await w.clock.settle()
-  expect(w.appends).toEqual([CONNECT_AGAIN])
+  expect(w.spawns.length).toBe(2)
   expect(w.submits).toEqual([])
+  expect(w.appends).toEqual([])
 })
 
-test('a refused connect-again prompt is appended instead', async ($, on) => {
-  const w = world(on, { submitRejects: true, rounds: [{ lines: [], code: 3 }] })
+test('a contested stream keeps backing off however long each hold lasted, so two holders do not trade it every second', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 3, holdMs: 120_000 }, { lines: [], code: 3, holdMs: 120_000 }, { lines: [], code: 0, hold: never }] })
   await begin($)
   await w.clock.settle()
-  expect(w.submits).toEqual([CONNECT_AGAIN])
-  expect(w.appends).toEqual([CONNECT_AGAIN])
+  await w.clock.advance(120_000)
+  await w.clock.advance(1_000)
+  expect(w.spawns.length).toBe(2)
+  await w.clock.advance(120_000)
+  await w.clock.advance(1_500)
+  expect(w.spawns.length).toBe(2)                       // a hold that lasted earns no reset here
+  await w.clock.advance(1_000)
+  expect(w.spawns.length).toBe(3)
 })
 
 test('a hold that ends badly says why in the debug log, and one that broke its recording is held again', async ($, on) => {
   const w = world(on, { enrolled: false, rounds: [
     { lines: [{ stderr: 'cannot record stream frames at /ws/x: disk full\n' }], code: 4 },
     { lines: [{ stderr: 'refused: no fresh holder claim for ps-1; the plugin\'s module starts this hold\n' }], code: 1 },
+    { lines: [], code: 0, hold: never },
   ] })
   await begin($)
   await w.clock.settle()
@@ -664,7 +661,7 @@ test('a hold that ends badly says why in the debug log, and one that broke its r
   await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/enroll/connect.py --current' } as never)
   await w.clock.settle()
   await w.clock.advance(5_000)
-  expect(w.spawns.length).toBe(2)
+  expect(w.spawns.length).toBe(3)
   expect(w.logs.some(l => /exited 4/.test(l) && l.includes('disk full'))).toBe(true)
   expect(w.logs.some(l => /exited 1/.test(l) && l.includes('no fresh holder claim'))).toBe(true)
 })
@@ -690,7 +687,7 @@ test('exit releases the claim and holds nothing more', async ($, on) => {
   const last = w.writes[w.writes.length - 1]
   expect(last?.path).toBe(CLAIM_PATH)
   expect(JSON.parse(last?.text ?? '{}').at).toBe(0)
-  expect(w.writes.length).toBe(2)                       // and the refresh no longer writes it live
+  expect(w.writes.length).toBe(3)                       // claim, the retrying record, release: the refresh no longer writes it live
 })
 
 test('/clear releases the old claim, claims the new id and forgets what was pending', async ($, on) => {
@@ -704,6 +701,7 @@ test('/clear releases the old claim, claims the new id and forgets what was pend
   const ats = (path: string) => w.writes.filter(x => x.path === path).map(x => JSON.parse(x.text).at)
   expect(ats(CLAIM_PATH).slice(-1)).toEqual([0])
   expect(ats('/ws/.claude/steering-holders/ps-2.json')).toEqual([1000])
+  expect(JSON.parse(w.writes.filter(x => x.path.endsWith('/ps-2.json'))[0]?.text ?? '{}').hold).toBeUndefined()   // no stale holding carried to the new id
   expect(w.state.get('pending')).toEqual([])
   expect(w.state.get('read')).toEqual([])
   expect(w.state.get('pointed')).toBe(false)
@@ -729,7 +727,7 @@ test('no row the module writes carries a frame\'s from: line', async ($, on) => 
   await $.session.measure({ context: { window: 200_000, tokens: 150_000, percent: 75 }, rateLimits: [], changed: ['context'] } as never)
   expect(String((first as { result: unknown }).result)).toContain('from: session peer')
   expect(w.submits).toEqual([POINTER])
-  expect(w.appends).toEqual([POINTER, CONNECT_AGAIN, CHECKPOINT])
+  expect(w.appends).toEqual([POINTER, CHECKPOINT])
   for (const text of [...w.submits, ...w.appends]) expect(text).not.toMatch(/from:/)
 })
 
@@ -889,6 +887,23 @@ test('a pending frame the recording does not hold yet stays pending', async ($, 
   expect(w.submits).toEqual([POINTER])          // a frame still missing does not wake the session again
 })
 
+// A subagent's command is its own: a connect or a disconnect it runs never stops, restarts or clears the
+// parent's hold, which only the parent's own loop controls (#5688).
+test('a subagent\'s connect or disconnect leaves the parent\'s hold, session and seat as they were', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }, { lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  expect(w.spawns.length).toBe(1)
+  w.state.set('seat', 'the rulings')
+  await $.tool.call({ tool: 'Bash', command: 'python3 "/p/steering/enroll/disconnect.py" s1', agentId: 'sub-1' } as never)
+  await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/enroll/connect.py --current', agentId: 'sub-1' } as never)
+  await w.clock.settle()
+  await w.clock.advance(120_000)
+  expect(w.spawns.length).toBe(1)                       // neither stopped nor restarted
+  expect(w.state.get('session')).toBe('s1')
+  expect(w.state.get('seat')).toBe('the rulings')
+})
+
 test('a session that disconnects is held no more, and a later refusal adds no row', async ($, on) => {
   let end: () => void = () => {}
   const w = world(on, { enrolled: false, rounds: [{ lines: [], code: 1, hold: new Promise<void>(r => { end = r }) }] })
@@ -904,7 +919,6 @@ test('a session that disconnects is held no more, and a later refusal adds no ro
   await w.clock.advance(120_000)
   expect(w.appends).toEqual([])
   expect(w.spawns.length).toBe(1)
-  expect(w.state.get('connected')).toBe(false)
   expect(w.state.get('session')).toBe('')
   expect(w.writes.map(x => JSON.parse(x.text).at).every(at => at > 0)).toBe(true)   // the claim stays live
 })
@@ -918,7 +932,7 @@ test('a sleep-expired claim is refreshed before the replacement hold delivers it
   await w.clock.settle()
   await w.clock.advance(1_000)
   expect(w.spawns.length).toBe(2)
-  expect(w.claimsAtSpawn).toEqual([1, 2])
+  expect(w.claimsAtSpawn).toEqual([1, 3])   // the retrying record, then the refresh before the spawn
   expect(w.submits).toEqual([POINTER])
   expect(w.state.get('pending')).toEqual(['e1'])
 })
@@ -979,39 +993,59 @@ test('a pointer the session refused to take as a prompt is appended instead', as
   expect(w.state.get('pointed')).toBe(true)
 })
 
-test('a hold refused after a connect gives the stream back to the recipe, so connecting again cannot loop', async ($, on) => {
+// The session reads the plugin's state from its claim (#5641): holding only once coordination
+// admitted the hold, retrying with the refusal that stopped it, or stopped with the remedy.
+const lastHold = (w: { writes: { path: string; text: string }[] }) =>
+  JSON.parse([...w.writes].reverse().find(x => x.path === CLAIM_PATH)?.text ?? '{}').hold
+
+test('a hold coordination admitted is recorded as holding, with its id and since when', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [JSON.stringify({ id: null, kind: 'held', wakes: false, hold: 'h1' }) + '\n'], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  expect(lastHold(w)).toEqual({ state: 'holding', hold: 'h1', since: 1000 })
+})
+
+test('a refusal a retry can outlive is recorded as retrying, with the attempt, the refusal and the next try', async ($, on) => {
+  const w = world(on, { rounds: [
+    { lines: [JSON.stringify({ id: null, kind: 'refused', wakes: false, why: 'refused 403: incarnation-unobserved', retry: true }) + '\n'], code: 1 },
+    { lines: [], code: 0, hold: never },
+  ] })
+  await begin($)
+  await w.clock.settle()
+  expect(lastHold(w)).toEqual({ state: 'retrying', attempt: 1, refusal: 'refused 403: incarnation-unobserved', at: 1000, next_at: 1001 })
+  await w.clock.advance(1_000)
+  expect(w.spawns.length).toBe(2)
+})
+
+test('a refusal no retry outlives stops the loop and records its remedy, asking the session nothing', async ($, on) => {
+  const w = world(on, { rounds: [
+    { lines: [JSON.stringify({ id: null, kind: 'refused', wakes: false, why: 'refused 403: session-not-enrolled', retry: false, remedy: 'run /2mw2lt:connect' }) + '\n'], code: 1 },
+    { lines: [], code: 0, hold: never },
+  ] })
+  await begin($)
+  await w.clock.settle()
+  await w.clock.advance(300_000)
+  expect(w.spawns.length).toBe(1)
+  expect(lastHold(w)).toEqual({ state: 'stopped', refusal: 'refused 403: session-not-enrolled', remedy: 'run /2mw2lt:connect', at: 1000 })
+  expect(w.submits).toEqual([])
+})
+
+test('a hold refused after a connect is held again by the plugin, its claim kept live, and the session is asked nothing', async ($, on) => {
   const w = world(on, { enrolled: false, rounds: [
     { lines: [{ stderr: 'refused 403: a Claude stream must declare event\n' }], code: 1 },
     { lines: [], code: 1 },
+    { lines: [], code: 0, hold: never },
   ] })
   await begin($)
   await w.clock.settle()
   w.enrolled = true
   await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/enroll/connect.py --current' } as never)
   await w.clock.settle()
-  expect(w.submits).toEqual([CONNECT_AGAIN])
-  expect(JSON.parse(w.writes[w.writes.length - 1]?.text ?? '{}').at).toBe(0)   // connect now prints today's reply
-  const written = w.writes.length
-  await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/enroll/connect.py --current' } as never)
-  await w.clock.settle()
   await w.clock.advance(300_000)
-  expect(w.spawns.length).toBe(1)                       // the model's own hold is the holder now
-  expect(w.submits).toEqual([CONNECT_AGAIN])
-  expect(w.writes.length).toBe(written)                 // and the refresh does not claim it back
-})
-
-test('a /clear after the stream was handed back claims nothing for the new id', async ($, on) => {
-  const w = world(on, { enrolled: false, rounds: [{ lines: [], code: 1 }] })
-  await begin($)
-  await w.clock.settle()
-  w.enrolled = true
-  await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/enroll/connect.py --current' } as never)
-  await w.clock.settle()
-  await $.session.end({ reason: 'clear', sessionId: 'ps-1' } as never)
-  w.psession = 'ps-2'
-  await $.classic.SessionStart({ source: 'clear', session_id: 'ps-2' } as never)
-  await w.clock.advance(120_000)
-  expect(w.writes.filter(x => x.path.endsWith('/ps-2.json'))).toEqual([])
+  expect(w.spawns.length).toBe(3)
+  expect(w.submits).toEqual([])
+  expect(w.appends).toEqual([])
+  expect(JSON.parse(w.writes[w.writes.length - 1]?.text ?? '{}').at).toBeGreaterThan(0)   // connect still finds the plugin holding
 })
 
 // The checkpoint prompt is keyed to the engine's own auto-compact point, not to the window: an

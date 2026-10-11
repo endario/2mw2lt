@@ -104,6 +104,23 @@ def main(argv: list[str]) -> int:
     return go_gate(ws, session, flags, kind, what, extra, retry_id)
 
 
+def _commission_id(detail: str) -> str | None:
+    import uuid
+    try:
+        return str(uuid.UUID(detail))
+    except ValueError:
+        return None
+
+
+def _settled_refusal(e) -> str:
+    """A refusal Go settled. One branch has a step that repairs it, so it names that."""
+    import refusal
+    if e.code == "not-holding-branch":
+        return refusal.refuse(str(e), send=[("taking: branch <name> token <t>",
+                                             "to claim the branch this checkout is on, then send this again")])
+    return refusal.refuse(str(e), send="/2mw2lt:gate")
+
+
 def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, retry_id: str | None) -> int:
     """The gate verbs on Go: a review or a critique is `POST /gates`, a withdrawal
     `POST /gates/<id>/cancellation`, each on the session's own carrier."""
@@ -183,7 +200,12 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
             uncertain, reply = True, refusal.retry("Go answered the commission without naming it")
     except session_routes.Refused as e:
         uncertain = not session_routes.settled(e)
-        reply = refusal.retry(str(e)) if uncertain else refusal.refuse(str(e), send="/2mw2lt:gate")
+        holding = _commission_id(e.detail) if e.code in ("already-commissioned", "queued-already") else None
+        if holding:
+            # A first reply that was lost leaves the commission made: Go names it, so its status can be read.
+            reply = refusal.refuse(f"{e} (commission {holding})", send=f"/2mw2lt:gate status {holding}")
+        else:
+            reply = refusal.retry(str(e)) if uncertain else _settled_refusal(e)
     except session_routes.Unsent as e:
         uncertain, reply = True, refusal.retry(str(e))
     print(display_reply(reply))
@@ -312,7 +334,7 @@ def go_carry(ws: Path, session: str, flags, pr: int, retry_id: str | None) -> in
             uncertain, reply = True, refusal.retry("Go answered the carry without naming it")
     except session_routes.Refused as e:
         uncertain = not session_routes.settled(e)
-        reply = refusal.retry(str(e)) if uncertain else refusal.refuse(str(e), send="/2mw2lt:gate")
+        reply = refusal.retry(str(e)) if uncertain else _settled_refusal(e)
     except session_routes.Unsent as e:
         uncertain, reply = True, refusal.retry(str(e))
     print(display_reply(reply))
