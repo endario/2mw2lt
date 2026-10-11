@@ -14,6 +14,8 @@ import python_floor  # noqa: E402
 
 python_floor.require()
 
+import fcntl
+import hashlib
 import json
 import os
 import subprocess
@@ -132,9 +134,16 @@ def main() -> int:
                 claimed = spool.claim(path)
                 if claimed:
                     claimed.unlink()
-                notice = notice_in(r)
+                notice = received_notice(ws, o, notice_in(r), time.time())
     except Exception as e:  # the sweep owns whatever stays; the hook log keeps why
         record("observe", f"send to {base} failed after {time.monotonic() - sent_at:.2f}s: {failure(e)}", ws)
+        try:
+            from ack import records
+            connected = any(rec.get("provider_session") == o["session"] for rec in records(ws).values())
+            if connected and path.exists():
+                notice = received_notice(ws, o, f"The observation send to steering failed for this session ({type(e).__name__}); it remains spooled for retry.", time.time())
+        except Exception:
+            pass  # The observation stays spooled even when its local enrolment cannot be read.
     # A turn that runs long reaches no Stop, so its tool calls carry the reading (#1159).
     left = deadline - time.monotonic()
     if o["event"] == "PostToolUse" and left > 0.3:
@@ -144,6 +153,31 @@ def main() -> int:
         except Exception as e:  # a reading is worth one attempt; the next window brings another
             record("readout", f"mid-turn post failed: {failure(e)}", ws)
     return finish(o["event"], notice) if notice else finish()
+
+
+def received_notice(ws: Path, o: dict, notice: str | None, now: float) -> str | None:
+    """The hook's notice window; an unseen spool answer never runs this."""
+    if not notice or o.get("event") not in ("UserPromptSubmit", "PostToolUse"):
+        return None
+    key = json.dumps([o.get("source"), o.get("session"), o.get("runtime_id")]).encode()
+    stamp = spool.spool_dir(ws) / (".notice-" + hashlib.sha256(key).hexdigest())
+    try:
+        stamp.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with stamp.open("a+") as file:
+            fcntl.flock(file, fcntl.LOCK_EX)
+            file.seek(0)
+            try:
+                previous = float(file.read())
+            except ValueError:
+                previous = None
+            if o["event"] != "UserPromptSubmit" and previous is not None and 0 <= now - previous < 300:
+                return None
+            file.seek(0)
+            file.truncate()
+            file.write(str(now))
+    except OSError:
+        pass  # The notice still reaches the session when its local window cannot be kept.
+    return notice
 
 
 def notice_in(r) -> str | None:

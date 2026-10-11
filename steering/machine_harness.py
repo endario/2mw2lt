@@ -640,8 +640,10 @@ def _claude_live_workers(config: Path, *, deadline: float | None = None) -> tupl
                         # Exited records are common; the process table independently reports
                         # unreadable live candidates instead of trusting a historical record.
                         continue
-                    stated = datetime.strptime(start, "%a %b %d %H:%M:%S %Y").replace(tzinfo=timezone.utc).timestamp()
-                    if math.floor(epoch) != stated:
+                    if start.isascii() and start.isdigit():
+                        if runtime_id.boot_ticks(pid) != start:
+                            continue
+                    elif math.floor(epoch) != datetime.strptime(start, "%a %b %d %H:%M:%S %Y").replace(tzinfo=timezone.utc).timestamp():
                         continue
                     out.append({"harness": "claude", "pid": pid, "since": since, "psession": sid})
                 except (ValueError, TypeError, AttributeError, UnicodeError, OverflowError):

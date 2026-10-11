@@ -128,6 +128,18 @@ def started_at(pid: int) -> str | None:
     return f"{b[0]}.{b[1]:06d}" if b is not None else process_start(pid)
 
 
+def boot_ticks(pid: int) -> str | None:
+    """`pid`'s start in clock ticks since boot, field 22 of `/proc/<pid>/stat`: the form Claude Code's
+    session registry records `procStart` in on Linux, where macOS records `ps`'s `lstart` in UTC.
+    None where there is no such process or no `/proc`."""
+    try:
+        # The command name, field 2, may hold spaces and parentheses; the fields after it do not.
+        fields = Path(f"/proc/{int(pid)}/stat").read_text().rpartition(")")[2].split()
+    except (OSError, ValueError):
+        return None
+    return fields[19] if len(fields) > 19 and fields[19].isdigit() else None
+
+
 def started_epoch(pid: int) -> float | None:
     """Unix start seconds, converted locally where only ps's lstart is available."""
     b = birth(pid)
@@ -292,10 +304,21 @@ def identity(runtime: dict) -> str:
     return f"{runtime['provider']}:{runtime['node']}:v3:{digest}"
 
 
+def hook_parent(timeout: float = 1.0) -> int:
+    """The Claude Code process a command hook runs under. Claude runs a hook through `/bin/sh -c`;
+    macOS's sh execs the command, so the hook's parent is Claude, while dash, Ubuntu's sh, forks it
+    and the parent is a shell gone when the hook ends. The pid Claude exports is asked first."""
+    v = os.environ.get("CLAUDE_PID", "").strip()
+    if v.isascii() and v.isdigit() and int(v) > 1 and process_start(int(v), timeout):
+        return int(v)
+    return os.getppid()
+
+
 def derive(provider: str = "claude", pid: int | None = None, timeout: float = 1.0) -> str | None:
-    """The id of the process `pid` (default: this process's parent) as an incarnation, or None
-    when its start time cannot be read — an observation then carries no runtime id."""
-    pid = os.getppid() if pid is None else pid
+    """The id of the process `pid` (default: the Claude process this hook runs under) as an
+    incarnation, or None when its start time cannot be read — an observation then carries no
+    runtime id."""
+    pid = hook_parent(timeout) if pid is None else pid
     try:
         start = process_start(pid, timeout)
         node = node_id() if start else None

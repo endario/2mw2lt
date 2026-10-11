@@ -104,8 +104,15 @@ the branch's worktree:
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> carry <pr number>
 ```
 
-A clean rebase, a merge of `main`, or a conflict-only update after `ship it` carries the pass; run
-`carry` rather than commissioning another round. Commission one when judgment warrants it. A docs-only
+After `ship it`, never rebase. To bring the branch up to date, merge `origin/main` into the passed
+head, resolve any conflicts inside that merge commit, push, and carry. Once `main` has moved, only
+that pure merge carries. A commit of your own before it, a renumbered migration included, is
+refused `serial-not-served` (measured on #5595), as is a rebase that changes anything, and then
+only another round can pass the head. Run `carry` rather than commissioning another round.
+
+For new coordination migrations, follow the repository convention.
+Resolve duplicate versions before the first round; renaming a migration after a pass costs a round.
+Commission another round when judgment warrants it. A docs-only
 pull request needs a review too, since a critique sets no status. Remaining serial proof gaps are
 tracked in #4287; a proof gap is not an
 instruction to commission another round solely for the update.
@@ -142,13 +149,14 @@ sweep after the verdict or the carry, and you are told when it lands: a `say` fr
 `from: forge #<n>` reading `review status posted on <sha>; merge now`. Merge then, not before:
 
 ```bash
-git fetch origin && .githooks/check-migrations.sh origin/main <head sha> &&
+git fetch origin && merged=$(git merge-tree --write-tree origin/main <head sha>) &&
+  .githooks/check-migrations.sh origin/main "$merged" &&
   gh pr merge <pr number> -R <repo> --squash --match-head-commit <head sha>
 ```
 
-The first line matters only in a repository with numbered migrations, and only where the script
-exists. `pre-push` ran it when you pushed, but another branch can take the same number before you
-merge, and nothing re-checks it at merge. If it refuses, renumber and push.
+The migration check applies where that script exists. Judge the merged tree: a version collision
+introduced by another branch need not exist in your branch's own tree. If it refuses, rename the
+conflicting migration with a fresh UTC timestamp and push.
 
 Not `--auto`. Never merge a pull request whose base is another branch: it would merge into that branch. Do
 not poll GitHub to learn what happens next either. The pull request's moves come to you as a
@@ -158,7 +166,7 @@ gated is told to the session whose `taking: branch` holds its branch. A `gh` loo
 failure mode: every session on a machine shares one person's GitHub limit (#4203).
 
 To read where its gates stand now, ask the daemon. Go does not read a pull request's draft state
-or checks yet (#4391).
+or checks yet (#5081).
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" "/gates?repo=<owner>/<name>&pr=<pr number>" </dev/null

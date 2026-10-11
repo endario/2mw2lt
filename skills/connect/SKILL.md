@@ -207,11 +207,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <session> status <commis
 ```
 
 Load `/2mw2lt:gate` for the round/ceiling, cancellation, publication and pass-carry rules.
+For coordination migration filenames, follow the repository convention.
 Steering commissions the independent judgment; a queued commission is not a reason to send
 another one. Fix verified findings, push and commission the next round. `ship it` closes the
-gate; mark ready only then, and merge it directly (`/2mw2lt:gate`). After a clean rebase, a merge
-of `main`, or a conflict-only update, carry the pass rather than commissioning another round;
-commission one when judgment warrants it.
+gate; mark ready only then, and merge it directly (`/2mw2lt:gate`). Never rebase after a
+pass: merge `origin/main` into the passed head, resolve conflicts in that merge, push and carry the
+pass rather than commissioning another round. Once `main` has moved, any other commit, a migration
+renumber included, costs a round.
 
 ## Checkpoint and leave
 

@@ -39,6 +39,7 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
              "       card.py --lease reclassify <card> track <lane>|off-track <why>\n"
              "       card.py --lease reclassify <card> significance|state|priority <value> <why>\n"
              "       card.py --lease reclassify <card> major major|ordinary <why>\n"
+             "       card.py --lease reclassify <card> name <new name, one line of at most 80 characters> <why>\n"
              "       card.py --lease reanchor <card> [<verb>:<n>[,<n>] ...] <why>\n"
              "       card.py --lease link <card> requires|part-of <card>|<owner>/<name>#<n> [--source <where>] <why>\n"
              "       card.py --lease unlink <card> requires|part-of <card>|<owner>/<name>#<n> resolved|withdrawn <why>\n"

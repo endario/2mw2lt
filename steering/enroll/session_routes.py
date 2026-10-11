@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
@@ -473,12 +474,22 @@ def machines_here(token: str) -> str:
     return f"machines here: {', '.join(named)}" if named else "no machine reaches this workspace"
 
 
+def live_cards(token: str):
+    """Every live card, page by page: a hundred to a page, and the cards route has no filter for a
+    session's own. A read that stops at the first page misses every card past it."""
+    page = "/cards?state=live"
+    while page:
+        listed = get(page, token)
+        yield from listed.get("cards") or []
+        nxt = listed.get("next")
+        page = "/cards?state=live&next=" + urllib.parse.quote(nxt, safe="") if nxt else ""
+
+
 def executing_card(session: str, token: str) -> dict | None:
     """The live card this session executes — its executor engagement, not a merely planned one —:
     what a branch claim's announce defaults its doing to, the brain having ruled there is no
     separate claim primitive (2026-10-08)."""
-    cards = get("/cards?state=live", token).get("cards") or []
-    for card in cards:
+    for card in live_cards(token):
         # Live, not merely unended: an earlier epoch's engagement stays unended. An engagement
         # read without `live` is not taken, so no card's title is guessed (#4469).
         if any(e.get("session") == session and e.get("role") == "executor" and e.get("live") is True
@@ -646,6 +657,17 @@ def seat_action(session: str, token: str, body: dict, key: str) -> str:
     return f"{doing}: {answer['id']} {body['to']}{value}, offered"
 
 
+def seat_keep(session: str, token: str, verb: str, body: dict, key: str) -> str:
+    """The holder keeps a session idle on purpose (`POST /sessions/{session}/keep`) or clears its
+    keep (`.../unkeep`), under its own session and keyed by the line's own key, so a rerun after a
+    lost answer is answered from the first. Raises `NotSeated`, `Refused` or `Unsent`."""
+    seat_generation(session, token)
+    answer = post(f"/sessions/{session}/{verb}", body, key, SESSION_CARRIER, token)
+    if verb == "unkeep":
+        return f"unkept: {answer['session']}, kept for {answer['reason']}"
+    return f"kept: {answer['session']} until {answer['until']} because {answer['reason']}"
+
+
 def lift(session: str, token: str, kind: str, repo: str, at: int | str, reason: str, key: str) -> str:
     """The holder lifts a gate series one round past its ceiling (`POST /gates/lifts`): a review's
     by its pull request, a critique's by its branch, at the generation it holds. `key` is the line's
@@ -656,6 +678,15 @@ def lift(session: str, token: str, kind: str, repo: str, at: int | str, reason: 
             **({"pr": at} if kind == "review" else {"branch": at})}
     post("/gates/lifts", body, _own_key("gate.lift", session, key), SESSION_CARRIER, token)
     return f"lifted: review {repo}#{at}" if kind == "review" else f"lifted: critic {repo} {at}"
+
+
+def abandon(session: str, token: str, target: str, epoch: int, reason: str, key: str) -> str:
+    """The holder abandons an ended epoch no machine observed running a model
+    (`POST /gates/abandonments`) at the generation it holds. `key` is the line's occurrence id, so a
+    resend after a lost answer is answered from the first. Raises `NotSeated`, `Refused` or `Unsent`."""
+    body = {"session": target, "epoch": epoch, "generation": seat_generation(session, token), "reason": reason}
+    post("/gates/abandonments", body, _own_key("gate.abandon", session, key), SESSION_CARRIER, token)
+    return f"abandoned: {target} epoch {epoch}"
 
 
 # The parts a bench is kept per (go-gate-failure-attribution-design.md §2), as a lift names them.
@@ -684,7 +715,7 @@ def raise_owner(session: str, token: str, title: str, text: str, need: str = "",
 
 
 # A card verb on Go: the work route it posts to, and its body from the verb's own fact
-# (`card_grammar.built`). A verb absent here has no Go route yet.
+# (`card_grammar.built`). A verb absent here is one this client sends no write for.
 def _card_write(fact: dict, repo: str) -> tuple[str, dict] | None:
     state, card = fact["state"], fact["card"]
     if state == "card-scoped":
@@ -718,6 +749,8 @@ def _card_write(fact: dict, repo: str) -> tuple[str, dict] | None:
     if state == "card-reclassified" and fact["field"] == "major" and fact["after"] in ("major", "ordinary"):
         return (f"/cards/{card}/corrections",
                 {"field": "major", "after": "true" if fact["after"] == "major" else "false", "why": fact["why"]})
+    if state == "card-reclassified" and fact["field"] == "name":
+        return f"/cards/{card}/corrections", {"field": "name", "after": fact["after"], "why": fact["why"]}
     if state in ("card-link", "card-unlink"):
         body = {k: fact[k] for k in ("kind", "to_card", "to_issue", "why", "how", "source") if k in fact}
         return f"/cards/{card}/{'links' if state == 'card-link' else 'unlinks'}", body
@@ -725,13 +758,13 @@ def _card_write(fact: dict, repo: str) -> tuple[str, dict] | None:
 
 
 # What the seat ruled Go will not keep (2026-10-09, #4812): refused with why, never as a verb Go
-# does not serve yet.
+# is said to lack.
 RULED_OUT = {
     "card reclassify significance": "a Go card has no significance, and nothing on Go reads one (#4812)",
     "card reclassify priority": "a Go card has no priority, and nothing on Go reads one (#4812)",
     "card outcome": "Go has no outcome brief (#4812)",
     "effort": "a Go card has no effort (#4812)",
-    "authorship": "Go attests a model only from what the machine observed (#4812)",
+    "authorship establish": "Go attests a model only from what the machine observed (#4812)",
 }
 
 
@@ -747,13 +780,13 @@ def seat_card(session: str, token: str, verb: str, fact: dict, repo: str, key: s
     """The seat's card verb on Go's work routes, which run it as the seat while this session holds
     it. `key` is the invocation's occurrence: a resend under `--retry` is answered from the first,
     and a fresh invocation is a fresh write, so the same verb after its undo is made again.
-    Raises `NotSeated`, `Refused`, `Unsent`, or `LookupError` for a verb Go does not serve yet."""
+    Raises `NotSeated`, `Refused`, `Unsent`, or `LookupError` for a verb this client sends no write for."""
     if fact["state"] == "card-reanchored":
         return seat_reanchor(session, token, fact, repo)
     write = _card_write(fact, repo)
     if write is None:
         what = f"{verb} {fact['field']}" if fact["state"] == "card-reclassified" else verb
-        raise LookupError(f"card {what}: not served by Go yet")
+        raise LookupError(f"card {what}: this client sends Go no write for it")
     seat_generation(session, token)
     path, body = write
     post(path, body, _own_key("seat.card", session, key), SESSION_CARRIER, token)
@@ -798,14 +831,22 @@ def backlog(session: str, token: str) -> str:
 def _roster_line(item: dict) -> str:
     cards = item.get("cards") or []
     told = f"; executing {', '.join(cards)}" if cards else ""
-    return f"{item['name']} {item['epoch']} {item['state']} - on {item.get('machine_registration') or item.get('machine') or '-'}{told}"
+    delivery = ""
+    if item["state"] == "enrolled":
+        presence = item.get("presence") if item.get("detached_since") is None else None
+        if presence == "stream":
+            delivery = "; stream held"
+        elif presence == "reach":
+            delivery = "; reached"
+        else:
+            from machine_harness import of
+            harness = of(item.get("harness"))
+            delivery = "; stream down" if harness and harness.holds else "; not reached"
+    return f"{item['name']} {item['epoch']} {item['state']} - on {item.get('machine_registration') or item.get('machine') or '-'}{delivery}{told}"
 
 
 def roster(session: str, token: str, include_gone: bool) -> str:
-    """Every session Go lists at its current epoch, one line each in the incumbent's `roster:`
-    columns: `<session> <epoch> <state> - on <machine>`. Go keeps no basis for a state, so that
-    column is `-`; what the incumbent told as sent is the live cards the epoch executes.
-    Raises `NotSeated`, `Refused` or `Unsent`."""
+    """Raises `NotSeated`, `Refused` or `Unsent`."""
     seat_generation(session, token)
     items = get("/sessions?gone=1" if include_gone else "/sessions", token).get("items") or []
     return "\n".join(_roster_line(item) for item in items) or "roster: empty"
@@ -818,4 +859,4 @@ def say(session: str, token: str, occurrence: str, text: str, to: str | None = N
     answer = post(f"/sessions/{session}/says", body, _own_key("say", session, occurrence), SESSION_CARRIER, token)
     if answer.get("state") == "unheard":
         return f"nobody holds the seat; kept on the brain's Needs You as unheard:{answer.get('id')}"
-    return f"sent to {answer.get('to')}@{answer.get('epoch')} as {answer.get('id')}: it reaches them on their stream"
+    return f"queued for {answer.get('to')}@{answer.get('epoch')} as {answer.get('id')}: queued until they hold"

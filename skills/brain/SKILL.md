@@ -76,13 +76,13 @@ ws="${STEERING_WORKSPACE:-$(dirname "$(git rev-parse --path-format=absolute --gi
 python3 "$ws/.claude/steering-launch.py" exec hold --until-event <session-name>
 ```
 
-It exits 0 once it has printed the first frame you must act on — a say, an envelope, a kick, a
+It exits 0 once it has printed the first frame you must act on — a say, an envelope, a
 seat frame, `closed` with `why: revoked`, or a usage frame moving your account to `excluded` —
-and passes presence, fleet and other usage frames by on stderr.
+and passes fleet and other usage frames by on stderr.
 When it completes, read the frame from its output, acknowledge an envelope (an unacknowledged one is handed
 straight back), and start it again before you act on it: while
 nothing holds, the brain cannot answer you and the board drops you
-(#1283). The newest presence and fleet frames are in the recording below. A harness
+(#1283). The newest fleet frame is in the recording below. A harness
 with no background completion holds it without `--until-event` under a Monitor tool call armed
 at its cap (`timeout_ms: 1800000`), and must re-arm it on each expiry notice.
 
@@ -101,64 +101,58 @@ passes the stream's frames through. The first line is
 `data: {"kind": "say", "from": …, "text": …}` is the owner or the brain speaking to you;
 `data: {"kind": "envelope", "ulid": …, "text": …}` is a directive, which you acknowledge
 with `ack.py <you> <its directive id>` once you have read it;
-`data: {"kind": "presence", "sessions": [...]}` is who you can reach, sent when you take the
-seat and again whenever it changes. It is the whole roster every time, not a delta, so the one
-you last received is the answer — there is nothing to accumulate and nothing to acknowledge.
-Each row carries the session's `model`, `effort` and `machine` (its host name), each `null` when
-nothing has been read: delegate by those, and never ask a session its level, since it cannot read
-its own. Its account's verdict is the `fleet` row naming it in `sessions`.
-`data: {"kind": "kick", "idle": [...], "executing": [...], "finished": [...], "changed": {...}, "turn": …, "delegation": {...}, "advice": {...}, "gates": {...}, "night": {...}, "moved": …, "missed": …}`
-is the daemon's timer, not a person.
-It arrives every interval because silence sends nothing else, and on the next poll that is
-neither `quiet`, `debounced` nor `refused` once a session finishes a turn. `moved` is the daemon's verdict that this kick carries a fleet
-change or a stalled gate; a kick that has neither wakes no model turn for a brain the plugin holds. `finished` is the daemon's own reading of who is waiting for work — do not ask
-the fleet to report it, and do not read its absence for a harness that posts no turn end as
-busy. It overlaps `executing`, because a session that has just finished is still recently heard.
+`data: {"kind": "seat", …}` says you hold the seat, at its generation. `data: {"kind": "usage", …}`
+is your own account's verdict. `data: {"kind": "revoked"}` ends a hold another replaced.
+Go sends no kick and no presence frame (#5569): the seat is told what moved by notices, each a
+say `from: session <id>` naming the session it is about:
+
+- **`session-concluded`**: the session said done and holds no work. It is free now: delegate to it.
+- **`session-stale`**: no sign of life for 30 minutes and no keep, whether it is idle, concluded,
+  waiting on work it holds, or never read since it enrolled. Close it, drive it, or keep it with a
+  reason. A stale wait may still be alive: check before you retire it, and keep a wait you trust
+  (a review round, say) with what it waits on.
+- **`session-lapsing`**: its prompt cache lapses within 15 minutes. Resumed after that, it re-reads
+  its whole context.
+- **`session-kept-over`**: its keep's until passed and no work reached it.
+
+A session that finishes is closed, driven with its next piece of work, or kept, and nothing else:
+never idle by neglect. Keep it only with a plan, the work you expect in its territory and when,
+because a keep spares a re-brief and costs a slot:
+
+```
+keep: token @lease <session> [until <time or duration>] because <the work you expect and when>
+unkeep: token @lease <session>
+```
+
+`until` defaults to 30 minutes and has no ceiling; the owner sees each keep with its reason. Work
+you place on it ends the keep. On `session-lapsing`, decide while it is cheap: drive it now, let it
+lapse knowingly, or close it. On `session-stale` or `session-kept-over`, act in that turn. Only
+Anthropic's cache lifetime, one hour, is stated; another vendor's session carries no cache and
+raises no `session-lapsing`.
+
+A session executing a live card reads as waiting, not concluded, even after its branch merged
+(#5588): conclude its card when its unit is done. Each notice is a suggestion; Go closes,
+wakes and keeps nothing for it. Who you can reach is
+`python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /sessions`, each row with its
+`machine_name`, `account`, `vitals` (`model`, `effort`) and `standing` (its activity, whether
+it is stale, its keep and its cache), `null` when nothing has been read:
+delegate by those, and never
+ask a session its level, since it cannot read its own. Its account's verdict is the `fleet` row
+naming it in `sessions`.
 A say `from: account <id>` is a spent account's reset: resume each session it names that stopped
 for that account with `wake:`, and place queued work on it by its rank.
-`delegation` is each reachable session's `{model, effort, machine, verdict}`, so a quiet brain is
-re-told rather than left to remember. `advice` is the daemon's suggestion for each session that
-has one:
-`concluded` or `orphaned` (its worker still runs, off the board) to `close` (`retire:`), `full`
-to `repurpose`, `free` or `lapsing` to `drive`, and
-`waiting` to `wait` — that session is live on a review round, a card or a branch, so never end it.
-`cache.lapses_at` is when its prompt cache lapses, where its vendor states a lifetime, and
-`cache.lapsing` that it is within fifteen minutes of it. A new `orphaned`, `concluded` or `full`, or a
-cache newly `lapsing`, moves the kick. The suggestion is
-yours to weigh, not an instruction. `gates` counts the open gate commissions by state and
-lists each `stalled` one — waiting ten minutes with no run out, or past its run's deadline — with
-who commissioned it: tell that session to commission it again, or find why nothing takes it.
-`night` is the ambient lane's rows, reported on every delivered kick
-(the night shift): `routes` is each candidate route —
-a fresh routes reading names it dispatchable on an account whose verdict is ranked — with its
-`triage` `band` (`{account, machine, ok, speed, attempts, last_seen}`: the route's agreement rate
-against the held-out human dispositions, `null` until it has one) and `admitted`, whether a
-placement of it has answered the admission ping; `queue` counts the route placements still
-waiting for theirs, so a lane drains only as the probes pace it. `drafts` is the review queue:
-one row per issue you have placed and the daemon has run — `state` `queued` carries the draft's
-`cluster`, `label` and `rationale` for your bulk adjudication; `state` `error` is a run that
-drafted nothing, with `why`, and it drafts again only after every other placement has had its
-pass. You place a draft with your recorded `night:` line —
-`night: token <lease token> draft <issue> <route> <account> <why>` — naming the issue, the route
-and the account in one act; the daemon drafts on that placement and nothing else, refusing a
-placement no admission has answered. The rows are state for your placement decisions, nothing
-more: the daemon never places a route — it only drafts what you have recorded.
-The cards are the board's, which a brain on any
-machine reads with
+The cards are the board's, which a brain on any machine reads with
 `python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease "/cards?state=live"`, a hundred to
-a page; read on with `&next=<the page's next>`. Delegate to `finished` first and `idle` after it, each session once — the two lists overlap for
-`ACTIVE` and a session in both is one session. For each of them, take the
-highest-priority card with no present executor (one whose executor has left the board counts)
-that the session can carry, and that you have not already relayed to a session still on the board
-that has not yet announced it: its account has room, and it runs at the effort the card's `effort:`
-asks for. Relay it with
+a page; read on with `&next=<the page's next>`. Delegate to each session a notice frees, each
+session once. For each, take the highest-priority card with no present executor (one whose
+executor has left the board counts) that the session can carry, and that you have not already
+relayed to a session still on the board that has not yet announced it: its account has room. Relay it with
 `relay: token @lease to <session> <the directive, naming the card>`, which needs no
 clearance, and once the session announces the branch, write `card-session <session> executor`.
 If no card fits, do nothing. Never
-report to the owner because a kick arrived. Any turn you take answers it;
-three unanswered kicks raise the owner. A turn that answers a frame changing nothing the owner
-knows — a kick with nothing to delegate, a routine say — is one line at most, and no line when
-nothing in it is new to them.
+report to the owner because a notice arrived. A turn
+that answers a frame changing nothing the owner knows — a notice with nothing to delegate, a
+routine say — is one line at most, and no line when nothing in it is new to them.
 
 `data: {"kind": "fleet", "accounts": [{"account", "provider", "vendor", "verdict", "tightest", "incentive", "sessions"}]}`
 is every account's verdict,
@@ -439,13 +433,13 @@ only to target an agent running there, and a launch on a node holding no uplink 
 An opencode worker runs confined, in a clone of its own, and its branch is pushed by its agent.
 `launching: <id> <harness> on <node>` means the agent there was handed it. Read how it ended
 through the API, from any machine: `requested`, `refused`, `lapsed`, `launched` naming the
-session, or `launch-refused` with the agent's reason. A launch refused at the cap names the
-`workers` it counted, each with its `advice`, and `others` for other workspaces': close one and
-launch again. Go has no read of one launch yet (#5081).
+session, or `launch-refused` with the agent's reason. Go waits a launch with no room rather than
+refusing it (`worker-full`, `host-full`): read `/sessions`' `standing` for the sessions on that
+machine you can close. Go has no read of one launch yet (#5081).
 
 `rest.py` reads `/facts?state=<kind>` (the ledger, redacted, a page at a time; `--all` follows it
 to the head). Read it; do not reach for the ledger on the host.
-The worker then arrives on the next kick, and you delegate to it like any idle session. One launch
+The worker then appears in `/sessions`, and you delegate to it like any idle session. One launch
 is in flight per machine, and an agent refuses one past `STEERING_MAX_WORKERS` live workers.
 
 An interactive Claude Code session, one a person can watch and type into, is a `launch:` too:
@@ -471,7 +465,9 @@ folder-trust prompt, and answers the launch once the session has connected itsel
 offers this only for the launchers it declares in `STEERING_CLAUDE_LAUNCHERS`. End one with
 `retire: token @lease <tmux session> on <node>`, the `2mw2lt-launch-…` name `worker-launched`
 carries. On a Go workspace a retire names the session and why instead: `retire: token @lease
-<session> because <reason>`.
+<session> [to <successor>] because <reason>`. A card the session still executes open is forfeited,
+live with no executor, or yielded to the successor named; the machine still refuses the retire
+while a card's branch holds work not pushed.
 
 A launched session stays headless in tmux. Name `window` only when the owner must view or
 interact with it; otherwise leave it out. To show one already running, on the machine it runs on:
@@ -658,7 +654,7 @@ you as lines in the `board:` row, each carrying its verb:
 | `ceiling` | a gate failed at its round ceiling: build it or decompose it, never another round |
 | `unlaned` | a card is filed under a track no lane names: `reclassify` its track, or `retire` it |
 
-**Delegate the row; do not work it by hand.** When a kick finds a `board:` row standing, hand the
+**Delegate the row; do not work it by hand.** When you find a `board:` row standing, hand the
 row's lines to one worker routed for routine work, with the lease writes it may make. The worker verifies
 each line against the ledger and GitHub, writes what it can with a one-line why, never discards
 work, and returns the judgement calls. Answer those, then `dispose:` the row. A disposed line
@@ -696,6 +692,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reclassify <card
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reclassify <card> track off-track "<why>"
 # a minor edit that earned a card by its gate, or back again
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reclassify <card> significance minor "<why>"
+# a card named wrongly, or whose name no longer says its work
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reclassify <card> name "<new name>" "<why>"
 # the whole anchor set the card declares, replacing what it declared before
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reanchor <card> resolves:<n> advances:<n> "<why>"
 # a card the keeper retired that is still real work
@@ -854,35 +852,21 @@ say "effort: token @lease 882 high"
 The owner is raised when a session announces that item below that effort, once per requirement.
 Only the owner can act on it, so the line names the remedy in their words.
 
-## Establish missing authorship
+## Abandon an unattested author
 
-When a gate refusal names an unresolved session epoch, investigate **that epoch**, including a
-historical detached one. Identify the actual author model from trusted historical evidence for
-it, not its harness/account label or a successor's current model. Send the finding through
-`say` above on your current lease:
-
-```bash
-say "authorship: token @lease establish <session> epoch <n> model <model> because <evidence>"
-```
-
-Keep the evidence credential-free. The fact records the target session/epoch separately from
-its investigating brain (`by`, `by_epoch`, `attachment_id`) and retains prior model evidence.
-Establishment neither detaches
-nor revokes a session.
-
-If the evidence cannot establish the model, abandon that epoch as invalid (the owner's ruling,
-#3385):
+A gate refused `author-unattested` names an epoch, in its log line, that held the branch with no
+model any machine observed. Only the machine attests a model, so nothing you say establishes
+one. While the epoch stands, it may yet be observed: find out why its machine sends no reading.
+Once it has ended with none, abandon it, saying what you searched:
 
 ```bash
 say "authorship: token @lease abandon <session> epoch <n> because <what was searched and why it is not enough>"
 ```
 
-Only an epoch with no recorded model can be abandoned, and the decision is final: it is never
-established afterwards, and every gate refuses a branch it held, open or merged, whoever holds
-it now. Have the work redone on a fresh branch from clean main by a session whose model is
-recorded; handing the old branch to one is not recovery. Abandoning the session's standing
-epoch detaches it; an earlier epoch's successor is untouched. This is not `detach: … abandon`,
-which is a session's own handover.
+Go refuses a standing epoch, one with an observed model, and one already abandoned. The decision
+is final. Every gate then refuses (`author-abandoned`) a branch the epoch executed a card on while
+that card held it, whoever holds it now. Have the work redone on a fresh branch from main. Its
+card may bind that branch, and the abandoned epoch is no author there.
 
 ## Lift a gate at its ceiling
 
@@ -918,7 +902,7 @@ that are not there already, so they survive this session.
 
 - **Name a session by where it is, every time you tell the owner about it:** machine, account,
   then session id — `<machine> · <account> · <session>`. A bare id can only be placed by
-  searching the console. The machine and account are on every presence row (`machine`, `agent`).
+  searching the console. The machine and account are on every `/sessions` row (`machine_name`, `account`).
 
 - **Keep your Needs-you rows current.** The daemon classifies every pending item as the owner's
   or the brain's, and the owner's rail draws only the owner's. `backlog: token @lease`
@@ -937,8 +921,9 @@ that are not there already, so they survive this session.
 - **Check the issue is still open before you brief it.** Search merged pull requests for it
   first. A brief for work that has already landed wastes a session's turn.
 - **Brief a pull request to stay a draft until `ship it`.** The suite runs locally between
-  rounds instead. After a clean rebase, a merge of `main`,
-  or a conflict-only update, the worker carries the pass on its own; a round remains available
+  rounds instead. After a pass the worker never rebases: it
+  merges `origin/main` into the passed head and carries the pass on its own, and once `main` has
+  moved any other commit, a migration renumber included, costs a round; a round remains available
   when judgment warrants it. Do not prescribe or skip a round in a directive: the gate skill's
   rule decides, and a brain that orders one overrides it.
 - **Rollout is yours.** Deploying merged work, restarting agents and copying credentials is the
@@ -970,7 +955,7 @@ that are not there already, so they survive this session.
   rather than the number. Hand out one item per named session, and announce the holder where the
   whole fleet reads it in the same minute: a list offered to several sessions at once was taken
   by three of them in forty seconds.
-- **A session missing from the kick's lists has not necessarily stopped.** A lapsed hold drops
+- **A session missing from `/sessions` has not necessarily stopped.** A lapsed hold drops
   it while it keeps working. Before reassigning its item, read its branch and pull request for
   recent movement.
 - **Read a lesser model's "addressed" against the diff.** For each finding a session reports

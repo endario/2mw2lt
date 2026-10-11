@@ -139,14 +139,29 @@ def lifted(line: str) -> bool:
             and verdict_of(line) is None)
 
 
-def acts(line: str, seen: datetime | str | None = None) -> bool:
+def seat_of(line: str) -> int | None:
+    """The generation a seat frame names, or None for any other line."""
+    frame = _frame(line)
+    if not frame or frame.get("kind") != "seat":
+        return None
+    generation = frame.get("generation")
+    return generation if type(generation) is int else None
+
+
+def acts(line: str, seen: datetime | str | None = None, seated: int | None = None) -> bool:
     """Whether a stream line is a frame the session must act on. `seen` is the exclusion the
     session was last woken for, by the moment it lifts. An account whose forecast crosses the
     threshold back and forth is excluded again with the same reset, and that wakes nothing
     more (#2552) — however its reason or its sub-second string moves (#3222). A different
-    reset is another exclusion, and wakes."""
+    reset is another exclusion, and wakes.
+
+    `seated` is the seat generation the session was already handed. Every new hold is told the
+    seat first, so a hold that ended on it again ended before the words queued behind it, on
+    every reconnect, and the seat went deaf (#5619); the same generation wakes nothing more."""
     frame = _frame(line)
     if frame is None:
+        return False
+    if seated is not None and seat_of(line) == seated:
         return False
     if frame.get("kind") == "usage":
         found = exclusion(line)
@@ -168,6 +183,18 @@ def last_exclusion(frames: Path) -> datetime | str | None:
             return None
         if (found := exclusion(line)) is not None:
             return found
+    return None
+
+
+def last_seat(frames: Path) -> int | None:
+    """The newest seat generation the record holds: the one an earlier hold was handed."""
+    try:
+        lines = frames.read_bytes().decode(errors="replace").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        if (generation := seat_of(line)) is not None:
+            return generation
     return None
 
 
@@ -417,22 +444,23 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
          service: bool = False, workspace: Path | None = None,
          plugin: bool = False,
          lapsed: Callable[[], str | None] | None = None, config: Path | None = None) -> int:
-    """Open the stream and yield its frames, until a 403 says no reopen would help.
+    """Open the stream and yield its frames, reopening transport failures.
 
-    A 403 is the one answer this loop cannot retry: the token, the node or the incarnation is
-    not the one the ledger admits, and every reopen would carry the same values again. A 503
+    A 503
     (no uplink) and a dead connection clear on their own, so they reopen — said once, when
     the failure begins, and not on every attempt while it lasts.
 
     `plugin` prints a line per frame in
     place of the frame, returns 3 on a revoked hold, and refuses to hold without a recording.
     `lapsed` is asked on every line read, keepalives included, and a reason it gives ends the
-    hold with 1. `config` is the session's Claude config directory, which the agent reads the
+    hold with 4 for the plugin to refresh and restart, otherwise 1. `config` is the session's Claude config directory, which the agent reads the
     session's transcript under: it runs outside the session's environment and cannot know it.
     """
     url = f"http://127.0.0.1:{port}/steering/session/{session}/stream"
-    quiet = False    # the standing failure has been named; naming it again every 2s is noise
+    quiet = False    # the standing failure has been named; naming it every attempt is noise
+    wait = REOPEN_AFTER
     seen = last_exclusion(frames)
+    seated = last_seat(frames)
     recorded = recording(frames)
     if plugin and recorded is None:
         return 1     # `recording` said why; the frames tool would have nothing to read
@@ -448,12 +476,13 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
             try:
                 with door.send(req, timeout=HOLD_READ) as r:
                     quiet = False   # a fresh open: the next failure is worth naming again
+                    wait = REOPEN_AFTER
                     for raw in r:
                         line = raw.decode(errors="replace")   # the response iterates as bytes
                         why = lapsed() if lapsed else None
                         if why:
                             print(why, file=sys.stderr)
-                            return 1
+                            return 4 if plugin else 1
                         if raw.startswith(b"data: ") and recorded:
                             recorded = record(recorded, frames, raw)
                             if recorded is None and (lost := recording_lost(plugin)):
@@ -463,8 +492,10 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                             say_read(port, session, raw)
                         if line.startswith(": keepalive") or not line.strip():
                             continue
-                        wakes, found = acts(line, seen), exclusion(line)
+                        wakes, found = acts(line, seen, seated), exclusion(line)
                         seen = None if lifted(line) else seen if found is None else found
+                        if (generation := seat_of(line)) is not None:
+                            seated = generation
                         if plugin:
                             frame = _frame(line)
                             if frame is None:
@@ -493,9 +524,10 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                 if not isinstance(body, dict):
                     body = {"refused": body}
                 why = body.get("refused")
-                if e.code == 403:
+                # An empty workspace registry can be an agent still starting.
+                if e.code == 403 or (e.code == 404 and isinstance(body.get("serves"), list) and body["serves"]):
                     serves = f" The agent serves {body['serves']}." if body.get("serves") else ""
-                    print(f"refused 403{f': {why}' if why else ''}.{serves} "
+                    print(f"refused {e.code}{f': {why}' if why else ''}.{serves} "
                           f"nothing this loop retries will change that; run /2mw2lt:connect, "
                           f"then hold this stream again", file=sys.stderr if plugin else sys.stdout)
                     return 1
@@ -508,7 +540,8 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                     print(f"the stream at 127.0.0.1:{port} answered {type(e).__name__}: {e}; "
                           f"reopening", file=sys.stderr)
                     quiet = True
-            time.sleep(REOPEN_AFTER)
+            time.sleep(wait)
+            wait = min(wait * 2, 60.0)
     finally:
         if recorded:
             close_recording(recorded)
@@ -592,9 +625,13 @@ def main(argv: list[str]) -> int:
             # asked anything: a `Stop` firing in that window would otherwise refuse a turn
             # that had already armed this hold, and be answered with a second one.
             arming.enter_context(held(ws, session))
-            port, why = agent_says(agent_port(project), ws, session)
-            if why:
-                raise Refused(why)
+            port = agent_port(project)
+            # A plugin owns reopening: probing an unavailable agent here would exit as a
+            # permanent refusal before the transport loop gets a chance to recover.
+            if not plugin:
+                port, why = agent_says(port, ws, session)
+                if why:
+                    raise Refused(why)
         except (Refused, Undetermined) as why:
             print(str(why), file=sys.stderr)
             return 1
@@ -605,8 +642,8 @@ def main(argv: list[str]) -> int:
         frames = frame_path(ws, session)
         print(f"frames: {frames}", file=said)
         lapsed = (lambda: None if holder.fresh(ws, psession) else
-                  f"the holder claim for {psession} is no longer fresh; the plugin's module that "
-                  f"started this hold is gone, so it ends") if plugin else None
+                  f"the holder claim for {psession} is no longer fresh; this hold ends so the "
+                  f"plugin's module can refresh its claim and restart it") if plugin else None
         return hold(port, session, token, rid, frames, until, service, ws, plugin, lapsed,
                     h.config_dir() if h.provider == "claude" else None)
 

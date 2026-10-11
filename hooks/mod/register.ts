@@ -293,10 +293,15 @@ async function holdOnce($: EngineInterface, ps: string, session: string, gen: nu
 async function holdLoop($: EngineInterface, session: string, gen: number) {
   const ps = await $.session.id()
   let wait = 1000
+  let retry = false
   while (gen === generation) {
     const began = await $.clock.now()
     let code: number | null = null
     try {
+      // Sleep can expire the claim before its periodic refresh runs.
+      if (retry) await claim($, true, ps)
+      if (gen !== generation) return
+      retry = true
       const ended = await holdOnce($, ps, session, gen)
       code = ended.code
       if (ended.woke) wait = 1000

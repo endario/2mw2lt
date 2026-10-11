@@ -382,6 +382,19 @@ AgentReleaseAnswer = typing.TypedDict("AgentReleaseAnswer", {
 # credential on the carrier extends.
 AgentRenewBody = typing.TypedDict("AgentRenewBody", {
     "uplink": "str",
+    "gates": "typing.NotRequired[list[GateSign] | None]",
+})
+
+# GateSign is what a machine sees of one gate run it holds: the offer's action as Commission and its
+# run, the run's phase, and, in Unix seconds, when its judge started and when it last wrote under its
+# run root.
+GateSign = typing.TypedDict("GateSign", {
+    "commission": "str",
+    "run": "str",
+    "phase": "str",
+    "started_at": "typing.NotRequired[float | None]",
+    "harness": "typing.NotRequired[str]",
+    "last_sign_at": "typing.NotRequired[float | None]",
 })
 
 # AgentRenewAnswer is when the uplink's stream now ends, in Unix seconds.
@@ -414,9 +427,12 @@ SessionReading = typing.TypedDict("SessionReading", {
     "directory": "typing.NotRequired[str]",
 })
 
-# ReadingTokens is the tokens a reading counts.
+# ReadingTokens is the tokens a reading counts: its call's whole input, and the parts of it read
+# from and written to the prompt cache.
 ReadingTokens = typing.TypedDict("ReadingTokens", {
     "input": "int | None",
+    "cache_read": "typing.NotRequired[int | None]",
+    "cache_creation": "typing.NotRequired[int | None]",
 })
 
 # AgentReadingAnswer says whether the reading was recorded.
@@ -905,13 +921,37 @@ RulingDTO = typing.TypedDict("RulingDTO", {
     "on_behalf": "bool",
     "acknowledged": "bool",
     "asked": "typing.NotRequired[RulingAsked | None]",
+    "since": "typing.NotRequired[list[RulingMove] | None]",
 })
 
-# RulingAsked is the need a ruling answered: its kind, its question and the session that raised it.
+# RulingMove is what a member did with a ruling after it was made, oldest first: `acknowledge`,
+# or `correct` with the words they corrected it with. Only a member makes either, named by their
+# GitHub login, null until Go holds one.
+RulingMove = typing.TypedDict("RulingMove", {
+    "kind": "str",
+    "login": "str | None",
+    "text": "typing.NotRequired[str]",
+    "at": "str",
+})
+
+# RulingAsked is the need a ruling answered, as it was asked: its kind, the session that raised it,
+# its question and context and the options it offered, and the owner's answer where the ruling
+# recorded it apart.
 RulingAsked = typing.TypedDict("RulingAsked", {
     "kind": "str",
     "question": "str",
     "session": "typing.NotRequired[str]",
+    "context": "typing.NotRequired[str]",
+    "options": "typing.NotRequired[list[NeedOptionDTO] | None]",
+    "multi": "typing.NotRequired[bool]",
+    "allow_other": "typing.NotRequired[bool]",
+    "answer": "typing.NotRequired[RulingChosen | None]",
+})
+
+# RulingChosen is the owner's answer as they gave it: the labels they chose, and their own words.
+RulingChosen = typing.TypedDict("RulingChosen", {
+    "choices": "list[str] | None",
+    "words": "typing.NotRequired[str]",
 })
 
 # NeedAnswer and RulingAnswer are a need's or a ruling's command answer, as IntentAnswer is.
@@ -1087,6 +1127,41 @@ BrainRequestView = typing.TypedDict("BrainRequestView", {
 BrainTranscript = typing.TypedDict("BrainTranscript", {
     "requests": "list[BrainRequestView] | None",
     "bootstrap": "BootstrapView | None",
+})
+
+# BrainReplyBody is speech from the current seat, optionally associated with a request.
+BrainReplyBody = typing.TypedDict("BrainReplyBody", {
+    "session": "str",
+    "generation": "int",
+    "text": "str",
+    "request": "typing.NotRequired[str | None]",
+})
+
+BrainReplyAnswer = typing.TypedDict("BrainReplyAnswer", {
+    "id": "str",
+    "replayed": "bool",
+    "position": "int",
+    "completed": "bool",
+})
+
+BrainTimelineItem = typing.TypedDict("BrainTimelineItem", {
+    "kind": "str",
+    "id": "str",
+    "position": "int",
+    "at": "str",
+    "text": "str",
+    "own": "bool",
+    "author": "str",
+    "request": "typing.NotRequired[str | None]",
+})
+
+BrainTimeline = typing.TypedDict("BrainTimeline", {
+    "items": "list[BrainTimelineItem] | None",
+    "next": "str",
+    "head": "bool",
+    "bootstrap": "BootstrapView | None",
+    "latest_failure": "str | None",
+    "capacity_available": "bool",
 })
 
 # BootstrapView is the vacant seat's bootstrap as a waiting request's member reads it (§2.3): waiting
@@ -1298,6 +1373,18 @@ CollaborationEndBody = typing.TypedDict("CollaborationEndBody", {
 # CollaborationAnswer is a member's collaboration command's answer: what it made or changed, and
 # whether it was a retry answered from the first attempt.
 CollaborationAnswer = typing.TypedDict("CollaborationAnswer", {
+    "id": "str",
+    "replayed": "bool",
+})
+
+# MemberAdmitBody names the person a team's owner admits as a member: the console's id for them, as
+# the identity the console verifies carries it. The issuer is the owner's own.
+MemberAdmitBody = typing.TypedDict("MemberAdmitBody", {
+    "subject": "str",
+})
+
+# MemberAdmitAnswer is the subject admitted, and whether this was a retry answered from the first.
+MemberAdmitAnswer = typing.TypedDict("MemberAdmitAnswer", {
     "id": "str",
     "replayed": "bool",
 })
@@ -1572,6 +1659,21 @@ GateBenchLiftAnswer = typing.TypedDict("GateBenchLiftAnswer", {
     "replayed": "bool",
 })
 
+# GateAbandonmentBody abandons an ended epoch no machine observed running a model, by its session's
+# name, at the seat generation, with the investigation that found no model for it.
+GateAbandonmentBody = typing.TypedDict("GateAbandonmentBody", {
+    "session": "str",
+    "epoch": "int",
+    "generation": "int",
+    "reason": "str",
+})
+
+# GateAbandonmentAnswer is the abandoned epoch's session, and whether this answer replays the first.
+GateAbandonmentAnswer = typing.TypedDict("GateAbandonmentAnswer", {
+    "session": "str",
+    "replayed": "bool",
+})
+
 # GateLiftAnswer is the lifted series and the rounds it may now run.
 GateLiftAnswer = typing.TypedDict("GateLiftAnswer", {
     "series": "str",
@@ -1667,6 +1769,8 @@ GateRow = typing.TypedDict("GateRow", {
     "why": "str | None",
     "verdict": "str | None",
     "findings": "int",
+    "findings_open": "int",
+    "handed_on": "int",
     "ended_at": "str | None",
     "review": "str | None",
     "reviewer": "GateReviewer | None",
@@ -1674,22 +1778,46 @@ GateRow = typing.TypedDict("GateRow", {
     "passed_over": "typing.NotRequired[dict[str, list[str] | None] | None]",
 })
 
-# GateReviewer is who the commission's attempt was given to, and, once judged, the model its
-# receipt observed.
+# GateReviewer is who the commission's attempt was given to: the route and effort it was offered
+# with, and, once judged, the model its receipt observed.
 GateReviewer = typing.TypedDict("GateReviewer", {
     "vendor": "str",
     "account": "str",
+    "route": "str | None",
+    "effort": "str | None",
     "model": "str | None",
     "model_source": "str | None",
     "deeper": "typing.NotRequired[bool]",
     "reused": "typing.NotRequired[bool]",
 })
 
-# GateRun is the attempt's offer while it stands: when it was offered, delivered and is due.
+# GateRun is the current attempt's run, open or ended (go-run-record-design.md §3.4): its offer's
+# timeline and outcome, the machine it went to, what that machine last signed of it, and what it
+# measured once it ended. Measures are the machine's word.
 GateRun = typing.TypedDict("GateRun", {
     "offered_at": "str",
     "delivered_at": "str | None",
     "deadline_at": "str",
+    "settled_at": "str | None",
+    "outcome": "str | None",
+    "machine": "str | None",
+    "cli": "str | None",
+    "phase": "str | None",
+    "started_at": "str | None",
+    "last_sign_at": "str | None",
+    "seconds": "int | None",
+    "first_output_seconds": "int | None",
+    "tokens": "GateTokens | None",
+})
+
+# GateTokens are a run's tokens by class, under the basis its harness counts them on.
+GateTokens = typing.TypedDict("GateTokens", {
+    "basis": "str | None",
+    "input": "int | None",
+    "output": "int | None",
+    "reasoning": "int | None",
+    "cache_read": "int | None",
+    "cache_write": "int | None",
 })
 
 # GateList answers GET /gates, newest commission first; Next asks for the page after it.
@@ -1698,7 +1826,8 @@ GateList = typing.TypedDict("GateList", {
     "next": "typing.NotRequired[str]",
 })
 
-# GateRead answers GET /gates/{gate}: the row, and its result once there is one.
+# GateRead answers GET /gates/{gate}: the row, its result once there is one, and every attempt
+# it was offered to, oldest first.
 GateRead = typing.TypedDict("GateRead", {
     "id": "str",
     "kind": "str",
@@ -1719,12 +1848,42 @@ GateRead = typing.TypedDict("GateRead", {
     "why": "str | None",
     "verdict": "str | None",
     "findings": "int",
+    "findings_open": "int",
+    "handed_on": "int",
     "ended_at": "str | None",
     "review": "str | None",
     "reviewer": "GateReviewer | None",
     "run": "GateRun | None",
     "passed_over": "typing.NotRequired[dict[str, list[str] | None] | None]",
     "result": "GateResult | None",
+    "attempts": "list[GateAttempt] | None",
+})
+
+# GateAttempt is one judge the commission was offered to: who and where, its run, the persona it
+# judged with, and why it was declined where it was.
+GateAttempt = typing.TypedDict("GateAttempt", {
+    "vendor": "str",
+    "account": "str",
+    "route": "str | None",
+    "effort": "str | None",
+    "model": "str | None",
+    "run": "GateRun | None",
+    "persona": "GatePersona | None",
+    "declined": "GateDeclined | None",
+})
+
+# GatePersona is where a judge's lens came from: the project's, at its path, or the bundled one.
+GatePersona = typing.TypedDict("GatePersona", {
+    "source": "str | None",
+    "path": "str | None",
+    "sha": "str | None",
+})
+
+# GateDeclined is why a judge's attempt did not judge the commission, and the class of its failure.
+GateDeclined = typing.TypedDict("GateDeclined", {
+    "reason": "str",
+    "class": "str | None",
+    "at": "str",
 })
 
 # GateResult is what the judge's receipt settled: a verdict with its findings, or unresolved with
@@ -1735,6 +1894,7 @@ GateResult = typing.TypedDict("GateResult", {
     "declared": "str | None",
     "model": "str | None",
     "reason": "str | None",
+    "summary": "str | None",
     "findings": "list[GateFinding] | None",
 })
 
@@ -1910,6 +2070,30 @@ GateBenchShadow = typing.TypedDict("GateBenchShadow", {
     "would_widen": "list[str] | None",
     "would_reorder": "list[str] | None",
     "timeouts_widened": "int",
+})
+
+# KeepBody is the seat keeping a session idle on purpose, because it expects work in that
+# session's territory soon: why, and until when, as an RFC 3339 time or a duration from now ("45m",
+# "2h"). A keep has no ceiling; a long one is the brain's call, seen with its reason.
+KeepBody = typing.TypedDict("KeepBody", {
+    "to": "str",
+    "until": "typing.NotRequired[str]",
+    "reason": "str",
+})
+
+# UnkeepBody is the seat clearing its keep on a session.
+UnkeepBody = typing.TypedDict("UnkeepBody", {
+    "to": "str",
+})
+
+# KeepAnswer is the keep a keep or an unkeep settled on: kept or unkept, with its reason and until.
+KeepAnswer = typing.TypedDict("KeepAnswer", {
+    "id": "str",
+    "session": "str",
+    "status": "str",
+    "reason": "str",
+    "until": "str",
+    "replayed": "bool",
 })
 
 KnowledgeUnit = typing.TypedDict("KnowledgeUnit", {
@@ -2597,9 +2781,9 @@ SessionList = typing.TypedDict("SessionList", {
 # directory spends, else the one its bind named, nil when neither names one. Status is
 # what the session last said, at the epoch it said it, or nil when it has said nothing. Observed is
 # what its machine saw this epoch run, newest first. Cards are the live cards it executes at this
-# epoch, by wire id, first engaged first. Presence is how an agent's stream delivers to it now,
-# "stream" or "reach", or nil when none does. Vitals is this epoch's latest reading, nil before its
-# first.
+# epoch, by wire id, first engaged first. Presence is the basis of the hold it stands on,
+# "stream" or "reach", or nil when none stands; DetachedSince is since when no uplink has carried
+# that hold, or nil while one does. Vitals is this epoch's latest reading, nil before its first.
 ListedSession = typing.TypedDict("ListedSession", {
     "name": "str",
     "epoch": "int",
@@ -2609,6 +2793,7 @@ ListedSession = typing.TypedDict("ListedSession", {
     "machine_name": "str | None",
     "harness": "str",
     "presence": "str | None",
+    "detached_since": "str | None",
     "enrolled_at": "str",
     "status": "ListedStatus | None",
     "observed": "list[ObservedReport] | None",
@@ -2616,6 +2801,35 @@ ListedSession = typing.TypedDict("ListedSession", {
     "account": "ListedAccount | None",
     "vitals": "SessionVitals | None",
     "origin": "SessionOrigin",
+    "standing": "SessionStanding | None",
+})
+
+# SessionStanding is a session's standing as Go reads it (doc 189 §1), so the Fleet draws it rather
+# than deriving its own. It is nil for the seat's holder, and for a session never read that is
+# neither kept nor yet stale. Activity is working, waiting, concluded or idle, nil when the session
+# has not reported one; Since is when its activity began, or its enrolment where it has none. Stale
+# is no sign of life for 30 minutes with no keep, whatever the session is doing but working (#5615).
+SessionStanding = typing.TypedDict("SessionStanding", {
+    "activity": "str | None",
+    "since": "str | None",
+    "stale": "bool",
+    "keep": "StandingKeep | None",
+    "cache": "StandingCache | None",
+})
+
+# StandingKeep is the seat's keep on a session: why, until when, and Over once that has passed with
+# nothing placed.
+StandingKeep = typing.TypedDict("StandingKeep", {
+    "reason": "str",
+    "until": "str",
+    "over": "bool",
+})
+
+# StandingCache is where a session's prompt cache stands, for a vendor whose lifetime is stated:
+# when it lapses, and its phase, warm, lapsing or lapsed.
+StandingCache = typing.TypedDict("StandingCache", {
+    "lapses_at": "str",
+    "phase": "str",
 })
 
 # SessionOrigin is where a session epoch runs and what launched it (#5026), read from its launch
@@ -3295,6 +3509,7 @@ ROUTES = frozenset({
     "POST /api/v1/teams/{team}/installations",
     "POST /api/v1/teams/{team}/invitations",
     "POST /api/v1/teams/{team}/invitations/{invitation}/redeem",
+    "POST /api/v1/teams/{team}/members",
     "POST /api/v1/teams/{team}/name",
     "POST /api/v1/teams/{team}/slug",
     "POST /api/v1/teams/{team}/workspaces",
@@ -3304,10 +3519,12 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/actions",
     "GET /w/{workspace}/api/v1/board",
     "GET /w/{workspace}/api/v1/brain/digest",
+    "POST /w/{workspace}/api/v1/brain/replies",
     "GET /w/{workspace}/api/v1/brain/requests",
     "POST /w/{workspace}/api/v1/brain/requests",
     "GET /w/{workspace}/api/v1/brain/requests/{request}",
     "POST /w/{workspace}/api/v1/brain/requests/{request}/answer",
+    "GET /w/{workspace}/api/v1/brain/transcript",
     "GET /w/{workspace}/api/v1/cards",
     "POST /w/{workspace}/api/v1/cards",
     "GET /w/{workspace}/api/v1/cards/{card}",
@@ -3334,6 +3551,7 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/facts",
     "GET /w/{workspace}/api/v1/gates",
     "POST /w/{workspace}/api/v1/gates",
+    "POST /w/{workspace}/api/v1/gates/abandonments",
     "GET /w/{workspace}/api/v1/gates/analysis",
     "POST /w/{workspace}/api/v1/gates/bench-lifts",
     "GET /w/{workspace}/api/v1/gates/benches",
@@ -3387,6 +3605,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/sessions/{session}/directives",
     "POST /w/{workspace}/api/v1/sessions/{session}/directives/{directive}/acknowledgement",
     "POST /w/{workspace}/api/v1/sessions/{session}/forge-token",
+    "POST /w/{workspace}/api/v1/sessions/{session}/keep",
     "POST /w/{workspace}/api/v1/sessions/{session}/push/raises",
     "POST /w/{workspace}/api/v1/sessions/{session}/says",
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/acquisition",
@@ -3395,6 +3614,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/renewal",
     "POST /w/{workspace}/api/v1/sessions/{session}/status",
     "POST /w/{workspace}/api/v1/sessions/{session}/targeting",
+    "POST /w/{workspace}/api/v1/sessions/{session}/unkeep",
     "POST /w/{workspace}/api/v1/sessions/{session}/waits",
     "GET /w/{workspace}/api/v1/snapshot",
     "POST /w/{workspace}/api/v1/sources",

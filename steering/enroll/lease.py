@@ -69,7 +69,8 @@ _ACTION = {
     "control": re.compile(r"^control:\s*token\s+@lease\s+(?P<to>\S+)\s+"
                           r"(?P<value>effort\s+(?:low|medium|high|xhigh|max)|model\s+[a-z]+-[0-9]+(?:\.[0-9]+)?|compact(?:\s+without\s+checkpoint)?)"
                           r"\s+because\s+(?P<reason>\S.*?)\s*$", re.S),
-    "retire": re.compile(r"^retire:\s*token\s+@lease\s+(?P<to>\S+)\s+because\s+(?P<reason>\S.*?)\s*$", re.S),
+    "retire": re.compile(r"^retire:\s*token\s+@lease\s+(?P<to>\S+)(?:\s+to\s+(?P<successor>\S+))?"
+                         r"\s+because\s+(?P<reason>\S.*?)\s*$", re.S),
     "rehome": re.compile(r"^rehome:\s*token\s+@lease\s+(?P<to>\S+)\s+to\s+(?P<account>\S+)"
                          r"(?P<compact>\s+compact(?:\s+without\s+checkpoint)?)?"
                          r"\s+because\s+(?P<reason>\S.*?)\s*$", re.S),
@@ -77,15 +78,30 @@ _ACTION = {
 _ACTION_USAGE = {
     "wake": "wake: token @lease <session> because <reason>",
     "control": "control: token @lease <session> effort <level> | model <name>-<version> | compact [without checkpoint] because <reason>",
-    "retire": "retire: token @lease <session> because <reason>",
+    "retire": "retire: token @lease <session> [to <successor>] because <reason>",
     "rehome": "rehome: token @lease <session> to <account> [compact [without checkpoint]] because <reason>",
 }
+# The seat's keep of a session it leaves idle on purpose, with its plan, and the keep's clearing
+# (doc 189 §2). The until is a time or a duration, Go's half hour when the line names none.
+_KEEP = re.compile(r"^keep:\s*token\s+@lease\s+(?P<to>\S+)(?:\s+until\s+(?P<until>\S+))?\s+because\s+(?P<reason>\S.*?)\s*$", re.S)
+_UNKEEP = re.compile(r"^unkeep:\s*token\s+@lease\s+(?P<to>\S+)\s*$")
+_KEEP_USAGE = {"keep": "keep: token @lease <session> [until <time or duration>] because <reason>",
+               "unkeep": "unkeep: token @lease <session>"}
+# Every lease verb `go_say` sends to Go, so a refusal of another names what this client takes.
+GO_VERBS = tuple(sorted({"authorship", "backlog", "dispose", "launch", "lift", "promote", "relay", "roster",
+                         "withdraw", *_ACTION, *_KEEP_USAGE}))
+# The paths `go_post` takes: each is the seat's own command, translated to the route Go serves.
+POST_TARGETS = ("/steering/seat/read", "/steering/brain/reply", "/steering/brain/attach",
+                "/steering/brain/detach", "/steering/push/raise")
 _RELAY = re.compile(r"^relay:\s*token\s+@lease\s+to\s+(?P<target>[^\s@]+)(?:@(?P<epoch>[0-9]{1,9}))?\s+(?P<text>.+)$", re.S)
 # `lift:` of a review series by its pull request or a critic series by its branch (speak.py _LIFT).
 _LIFT = re.compile(r"^lift:\s*token\s+@lease\s+(?P<kind>review|critic)\b(?P<rest>.*)$", re.S)
 # `lift:` of a bench, by the dimension and key its bench reason names, or a judge's vendor and model
 # (speak.py _LIFT).
 _BENCH = re.compile(r"^lift:\s*token\s+@lease\s+bench\s+(?P<first>\S+)\s+(?P<second>\S+)\s+(?P<reason>\S.*)$", re.S)
+# `authorship: abandon` of an ended epoch no machine observed running a model (registry.py abandon).
+_ABANDON = re.compile(r"^authorship:\s*token\s+@lease\s+abandon\s+(?P<session>\S+)\s+epoch\s+(?P<epoch>[0-9]{1,9})"
+                      r"\s+because\s+(?P<reason>\S.*?)\s*$", re.S)
 _LIFT_AT = {"review": re.compile(r"\s+(?P<repo>\S+)\s+pr\s+(?P<at>[0-9]{1,9})\s+(?P<reason>\S.*)$", re.S),
             "critic": re.compile(r"\s+(?P<repo>\S+)\s+branch\s+(?P<at>\S+)\s+(?P<reason>\S.*)$", re.S)}
 
@@ -106,6 +122,8 @@ def go_say(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         return _go_withdraw(rec, line, key)
     if verb in _ACTION:
         return _go_action(rec, verb, line, key)
+    if verb in _KEEP_USAGE:
+        return _go_keep(rec, verb, line, key)
     lift = _LIFT.match(line)
     if lift:
         return _go_lift(rec, lift, key)
@@ -113,11 +131,16 @@ def go_say(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         return _go_bench_lift(rec, line, key)
     if verb in ("backlog", "roster"):
         return _go_read(rec, verb, line)
-    ruled = session_routes.ruled_out(verb)
+    if re.match(r"^authorship:\s*token\s+@lease\s+abandon\b", line):
+        return _go_abandon(rec, line, key)
+    ruled = session_routes.ruled_out("authorship establish" if verb == "authorship" else verb)
     if ruled:
         return 1, ruled, False
+    if verb == "lift":
+        return 2, refusal.use("lift", "malformed lift: invocation"), False
     if verb != "relay":
-        return 1, refusal.escalate(f"{verb}: not served by Go yet", to="seat"), False
+        return 1, refusal.refuse(f"{verb[:40]} is not a lease verb this client sends to Go; it sends {', '.join(GO_VERBS)}",
+                                 send=[("/2mw2lt:brain", "for each verb's grammar")], to="seat"), False
     m = _RELAY.match(line)
     if not m or not m["text"].strip():
         return 2, refusal.use("relay", "malformed relay: invocation"), False
@@ -237,8 +260,38 @@ def _go_action(rec: dict, verb: str, line: str, key: str) -> tuple[int, str, boo
         body["value"] = " ".join(m["value"].split())
     if verb == "rehome":
         body["value"] = " ".join([m["account"], *(m["compact"] or "").split()])
+    if verb == "retire" and m["successor"]:
+        body["value"] = m["successor"]
     try:
         said = session_routes.seat_action(rec["session"], rec["token"], body, key)
+    except session_routes.NotSeated as why:
+        return 1, GO_NOT_SEATED.format(why=why), False
+    except session_routes.Unsent as e:
+        return 1, refusal.retry(str(e)), True
+    except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale, False
+        if e.code in SEAT_LOST:
+            return 1, GO_NOT_SEATED.format(why=e), False
+        if session_routes.settled(e):
+            return 1, refusal.use(verb, str(e)), False
+        return 1, refusal.retry(str(e)), True
+    return 0, said, False
+
+
+def _go_keep(rec: dict, verb: str, line: str, key: str) -> tuple[int, str, bool]:
+    """`keep:` or `unkeep:` on Go: the brain records why it leaves a session idle and until when, or
+    clears that. A keep goes to no machine; it is the brain's stated intent."""
+    import refusal
+    import session_routes
+    m = (_KEEP if verb == "keep" else _UNKEEP).match(line)
+    if not m:
+        return 2, refusal.use(verb, f"malformed {verb}: on Go it is `{_KEEP_USAGE[verb]}`"), False
+    body = {"to": m["to"]}
+    if verb == "keep":
+        body.update({**({"until": m["until"]} if m["until"] else {}), "reason": " ".join(m["reason"].split())})
+    try:
+        said = session_routes.seat_keep(rec["session"], rec["token"], verb, body, key)
     except session_routes.NotSeated as why:
         return 1, GO_NOT_SEATED.format(why=why), False
     except session_routes.Unsent as e:
@@ -277,6 +330,34 @@ def _go_lift(rec: dict, lift: re.Match, key: str) -> tuple[int, str, bool]:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
             return 1, refusal.use("lift", str(e)), False
+        return 1, refusal.retry(str(e)), True
+    return 0, said, False
+
+
+def _go_abandon(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
+    """`authorship: abandon` on Go: the seat's final word that an ended epoch no machine observed
+    running a model authored nothing a gate may pass. `key` is the line's occurrence, so a resend
+    under `--retry` is answered from the first."""
+    import refusal
+    import session_routes
+    m = _ABANDON.match(line)
+    if not m:
+        return 2, refusal.use("authorship", "malformed authorship: abandon invocation; "
+                              "authorship: token @lease abandon <session> epoch <n> because <reason>"), False
+    try:
+        said = session_routes.abandon(rec["session"], rec["token"], m["session"], int(m["epoch"]),
+                                      " ".join(m["reason"].split()), key)
+    except session_routes.NotSeated as why:
+        return 1, GO_NOT_SEATED.format(why=why), False
+    except session_routes.Unsent as e:
+        return 1, refusal.retry(str(e)), True
+    except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale, False
+        if e.code in SEAT_LOST:
+            return 1, GO_NOT_SEATED.format(why=e), False
+        if session_routes.settled(e):
+            return 1, refusal.use("authorship", str(e)), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 
@@ -378,8 +459,9 @@ def go_post(rec: dict, target: str, body: bytes) -> tuple[int, str]:
     target = target.rstrip("/")
     if target == "/steering/seat/read":
         return go_read(rec, body)
-    if target not in ("/steering/brain/reply", "/steering/brain/attach", "/steering/brain/detach", "/steering/push/raise"):
-        return 1, refusal.escalate(f"post {target}: not served by Go yet", to="seat")
+    if target not in POST_TARGETS:
+        return 1, refusal.refuse(f"{target[:80]} is not a path this client posts to Go; it posts to {', '.join(POST_TARGETS)}",
+                                 send=[("/2mw2lt:brain", "for the lease commands")], to="seat")
     try:
         obj = json.loads(body or b"null")
     except ValueError:

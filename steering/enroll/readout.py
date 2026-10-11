@@ -132,7 +132,7 @@ def with_tmux(rec: dict, left: float) -> tuple[str, str] | None:
     tmux = os.environ.get("TMUX")
     try:
         where, state = wakeexec.pane_state(
-            os.getppid(), socket=tmux.split(",", 1)[0] if tmux else None,
+            runtime_id.hook_parent(), socket=tmux.split(",", 1)[0] if tmux else None,
             run=lambda *a, **k: subprocess.run(*a, **{**k, "timeout": each}))
     except Exception:
         return None
@@ -205,7 +205,7 @@ def main() -> int:
         try:
             trec = targeting.build(provider_session=hook.get("session_id"),
                                    runtime_id=rec["runtime_id"], observed_at=adapter.utc(),
-                                   entrypoint=targeting.TMUX_ENTRYPOINT, pid=os.getppid(), cwd=str(anchor),
+                                   entrypoint=targeting.TMUX_ENTRYPOINT, pid=runtime_id.hook_parent(), cwd=str(anchor),
                                    tmux=pane, tmux_attached=rec.get("tmux") == "attached" if rec.get("tmux") else None)
             why = targeting.validate(trec)
             if why:
@@ -218,7 +218,7 @@ def main() -> int:
             entry = last_assistant_entry(hook)
             if entry is None:
                 raise RuntimeError("transcript no longer yields an assistant entry")
-            walk_pid = os.getppid()
+            walk_pid = runtime_id.hook_parent()
             instance = runtime_id.instance_of(walk_pid)
             trec = targeting.read(hook, entry, rec.get("runtime_id"), adapter.utc(),
                                   pid=walk_pid, instance=instance)

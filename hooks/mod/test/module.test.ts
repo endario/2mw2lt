@@ -87,6 +87,7 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
     runs: [] as string[][],
     cwds: [] as (string | undefined)[],
     spawns: [] as string[][],
+    claimsAtSpawn: [] as number[],
     submits: [] as string[],
     appends: [] as string[],
     logs: [] as string[],
@@ -164,6 +165,7 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
   })
   on('process.spawn', async function* ($, e) {
     w.spawns.push([...e.argv])
+    w.claimsAtSpawn.push(w.writes.filter(write => JSON.parse(write.text).at > 0).length)
     w.cwds.push(e.cwd)
     const round = rounds.shift()
     if (!round) throw new Error('no more children')
@@ -907,6 +909,20 @@ test('a session that disconnects is held no more, and a later refusal adds no ro
   expect(w.writes.map(x => JSON.parse(x.text).at).every(at => at > 0)).toBe(true)   // the claim stays live
 })
 
+test('a sleep-expired claim is refreshed before the replacement hold delivers its replay', async ($, on) => {
+  const w = world(on, { recording: RECORDING, rounds: [
+    { lines: [], code: 4 },
+    { lines: [line('e1', 'envelope', true)], code: 0, hold: never },
+  ] })
+  await begin($)
+  await w.clock.settle()
+  await w.clock.advance(1_000)
+  expect(w.spawns.length).toBe(2)
+  expect(w.claimsAtSpawn).toEqual([1, 2])
+  expect(w.submits).toEqual([POINTER])
+  expect(w.state.get('pending')).toEqual(['e1'])
+})
+
 test('a child that breaks is held again after a backoff, not given up', async ($, on) => {
   const w = world(on, { rounds: [{ lines: [], code: 'throw' }, { lines: [], code: 0, hold: never }] })
   await begin($)
@@ -1323,6 +1339,16 @@ test('seatCall: a rehome names the account, and compacts first only when asked',
   expect(line({ compact: false, without_checkpoint: true })).toEqual({ refused: 'without_checkpoint is only with compact' })
   expect(line({ account: 'acct 3' })).toEqual({ refused: 'account is one word' })
   expect(seatCall('rehome', { session: 'teal', reason: 'r' })).toEqual({ refused: 'account is required' })
+})
+
+test('seatCall: a keep carries its reason, and its until only when given; an unkeep names the session alone', async () => {
+  expect(seatCall('keep', { session: 'teal', reason: 'the review on #5536' }))
+    .toEqual({ client: 'say', stdin: 'keep: token @lease teal because the review on #5536' })
+  expect(seatCall('keep', { session: 'teal', until: '45m', reason: 'the review on #5536' }))
+    .toEqual({ client: 'say', stdin: 'keep: token @lease teal until 45m because the review on #5536' })
+  expect(seatCall('keep', { session: 'teal', until: '45m' })).toEqual({ refused: 'reason is required' })
+  expect(seatCall('keep', { session: 'teal', until: 'in an hour', reason: 'r' })).toEqual({ refused: 'until is one word' })
+  expect(seatCall('unkeep', { session: 'teal' })).toEqual({ client: 'say', stdin: 'unkeep: token @lease teal' })
 })
 
 test('a client that refused is the call\'s error, in its words, never a result', async ($, on) => {

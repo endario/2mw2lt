@@ -173,6 +173,18 @@ export const SEAT_TOOLS: Record<string, SeatTool> = {
     build: a => ({ client: 'say', stdin: `rehome: token @lease ${str(a, 'session')} to ${str(a, 'account')}${a.compact === true
       ? (a.without_checkpoint === true ? ' compact without checkpoint' : ' compact') : ''} because ${str(a, 'reason')}` }),
   },
+  keep: {
+    description: 'Seat only: keep a finished session idle on purpose, because work in its territory is expected soon. Name the plan as the reason; the keep stands half an hour unless until says otherwise, and work placed on the session ends it.',
+    fields: { session: word('The session to keep.'), until: word('When the keep ends: a time (RFC 3339) or a duration such as 45m or 2h.'), reason: text('The work expected in its territory, and when.') },
+    required: ['session', 'reason'],
+    build: a => ({ client: 'say', stdin: `keep: token @lease ${str(a, 'session')}${a.until !== undefined ? ` until ${str(a, 'until')}` : ''} because ${str(a, 'reason')}` }),
+  },
+  unkeep: {
+    description: 'Seat only: clear the keep on a session.',
+    fields: { session: word('The kept session.') },
+    required: ['session'],
+    build: a => ({ client: 'say', stdin: `unkeep: token @lease ${str(a, 'session')}` }),
+  },
   card_reclassify: {
     description: 'Seat only: correct a card\'s track, significance, state, priority or major mark.',
     fields: { card: word('The card.'), field: { type: 'string', description: 'What to correct.', enum: ['track', 'significance', 'state', 'priority', 'major'] },

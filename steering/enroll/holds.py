@@ -45,15 +45,10 @@ def _on_go(ws: Path, token: str, asked: str) -> int:
     try:
         if asked.startswith("issue "):
             n = int(asked.split()[1])
-            page = "/cards?state=live"
-            while page:
-                listed = session_routes.get(page, token)
-                for card in listed.get("cards") or []:
-                    if any(a.get("verb") == "resolves" and a.get("repo") == repo and a.get("n") == n and not a.get("ended")
-                           for a in card.get("anchors") or []):
-                        who += _executors(card)
-                nxt = listed.get("next")
-                page = "/cards?state=live&next=" + urllib.parse.quote(nxt, safe="") if nxt else ""
+            for card in session_routes.live_cards(token):
+                if any(a.get("verb") == "resolves" and a.get("repo") == repo and a.get("n") == n and not a.get("ended")
+                       for a in card.get("anchors") or []):
+                    who += _executors(card)
             print(f"issue {n} is claimed by {', '.join(who)}" if who else f"issue {n} is claimed by nobody")
             return 0
         try:

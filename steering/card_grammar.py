@@ -26,7 +26,7 @@ STATES = ("card-scoped", "card-branch", "card-unbranch", "card-session", "card-u
           # What the work is for, and the daemon's reading of it (doc 185 §5).
           "card-outcome", "card-outcome-read")
 SIGNS = ("gate", "anchor")
-FIELDS = ("track", "significance", "state", "priority", "major")
+FIELDS = ("track", "significance", "state", "priority", "major", "name")
 
 # What a correction spells the card's weight in (doc 148 §5): major is the brain's declaration,
 # which the knowledge stages' `owes-spec` reads.
@@ -125,14 +125,8 @@ def validate(fact: dict) -> str | None:
                 return f"field must be one of {FIELDS}"
             if fact["field"] == "track" and not valid_track(fact.get("after")):
                 return "track must name a lane"
-            if fact["field"] == "significance" and fact.get("after") not in SIGNIFICANCE:
-                return f"significance must be one of {SIGNIFICANCE}"
-            if fact["field"] == "priority" and fact.get("after") not in PRIORITY:
-                return f"priority must be one of {PRIORITY}"
-            if fact["field"] == "major" and fact.get("after") not in MAJOR_AFTER:
-                return f"a card's weight is one of {', '.join(MAJOR_AFTER)}"
-            if fact["field"] == "state" and fact.get("after") != "live":
-                return "a state is corrected only to live, which undoes the keeper's retirement"
+            if (wrong := correction_value_refusal(fact["field"], fact.get("after"))):
+                return wrong
         elif not _valid_anchors(fact.get("after")):
             return f"anchors must be keyed by {'|'.join(VERBS)}, each a positive issue number"
     elif state == "card-observed":
@@ -286,6 +280,22 @@ def declaration(session: str, card: str, words: list[str]) -> tuple[dict | None,
     return (None, refusal) if refusal else (first, None)
 
 
+def correction_value_refusal(field: str, after: object) -> str | None:
+    """Why `after` is not a value `field` takes, naming the values it does, or None. A track is not
+    here: the lanes a workspace names are its own, so its door judges them."""
+    if field == "significance" and after not in SIGNIFICANCE:
+        return f"significance must be one of {SIGNIFICANCE}, not {after!r}"
+    if field == "priority" and after not in PRIORITY:
+        return f"priority must be one of {PRIORITY}, not {after!r}"
+    if field == "major" and after not in MAJOR_AFTER:
+        return f"a card's weight is {' or '.join(MAJOR_AFTER)}, not {after!r}"
+    if field == "name" and (not _text(after) or any(c in after for c in "\r\x00")):
+        return "a card's name is one line of at most 80 characters"
+    if field == "state" and after != "live":
+        return f"a state is corrected only to live, which undoes the keeper's retirement, not {after!r}"
+    return None
+
+
 def built(verb: str, rest: list[str]) -> tuple[list[dict], str | None]:
     """The fact a verb names, from the arguments alone, or the refusal its grammar earned.
 
@@ -329,6 +339,8 @@ def built(verb: str, rest: list[str]) -> tuple[list[dict], str | None]:
         if verb == "retire" and len(rest) == 2:
             return [_fact("card-retired", rest[0], why=rest[1])], None
         if verb == "reclassify" and len(rest) >= 4 and rest[1] in FIELDS:
+            if (wrong := correction_value_refusal(rest[1], rest[2])):
+                return [], wrong
             return [_fact("card-reclassified", rest[0], field=rest[1], after=rest[2],
                           why=" ".join(rest[3:]))], None
         if verb == "link" and len(rest) >= 4:
