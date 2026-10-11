@@ -96,6 +96,9 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
     compacts: [] as { trigger: string; instructions?: string }[],
     recording,
     enrolled,
+    sessionLookupCode: 0,
+    retainedName: '',
+    holdNextLookup: undefined as Promise<void> | undefined,
     readGate: undefined as Promise<void> | undefined,
     state: new Map<string, unknown>(),
     // The next read of this key is answered with what it held when asked, once `release` runs.
@@ -156,11 +159,17 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
       if (w.seatGate) await w.seatGate
       return { value: { exitCode: w.seat.code, stdout: w.seat.stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
-    const out = e.argv.includes('--session-of') ? (w.enrolled ? 's1\n' : '')
+    const out = e.argv.includes('--session-of') ? (w.enrolled ? 's1\n' : e.argv[4] === undefined ? w.retainedName : '')
       : e.argv.includes('--claim-path') ? (w.claimFails ? '' : `/ws/.claude/steering-holders/${e.argv[3]}.json\n`)
       : e.argv.includes('--frame-path') ? `${FRAME_PATH}\n`
       : e.argv.includes('--keep') ? keep : ''
-    const exitCode = (e.argv.includes('--claim-path') && w.claimFails) || (e.argv.some(a => a.endsWith('/ack.py')) && ackFails) ? 1 : 0
+    if (e.argv.includes('--session-of') && w.holdNextLookup) {
+      const gate = w.holdNextLookup
+      w.holdNextLookup = undefined
+      await gate
+    }
+    const exitCode = e.argv.includes('--session-of') ? w.sessionLookupCode
+      : (e.argv.includes('--claim-path') && w.claimFails) || (e.argv.some(a => a.endsWith('/ack.py')) && ackFails) ? 1 : 0
     return { value: { exitCode, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('process.spawn', async function* ($, e) {
@@ -832,6 +841,7 @@ test('a pointer is sent again only once the session is idle, and not after the s
 
 test('a pointer appended into a turn is not sent again after the session disconnected', async ($, on) => {
   const w = await arrivesInTurn($, on)
+  w.enrolled = false
   await $.tool.call({ tool: 'Bash', command: 'python3 "/p/steering/enroll/disconnect.py" s1' } as never)
   await $.turn.complete({ turnId: 't-1', text: 'done' } as never)
   await w.clock.advance(2_000)
@@ -904,6 +914,71 @@ test('a subagent\'s connect or disconnect leaves the parent\'s hold, session and
   expect(w.state.get('seat')).toBe('the rulings')
 })
 
+for (const [name, command] of [
+  ['a refused disconnect masked by a successful shell command', 'python3 /p/steering/enroll/disconnect.py other-session; printf "finished"'],
+  ['a disconnect sent as text to another pane', 'tmux send-keys -t %2 \'cd /work && python3 /p/steering/enroll/disconnect.py other-session\' Enter'],
+]) test(`${name} keeps this session reachable`, async ($, on) => {
+  let arrive!: () => void
+  const w = world(on, { rounds: [{ lines: [new Promise<void>(resolve => { arrive = resolve }), line('after', 'say', true)], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  w.state.set('seat', 'the rulings')
+  await $.tool.call({ tool: 'Bash', command } as never)
+  expect(w.state.get('session')).toBe('s1')
+  expect(w.state.get('seat')).toBe('the rulings')
+  arrive()
+  await w.clock.settle()
+  expect(w.submits).toEqual([POINTER])
+  expect(w.spawns.length).toBe(1)
+})
+
+test('a failed enrolment lookup after disconnect text does not mean this session left', async ($, on) => {
+  let arrive!: () => void
+  const w = world(on, { rounds: [{ lines: [new Promise<void>(resolve => { arrive = resolve }), line('after', 'say', true)], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  w.state.set('seat', 'the rulings')
+  w.enrolled = false
+  w.sessionLookupCode = 1
+  await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/enroll/disconnect.py other-session; printf "finished"' } as never)
+  expect(w.state.get('session')).toBe('s1')
+  expect(w.state.get('seat')).toBe('the rulings')
+  arrive()
+  await w.clock.settle()
+  expect(w.submits).toEqual([POINTER])
+})
+
+test('disconnect ends the held enrolment even when an older name remains stored', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  w.state.set('seat', 'the rulings')
+  w.enrolled = false
+  w.retainedName = 'old-name\n'
+  await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/enroll/disconnect.py s1' } as never)
+  expect(w.state.get('session')).toBe('')
+  expect(w.state.get('seat')).toBe('')
+  expect(w.runs).toContainEqual(['python3', `${w.root}/steering/enroll/hold.py`, '--session-of', 'ps-1', 's1'])
+})
+
+test('a disconnect lookup that lands after reconnect does not stop the new hold', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }, { lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  let release!: () => void
+  w.enrolled = false
+  w.holdNextLookup = new Promise<void>(resolve => { release = resolve })
+  const leaving = $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/enroll/disconnect.py s1' } as never)
+  await w.clock.settle()
+  w.enrolled = true
+  await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/enroll/connect.py --current' } as never)
+  await w.clock.settle()
+  release()
+  await leaving
+  expect(w.state.get('session')).toBe('s1')
+  expect(w.spawns.length).toBe(2)
+})
+
 test('a session that disconnects is held no more, and a later refusal adds no row', async ($, on) => {
   let end: () => void = () => {}
   const w = world(on, { enrolled: false, rounds: [{ lines: [], code: 1, hold: new Promise<void>(r => { end = r }) }] })
@@ -913,6 +988,7 @@ test('a session that disconnects is held no more, and a later refusal adds no ro
   await $.tool.call({ tool: 'Bash', command: 'python3 "/p/steering/enroll/connect.py" --current' } as never)
   await w.clock.settle()
   expect(w.spawns.length).toBe(1)
+  w.enrolled = false
   await $.tool.call({ tool: 'Bash', command: 'python3 "/p/steering/enroll/disconnect.py" s1' } as never)
   end()
   await w.clock.settle()
@@ -1274,6 +1350,7 @@ test('an answer that lands after disconnect is dropped', async ($, on) => {
   w.seatGate = new Promise<void>(resolve => { answer = resolve })
   w.seat = { code: 0, stdout: 'A' }
   await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/promote.py' } as never)
+  w.enrolled = false
   await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/enroll/disconnect.py s1' } as never)
   answer()
   await w.clock.settle()

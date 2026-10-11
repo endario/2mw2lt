@@ -414,7 +414,8 @@ AgentReadingBody = typing.TypedDict("AgentReadingBody", {
 # model, effort, turn and context it names. Turn is open, ended or aborted. Directory is the label of
 # the config directory the machine found the session's transcript under, absent where it read none.
 # ActiveAt is when the machine last saw the harness write its record, a subagent's included, to the
-# minute; absent from an agent that does not say.
+# minute; absent from an agent that does not say. Background is how many background tasks the
+# harness's own process started and has not recorded ending; absent from an agent that does not say.
 SessionReading = typing.TypedDict("SessionReading", {
     "provider_session": "str",
     "observed_at": "str",
@@ -428,6 +429,7 @@ SessionReading = typing.TypedDict("SessionReading", {
     "tokens": "ReadingTokens",
     "entrypoint": "str",
     "directory": "typing.NotRequired[str]",
+    "background": "typing.NotRequired[int | None]",
 })
 
 # ReadingTokens is the tokens a reading counts: its call's whole input, and the parts of it read
@@ -2889,6 +2891,7 @@ SessionVitals = typing.TypedDict("SessionVitals", {
     "effort": "str | None",
     "context": "SessionContext",
     "entrypoint": "str | None",
+    "background": "int | None",
 })
 
 # SessionContext is the tokens a session's context holds, against the window its harness states;

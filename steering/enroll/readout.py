@@ -179,16 +179,15 @@ def main() -> int:
     if left < 0.2:
         return finish()
     pane = with_tmux(rec, left)
-    left = deadline - time.monotonic()
     sent_at = time.monotonic(); anchor = Path(os.environ.get("CLAUDE_PROJECT_DIR") or hook.get("cwd") or os.getcwd()); where = anchor
     ws = anchor  # a fallback the targeting block below can still post through if resolution fails
     try:
-        ws = workspace_root(anchor, timeout=1.0); where = ws
+        ws = workspace_root(anchor, timeout=min(1.0, max(0.1, deadline - time.monotonic()))); where = ws
         try:
             tell_agent(ws, hook, min(0.5, deadline - time.monotonic()))
         except Exception as e:  # the agent's poll reads the session anyway
             record("readout", f"the agent was not told the turn ended: {failure(e)}", where)
-        observe_post.post(rec, ws, min(2.0, left))
+        observe_post.post(rec, ws, min(2.0, max(0.1, deadline - time.monotonic())))
     except Exception as e:  # a reading is worth exactly one attempt; the next turn end brings another
         record("readout", f"post failed after {time.monotonic() - sent_at:.2f}s: {failure(e)}", where)
     # Targeting facts: only for a claude-vscode session, only with budget to spare — a hard

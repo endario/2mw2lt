@@ -320,8 +320,9 @@ def _claude_transcript(psession: str):
 
 def _claude_reading(psession: str, config: str | None = None) -> dict | None:
     """What the session's transcript under `config` says it last ran, stated as of the entry that
-    says it, so an unchanged transcript reads the same at every poll. `Refused` says why there is
-    none."""
+    says it, so an unchanged transcript reads the same at every poll, with the background tasks the
+    process running it now has started and not seen end (#5711). `Refused` says why there is none."""
+    import resume
     import vitals
     if not config:
         raise Refused("the session's stream named no Claude config directory")
@@ -331,6 +332,12 @@ def _claude_reading(psession: str, config: str | None = None) -> dict | None:
     rec = vitals.of_entry(vitals.last_assistant(vitals.tail(path)), {"session_id": psession}, restated=True)
     if rec is None:
         raise Refused(f"no assistant entry with an instant in {path}")
+    # The registry is asked only of a transcript with a task it has not seen end: asking runs `ps`.
+    n = vitals.background(path, 0)
+    if n:
+        since = resume.started(psession, str(Path(config) / "sessions" / "*.json"))
+        n = vitals.background(path, since) if since is not None else 0
+    rec = {**rec, "background": n}
     at = vitals.active_at(vitals.last_write(path))
     return {**rec, "active_at": at} if at else rec
 

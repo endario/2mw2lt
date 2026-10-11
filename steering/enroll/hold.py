@@ -51,7 +51,7 @@ from local_workspace import agent_port, path_header, required_workspace_root, wo
 from moments import moment  # noqa: E402
 import door  # noqa: E402
 from bind import Refused, bind, incarnation, pid_arg  # noqa: E402
-from connect import agent_says, harness_of, minted_name, own_enrolment, project_dir, records  # noqa: E402
+from connect import agent_says, hand_over_pane, harness_of, minted_name, own_enrolment, project_dir, records  # noqa: E402
 import machine_harness as harness_mod  # noqa: E402
 from process_probe import Undetermined  # noqa: E402
 import spool  # noqa: E402
@@ -276,16 +276,20 @@ def present(ws: Path, psession: str, rid: str) -> None:
 
 
 def rebound(ws: Path, session: str, token: str, psession: str, rid: str, pid: int | None,
-            provider: str) -> str | None:
+            provider: str, project: Path) -> str | None:
     """None once this process is bound to the session's own enrolment, else the refusal. A bind
     mints nothing: Go refuses it for an enrolment that was retired or detached, so a plugin's
-    hold revives no session (#5641). Its answer is said either way."""
+    hold revives no session (#5641). Its answer is said either way. Bound, it hands over its
+    pane as connect does: the targeting Go holds names the earlier incarnation, and a wake,
+    control or retire is refused it until this one's is posted (#5733)."""
     try:
         answer, _ = bind(session, token, psession, pid, provider)
     except (Refused, Undetermined) as why:
         answer = str(why)
     print(f"the stream named a runtime {session} is not bound to; rebinding: {answer}", file=sys.stderr)
     if answer.startswith("bound:"):
+        if pid is not None and (missed := hand_over_pane(ws, provider, psession, rid, pid, project)):
+            print(missed, file=sys.stderr)
         return None
     code = REFUSAL_CODE.search(answer)
     if code and code.group(1) == "incarnation-unobserved":
@@ -662,11 +666,16 @@ def main(argv: list[str]) -> int:
         return 0
     # Each names a fact of the workspace this client resolves, so the module keeps no copy of
     # the rule: the recording, the holder claim's path, and the enrolment of a provider session.
+    if args[:1] == ["--session-of"]:
+        if len(args) not in (2, 3):
+            return error("hold", "--session-of takes one provider session and an optional session name")
+        if len(args) == 3 and args[2].startswith("-"):
+            return error("hold", f"no such flag: {args[2]}")
+        return workspace_answer(args[:2], "provider session", lambda ws, ps: minted_name(
+            {name: rec for name, rec in records(ws).items() if len(args) == 2 or name == args[2]}, ps))
     for flag, what, answer in (("--frame-path", "session name", frame_path),
                                ("--claim-path", "provider session", holder.claim_path),
-                               ("--plugin-state", "provider session", holder.describe),
-                               ("--session-of", "provider session",
-                                lambda ws, ps: minted_name(records(ws), ps))):
+                               ("--plugin-state", "provider session", holder.describe)):
         if args[:1] == [flag]:
             return workspace_answer(args, what, answer)
     try:
@@ -720,7 +729,7 @@ def main(argv: list[str]) -> int:
                   f"plugin's module can refresh its claim and restart it") if plugin else None
         return hold(port, session, token, rid, frames, until, service, ws, plugin, lapsed,
                     h.config_dir() if h.provider == "claude" else None,
-                    rebind=(lambda: rebound(ws, session, token, psession, rid, pid, h.provider)) if plugin else None)
+                    rebind=(lambda: rebound(ws, session, token, psession, rid, pid, h.provider, project)) if plugin else None)
 
 
 if __name__ == "__main__":

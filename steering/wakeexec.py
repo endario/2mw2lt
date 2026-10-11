@@ -146,12 +146,47 @@ def session_pid(frame: dict) -> int | None:
     return pid if isinstance(pid, int) and not isinstance(pid, bool) else None
 
 
+# The providers whose workers this agent serves as its own processes: their runtime derives from
+# the server's pid, so no process on this machine deriving to it is one that has ended.
+SERVED = ("opencode", "goose")
+
+
+def _running(provider: str) -> list[int] | None:
+    """The pids of this machine's processes whose command line names `provider`, or None when the
+    process table could not be read."""
+    try:
+        listed = subprocess.run(["ps", "-axo", "pid=,args="], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if listed.returncode != 0:
+        return None
+    pids = []
+    for line in listed.stdout.splitlines():
+        pid, _, args = line.strip().partition(" ")
+        if pid.isdigit() and provider in args:
+            pids.append(int(pid))
+    return pids
+
+
 def session_gone(psession: str, runtime: str) -> bool:
-    """Whether the Claude Code process `runtime` names, on this machine, is known to have ended:
-    its registry row is gone, or names a pid that no longer derives to it (a pid is reused by the
-    OS; the derived id is not). False wherever this machine cannot say: another provider, another
-    machine, or a row whose process is still that runtime."""
-    if runtime_id.provider_of(runtime) != "claude" or runtime_id.node_of(runtime) != runtime_id.node_id():
+    """Whether the process `runtime` names, on this machine, is known to have ended. A Claude Code
+    session's registry row is gone, or names a pid that no longer derives to it (a pid is reused by
+    the OS; the derived id is not). A served worker's (#5697) is no process here that derives to it.
+    False wherever this machine cannot say: another provider, another machine, a process table or a
+    start time it could not read, or a process that is still that runtime."""
+    provider = runtime_id.provider_of(runtime)
+    if runtime_id.node_of(runtime) != runtime_id.node_id():
+        return False
+    if provider in SERVED:
+        pids = _running(provider)
+        if pids is None:
+            return False
+        for pid in pids:
+            derived = runtime_id.derive(provider, pid=pid)
+            if derived is None or derived == runtime:
+                return False
+        return True
+    if provider != "claude":
         return False
     try:
         pid = row_for(psession).get("pid")

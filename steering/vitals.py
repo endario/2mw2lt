@@ -15,8 +15,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
+import threading
 import time
+from datetime import datetime
 from pathlib import Path
 
 from wire_instants import is_instant
@@ -34,7 +37,7 @@ _FIELDS = {"v", "source", "source_version", "provider_session", "runtime_id", "o
            "model", "vendor", "tokens", "branch", "cwd", "permission_mode", "effort",
            "context_window",
            "stop_reason", "background_tasks", "session_crons", "entrypoint", "agent_type",
-           "machine_id", "hostname", "turn", "tmux", "active_at"}
+           "machine_id", "hostname", "turn", "tmux", "active_at", "background"}
 _REQUIRED = {"v", "source", "source_version", "provider_session", "observed_at"}
 _TOKENS = ("input", "output", "thinking", "cache_read", "cache_creation")
 # Claude Code's own permission modes; anything else is a string this does not recognise.
@@ -230,7 +233,7 @@ def validate(rec: object) -> str | None:
         return "turn outside the closed set"
     if rec.get("tmux") is not None and rec["tmux"] not in TMUX:
         return "tmux outside the closed set"
-    why = records.integers(rec, ("background_tasks", "session_crons", "context_window"),
+    why = records.integers(rec, ("background_tasks", "session_crons", "context_window", "background"),
                            least=0, what="a non-negative integer")
     if why:
         return why
@@ -345,6 +348,65 @@ def active_at(mtime: float | None) -> str | None:
     if mtime is None:
         return None
     return time.strftime("%Y-%m-%dT%H:%M:00Z", time.gmtime(mtime))
+
+
+# A background task as Claude Code records it in the transcript (#5711): started, a tool result naming
+# a shell's `backgroundTaskId` or a subagent's `agentId` launched `async_launched` (#5736); ended, the
+# task-notification it queues, or the result of a TaskStop on it.
+_NOTIFIED = re.compile(r"<task-notification>\s*<task-id>([^<]+)</task-id>")
+# By transcript: (inode, bytes read, {task: started, Unix ms}, ended tasks). A transcript is appended
+# to, so each read takes only what was written since; one replaced is read again from the start.
+_TASKS: dict[str, tuple[int, int, dict[str, int], set[str]]] = {}
+_TASKS_LOCK = threading.Lock()
+
+
+def background(path: Path, since: int) -> int:
+    """How many background tasks the transcript at `path` records starting at or after `since`, in
+    Unix milliseconds, and not ending: the tasks of a process that started then and runs them still.
+    A task an earlier process started died with it, whatever its transcript says."""
+    key = str(path)
+    with _TASKS_LOCK, open(path, "rb") as f:
+        st = os.fstat(f.fileno())
+        inode, offset, launched, ended = _TASKS.get(key) or (st.st_ino, 0, {}, set())
+        if inode != st.st_ino or offset > st.st_size:
+            inode, offset, launched, ended = st.st_ino, 0, {}, set()
+        f.seek(offset)
+        blob = f.read()
+        whole = blob[:blob.rfind(b"\n") + 1]   # a line being written is read when it is whole
+        for line in whole.splitlines():
+            if not any(k in line for k in (b'"backgroundTaskId"', b'"async_launched"', b'"queue-operation"', b'"task_id"')):
+                continue
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(e, dict):
+                continue
+            result = e.get("toolUseResult")
+            if e.get("type") == "user" and isinstance(result, dict):
+                task = result.get("backgroundTaskId") or (result.get("agentId") if result.get("status") == "async_launched" else None)
+                at = _millis(e.get("timestamp"))
+                if isinstance(task, str) and task and at is not None:
+                    launched[task] = at
+                stopped = result.get("task_id")
+                if isinstance(stopped, str) and str(result.get("message", "")).startswith("Successfully stopped task"):
+                    ended.add(stopped)
+            elif e.get("type") == "queue-operation" and e.get("operation") == "enqueue" and isinstance(e.get("content"), str):
+                m = _NOTIFIED.match(e["content"])
+                if m:
+                    ended.add(m.group(1))
+        _TASKS[key] = (inode, offset + len(whole), launched, ended)
+        return sum(1 for task, at in launched.items() if at >= since and task not in ended)
+
+
+def _millis(ts: object) -> int | None:
+    """A transcript entry's timestamp in Unix milliseconds, or None."""
+    if not isinstance(ts, str):
+        return None
+    try:
+        return int(datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp() * 1000)
+    except ValueError:
+        return None
 
 
 def utc() -> str:

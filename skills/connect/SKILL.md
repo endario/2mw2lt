@@ -61,7 +61,7 @@ launcher resolves the current plugin when called; a cached plugin path can disap
 long session.
 
 ```bash
-ws="${STEERING_WORKSPACE:-$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")}"
+ws="${STEERING_WORKSPACE:-$(dirname "$(git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --path-format=absolute --git-common-dir)")}"
 python3 "$ws/.claude/steering-launch.py" exec hold --until-event <session>
 ```
 
@@ -87,7 +87,7 @@ it, since a second hold revokes the plugin's. When it is retrying or has stopped
 always one command away:
 
 ```bash
-ws="${STEERING_WORKSPACE:-$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")}"
+ws="${STEERING_WORKSPACE:-$(dirname "$(git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --path-format=absolute --git-common-dir)")}"
 python3 "$ws/.claude/steering-launch.py" exec hold --plugin-state "$CLAUDE_CODE_SESSION_ID"
 ```
 

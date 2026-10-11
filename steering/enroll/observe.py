@@ -195,6 +195,9 @@ def plugin_notice(ws: Path, o: dict, notice: str | None) -> str | None:
         return notice
     hold = holder.state(ws, psession)
     if hold is None:
+        if notice and notice.startswith(STREAM_DOWN) and holder.fresh(ws, psession):
+            return ("Your steering stream is down; messages remain queued. The plugin owns reconnection; "
+                    "do not arm another hold. Its hold state has not been reported yet.")
         return notice
     if notice and notice.startswith(STREAM_DOWN):
         notice = None

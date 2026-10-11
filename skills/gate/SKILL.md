@@ -166,7 +166,7 @@ gated is told to the session whose `taking: branch` holds its branch. A `gh` loo
 failure mode: every session on a machine shares one person's GitHub limit (#4203).
 
 To read where its gates stand now, ask the daemon. Go does not read a pull request's draft state
-or checks yet (#5081).
+or checks.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" "/gates?repo=<owner>/<name>&pr=<pr number>" </dev/null

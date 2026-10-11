@@ -167,7 +167,7 @@ TOOLS = {
     "hold": {"current": True, "forms": [
         {"topic": "--frame-path", "usage": "--frame-path <session>", "example": "hold --frame-path violet"},
         {"topic": "--claim-path", "usage": "--claim-path <provider-session>", "example": "hold --claim-path 0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"},
-        {"topic": "--session-of", "usage": "--session-of <provider-session>", "example": "hold --session-of 0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"},
+        {"topic": "--session-of", "usage": "--session-of <provider-session> [session]", "example": "hold --session-of 0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0 violet"},
         {"topic": "--plugin-state", "usage": "--plugin-state <provider-session>", "example": "hold --plugin-state 0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"},
         {"topic": "stream", "usage": "[--until-event|--service|--wake plugin] [--provider <provider>] [--provider-session <id>] [--pid <pid>] [session]", "example": "hold --current"},
     ]},

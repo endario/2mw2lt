@@ -439,7 +439,7 @@ An opencode worker runs confined, in a clone of its own, and its branch is pushe
 through the API, from any machine: `requested`, `refused`, `lapsed`, `launched` naming the
 session, or `launch-refused` with the agent's reason. Go waits a launch with no room rather than
 refusing it (`worker-full`, `host-full`), and the waiting line names the sessions it could
-reclaim, each as its standing reads: close or drive one, or drop a keep you no longer need. Go has no read of one launch yet (#5081).
+reclaim, each as its standing reads: close or drive one, or drop a keep you no longer need. Go has no read of one launch.
 
 `rest.py` reads `/facts?state=<kind>` (the ledger, redacted, a page at a time; `--all` follows it
 to the head). Read it; do not reach for the ledger on the host.

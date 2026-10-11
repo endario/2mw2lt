@@ -50,8 +50,8 @@ GO_UNSERVED = (
     ("/tracks/syncs", "Go syncs the lanes as the workspace's mirror moves; GET /tracks names the "
                       "commit synced, awaited or failed"),
     ("/knowledge/brief", "read /knowledge/units, or /knowledge/units/<id>"),
-    ("/launches", "a launch is not read on Go yet (#5081)"),
-    ("/pulls/", "a pull request is not read on Go yet (#5081)"),
+    ("/launches", "a launch is not read on Go"),
+    ("/pulls/", "a pull request is not read on Go"),
 )
 
 

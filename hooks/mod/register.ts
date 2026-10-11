@@ -226,9 +226,13 @@ async function runSeatCall($: EngineInterface, call: SeatCall): Promise<{ result
   return answer(r)
 }
 
-async function sessionOf($: EngineInterface): Promise<string> {
-  const r = await $.process.run(['python3', script($, 'hold.py'), '--session-of', await $.session.id()], { cwd: root })
-  return r.exitCode === 0 ? r.stdout.trim() : ''
+async function sessionOf($: EngineInterface, session?: string): Promise<string | null> {
+  const r = await $.process.run(['python3', script($, 'hold.py'), '--session-of', await $.session.id(), ...(session ? [session] : [])], { cwd: root })
+  if (r.exitCode !== 0) {
+    $.ui.log(`2mw2lt: the enrolment lookup exited ${r.exitCode}: ${r.stderr.trim()}`, { to: 'debug' })
+    return null
+  }
+  return r.stdout.trim()
 }
 
 // Module variables start over on a reload, and so does everything they hold: the reload kills
@@ -457,8 +461,10 @@ export const register: Register = on => {
       // Taking the seat, handing it on or handing it back: no frame tells the session that left it.
       askSeat($, true)
     } else if (invokes(e.command, 'disconnect')) {
-      // The session chose to leave: hold nothing, and ask nothing of it. The claim stays, since
-      // the module is still live for a later connect.
+      const gen = generation
+      const { value: session = '' } = await $.state.get(SESSION)
+      if (!session || await sessionOf($, session) !== '' || gen !== generation) return result
+      // The claim stays, since the module is still live for a later connect.
       stop()
       hold = { state: 'stopped', refusal: 'this session disconnected', remedy: 'run /2mw2lt:connect', at: (await $.clock.now()) / 1000 }
       await claim($, true).catch(() => undefined)
