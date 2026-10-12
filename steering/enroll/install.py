@@ -3,7 +3,8 @@
 
     install.py [workspace] [invite-code] [--codex] [--team <id>] [--gh-account <login>] [--login <login>]
                                         install, or resume one half done; --codex writes no hooks;
-                                        --team names the team when the person owns several;
+                                        --team names the team when the person may install in
+                                        several, a new team of their own among them;
                                         --gh-account names the workspace's GitHub login when
                                         several signed-in logins can read the repository;
                                         --login names the GitHub account to sign in as, when it
@@ -390,7 +391,10 @@ def admit_on_go(console: str, token: str, access: dict, repo: str, team: str | N
     # A team without an id is passed over, as a malformed workspace is; one without a name is named by its id.
     teams = [{**t, "name": t.get("name") or t["id"]} for t in access["teams"]
              if isinstance(t, dict) and isinstance(t.get("id"), str) and (team is None or t["id"] == team)]
-    if team is not None and not teams:
+    # An operator's team of one's own does not exist yet; --team names it by the id it will take.
+    intents = [i for i in access.get("invitations") or [] if isinstance(i, dict) and i.get("kind") == "team"
+               and (team is None or i.get("team_id") == team)]
+    if team is not None and not teams and not intents:
         raise Stop(f"you are not a member of team {team}; name one of yours with --team, or leave it out")
     serving = [(t, w) for t in teams for w in t.get("workspaces") or []
                # GitHub reads a repository's name in any case, as coordination compares it.
@@ -399,12 +403,16 @@ def admit_on_go(console: str, token: str, access: dict, repo: str, team: str | N
     if len(serving) > 1:
         raise Stop(f"several of your teams serve {repo}; name one with --team: "
                    + ", ".join(f"{t['name']} ({t['id']})" for t, _ in serving))
-    intents = [i for i in access.get("invitations") or [] if isinstance(i, dict) and i.get("kind") == "team"]
     owned = [t for t in teams if t.get("owner")]
     if serving:
         t, w = serving[0]
         say("team", f"{t['name']}{'' if t.get('owner') else ' (you joined it; installing a new repository is its owner’s)'}")
         say("workspace", f"{w['id']} found")
+    elif owned and intents:
+        raise Stop(f"none of your teams serves {repo}, and you could install it in a team you own or in the "
+                   "team of your own an operator gave you; name one with --team: "
+                   + ", ".join([f"{t['name']} ({t['id']})" for t in owned]
+                               + [f"a new team of your own ({i.get('team_id')})" for i in intents]))
     elif owned or teams and not intents:
         if not owned:
             raise Stop(f"none of your teams serves {repo}, and only a team's owner installs a new repository; "
@@ -698,10 +706,33 @@ def record(root: Path, door: str, authority: str) -> None:
     os.environ["STEERING_DOOR"] = door
 
 
+# What install writes into a checkout, relative to its root.
+LOCAL_FILES = (".env", ".claude/settings.local.json", ".claude/.settings.local.json.lock", ".claude/steering-launch.py",
+               ".claude/steering-workspace", ".claude/steering-tokens")
+
+
+def exclude_local(root: Path) -> None:
+    """Install's files are this machine's, so a `git add -A` in a team's repository must not
+    commit them: each goes in the clone's own exclude file, which is never pushed."""
+    try:
+        common = subprocess.run(["git", "-C", str(root), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                                capture_output=True, text=True, timeout=10, check=True).stdout.strip()
+        exclude = Path(common) / "info" / "exclude"
+        held = exclude.read_text() if exclude.exists() else ""
+        missing = [f"/{f}" for f in LOCAL_FILES if f"/{f}" not in held.splitlines()]
+        if missing:
+            exclude.parent.mkdir(exist_ok=True)
+            spool.write_atomic(exclude, held + ("" if held.endswith("\n") or not held else "\n") + "\n".join(missing) + "\n",
+                               mode=0o644)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise Stop(f"could not keep install's files out of {root}'s commits: {e}") from None
+
+
 def wire(root: Path, door: str, authority: str, codex: bool = False) -> None:
     """The door and id `record` writes, and Claude's hook pack; nothing else local. Codex runs
     no hooks: its sessions share only the enrolment tokens' directory."""
     import hooks
+    exclude_local(root)
     record(root, door, authority)
     if codex:
         hooks.tokens_directory(root)
@@ -711,14 +742,19 @@ def wire(root: Path, door: str, authority: str, codex: bool = False) -> None:
 
 def github_account(root: Path, repo: str, chosen: str | None = None) -> str:
     try:
-        names = ghauth.readable_accounts(repo)
+        names, refused = ghauth.readable_accounts(repo)
     except ghauth.NoIdentity as e:
         raise Stop(str(e)) from None
+    if not names and refused:
+        said = "; ".join(f"{name} ({why})" for name, why in refused.items())
+        raise Stop(f"GitHub refused {repo} to {said}, and no other signed-in login reads it; grant that access, "
+                   f"or run `gh auth login` with an account that can, then install again")
     if not names:
         raise Stop(f"no gh account can read {repo}; run `gh auth login` with an account that can, then install again")
     if chosen is not None:
         if chosen not in names:
-            raise Stop(f"{chosen} cannot read {repo}; name one of {', '.join(names)} with --gh-account")
+            why = f" (GitHub refused it: {refused[chosen]})" if chosen in refused else ""
+            raise Stop(f"{chosen} cannot read {repo}{why}; name one of {', '.join(names)} with --gh-account")
         return chosen
     held = machine_workspaces.at(root)
     if held and held.gh_account in names:
@@ -925,39 +961,44 @@ def merge_lanes(repo: str, plan: dict, token: str) -> dict:
     return {"merged": True, "commit": commit}
 
 
-NO_TRACKS = "the workspace keeps no lanes; its door names no tracks document to sync"
+NO_TRACKS = "the workspace keeps no lanes; it binds no tracks document to sync"
 
 
 def tracks_now(door: str) -> tuple[int | None, dict]:
-    """The daemon's lanes as this machine reads them, with the status; None while it does not answer."""
+    """Go's tracks read (`protocol.TracksRead`) as this machine asks for it, with the status; None
+    while it does not answer."""
     try:
-        status, got = ask("GET", f"{door}/api/v1/tracks", timeout=30)
+        return ask("GET", f"{door}/api/v1/tracks", timeout=30)
     except Unanswered:
         return None, {}
-    return status, got if status == 200 else {}
 
 
 UNREAD = object()  # the lanes before the merge could not be read, so no later sync is known new
 
 
 def wait_for_lanes(door: str, before, commit: str | None, deadline: float) -> dict:
-    """Until the daemon holds lanes synced at the merge or after it, or refuses the merged document.
-    The mirror and the tracks fold move on GitHub's push; nothing here asks them to."""
+    """Until Go holds lanes synced at the merge or after it, or refuses the merged document.
+    The mirror and the tracks sync move on GitHub's push; nothing here asks them to."""
     while True:
         status, t = tracks_now(door)
-        if status == 404:
+        if status is not None and 400 <= status < 500 and status != 429:
+            # Waiting does not change what this machine's credential may read.
+            why = f"{status} {t.get('code') or t.get('title') or 'refused'}"
+            say("lanes", f"the lanes are merged, and the door refused to show this machine the board's lanes ({why})")
+            return {"synced": False, "reason": f"the board's lanes could not be read: {why}"}
+        if status == 200 and t.get("unbound"):
             say("lanes", NO_TRACKS)
             return {"synced": False, "reason": NO_TRACKS}
-        drift = t.get("drift") or {}
-        if commit and drift.get("commit") == commit:
-            say("lanes", f"the daemon refused the merged document: {drift.get('reason')}")
-            return {"synced": False, "reason": f"the merged document was refused: {drift.get('reason')}"}
-        synced = (t.get("source") or {}).get("commit")
-        if t.get("items") and synced and (synced == commit or before is not UNREAD and synced != before):
-            say("lanes", f"the board holds {len(t['items'])} lanes, synced at {synced[:12]}")
+        failed = t.get("failed") or {}
+        if commit and failed.get("commit") == commit:
+            say("lanes", f"the merged document was refused: {failed.get('reason')}")
+            return {"synced": False, "reason": f"the merged document was refused: {failed.get('reason')}"}
+        synced = (t.get("synced") or {}).get("commit")
+        if t.get("lanes") and synced and (synced == commit or before is not UNREAD and synced != before):
+            say("lanes", f"the board holds {len(t['lanes'])} lanes, synced at {synced[:12]}")
             return {"synced": True}
         if time.monotonic() + POLL > deadline:
-            say("lanes", "the lanes are merged; the board shows them once the daemon syncs the repository")
+            say("lanes", "the lanes are merged; the board shows them once the platform syncs the repository")
             return {"synced": False}
         time.sleep(POLL)
 
@@ -979,9 +1020,9 @@ def adopt_lanes(root: Path, merge: bool, gh_account: str | None = None) -> int:
         print(json.dumps(plan))
         return 0
     status, t = tracks_now(door)
-    if status == 404:
+    if status == 200 and t.get("unbound"):
         raise Stop(NO_TRACKS)
-    before = (t.get("source") or {}).get("commit") if status == 200 else UNREAD
+    before = (t.get("synced") or {}).get("commit") if status == 200 else UNREAD
     out = {"pr": plan["pr"], "url": plan["url"], **merge_lanes(repo, plan, token)}
     if out["merged"]:
         out.update(wait_for_lanes(door, before, out["commit"], time.monotonic() + SYNC_WAIT))

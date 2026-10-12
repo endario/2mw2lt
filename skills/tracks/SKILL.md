@@ -23,7 +23,7 @@ Each lane has a stable `id` distinct from its changeable name: keep the id when 
 
 ## Read this workspace's tracks
 
-The repository document named by the authority manifest's `tracks_source` is canonical (`source` in a checkout-mode workspace definition). The daemon serves its synced copy at `GET /w/<authority>/api/v1/tracks`, including lane ids, source commit, staleness and drift, and the commit last synced, awaited or failed. Read it **before** placing or classifying work. From the workspace, the client resolves the authority and door for you:
+The repository document named by the authority manifest's `tracks_source` is canonical (`source` in a checkout-mode workspace definition). The platform serves its synced copy at `GET /w/<authority>/api/v1/tracks`: its `lanes`, the commit `synced`, the one `awaited`, the one that `failed` with its reason, and `unbound` when the workspace binds no tracks document. Read it **before** placing or classifying work. From the workspace, the client resolves the authority and door for you:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" /tracks </dev/null

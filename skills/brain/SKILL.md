@@ -435,6 +435,17 @@ an `opencode-go/…` or `commandcode/…` model, and the daemon picks the machin
 that vendor ranks first, naming the account and the forecast in its reply; name one only to
 override that. With no model, or another provider's, it refuses: nothing it reads is what that
 worker spends.
+
+**Spread the fleet.** Before every launch, read `/machines` for each host's `readings.load`
+(one, five, fifteen against `logical_cores`), `readings.memory` and `worker_census`, and `/sessions` for
+what each host already runs. Send work to the host with the most room, not the one you are on:
+the machine the owner works at often carries the seat, their interactive sessions and CI
+runners, so fill it last. Name `on` only to put work where the score would not, and then choose the
+quietest host that has the account; until the launch score weighs measured load
+(#6082), the worker cap it reads does not see
+a host's load. Re-read the spread whenever a launch lands or a session ends, and move
+the next launch, not a running session, to rebalance.
+
 The brain, the daemon and the agents sit on different machines as a matter of course, so there is no
 machine of your own to default to. `loopback` is the orchestrator's node, not yours: use it
 only to target an agent running there, and a launch on a node holding no uplink is refused.

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import json
@@ -72,10 +73,12 @@ def pin_into(env: dict, root: Path | None = None) -> str | None:
     return None
 
 
-def readable_accounts(repo: str) -> list[str]:
-    """Signed-in GitHub logins whose own token can read `repo`, without switching gh's login.
-    GitHub answers 404 for a repository a login cannot see; any other failure is not an answer
-    about the repository, so it is raised naming the login and what gh said."""
+def readable_accounts(repo: str) -> tuple[list[str], dict[str, str]]:
+    """Signed-in GitHub logins whose own token can read `repo`, without switching gh's login, and
+    the logins GitHub refused it to, each with what gh said. GitHub answers 404 for a repository a
+    login cannot see, and 401 or 403 to a login it refuses (an organization's SAML or OAuth app
+    policy); any other failure, a rate limit's 403 included, is not an answer about the login, so it
+    is raised naming the login and what gh said."""
     try:
         got = subprocess.run(["gh", "auth", "status", "--hostname", "github.com", "--json", "hosts"],
                              capture_output=True, text=True, timeout=30,
@@ -86,7 +89,7 @@ def readable_accounts(repo: str) -> list[str]:
         names = list(dict.fromkeys(row["login"] for row in rows if row.get("login")))
         if not names:
             raise NoIdentity("gh is signed in to no GitHub account; run `gh auth login`, then run install again")
-        readable = []
+        readable, refused = [], {}
         for name in names:
             try:
                 token = pinned_token(name)
@@ -94,12 +97,15 @@ def readable_accounts(repo: str) -> list[str]:
                 raise NoIdentity(f"{e}; run `gh auth login` for {name}, or `gh auth logout -u {name}`") from None
             result = subprocess.run(["gh", "api", "--hostname", "github.com", f"repos/{repo}"], capture_output=True, text=True,
                                     timeout=30, env={**os.environ, "GH_TOKEN": token})
+            status = re.search(r"\(HTTP (\d{3})\)", result.stderr)
             if result.returncode == 0:
                 readable.append(name)
-            elif "HTTP 404" not in result.stderr:
+            elif status and status[1] in ("401", "403") and "rate limit" not in result.stderr.lower():
+                refused[name] = _said(result)
+            elif not (status and status[1] == "404"):
                 raise NoIdentity(f"gh could not check whether {name} reads {repo} ({_said(result)}); "
                                  f"run `gh api repos/{repo}` as {name} to see why, then run install again")
-        return readable
+        return readable, refused
     except FileNotFoundError:
         raise NoIdentity("install the GitHub CLI (gh), then run install again") from None
     except subprocess.TimeoutExpired as e:

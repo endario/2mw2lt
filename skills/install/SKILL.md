@@ -93,11 +93,13 @@ engine again. These are the stops that need a person:
   team. Someone who does must run the install.
 - **`you are in no team`**: the account that signed in belongs to no team. Tell the person,
   and stop: they sign in with the account that owns the team, or the operator settles it.
-- **`you own no team by that id`**: `--team` named a team the person does not own. Run again
-  with an id from the `you own several teams` line, or without `--team`.
-- **`you own several teams; name one with --team: …`**: the line lists each team's id and name.
-  Ask the person which team the repository belongs to, then run the engine again with
-  `--team <id>`.
+- **`you are not a member of team <id>`**: `--team` named a team the person is not in. Run again
+  with an id from the engine's `--team` line, or without `--team`.
+- **`… you own several; name the one to install it in with --team: …`** or **`… a team you own or
+  in the team of your own an operator gave you; name one with --team: …`**: the line lists each
+  team's name and id; the second also lists the new team of the person's own. Ask the person which
+  team the repository belongs to — a repository of another organization usually belongs in its own
+  team — then run the engine again with `--team <id>`.
 - **`several GitHub logins can read <repository>; name one with --gh-account: …`**: this
   machine's `gh` is signed in as more than one login that can read the repository. Ask the
   person which login the workspace's workers act as, then run the engine again with
@@ -115,9 +117,13 @@ Other stops, and what to do; one not listed here names its own remedy:
   read the repository. Run again with one of the logins the line names.
 - **`<checkout> is bound to <workspace>, which serves …`**: the checkout's origin moved away from
   the repository its workspace serves. Run `install.py uninstall` here, then install again.
-- **`gh could not check whether <login> reads <repository> (…)`**: GitHub refused for a reason
-  other than the repository being unseen, such as SAML single sign-on or a rate limit. Run the
-  `gh api` the line names to see it, settle it, then run again.
+- **`GitHub refused <repository> to <login> (…)`**: no signed-in login reads the repository, and
+  GitHub refused the logins the line names, such as for an organization's SAML single sign-on,
+  saying why for each. Settle that login's access to the organization, or run `gh auth login` as a
+  login that can read the repository, then run again.
+- **`gh could not check whether <login> reads <repository> (…)`**: GitHub gave no answer about the
+  login, such as a rate limit, a server error or no network. Run the `gh api` the line names to see
+  it, settle it, then run again.
 - **`<the console or door> at <address> did not answer (…)`**: the network or the platform is
   down. Check the network, then run again.
 - **`the device token is not a live session`**: the sign-in lapsed mid-run. Run again.
@@ -203,8 +209,9 @@ The workspace works without lanes, and its board says it has none yet. Give it l
    `{pr, url, merged, reason?, queued?, synced?}`:
    - `synced` true: the board shows the lanes.
    - `merged` true and `synced` false: the lanes are merged and the board shows them once the
-     daemon syncs the repository; with a `reason`, the daemon refused the merged document, and the
-     reason says what to fix.
+     daemon syncs the repository. A `reason` says why the board does not show them: the merged
+     document was refused, and the reason says what to fix; or the board's lanes could not be
+     read from this machine, and the reason names the refusal.
    - `merged` false: tell the person the `reason` in one line. `queued` means it merges itself
      once its checks pass.
 
