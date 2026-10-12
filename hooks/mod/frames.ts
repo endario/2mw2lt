@@ -1,7 +1,7 @@
 // What the module reads and writes as text: hold.py's frame lines, the frame recording, the
 // fixed rows it may append, and the version floor. Nothing here touches `$`.
 
-export type Line = { id: string | null; kind: string; wakes: boolean; hold?: string; why?: string; retry?: boolean; remedy?: string }
+export type Line = { id: string | null; kind: string; wakes: boolean; hold?: string; session?: string; why?: string; retry?: boolean; remedy?: string }
 
 export const POINTER = 'A steering frame is waiting. Call mcp__2mw2lt__frames to read it.'
 export const CHECKPOINT = 'Compaction is near. Write your checkpoint (/2mw2lt:checkpoint) now.'
@@ -163,13 +163,17 @@ export const SEAT_TOOLS: Record<string, SeatTool> = {
     build: a => ({ client: 'say', stdin: `wake: token @lease ${str(a, 'target')} because ${str(a, 'reason')}` }),
   },
   rehome: {
-    description: 'Seat only: move a stopped Claude Code session to another account on the same machine, keeping its conversation. compact runs /compact on the account it leaves first; without_checkpoint, only with compact, skips the checkpoint that compact otherwise requires.',
-    fields: { session: word('The session to move.'), account: word('The account to move it to, as the machine\'s census names it.'),
+    description: 'Seat only: move a stopped Claude Code session to another account on the same machine, keeping its conversation. Name the account as for a launch, by its number under its vendor (Anthropic when vendor is not given), and the model and effort it resumes on, in that vendor\'s own ids; without them it resumes on the launcher\'s defaults. compact runs /compact on the account it leaves first; without_checkpoint, only with compact, skips the checkpoint that compact otherwise requires.',
+    fields: { session: word('The session to move.'), vendor: word('The account\'s vendor, such as zai; Anthropic when not given.'),
+              account: word('The account to move it to: the team\'s number for it, or its id.'),
+              model: word('The model it resumes on, in its vendor\'s own ids, such as glm-5.3.'),
+              effort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max'], description: 'The effort it resumes at.' },
               compact: { type: 'boolean', description: 'Compact the session before it moves.' },
               without_checkpoint: { type: 'boolean', description: 'Compact without a current checkpoint.' }, reason: text('Why.') },
     required: ['session', 'account', 'reason'],
     refuse: a => a.without_checkpoint === true && a.compact !== true ? 'without_checkpoint is only with compact' : null,
-    build: a => ({ client: 'say', stdin: `rehome: token @lease ${str(a, 'session')} to ${str(a, 'account')}${a.compact === true
+    build: a => ({ client: 'say', stdin: `rehome: token @lease ${str(a, 'session')} to${a.vendor !== undefined ? ` vendor ${str(a, 'vendor')}` : ''} ${str(a, 'account')}${
+      a.model !== undefined ? ` model ${str(a, 'model')}` : ''}${a.effort !== undefined ? ` effort ${str(a, 'effort')}` : ''}${a.compact === true
       ? (a.without_checkpoint === true ? ' compact without checkpoint' : ' compact') : ''} because ${str(a, 'reason')}` }),
   },
   keep: {

@@ -558,8 +558,13 @@ A Claude Code session that stopped on its limit, or is about to, can continue on
 on the same machine with its conversation, name and card:
 
 ```bash
-say "rehome: token @lease <session> to <account id> [compact [without checkpoint]] because <why>"
+say "rehome: token @lease <session> to [vendor <vendor>] <account> [model <model>] [effort <level>] [compact [without checkpoint]] because <why>"
 ```
+
+Name the account as you name it for `launch:`: its number, under its vendor. A move into another
+vendor's home (`vendor zai`, or a proxied launcher's) is named as one, and names the model it
+resumes on in that vendor's own ids (`glm-5.3`, `glm-5.3-flash`); without `model` and `effort` it
+resumes on the launcher's defaults.
 
 Prefer it to a pack-up whenever an account on that machine has runway. The session must
 be out of its turn: a busy one is refused, and stopping one early is your deliberate call.
@@ -575,7 +580,7 @@ remain tmux-only, set for that session rather than the account:
 
 ```bash
 say "control: token @lease <session> effort <low|medium|high|xhigh|max> because <why>"
-say "control: token @lease <session> model <name>-<version> because <why>"   # sonnet-5, opus-5.5
+say "control: token @lease <session> model <model> because <why>"   # sonnet-5, opus-5.5; glm-5.3-flash on a GLM home
 say "control: token @lease <session> compact because <why>"
 say "control: token @lease <session> compact without checkpoint because <why>"   # recorded as skipped
 ```

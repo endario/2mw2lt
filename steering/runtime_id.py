@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 import hashlib
+import json
 import os
 import time
 import re
@@ -304,14 +305,48 @@ def identity(runtime: dict) -> str:
     return f"{runtime['provider']}:{runtime['node']}:v3:{digest}"
 
 
+def _session_dirs() -> list[Path]:
+    """Every Claude home's registry here: the configured one, and each `~/.claude*`."""
+    homes = [Path(os.environ["CLAUDE_CONFIG_DIR"])] if os.environ.get("CLAUDE_CONFIG_DIR") else []
+    return [h / "sessions" for h in [*homes, *Path.home().glob(".claude*")]]
+
+
+def registered_session(pid: int) -> str | None:
+    """The session Claude Code's own registry says `pid` serves (`<config>/sessions/<pid>.json`),
+    or None where no home on this machine holds a row for it."""
+    for row in (d / f"{pid}.json" for d in _session_dirs()):
+        try:
+            sid = json.loads(row.read_text()).get("sessionId")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if isinstance(sid, str) and sid:
+            return sid
+    return None
+
+
+def claude_pid(psession: str | None = None, timeout: float = 1.0) -> int | None:
+    """The pid Claude exports, unless it is another session's. A Claude started from inside a
+    session's Bash tool inherits that session's `CLAUDE_PID` (doc 08), and a runtime derived from
+    it names the parent: its binds, captures and machine actions then pin the wrong process, as a
+    rehome's did on 2026-10-12. So a pid the registry gives to a session other than `psession` is
+    not this one's, and the live process the registry gives to `psession` is asked instead."""
+    v = os.environ.get("CLAUDE_PID", "").strip()
+    if not (v.isascii() and v.isdigit() and int(v) > 1 and process_start(int(v), timeout)):
+        return None
+    other = registered_session(int(v)) if psession else None
+    if other is None or other == psession:
+        return int(v)
+    for row in (r for d in _session_dirs() for r in d.glob("*.json")):
+        if row.stem.isdigit() and registered_session(int(row.stem)) == psession and process_start(int(row.stem), timeout):
+            return int(row.stem)
+    return None
+
+
 def hook_parent(timeout: float = 1.0) -> int:
     """The Claude Code process a command hook runs under. Claude runs a hook through `/bin/sh -c`;
     macOS's sh execs the command, so the hook's parent is Claude, while dash, Ubuntu's sh, forks it
     and the parent is a shell gone when the hook ends. The pid Claude exports is asked first."""
-    v = os.environ.get("CLAUDE_PID", "").strip()
-    if v.isascii() and v.isdigit() and int(v) > 1 and process_start(int(v), timeout):
-        return int(v)
-    return os.getppid()
+    return claude_pid(os.environ.get("CLAUDE_CODE_SESSION_ID"), timeout) or os.getppid()
 
 
 def derive(provider: str = "claude", pid: int | None = None, timeout: float = 1.0) -> str | None:

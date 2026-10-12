@@ -69,19 +69,20 @@ _ROSTER = re.compile(r"^roster:\s*token\s+@lease(?P<gone>\s+with\s+gone)?\s*$")
 _ACTION = {
     "wake": re.compile(r"^wake:\s*token\s+@lease\s+(?P<to>\S+)\s+because\s+(?P<reason>\S.*?)\s*$", re.S),
     "control": re.compile(r"^control:\s*token\s+@lease\s+(?P<to>\S+)\s+"
-                          r"(?P<value>effort\s+(?:low|medium|high|xhigh|max)|model\s+[a-z]+-[0-9]+(?:\.[0-9]+)?|compact(?:\s+without\s+checkpoint)?)"
+                          r"(?P<value>effort\s+(?:low|medium|high|xhigh|max)|model\s+[a-z][a-z0-9]*(?:-[a-z0-9]+(?:\.[0-9]+)?)+|compact(?:\s+without\s+checkpoint)?)"
                           r"\s+because\s+(?P<reason>\S.*?)\s*$", re.S),
     "retire": re.compile(r"^retire:\s*token\s+@lease\s+(?P<to>\S+)(?:\s+to\s+(?P<successor>\S+))?"
                          r"\s+because\s+(?P<reason>\S.*?)\s*$", re.S),
-    "rehome": re.compile(r"^rehome:\s*token\s+@lease\s+(?P<to>\S+)\s+to\s+(?P<account>\S+)"
+    "rehome": re.compile(r"^rehome:\s*token\s+@lease\s+(?P<to>\S+)\s+to(?:\s+vendor\s+(?P<vendor>\S+))?\s+(?P<account>\S+)"
+                         r"(?:\s+model\s+(?P<model>\S{1,128}))?(?:\s+effort\s+(?P<effort>low|medium|high|xhigh|max))?"
                          r"(?P<compact>\s+compact(?:\s+without\s+checkpoint)?)?"
                          r"\s+because\s+(?P<reason>\S.*?)\s*$", re.S),
 }
 _ACTION_USAGE = {
     "wake": "wake: token @lease <session> because <reason>",
-    "control": "control: token @lease <session> effort <level> | model <name>-<version> | compact [without checkpoint] because <reason>",
+    "control": "control: token @lease <session> effort <level> | model <model> | compact [without checkpoint] because <reason>",
     "retire": "retire: token @lease <session> [to <successor>] because <reason>",
-    "rehome": "rehome: token @lease <session> to <account> [compact [without checkpoint]] because <reason>",
+    "rehome": "rehome: token @lease <session> to [vendor <vendor>] <account> [model <model>] [effort <level>] [compact [without checkpoint]] because <reason>",
 }
 # The seat's keep of a session it leaves idle on purpose, with its plan, and the keep's clearing
 # (doc 189 §2). The until is a time or a duration, Go's half hour when the line names none.
@@ -267,7 +268,9 @@ def _go_action(rec: dict, verb: str, line: str, key: str) -> tuple[int, str, boo
     if verb == "control":
         body["value"] = " ".join(m["value"].split())
     if verb == "rehome":
-        body["value"] = " ".join([m["account"], *(m["compact"] or "").split()])
+        body["value"] = " ".join([*(["vendor", m["vendor"]] if m["vendor"] else []), m["account"],
+                                  *(["model", m["model"]] if m["model"] else []),
+                                  *(["effort", m["effort"]] if m["effort"] else []), *(m["compact"] or "").split()])
     if verb == "retire" and m["successor"]:
         body["value"] = m["successor"]
     try:

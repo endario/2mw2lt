@@ -628,6 +628,8 @@ MachineAction = typing.TypedDict("MachineAction", {
     "value": "typing.NotRequired[str]",
     "effort": "typing.NotRequired[str]",
     "account": "typing.NotRequired[str]",
+    "vendor": "typing.NotRequired[str]",
+    "model": "typing.NotRequired[str]",
     "compact": "typing.NotRequired[bool]",
 })
 
@@ -671,6 +673,8 @@ StreamWake = typing.TypedDict("StreamWake", {
     "value": "typing.NotRequired[str]",
     "effort": "typing.NotRequired[str]",
     "account": "typing.NotRequired[str]",
+    "vendor": "typing.NotRequired[str]",
+    "model": "typing.NotRequired[str]",
     "compact": "typing.NotRequired[bool]",
 })
 
@@ -700,6 +704,8 @@ StreamControl = typing.TypedDict("StreamControl", {
     "value": "typing.NotRequired[str]",
     "effort": "typing.NotRequired[str]",
     "account": "typing.NotRequired[str]",
+    "vendor": "typing.NotRequired[str]",
+    "model": "typing.NotRequired[str]",
     "compact": "typing.NotRequired[bool]",
 })
 
@@ -729,6 +735,8 @@ StreamRehome = typing.TypedDict("StreamRehome", {
     "value": "typing.NotRequired[str]",
     "effort": "typing.NotRequired[str]",
     "account": "typing.NotRequired[str]",
+    "vendor": "typing.NotRequired[str]",
+    "model": "typing.NotRequired[str]",
     "compact": "typing.NotRequired[bool]",
 })
 

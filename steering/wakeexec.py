@@ -662,7 +662,8 @@ def _composer(t, screen: str):
 
 
 CONTROL_TYPED, CONTROL_REFUSED, CONTROL_UNCERTAIN = "typed", "refused", "uncertain"
-_MODEL = re.compile(r"[a-z]+-[0-9]+(?:\.[0-9]+)?")
+# Claude's `opus-5.5`, or another vendor's own id, which its launcher draws as the row's name.
+_MODEL = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+(?:\.[0-9]+)?)+")
 # How long a compact is given to answer (doc 134 §5): 88 s was measured at 162k tokens, and a
 # larger context takes longer. The pane stays locked for the wait.
 COMPACT_WAIT_S, COMPACT_POLL_S = 600.0, 1.0
@@ -814,10 +815,13 @@ def control(frame: dict, *, pane=None, find_pane=None, still_offered=None, lock_
                 if rows is None:
                     return back_out(f"/model did not open the measured picker: {_foot(screen)}")
                 match = [r for r in rows if composer.model_key(r.name) == target]
-                if len(match) != 1:
+                # A launcher that maps two aliases to one model draws it twice by the same name
+                # (claude-glm's Sonnet and Haiku are both glm-5.3-flash): one model, so the first
+                # row, or the current one.
+                if not match or len({r.name for r in match}) > 1:
                     return back_out(f"no row on the picker's screen is {target}" if not match
                                     else f"{len(match)} rows on the picker are {target}")
-                row = match[0]
+                row = next((r for r in match if r.current), match[0])
                 if row.current:
                     return back_out(f"the session's model is already {row.name}")
 

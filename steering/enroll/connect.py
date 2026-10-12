@@ -31,7 +31,7 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 from local_workspace import KEY_HEADER, agent_key, agent_port, origin_slug, required_workspace_root, workspace_header  # noqa: E402
 import door  # noqa: E402
-from ack import valid_token  # noqa: E402
+from ack import token_path, valid_token  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
 from bind import Refused, bind, incarnation, incarnation_of, pid_arg, records  # noqa: E402
 from transcript_proof import account_of  # noqa: E402
@@ -140,12 +140,38 @@ def minted_name(taken: dict[str, dict], psession: str) -> str | None:
     Asked before the name is derived, because a derived name is only stable while the sessions
     it was derived against stay enrolled: the session that had to grow its name would otherwise
     shrink back to the base once the collider detached, and enrol again under a second name
-    while its own enrolment still stood. Two records minted for one session (a detached one's can
-    outlive it, #5661) resolve to the first `records` gives, the newest written (#5641).
+    while its own enrolment still stood. Two records minted for one session — a detached name's
+    can outlive it beside the one its next connect wrote — are not this pick's to tell apart:
+    `reconciled` asks the enrolment itself (#5661), and this order stands only where Go was not
+    asked or said nothing.
     """
     for name, rec in taken.items():
         if rec.get("provider_session") == psession:
             return name
+    return None
+
+
+def reconciled(ws: Path, psession: str, pid: int | None,
+               h: harness_mod.Harness) -> tuple[str, str, str, str] | None:
+    """Connect's answer — (session, Go's answer to the bind, the runtime id, the provider
+    session) — for the enrolment this provider session currently is, where more than one record
+    here is minted for it (#5661). Go excludes two live names, so the record whose binding it
+    admits is the current one and every other minted for the session is a retained name whose
+    epoch is gone: its token is dropped, and the lookups that name no session — the hold's name,
+    a say's speaker — are no longer ambiguous. None where no binding was admitted, dropping
+    nothing (nothing here is current, or Go could not be asked): the caller proceeds as it did.
+    """
+    mine = [(name, rec) for name, rec in records(ws).items() if rec.get("provider_session") == psession]
+    if len(mine) < 2:
+        return None
+    for name, rec in mine:
+        answer, rid = bind(name, rec.get("token"), psession, pid, h.provider)
+        if answer.startswith("bound:"):
+            for other in (n for n, _ in mine if n != name):
+                token_path(ws, other).unlink(missing_ok=True)
+            return name, answer, rid, psession
+        if not any(why in answer for why in STALE):
+            return None
     return None
 
 
@@ -302,6 +328,13 @@ def connect(ws: Path, session: str | None, account: str, doing: str,
         except OSError as why:
             raise Refused(f"the observation for {psession} could not be sent: {why}")
     known = records(ws)
+    if session is None and sum(1 for rec in known.values() if rec.get("provider_session") == psession) > 1:
+        # Two records minted for this session — a detached name's can outlive it beside the one
+        # its next connect wrote — and which is current is the enrolment's own to say, not the
+        # files' order (#5661).
+        admitted = reconciled(ws, psession, pid, h)
+        if admitted is not None:
+            return admitted
     session = session or minted_name(known, psession) or name_for(psession, known, project)
     rec = known.get(session) or {}
     minted_for = rec.get("provider_session")

@@ -260,10 +260,9 @@ def _env(*names: str):
     return read
 
 
-def _claude_pid(_psession: str) -> int | None:
+def _claude_pid(psession: str) -> int | None:
     import runtime_id
-    v = os.environ.get("CLAUDE_PID", "").strip()
-    return int(v) if v.isdigit() and runtime_id.process_start(int(v)) else None
+    return runtime_id.claude_pid(psession)
 
 
 def _codex_rollout(psession: str):

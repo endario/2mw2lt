@@ -380,8 +380,10 @@ def model_id(name: str) -> str:
 
 def is_model(name: str, recorded: str | None) -> bool:
     """Whether a turn that recorded `recorded` ran the picker row `name`: its id exactly, or with
-    a release date after it. Not a prefix: `claude-opus-5-5` starts with Opus 5's id."""
-    return isinstance(recorded, str) and re.fullmatch(re.escape(model_id(name)) + r"(?:-\d{8})?", recorded) is not None
+    a release date after it. Not a prefix: `claude-opus-5-5` starts with Opus 5's id. Another
+    vendor's row is named by the model's own id, which a turn records as it is."""
+    return isinstance(recorded, str) and (recorded == model_key(name) or re.fullmatch(
+        re.escape(model_id(name)) + r"(?:-\d{8})?", recorded) is not None)
 
 
 _COMPACT_TYPED = re.compile(r"^/compact(?:\s{2,}<[^>]*>)?\s*$")

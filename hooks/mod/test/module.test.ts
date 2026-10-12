@@ -932,6 +932,26 @@ for (const [name, command] of [
   expect(w.spawns.length).toBe(1)
 })
 
+// A detached name's record can outlive it beside the one its next connect wrote (#5661): the
+// lookup hands the module whichever record sorted first, and the hold keeps the enrolment Go
+// admits. The admitted name is the session's from then on — its frames, its next arm — so the
+// stream it holds and the name it answers by cannot drift apart.
+test('a hold admitted under a reconciled name makes that name the session\'s', async ($, on) => {
+  const held = JSON.stringify({ id: null, kind: 'held', wakes: false, hold: 'h7', session: 's2' }) + '\n'
+  const w = world(on, {
+    rounds: [{ lines: [held, line('e1', 'envelope', true)], code: 0 }, { lines: [], code: 0, hold: never }],
+    recording: 'data: {"kind":"envelope","id":"e1","ulid":"01JHELD"}\n',
+  })
+  await begin($)
+  await w.clock.settle()
+  expect(w.state.get('session')).toBe('s2')
+  await $.tool.call({ tool: TOOL } as never)
+  await w.clock.settle()
+  expect(w.runs).toContainEqual(['python3', `${w.root}/steering/enroll/hold.py`, '--frame-path', 's2'])
+  await w.clock.advance(2_000)
+  expect(w.spawns[1]?.slice(-1)).toEqual(['s2'])
+})
+
 test('a failed enrolment lookup after disconnect text does not mean this session left', async ($, on) => {
   let arrive!: () => void
   const w = world(on, { rounds: [{ lines: [new Promise<void>(resolve => { arrive = resolve }), line('after', 'say', true)], code: 0, hold: never }] })
@@ -1450,6 +1470,15 @@ test('seatCall: a rehome names the account, and compacts first only when asked',
   expect(line({ compact: false, without_checkpoint: true })).toEqual({ refused: 'without_checkpoint is only with compact' })
   expect(line({ account: 'acct 3' })).toEqual({ refused: 'account is one word' })
   expect(seatCall('rehome', { session: 'teal', reason: 'r' })).toEqual({ refused: 'account is required' })
+})
+
+test('seatCall: a rehome into another vendor names it, and the model and effort the session resumes on', async () => {
+  const line = (a: Record<string, unknown>) => seatCall('rehome', { session: 'teal', account: '4', reason: 'build on GLM', ...a })
+  expect(line({ vendor: 'zai', model: 'glm-5.3-flash', effort: 'high' })).toEqual(
+    { client: 'say', stdin: 'rehome: token @lease teal to vendor zai 4 model glm-5.3-flash effort high because build on GLM' })
+  expect(line({ vendor: 'zai', model: 'glm-5.3', compact: true })).toEqual(
+    { client: 'say', stdin: 'rehome: token @lease teal to vendor zai 4 model glm-5.3 compact because build on GLM' })
+  expect(line({ effort: 'extreme' })).toEqual({ refused: 'effort is one of low, medium, high, xhigh, max' })
 })
 
 test('seatCall: a keep carries its reason, and its until only when given; an unkeep names the session alone', async () => {

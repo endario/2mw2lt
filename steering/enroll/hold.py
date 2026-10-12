@@ -252,6 +252,16 @@ def who(ws: Path, h: harness_mod.Harness, psession: str | None, pid: int | None,
         name, token = own_enrolment(ws, psession, session)
     except Refused as why:
         raise Unenrolled(str(why)) from None
+    if sum(1 for rec in records(ws).values() if rec.get("provider_session") == psession) > 1:
+        # The module's lookup named whichever record sorted first; two minted for one session —
+        # a detached name's outliving it — are the enrolment's to tell apart, and the hold keeps
+        # the one Go admits (#5661). Its answer names the session; the token is the record's,
+        # read again now that the refused ones are dropped.
+        import connect
+        admitted = connect.reconciled(ws, psession, pid, h)
+        if admitted is not None:
+            name = admitted[0]
+            token = own_enrolment(ws, psession, name)[1]
     return name, token, rid, psession
 
 
@@ -558,7 +568,10 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                                 admitted = json.loads(line[line.index("{"):])
                             except ValueError:
                                 admitted = {}
-                            told("held", hold=admitted.get("hold_id"))
+                            # The session is named beside the hold: the module's own lookup
+                            # picked the name before the enrolment reconciled a retained one
+                            # (#5661), and its frames and its next arm follow the admitted name.
+                            told("held", hold=admitted.get("hold_id"), session=session)
                             continue
                         wakes, found = acts(line, seen, seated), exclusion(line)
                         seen = None if lifted(line) else seen if found is None else found

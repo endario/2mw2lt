@@ -257,7 +257,9 @@ function stop() {
   child = undefined
 }
 
-// One child, read to its end: its exit code, and whether a frame it gave woke the session.
+// One child, read to its end: its exit code, and whether a frame it gave woke the session. The
+// child names the session coordination admitted where the enrolment reconciled a retained name
+// (#5661), so the loop answers by the admitted name from the next arm on.
 async function holdOnce($: EngineInterface, ps: string, session: string, gen: number) {
   const held = $.process.spawn({
     argv: ['python3', script($, 'hold.py'), '--wake', 'plugin', '--provider', 'claude', '--provider-session', ps, session],
@@ -268,13 +270,15 @@ async function holdOnce($: EngineInterface, ps: string, session: string, gen: nu
   let said = ''                                // the end of what it wrote to stderr: why it stopped
   let woke = false
   let refused: Line | undefined
+  let named: string | undefined
   for await (const { stream, text } of held) {
-    if (gen !== generation) return { code: null, woke, said, refused }   // leaving the loop kills the child
+    if (gen !== generation) return { code: null, woke, said, refused, session: named }   // leaving the loop kills the child
     if (stream !== 'stdout') { said = (said + text).slice(-STDERR_TAIL); continue }
     const { complete, rest } = lines(buffer + text)
     buffer = rest
     for (const l of complete) {
       if (l.kind === 'held') {
+        named = l.session && l.session !== session ? l.session : named
         hold = { state: 'holding', hold: l.hold ?? null, since: (await $.clock.now()) / 1000 }
         await claim($, true, ps).catch(() => undefined)
         continue
@@ -296,8 +300,8 @@ async function holdOnce($: EngineInterface, ps: string, session: string, gen: nu
       })
     }
   }
-  if (gen !== generation) return { code: null, woke, said, refused }
-  return { code: (await held.result).code, woke, said, refused }
+  if (gen !== generation) return { code: null, woke, said, refused, session: named }
+  return { code: (await held.result).code, woke, said, refused, session: named }
 }
 
 async function holdLoop($: EngineInterface, session: string, gen: number) {
@@ -305,24 +309,33 @@ async function holdLoop($: EngineInterface, session: string, gen: number) {
   let wait = 1000
   let retry = false
   let attempt = 0
+  let named = session
   while (gen === generation) {
     const began = await $.clock.now()
     let code: number | null = null
     let refused: Line | undefined
+    let admitted: string | undefined
     try {
       // Sleep can expire the claim before its periodic refresh runs.
       if (retry) await claim($, true, ps)
       if (gen !== generation) return
       retry = true
-      const ended = await holdOnce($, ps, session, gen)
+      const ended = await holdOnce($, ps, named, gen)
       code = ended.code
       refused = ended.refused
+      admitted = ended.session
       if (ended.woke) wait = 1000
       if (code !== 0) $.ui.log(`2mw2lt: the hold exited ${code}: ${ended.said.trim()}`, { to: 'debug' })
     } catch (err) {                            // a child that broke is held again, as one that exited
       $.ui.log(`2mw2lt: the hold broke: ${String(err)}`, { to: 'debug' })
     }
     if (gen !== generation) return
+    if (admitted && admitted !== named) {
+      // Coordination admitted the hold under a reconciled name: the frames and the next arm
+      // follow it (#5661). Past the generation check, a superseded loop writes nothing.
+      named = admitted
+      await $.state.set(SESSION, named)
+    }
     // The plugin holds every session's stream, the seat's included, and never hands that to the
     // session (owner ruling, #5641): a revoked (3) or refused (1) hold is held again like any
     // other end, and the session is asked nothing. Those two keep backing off however long the
