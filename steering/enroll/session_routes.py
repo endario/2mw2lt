@@ -37,6 +37,9 @@ INVALID_TOKEN = frozenset({"session-token-locator-read", "session-credential-car
 # refusal is reported rather than held, whatever wait Go asked for.
 RETRY_LIMIT = 30.0
 RETRY_ATTEMPTS = 5
+# A write whose answer was lost is sent again under its own key this many times in all: Go answers a
+# resend from the record of the first, so it is neither dropped nor done twice (#5405).
+WRITE_ATTEMPTS = 3
 
 
 class Refused(Exception):
@@ -122,6 +125,18 @@ def post(path: str, body: dict, key: str, carrier: str, token: str, timeout: flo
             time.sleep(pause)
         except (urllib.error.URLError, OSError, TimeoutError) as e:
             raise Unsent(f"{_base()}{path}: no answer ({e})") from None
+
+
+def write(path: str, body: dict, key: str, carrier: str, token: str, timeout: float = 10.0) -> dict:
+    """`post` for a write one invocation sends under its own key, sent again when no answer comes. Not
+    for a write that is a fresh request each time, or that has a deadline or a recovery of its own."""
+    for attempt in range(1, WRITE_ATTEMPTS + 1):
+        try:
+            return post(path, body, key, carrier, token, timeout)
+        except Unsent:
+            if attempt == WRITE_ATTEMPTS:
+                raise
+            time.sleep(attempt * 0.5)
 
 
 def _problem(e: urllib.error.HTTPError) -> dict:
@@ -280,7 +295,7 @@ def checkpoint(token: str, body: dict) -> tuple[str, bool]:
     sent = {"occurrence": body["id"], "boundary": body["boundary"], "note": body["note"],
             "note_sha256": body["note_sha256"], **({"learned": body["learned"]} if body.get("learned") else {})}
     try:
-        answer = post("/checkpoints", sent, body["id"], SESSION_CARRIER, token)
+        answer = write("/checkpoints", sent, body["id"], SESSION_CARRIER, token)
     except Unsent as e:
         return refusal.retry(str(e)), True
     except Refused as e:
@@ -303,7 +318,7 @@ def acknowledge(session: str, token: str, directive: str) -> str:
     key is the acknowledgement's own, so a retry after a lost answer is answered from the first."""
     key = hashlib.sha256(f"ack\n{session}\n{directive}".encode()).hexdigest()[:32]
     try:
-        post(f"/sessions/{session}/directives/{directive}/acknowledgement", {}, key, SESSION_CARRIER, token)
+        write(f"/sessions/{session}/directives/{directive}/acknowledgement", {}, key, SESSION_CARRIER, token)
     except Unsent as e:
         return refusal.retry(str(e))
     except Refused as e:
@@ -386,7 +401,7 @@ def issue_directive(session: str, token: str, directive: str, to: str, to_epoch:
     """The holder, at the seat generation it holds, directs the session `to` at `to_epoch`. `directive`
     is a UUID the caller mints once and sends again with a retry, which Go answers from the first.
     Raises `Refused` or `Unsent`."""
-    return post(f"/sessions/{session}/directives",
+    return write(f"/sessions/{session}/directives",
                 {"id": directive, "to": to, "to_epoch": to_epoch, "generation": generation, "body": text},
                 _own_key("directive.issue", session, directive), SESSION_CARRIER, token)
 
@@ -394,7 +409,7 @@ def issue_directive(session: str, token: str, directive: str, to: str, to_epoch:
 def claim_name(token: str, key: str) -> dict:
     """The session claims the permanent name `key`; its own repeat is granted, another's is refused
     `name-claimed`. Raises `Refused` or `Unsent`."""
-    return post("/names", {"key": key}, _own_key("name.claim", key), SESSION_CARRIER, token)
+    return write("/names", {"key": key}, _own_key("name.claim", key), SESSION_CARRIER, token)
 
 
 def card_repo(ws: Path | None = None) -> str:
@@ -432,7 +447,7 @@ def declare_card(card: str, name: str, anchors: dict, token: str, repo: str = ""
     if anchors:
         body["anchors"] = [{"verb": verb, "repo": repo, "n": n}
                            for verb, ns in sorted(anchors.items()) for n in ns]
-    answer = post("/cards", body, _own_key("declare", card, json.dumps(body, sort_keys=True)),
+    answer = write("/cards", body, _own_key("declare", card, json.dumps(body, sort_keys=True)),
                   SESSION_CARRIER, token)
     return f"declared: {card}" + (" (replayed)" if answer.get("replayed") else "")
 
@@ -449,7 +464,7 @@ def edge_card(card: str, unlink: bool, kind: str, to: dict, why: str, token: str
     if source:
         body["source"] = source
     verb = "unlink" if unlink else "link"
-    post(f"/cards/{card}/{'unlinks' if unlink else 'links'}", body,
+    write(f"/cards/{card}/{'unlinks' if unlink else 'links'}", body,
          _own_key(verb, card, json.dumps(body, sort_keys=True)), SESSION_CARRIER, token)
     return f"{verb}ed: {card} {kind}"
 
@@ -516,20 +531,26 @@ def status(session: str, token: str, key: str, body: dict) -> dict:
     """The session's own status on Go's route (EL1a slice 2), under the invocation's occurrence id:
     a resend through `--retry` is answered from the first, and a fresh invocation writes a new row.
     Raises `Refused` or `Unsent`."""
-    return post(f"/sessions/{session}/status", body, key, SESSION_CARRIER, token)
+    return write(f"/sessions/{session}/status", body, key, SESSION_CARRIER, token)
 
 
 def wait(session: str, token: str, key: str, body: dict) -> dict:
     """The session's own wait on Go's route (go-waits-design.md decision 8), under the invocation's
     occurrence id: a resend through `--retry` answers the wait the first registered. Raises
     `Refused` or `Unsent`."""
-    return post(f"/sessions/{session}/waits", body, key, SESSION_CARRIER, token)
+    return write(f"/sessions/{session}/waits", body, key, SESSION_CARRIER, token)
+
+
+def cancel_wait(session: str, token: str, key: str, wait: str) -> dict:
+    """The session ends one of its own open waits on Go's cancellation route, under the invocation's
+    occurrence id: a resend through `--retry` is answered from the first. Raises `Refused` or `Unsent`."""
+    return write(f"/sessions/{session}/waits/{wait}/cancellation", {}, key, SESSION_CARRIER, token)
 
 
 def raise_need(token: str, key: str, body: dict) -> dict:
     """The session's ask or recommendation on Go's needs route (EL4 decision 7), under the
     invocation's occurrence id. Raises `Refused` or `Unsent`."""
-    return post("/needs", body, key, SESSION_CARRIER, token)
+    return write("/needs", body, key, SESSION_CARRIER, token)
 
 
 def announce_branch(session: str, token: str, branch: str, ws: Path, key: str,
@@ -579,7 +600,7 @@ def claim_issue(session: str, token: str, repo: str, n: int) -> str:
     card = _own_key("claim.card", session, repo, str(n))[:24]
     body = {"id": card, "name": f"{repo}#{n}",
             "anchors": [{"verb": "resolves", "repo": repo, "n": n}]}
-    answer = post("/cards", body, _own_key("claim", session, repo, str(n)), SESSION_CARRIER, token)
+    answer = write("/cards", body, _own_key("claim", session, repo, str(n)), SESSION_CARRIER, token)
     return f"declared: {card}" + (" (replayed)" if answer.get("replayed") else "")
 
 
@@ -632,7 +653,7 @@ def seat_need(session: str, token: str, kind: str, need: str, reason: str) -> st
     or `Unsent`."""
     seat_generation(session, token)
     body = {"kind": kind, "reason": reason}
-    post(f"/needs/{need}/transitions", body, _own_key("seat.need", session, need, kind, reason), SESSION_CARRIER, token)
+    write(f"/needs/{need}/transitions", body, _own_key("seat.need", session, need, kind, reason), SESSION_CARRIER, token)
     return f"{kind}d: {need}"
 
 
@@ -640,7 +661,7 @@ def seat_launch(session: str, token: str, body: dict, key: str) -> str:
     """The holder asks capacity for a worker (`POST /launches`), keyed by the line's own key so a
     rerun after a lost answer is answered from the first. Raises `NotSeated`, `Refused` or `Unsent`."""
     seat_generation(session, token)
-    answer = post("/launches", body, key, SESSION_CARRIER, token)
+    answer = write("/launches", body, key, SESSION_CARRIER, token)
     account = answer.get("account")
     on = f" on {account['vendor']} account {account['number']} ({account['account_id']}, brought by {account['brought_by']})" if account else ""
     if answer.get("outcome") == "refused":
@@ -677,7 +698,7 @@ def seat_withdraw(session: str, token: str, launch: str, key: str) -> str:
     """The holder withdraws a launch still waiting (`POST /launches/{launch}/withdrawal`), keyed by the
     line's own key. Raises `NotSeated`, `Refused` or `Unsent`."""
     seat_generation(session, token)
-    answer = post(f"/launches/{launch}/withdrawal", {}, key, SESSION_CARRIER, token)
+    answer = write(f"/launches/{launch}/withdrawal", {}, key, SESSION_CARRIER, token)
     return f"withdrawn: {answer.get('id', launch)}"
 
 
@@ -686,7 +707,7 @@ def seat_action(session: str, token: str, body: dict, key: str) -> str:
     (`POST /actions`), keyed by the line's own key so a rerun after a lost answer is answered from
     the first. Raises `NotSeated`, `Refused` or `Unsent`."""
     seat_generation(session, token)
-    answer = post("/actions", body, key, SESSION_CARRIER, token)
+    answer = write("/actions", body, key, SESSION_CARRIER, token)
     doing = {"wake": "waking", "control": "controlling", "retire": "retiring", "rehome": "rehoming"}[body["kind"]]
     value = f" {body['value']}" if body.get("value") else ""
     return f"{doing}: {answer['id']} {body['to']}{value}, offered"
@@ -697,7 +718,7 @@ def seat_keep(session: str, token: str, verb: str, body: dict, key: str) -> str:
     keep (`.../unkeep`), under its own session and keyed by the line's own key, so a rerun after a
     lost answer is answered from the first. Raises `NotSeated`, `Refused` or `Unsent`."""
     seat_generation(session, token)
-    answer = post(f"/sessions/{session}/{verb}", body, key, SESSION_CARRIER, token)
+    answer = write(f"/sessions/{session}/{verb}", body, key, SESSION_CARRIER, token)
     if verb == "unkeep":
         return f"unkept: {answer['session']}, kept for {answer['reason']}"
     return f"kept: {answer['session']} until {answer['until']} because {answer['reason']}"
@@ -711,7 +732,7 @@ def lift(session: str, token: str, kind: str, repo: str, at: int | str, reason: 
     generation = seat_generation(session, token)
     body = {"kind": kind, "repo": repo, "generation": generation, "reason": reason,
             **({"pr": at} if kind == "review" else {"branch": at})}
-    post("/gates/lifts", body, _own_key("gate.lift", session, key), SESSION_CARRIER, token)
+    write("/gates/lifts", body, _own_key("gate.lift", session, key), SESSION_CARRIER, token)
     return f"lifted: review {repo}#{at}" if kind == "review" else f"lifted: critic {repo} {at}"
 
 
@@ -720,7 +741,7 @@ def abandon(session: str, token: str, target: str, epoch: int, reason: str, key:
     (`POST /gates/abandonments`) at the generation it holds. `key` is the line's occurrence id, so a
     resend after a lost answer is answered from the first. Raises `NotSeated`, `Refused` or `Unsent`."""
     body = {"session": target, "epoch": epoch, "generation": seat_generation(session, token), "reason": reason}
-    post("/gates/abandonments", body, _own_key("gate.abandon", session, key), SESSION_CARRIER, token)
+    write("/gates/abandonments", body, _own_key("gate.abandon", session, key), SESSION_CARRIER, token)
     return f"abandoned: {target} epoch {epoch}"
 
 
@@ -735,7 +756,7 @@ def bench_lift(session: str, token: str, first: str, second: str, reason: str, k
     `NotSeated`, `Refused` or `Unsent`."""
     names = {"dimension": first, "key": second} if first in BENCH_DIMENSIONS else {"vendor": first, "model": second}
     body = {**names, "generation": seat_generation(session, token), "reason": reason}
-    post("/gates/bench-lifts", body, _own_key("gate.bench.lift", session, key), SESSION_CARRIER, token)
+    write("/gates/bench-lifts", body, _own_key("gate.bench.lift", session, key), SESSION_CARRIER, token)
     return f"lifted: bench {first} {second}"
 
 
@@ -818,13 +839,13 @@ def seat_card(session: str, token: str, verb: str, fact: dict, repo: str, key: s
     Raises `NotSeated`, `Refused`, `Unsent`, or `LookupError` for a verb this client sends no write for."""
     if fact["state"] == "card-reanchored":
         return seat_reanchor(session, token, fact, repo)
-    write = _card_write(fact, repo)
-    if write is None:
+    planned = _card_write(fact, repo)
+    if planned is None:
         what = f"{verb} {fact['field']}" if fact["state"] == "card-reclassified" else verb
         raise LookupError(f"card {what}: this client sends Go no write for it")
     seat_generation(session, token)
-    path, body = write
-    post(path, body, _own_key("seat.card", session, key), SESSION_CARRIER, token)
+    path, body = planned
+    write(path, body, _own_key("seat.card", session, key), SESSION_CARRIER, token)
     return f"carded: {verb} {fact['card']}"
 
 
@@ -913,7 +934,7 @@ def say(session: str, token: str, occurrence: str, text: str, to: str | None = N
     words: handed to a stream that stood, or spooled for the session's next hold (#5674). Raises
     `Refused` or `Unsent`."""
     body = {"occurrence": occurrence, "text": text, **({"to": to} if to else {})}
-    answer = post(f"/sessions/{session}/says", body, _own_key("say", session, occurrence), SESSION_CARRIER, token)
+    answer = write(f"/sessions/{session}/says", body, _own_key("say", session, occurrence), SESSION_CARRIER, token)
     if answer.get("state") == "unheard":
         return f"nobody holds the seat; kept on the brain's Needs You as unheard:{answer.get('id')}"
     if answer.get("held"):

@@ -445,6 +445,23 @@ AgentReadingAnswer = typing.TypedDict("AgentReadingAnswer", {
     "recorded": "bool",
 })
 
+# AgentLeavingBody is the body of POST /steering/agent/leaving: what this machine reports left
+# with no process. Runtimes name the process trees of a launch it ended after the launch's offer
+# had lapsed, whose enrolments the launch receipt of #5909 can no longer reach; Sessions name
+# this machine's launch records whose tmux session is gone. Either ends the standing enrolment
+# (#5903, #5917).
+AgentLeavingBody = typing.TypedDict("AgentLeavingBody", {
+    "uplink": "str",
+    "launch": "typing.NotRequired[str]",
+    "runtimes": "typing.NotRequired[list[str] | None]",
+    "sessions": "typing.NotRequired[list[str] | None]",
+})
+
+# AgentLeavingAnswer is the sessions whose standing enrolment the report ended.
+AgentLeavingAnswer = typing.TypedDict("AgentLeavingAnswer", {
+    "left": "list[str] | None",
+})
+
 # StreamUplink opens a generation of the machine's uplink: every later call names its id.
 StreamUplink = typing.TypedDict("StreamUplink", {
     "kind": "str",
@@ -742,6 +759,7 @@ AgentLaunchBody = typing.TypedDict("AgentLaunchBody", {
 AgentLaunchResult = typing.TypedDict("AgentLaunchResult", {
     "session": "typing.NotRequired[str]",
     "refused": "typing.NotRequired[str]",
+    "runtimes": "typing.NotRequired[list[str] | None]",
 })
 
 # AgentLaunchAnswer is the launch's receipt as recorded.
@@ -3140,6 +3158,16 @@ WaitAnswer = typing.TypedDict("WaitAnswer", {
     "id": "str",
 })
 
+# WaitCancel is the body of a wait's cancellation: the wait is named by the route, so it has no fields.
+WaitCancel = typing.TypedDict("WaitCancel", {})
+
+# WaitCancelAnswer names the wait cancelled and the state it was in: `open` when the cancel ended it,
+# `ended` or `told` when it had been already.
+WaitCancelAnswer = typing.TypedDict("WaitCancelAnswer", {
+    "id": "str",
+    "from": "str",
+})
+
 IntentCreateBody = typing.TypedDict("IntentCreateBody", {
     "title": "str",
     "context": "typing.NotRequired[str]",
@@ -3715,6 +3743,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/sessions/{session}/targeting",
     "POST /w/{workspace}/api/v1/sessions/{session}/unkeep",
     "POST /w/{workspace}/api/v1/sessions/{session}/waits",
+    "POST /w/{workspace}/api/v1/sessions/{session}/waits/{wait}/cancellation",
     "GET /w/{workspace}/api/v1/snapshot",
     "POST /w/{workspace}/api/v1/sources",
     "GET /w/{workspace}/api/v1/stamps",
@@ -3734,6 +3763,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/steering/agent/injection",
     "POST /w/{workspace}/steering/agent/judges",
     "POST /w/{workspace}/steering/agent/launch",
+    "POST /w/{workspace}/steering/agent/leaving",
     "POST /w/{workspace}/steering/agent/model",
     "GET /w/{workspace}/steering/agent/package/{sha}",
     "POST /w/{workspace}/steering/agent/reach",

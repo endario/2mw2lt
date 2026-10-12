@@ -23,6 +23,8 @@ from local_workspace import workspace_root  # noqa: E402
 # `recommend:` and `ask:` share the session-owned status path and door admission. `say:` remains
 # deliberately absent — it is speech routed by `say.py`.
 VERBS = ("announce", "blocked", "wait", "done", "recommend", "ask")
+# `wait: <session> cancel <wait id>`: the session ends one of its own open waits.
+WAIT_CANCEL = re.compile(r"cancel (?P<id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
 
 
 def invocation() -> str:
@@ -163,6 +165,15 @@ def _wait_on_go(ws: Path, session: str, token: str, text: str, retry_id: str | N
     or a time, told once it holds."""
     import session_routes
     import verb_grammar
+    cancelled = WAIT_CANCEL.fullmatch(text)
+    if cancelled:
+        key = retry_id or occurrence()
+        print(f"id {key}", file=sys.stderr)
+        answer = said(lambda: session_routes.cancel_wait(session, token, key, cancelled["id"]), key)
+        if answer is False:
+            return 1
+        print(f"cancelled: wait {session} {answer['id']}, it was {answer['from']}")
+        return 0
     status = verb_grammar.parse_status(line("wait", session, text))
     body: dict = {"kind": status["kind"]}
     if status["kind"] == "at":
@@ -232,7 +243,8 @@ def main(argv: list[str]) -> int:
     unparsed = False
     if verb in ("announce", "blocked", "wait"):
         import verb_grammar
-        unparsed = verb_grammar.parse_status(line(verb, session, text)) is None
+        unparsed = verb_grammar.parse_status(line(verb, session, text)) is None and not (
+            verb == "wait" and WAIT_CANCEL.fullmatch(text))
         go_shape = (verb == "announce"
                     and re.fullmatch(r"as \S+/\S+(?: on \S+)?(?: doing .+)?", text) is not None)
         if unparsed and not go_shape:

@@ -101,6 +101,9 @@ def main() -> int:
                 o["reply_head"] = h
         except Exception:
             pass  # no reply head: the observation still stands
+    # Only this side sees whether the plugin's module holds the stream; the daemon's stream-down
+    # notice follows what it says (#5722).
+    o["holder"] = "plugin" if holder.fresh(ws, str(o.get("session") or "")) else "session"
     try:
         rid = runtime_id.derive("claude", timeout=min(1.0, max(0.1, deadline - time.monotonic() - 1.5)))
         if rid:

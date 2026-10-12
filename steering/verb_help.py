@@ -210,7 +210,7 @@ TOOLS = {
     "verb": {"forms": [
         {"topic": "announce", "usage": "announce <session> as <harness/account> on <branch> doing <what> [--retry=<id>]", "example": "verb announce violet as claude-code/main on feat/help doing add-help"},
         {"topic": "blocked", "usage": "blocked <session> on <what> [--retry=<id>]", "example": "verb blocked violet on waiting"},
-        {"topic": "wait", "usage": "wait <session> for checks <pr>, merged <pr>, verdict <pr>, comment <pr> or at <YYYY-MM-DDTHH:MMZ> [recheck <seconds>] [--retry=<id>]", "example": "verb wait violet for checks 4391"},
+        {"topic": "wait", "usage": "wait <session> for checks <pr>, merged <pr>, verdict <pr>, comment <pr> or at <YYYY-MM-DDTHH:MMZ> [recheck <seconds>], or cancel <wait id>, which ends one of its own open waits [--retry=<id>]", "example": "verb wait violet for checks 4391"},
         {"topic": "done", "usage": "done <session> <what> [--retry=<id>]", "example": "verb done violet help"},
         {"topic": "recommend", "usage": "recommend <session> <what> [--retry=<id>]", "example": "verb recommend violet approve"},
         {"topic": "ask", "usage": "ask <session> <question> [--retry=<id>]", "example": "verb ask violet should-we-deploy"},

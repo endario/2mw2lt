@@ -4,7 +4,9 @@ workspace this OS user registered at an alias door, `<root>/w/<alias>`, moves to
 `/2mw2lt:install` run again. The cut release deletes it.
 
 A workspace whose door cannot be resolved is left on its alias door, which the window's serve still
-answers, and the reason is said; the next activation or install tries again. Each file is replaced
+answers, and the reason is said; the next activation or install tries again. A move also waits while
+any installed plugin's door module refuses the address form, so the agent never runs ahead of the
+clients it serves (#5519). Each file is replaced
 whole (`spool.write_atomic`), and the steps run in an order a run stopped between any two of them
 resumes from (a workspace whose door is on DEAD_HOST is instead forgotten):
 
@@ -27,6 +29,7 @@ import contextlib
 import fcntl
 import json
 import os
+import subprocess
 import sys
 import urllib.error
 import urllib.parse
@@ -149,6 +152,53 @@ def _bind(root: Path, workspace_id: str) -> None:
     spool.write_atomic(p, workspace_id + "\n")
 
 
+def _plugin_doors() -> list[Path | None]:
+    """Every installed 2mw2lt plugin's enroll/door.py, one record per harness home's plugin
+    registry naming the plugin, at the absolute installPath the record carries. An entry that is
+    not a record comes back as None: a client this machine cannot ask."""
+    import transcript_proof
+    out: list[Path | None] = []
+    for _, root in transcript_proof.harness_roots():
+        try:
+            doc = json.loads((root.parent / "plugins" / "installed_plugins.json").read_text())
+        except (OSError, ValueError):
+            continue
+        plugins = doc.get("plugins") if isinstance(doc, dict) else None
+        records = plugins.get("2mw2lt@2mw2lt") if isinstance(plugins, dict) else None
+        for r in records if isinstance(records, list) else []:
+            p = None if not isinstance(r, dict) \
+                else Path(str(r.get("installPath") or "")) / "steering" / "enroll" / "door.py"
+            if p not in out:
+                out.append(p)
+    return out
+
+
+def _clients_refuse(door: str) -> str | None:
+    """Why an installed client would refuse `door`, or None when every one parses it. Each
+    installed plugin's own door module answers, in a subprocess of its own, so its imports and
+    sys.path stay out of this one; one that cannot be asked counts as refusing. A grammar
+    predating the address form answers `split` with no workspace — the refusal that cut every
+    client call on M4 and M1 for an afternoon (#5519) — and the move waits for it to update."""
+    for p in _plugin_doors():
+        if p is None:
+            return "a plugin registry entry is not a record, so that client cannot be asked"
+        try:
+            asked = subprocess.run(
+                [sys.executable, "-I", "-c",
+                 "import importlib.util, sys\n"
+                 "s = importlib.util.spec_from_file_location('installed_door', sys.argv[1])\n"
+                 "m = importlib.util.module_from_spec(s)\n"
+                 "s.loader.exec_module(m)\n"
+                 "print('yes' if m.split(sys.argv[2])[1] else 'no')",
+                 str(p), door],
+                capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return f"{p} could not be asked: {e}"
+        if asked.returncode != 0 or asked.stdout.strip() != "yes":
+            return f"{p} parses no {door}"
+    return None
+
+
 @contextlib.contextmanager
 def _locked(p: Path):
     """The credential's own lock, which a renewal takes, so the copy is never of a half-renewed file."""
@@ -189,6 +239,8 @@ def _move(where: Path, name: str, entry: machine_workspaces.Entry, held_by: dict
     if bound not in (None, workspace_id, alias):
         raise Kept(f"{entry.root} is bound to {bound}, and its door opens {alias or workspace_id}")
     if aliased:
+        if why := _clients_refuse(new):
+            raise Kept(f"no installed client parses {new} ({why}), so the alias stands until one does")
         held = credential.path_for(old)
         with _locked(held):
             d = _read(held)

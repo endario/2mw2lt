@@ -85,7 +85,7 @@ def validate(data) -> dict:
         problem = account_uses_problem(routing["account_uses"])
         if problem:
             raise ValueError(f"[routing].account_uses {problem}")
-    if routing.get("worker_forge", "login") not in ("login", "app"):
+    if routing.get("worker_forge", "app") not in ("login", "app"):
         raise ValueError(f"[routing].worker_forge={routing['worker_forge']!r} is not login or app")
     machine = data.get("machine", {})
     if not isinstance(machine, dict):
@@ -269,9 +269,9 @@ def claude_launchers(path: Path = DEFAULT_PATH) -> list | None:
 
 
 def worker_forge(path: Path = DEFAULT_PATH) -> str:
-    """Whose GitHub credential a worker launched here holds (doc 181 §5): `login`, the machine's
-    own, until the App's is proven on one worker; `app` for the App's installation token."""
-    return capacity(path).get("routing", {}).get("worker_forge", "login")
+    """Whose GitHub credential a worker launched here holds (doc 181 §5): `app`, the App's
+    installation token, unless the file says `login`, the machine's own (#5121)."""
+    return capacity(path).get("routing", {}).get("worker_forge", "app")
 
 
 def machine_name(path: Path = DEFAULT_PATH) -> str | None:

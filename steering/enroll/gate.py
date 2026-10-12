@@ -18,6 +18,7 @@ python_floor.require()
 import os
 import re
 import subprocess
+import time
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -138,7 +139,7 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
             print(str(why), file=sys.stderr)
             return 1
         try:
-            answer = session_routes.post(f"/gates/{gate}/cancellation", {}, session_routes._own_key("gate.cancel", gate),
+            answer = session_routes.write(f"/gates/{gate}/cancellation", {}, session_routes._own_key("gate.cancel", gate),
                                          session_routes.SESSION_CARRIER, token)
             where = {"queue": "the queue", "run": "its run"}.get(answer.get("from"))
             reply = (f"cancelled: {gate}, withdrawn from {where}" if where
@@ -192,10 +193,12 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
     print(f"id {this}", file=sys.stderr)
     uncertain = False
     try:
-        answer = session_routes.post("/gates", body, this, session_routes.SESSION_CARRIER, token)
-        if all(answer.get(k) for k in ("id", "round", "state")):
+        answer = session_routes.write("/gates", body, this, session_routes.SESSION_CARRIER, token)
+        # An id and a state name a commission; a round it does not answer is left unsaid (#5873).
+        if answer.get("id") and answer.get("state"):
             why = f" ({answer['reason']})" if answer.get("reason") else ""
-            reply = f"commissioned: {answer['id']} {kind} round {answer['round']}, {answer['state']}{why}"
+            round_ = f" round {answer['round']}" if answer.get("round") else ""
+            reply = f"commissioned: {answer['id']} {kind}{round_}, {answer['state']}{why}"
         else:
             uncertain, reply = True, refusal.retry("Go answered the commission without naming it")
     except session_routes.Refused as e:
@@ -217,6 +220,8 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
 
 # How many pages of a pull request's gates a read walks, so a cursor that repeats cannot loop.
 GO_READ_PAGES = 20
+# How long a carry waits for GitHub to deliver a head it was refused as unobserved, and how often it asks.
+CARRY_UNOBSERVED_WAIT, CARRY_UNOBSERVED_POLL = 60.0, 5.0
 
 
 def go_read(ws: Path, session: str, flags, kind: str, what: str) -> int:
@@ -323,20 +328,30 @@ def go_carry(ws: Path, session: str, flags, pr: int, retry_id: str | None) -> in
     made = made_here(_git(here, "reflog", "--format=%H %gs", "HEAD"))
     equivalent = not walked or not trunk or any(c not in made for c in after.split())
     this = retry_id or occurrence()
-    print(f"id {this}", file=sys.stderr)
-    uncertain = False
-    try:
-        answer = session_routes.post("/gates/carries", {"repo": repo, "pr": pr, "head": at, "equivalent": equivalent},
-                                     this, session_routes.SESSION_CARRIER, token)
-        if answer.get("id") and answer.get("proof"):
-            reply = f"carried: the pass on #{pr} to {at[:12]}, proved {answer['proof']}"
-        else:
-            uncertain, reply = True, refusal.retry("Go answered the carry without naming it")
-    except session_routes.Refused as e:
-        uncertain = not session_routes.settled(e)
-        reply = refusal.retry(str(e)) if uncertain else _settled_refusal(e)
-    except session_routes.Unsent as e:
-        uncertain, reply = True, refusal.retry(str(e))
+    waited_until = time.monotonic() + CARRY_UNOBSERVED_WAIT
+    while True:
+        print(f"id {this}", file=sys.stderr)
+        uncertain = False
+        try:
+            answer = session_routes.write("/gates/carries", {"repo": repo, "pr": pr, "head": at, "equivalent": equivalent},
+                                         this, session_routes.SESSION_CARRIER, token)
+            if answer.get("id") and answer.get("proof"):
+                reply = f"carried: the pass on #{pr} to {at[:12]}, proved {answer['proof']}"
+            else:
+                uncertain, reply = True, refusal.retry("Go answered the carry without naming it")
+        except session_routes.Refused as e:
+            # A head pushed a moment ago reaches Go when GitHub delivers it: wait that out under a new
+            # key, since Go answers a refused key with the same refusal.
+            if e.code == "carry-head-unobserved" and time.monotonic() < waited_until:
+                print(f"waiting for GitHub to deliver {at[:12]} to the gate", file=sys.stderr)
+                time.sleep(CARRY_UNOBSERVED_POLL)
+                this = occurrence()
+                continue
+            uncertain = not session_routes.settled(e)
+            reply = refusal.retry(str(e)) if uncertain else _settled_refusal(e)
+        except session_routes.Unsent as e:
+            uncertain, reply = True, refusal.retry(str(e))
+        break
     print(display_reply(reply))
     if uncertain:
         print(f"the carry may have landed: send it again with --retry={this} to learn which", file=sys.stderr)

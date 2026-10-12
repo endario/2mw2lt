@@ -6,6 +6,7 @@ import contextlib
 import fcntl
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -61,9 +62,10 @@ def sweep(entries: Iterable[Path], now: float, days: int) -> list[Path]:
     return removed
 
 
-def evict(entries: Iterable[Path], enough: Callable[[], bool]) -> list[Path]:
+def evict(entries: Iterable[Path], enough: Callable[[], bool], unused_for: float = 0) -> list[Path]:
     """Remove the least recently used of `entries`, with their locks, until `enough()` holds. One
-    whose lock is held is in use and kept."""
+    whose lock is held is in use and kept, and so is one used within `unused_for` seconds as of its
+    removal, not as of the call."""
     def used(p: Path) -> float:
         try:
             return p.stat().st_mtime
@@ -73,5 +75,5 @@ def evict(entries: Iterable[Path], enough: Callable[[], bool]) -> list[Path]:
     for entry in sorted(entries, key=used):
         if enough():
             break
-        removed += sweep([entry], now=float("inf"), days=0)
+        removed += sweep([entry], now=time.time() if unused_for else float("inf"), days=unused_for / 86400)
     return removed
