@@ -30,7 +30,7 @@ _RAW_FORMS = {
     "ack": ["ack: <ulid> token <t>"],
     "say": ["say: <session> [to <target>] token <t> <text>"],
     "note": ["note: token <lease token> <text>"],
-    "launch": ["launch: token <lease token> <harness> [on <node>] [vendor <vendor>] [account <n>] [model <model>] [thinking <level>] [effort <level>] [window] [card <card>] because <reason> [<newline> brief: <directive>]"],
+    "launch": ["launch: token <lease token> <harness> [on <node>] [vendor <vendor>] [account <n>] [model <model>] [thinking <level>] [effort <level>] [window] [card <card>|resolves <owner>/<name>#<n>] because <reason> [<newline> brief: <directive>]"],
     "withdraw": ["withdraw: token <lease token> <launch id>"],
     "relay": ["relay: token <lease token> to <session>[@<epoch>] <text>"],
     "retire": ["retire: token <lease token> <worker> on <node>"],

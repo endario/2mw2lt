@@ -441,9 +441,7 @@ worker spends.
 what each host already runs. Send work to the host with the most room, not the one you are on:
 the machine the owner works at often carries the seat, their interactive sessions and CI
 runners, so fill it last. Name `on` only to put work where the score would not, and then choose the
-quietest host that has the account; until the launch score weighs measured load
-(#6082), the worker cap it reads does not see
-a host's load. Re-read the spread whenever a launch lands or a session ends, and move
+quietest host that has the account. Re-read the spread whenever a launch lands or a session ends, and move
 the next launch, not a running session, to rebalance.
 
 The brain, the daemon and the agents sit on different machines as a matter of course, so there is no
@@ -451,11 +449,13 @@ machine of your own to default to. `loopback` is the orchestrator's node, not yo
 only to target an agent running there, and a launch on a node holding no uplink is refused.
 
 An opencode worker runs confined, in a clone of its own, and its branch is pushed by its agent.
-`launching: <id> <harness> on <node>` means the agent there was handed it. Read how it ended
-through the API, from any machine: `requested`, `refused`, `lapsed`, `launched` naming the
-session, or `launch-refused` with the agent's reason. Go waits a launch with no room rather than
+`launching: <id> <harness> on <node>` means the agent there was handed it. Read how it went with
+`rest.py "/launches/<id>"`: its state, each machine it was offered to and what that machine
+answered, why each vendor's route was passed over while it waits, and the session it started. Go waits a launch with no room rather than
 refusing it (`worker-full`, `host-full`), and the waiting line names the sessions it could
-reclaim, each as its standing reads: close or drive one, or drop a keep you no longer need. Go has no read of one launch.
+reclaim, each as its standing reads: close or drive one, or drop a keep you no longer need. A launch every machine bars by a rule
+rather than by load is withdrawn `launch-unsatisfiable` at once: change the ask, since waiting
+will not place it.
 A launch its machine refused is placed again, on a machine that has not refused it, for a few
 attempts; it waits `launch-refused` meanwhile. Do not launch it again yourself. A launch asked for while older ones
 wait for a freed place answers `behind-waiting` and is placed in its turn. A launch pinned to a
@@ -632,6 +632,10 @@ brief: Continue <card>: read the handover checkpoint <note url>, then the plan i
 LAUNCH
 )"
 ```
+
+In `card`'s place, `resolves <owner>/<name>#<n>` names the card by the issue it resolves: the one
+live card resolving it, refused `card-absent` when none does (scope one first) and `card-ambiguous`
+when several do.
 
 Launch only once the holder's branch is pushed: the new session starts from the remote, and the
 daemon cannot see a commit left in the old worktree. The answer that starts the session makes it the card's executor, ending the previous one's

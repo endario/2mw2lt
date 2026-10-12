@@ -2337,6 +2337,7 @@ LaunchBody = typing.TypedDict("LaunchBody", {
     "reason": "str",
     "brief": "typing.NotRequired[str]",
     "card": "typing.NotRequired[str]",
+    "resolves": "typing.NotRequired[IssueRef | None]",
 })
 
 # LaunchWithdrawal withdraws a launch still waiting. It names nothing: the launch is the route's.
@@ -2355,6 +2356,32 @@ LaunchAnswer = typing.TypedDict("LaunchAnswer", {
     "replayed": "bool",
     "reclaimable": "typing.NotRequired[list[ReclaimableSession] | None]",
     "host_overloaded": "typing.NotRequired[HostOverloaded | None]",
+})
+
+# LaunchRead is one launch as the seat reads it: its answer, why each vendor was passed over at its
+# last decision, each machine it was offered to, and the session it started.
+LaunchRead = typing.TypedDict("LaunchRead", {
+    "id": "str",
+    "request": "str",
+    "state": "str",
+    "reason": "typing.NotRequired[str]",
+    "account": "typing.NotRequired[LaunchAccount | None]",
+    "outcome": "str | None",
+    "refused": "str | None",
+    "replayed": "bool",
+    "reclaimable": "typing.NotRequired[list[ReclaimableSession] | None]",
+    "host_overloaded": "typing.NotRequired[HostOverloaded | None]",
+    "passed_over": "dict[str, list[str] | None] | None",
+    "attempts": "list[LaunchAttempt] | None",
+    "session": "str | None",
+})
+
+# LaunchAttempt is one offer of a launch: the machine, by the name it reported or else its hardware,
+# how the offer stands, and what its agent answered once it did.
+LaunchAttempt = typing.TypedDict("LaunchAttempt", {
+    "machine": "str",
+    "state": "str",
+    "outcome": "str | None",
 })
 
 # HostOverloaded is a host's measured load as its placement judged it overloaded: its five-minute
@@ -2486,6 +2513,58 @@ MachineFleetPage = typing.TypedDict("MachineFleetPage", {
 
 MachineReportAnswer = typing.TypedDict("MachineReportAnswer", {
     "status": "str",
+})
+
+# MemberList is GET /api/v1/teams/{team}/members: the team's live members, its owner first, then by
+# when they joined.
+MemberList = typing.TypedDict("MemberList", {
+    "members": "list[MemberDTO] | None",
+})
+
+# MemberDTO is one member. Login is the GitHub login Go holds for them, for display and never
+# authority; null when it holds none. JoinedAt is null for a member whose joining the journal does
+# not record.
+MemberDTO = typing.TypedDict("MemberDTO", {
+    "subject": "str",
+    "login": "str | None",
+    "owner": "bool",
+    "you": "bool",
+    "joined_at": "str | None",
+})
+
+# MemberRemoveAnswer is the member removed, or who left, and whether this was a retry answered
+# from the first.
+MemberRemoveAnswer = typing.TypedDict("MemberRemoveAnswer", {
+    "id": "str",
+    "replayed": "bool",
+})
+
+# TeamInvitationList is GET /api/v1/teams/{team}/invitations: every invitation of the team, newest
+# first.
+TeamInvitationList = typing.TypedDict("TeamInvitationList", {
+    "invitations": "list[TeamInvitationDTO] | None",
+})
+
+# TeamInvitationDTO is one invitation as its owner sees it. GitHubID and Login are the identity it
+# names, null on a row made before invitations named one; CreatedAt is null where the journal does
+# not record its issue. UsedBy is the subject that redeemed it.
+TeamInvitationDTO = typing.TypedDict("TeamInvitationDTO", {
+    "id": "str",
+    "github_id": "int | None",
+    "login": "str | None",
+    "status": "typing.Literal[\"open\", \"used\", \"revoked\", \"expired\"]",
+    "created_at": "str | None",
+    "expires_at": "str",
+    "used_at": "str | None",
+    "used_by": "str | None",
+    "revoked_at": "str | None",
+})
+
+# InvitationRevokeAnswer is the invitation revoked, and whether this was a retry answered from the
+# first.
+InvitationRevokeAnswer = typing.TypedDict("InvitationRevokeAnswer", {
+    "id": "str",
+    "replayed": "bool",
 })
 
 # Momentum answers GET /momentum: where the workspace's live work is stuck, how its gates are
@@ -3782,11 +3861,16 @@ ROUTES = frozenset({
     "POST /api/v1/teams/{team}/collaborators/{collaborator}/title",
     "GET /api/v1/teams/{team}/installations",
     "POST /api/v1/teams/{team}/installations",
+    "GET /api/v1/teams/{team}/invitations",
     "POST /api/v1/teams/{team}/invitations",
+    "DELETE /api/v1/teams/{team}/invitations/{invitation}",
     "POST /api/v1/teams/{team}/invitations/{invitation}/redeem",
     "GET /api/v1/teams/{team}/machines/{machine}/settings",
     "POST /api/v1/teams/{team}/machines/{machine}/settings/{key}",
+    "GET /api/v1/teams/{team}/members",
     "POST /api/v1/teams/{team}/members",
+    "DELETE /api/v1/teams/{team}/members/me",
+    "DELETE /api/v1/teams/{team}/members/{subject}",
     "POST /api/v1/teams/{team}/name",
     "GET /api/v1/teams/{team}/settings",
     "POST /api/v1/teams/{team}/settings/{key}",
@@ -3854,6 +3938,7 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/knowledge/units",
     "GET /w/{workspace}/api/v1/knowledge/units/{id}",
     "POST /w/{workspace}/api/v1/launches",
+    "GET /w/{workspace}/api/v1/launches/{launch}",
     "POST /w/{workspace}/api/v1/launches/{launch}/withdrawal",
     "POST /w/{workspace}/api/v1/machine-renewals",
     "GET /w/{workspace}/api/v1/machines",
