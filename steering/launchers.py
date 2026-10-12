@@ -37,6 +37,13 @@ KEPT = ("HOME", "USER", "LOGNAME", "SHELL", "PATH", "TMPDIR", "LANG", "LC_ALL", 
         "STEERING_DOOR", "STEERING_PORT", "COORDINATION_PG_PREFIX")
 
 
+# The usage read's word, as `accounts.wire` words it, for a home holding Claude Code's own record of
+# a failed refresh: the login has lapsed, while `auth status` still answers it signed in (2026-10-12,
+# M1). An expired token is not one: an idle account's expires within hours, and the session
+# refreshes it at start.
+SIGNED_OUT = "signed out"
+
+
 class Unread(Exception):
     """The machine's accounts have not been read yet, so no launcher can be joined to one."""
 
@@ -129,13 +136,16 @@ def accounts(launchers: list[dict], readings: list[dict], run: Callable[[list[st
     source; with none, its declared vendor and its directory's label, an account with no verdict.
     `why`, when given, takes the one cause for each launcher offering nothing, by its path. `dead`
     takes the paths whose read answered that the launcher is signed out — an answer about the
-    account, not a read that missed (#3046)."""
+    account, not a read that missed (#3046) — by its `auth status` or by its usage reading."""
     why = {} if why is None else why
     import transcript_proof
     proxy_label = proxy_label or _proxy_label
     # By harness as well as label: Claude's own directory and Codex's are both `default`.
     by = {}
+    lapsed = set()
     for r in readings:
+        if isinstance(r.get("directory"), str) and r.get("why") == SIGNED_OUT:
+            lapsed.add((r.get("provider"), r["directory"]))
         if isinstance(r.get("directory"), str) and r.get("vendor") and r.get("account_id"):
             by.setdefault((r.get("provider"), r["directory"]), (r["vendor"], r["account_id"]))
     out = []
@@ -167,6 +177,11 @@ def accounts(launchers: list[dict], readings: list[dict], run: Callable[[list[st
             read = (launcher["vendor"], own)
         if key is None:
             why[launcher["path"]] = probed
+            continue
+        if key in lapsed:
+            if dead is not None:
+                dead.add(launcher["path"])
+            why[launcher["path"]] = f"its usage read answers {SIGNED_OUT}, though its auth status answers signed in"
             continue
         if read is None:
             held = sorted(d for p, d in by if p == (key or ("",))[0]) if key else []
@@ -246,12 +261,14 @@ def withdrawn(kept: dict, dead: set[str] | None) -> list[dict]:
     return out
 
 
-def for_launch(offered: list[dict], fresh: list[dict], run: Callable[[list[str]], str] = _run) -> list[dict]:
+def for_launch(offered: list[dict], fresh: list[dict], run: Callable[[list[str]], str] = _run,
+               dead: set[str] = frozenset()) -> list[dict]:
     """The accounts a launch may start: a fresh join (`fresh`, `accounts()` now), and an account
     offered earlier (`offered`) only for a launcher the fresh join could not place at all, still
     signed in to the same directory. A proxy probe that did not answer once dropped the launcher
-    from the join and the daemon's chosen account was refused (#2325's live test)."""
-    placed = {a["launcher"]["path"] for a in fresh}
+    from the join and the daemon's chosen account was refused (#2325's live test). A launcher the
+    join found signed out (`dead`) is not one it could not place."""
+    placed = {a["launcher"]["path"] for a in fresh} | set(dead)
     return fresh + still_signed_in([a for a in offered if a["launcher"]["path"] not in placed], run)
 
 

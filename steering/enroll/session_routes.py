@@ -718,10 +718,22 @@ def seat_launch(session: str, token: str, body: dict, key: str) -> str:
     if answer.get("outcome") == "refused":
         return f"launch refused: {answer['id']} {body['harness']}{on}: {answer.get('refused')}"
     if answer.get("outcome") == "session":
-        return f"launched: {answer['id']} {body['harness']}{on}"
+        return f"launched: {answer['id']} {body['harness']}{on}{_overloaded(answer.get('host_overloaded'))}"
     if answer.get("state") == "admitted":
-        return f"launching: {answer['id']} {body['harness']}{on}"
+        return f"launching: {answer['id']} {body['harness']}{on}{_overloaded(answer.get('host_overloaded'))}"
     return f"launch waiting: {answer['id']} {answer.get('reason') or answer.get('state')}{on}{_reclaimable(answer.get('reclaimable'))}"
+
+
+def _overloaded(host: dict | None) -> str:
+    """The measured load of an overloaded host the launch was placed on, as the seat reads it."""
+    if not host:
+        return ""
+    said = []
+    if host.get("load_five") is not None and host.get("logical_cores"):
+        said.append(f"load {host['load_five']:.1f}/{host['logical_cores']}")
+    if host.get("memory_used") is not None:
+        said.append(f"memory {host['memory_used'] * 100:.0f}%")
+    return "; host-overloaded: " + ", ".join(said)
 
 
 def _reclaimable(sessions: list | None) -> str:

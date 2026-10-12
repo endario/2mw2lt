@@ -459,7 +459,9 @@ reclaim, each as its standing reads: close or drive one, or drop a keep you no l
 A launch its machine refused is placed again, on a machine that has not refused it, for a few
 attempts; it waits `launch-refused` meanwhile. Do not launch it again yourself. A launch asked for while older ones
 wait for a freed place answers `behind-waiting` and is placed in its turn. A launch pinned to a
-machine that stops being a worker here ends `launch-pin-unknown`.
+machine that stops being a worker here ends `launch-pin-unknown`. A launch placed on a machine
+whose load or memory is over its limit still goes, and its line ends
+`host-overloaded: load <five>/<cores>, memory <used>%`.
 
 `rest.py` reads `/facts?state=<kind>` (the ledger, redacted, a page at a time; `--all` follows it
 to the head). Read it; do not reach for the ledger on the host.

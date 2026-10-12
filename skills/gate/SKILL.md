@@ -42,6 +42,12 @@ rounds, from a vendor no earlier round used where one can take it, and after its
 refuses another round, as at the ceiling. The round at the ceiling is final without asking. The
 review's run details say the tier and how the final round ran.
 
+A standard round of a small diff, 50 changed lines unless the team's owner set another limit,
+runs read-only: no shell, network or writes. A migration, workflow, authorization,
+credential, isolation, release or gate path always runs full, and so does a heavy or final round, so name `--tier heavy` for a
+small change that needs the reviewer to run it. The team's owner turns this off, or changes the limit and the paths kept full, in the console's
+Workspace settings, or Team settings for every workspace; no session can.
+
 The reviewer holds its own full tool set — shell, network, builds and tests — in a clone with no
 remote, under a cage that keeps the machine's credentials and every other checkout out of its
 reach — all but the reviewing CLI's own sign-in, which only Codex keeps from its tools.

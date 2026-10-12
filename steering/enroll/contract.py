@@ -2315,6 +2315,16 @@ LaunchAnswer = typing.TypedDict("LaunchAnswer", {
     "refused": "str | None",
     "replayed": "bool",
     "reclaimable": "typing.NotRequired[list[ReclaimableSession] | None]",
+    "host_overloaded": "typing.NotRequired[HostOverloaded | None]",
+})
+
+# HostOverloaded is a host's measured load as its placement judged it overloaded: its five-minute
+# load over its logical cores, and the share of its memory in use; a figure the host did not report
+# fresh is absent.
+HostOverloaded = typing.TypedDict("HostOverloaded", {
+    "load_five": "typing.NotRequired[float | None]",
+    "logical_cores": "typing.NotRequired[int | None]",
+    "memory_used": "typing.NotRequired[float | None]",
 })
 
 # ReclaimableSession is a session a waiting launch names, with its standing.
@@ -3059,6 +3069,36 @@ ListedStatus = typing.TypedDict("ListedStatus", {
     "at": "str",
 })
 
+# Setting is one key of a team's settings as a workspace reads it: what the key is, its effective
+# value and where that came from (internal/settings).
+Setting = typing.TypedDict("Setting", {
+    "key": "str",
+    "kind": "str",
+    "title": "str",
+    "says": "str",
+    "min": "typing.NotRequired[int | None]",
+    "max": "typing.NotRequired[int | None]",
+    "value": "typing.Any",
+    "default": "typing.Any",
+    "source": "str",
+    "version": "int",
+    "changed_by": "typing.NotRequired[str | None]",
+    "changed_at": "typing.NotRequired[str | None]",
+})
+
+# SettingList is a workspace's settings, and whether the reader may change them.
+SettingList = typing.TypedDict("SettingList", {
+    "settings": "list[Setting] | None",
+    "may_change": "bool",
+})
+
+# SettingBody changes a setting from the version its writer read: value null sets it back to what it
+# inherits.
+SettingBody = typing.TypedDict("SettingBody", {
+    "value": "typing.Any",
+    "version": "int",
+})
+
 # SourceState is what the board is told of a source: when it was last read whole or in part,
 # whether a failure since has made it stale and why, whether its last good read is past its expiry,
 # and the gaps that read left. A source is named by its UUID.
@@ -3695,6 +3735,8 @@ ROUTES = frozenset({
     "POST /api/v1/teams/{team}/invitations/{invitation}/redeem",
     "POST /api/v1/teams/{team}/members",
     "POST /api/v1/teams/{team}/name",
+    "GET /api/v1/teams/{team}/settings",
+    "POST /api/v1/teams/{team}/settings/{key}",
     "POST /api/v1/teams/{team}/slug",
     "POST /api/v1/teams/{team}/workspaces",
     "POST /forge/hook",
@@ -3805,6 +3847,8 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/sessions/{session}/unkeep",
     "POST /w/{workspace}/api/v1/sessions/{session}/waits",
     "POST /w/{workspace}/api/v1/sessions/{session}/waits/{wait}/cancellation",
+    "GET /w/{workspace}/api/v1/settings",
+    "POST /w/{workspace}/api/v1/settings/{key}",
     "GET /w/{workspace}/api/v1/snapshot",
     "POST /w/{workspace}/api/v1/sources",
     "GET /w/{workspace}/api/v1/stamps",
