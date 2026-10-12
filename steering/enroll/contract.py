@@ -917,6 +917,8 @@ NeedReturn = typing.TypedDict("NeedReturn", {
 # its reason, and whether the owner has acknowledged it.
 RulingDTO = typing.TypedDict("RulingDTO", {
     "id": "str",
+    "verb": "str",
+    "ruling": "typing.NotRequired[str]",
     "card": "typing.NotRequired[str]",
     "need": "typing.NotRequired[str]",
     "text": "str",
@@ -3460,6 +3462,7 @@ CardRead = typing.TypedDict("CardRead", {
 CardList = typing.TypedDict("CardList", {
     "cards": "list[CardDTO] | None",
     "next": "typing.NotRequired[str]",
+    "unattended": "typing.NotRequired[list[AnomalyDTO] | None]",
 })
 
 # TracksRead is a workspace's tracks: the document it binds, its live lanes in the document's order
@@ -3749,6 +3752,27 @@ ROUTES = frozenset({
     "POST /w/{workspace}/steering/door",
     "POST /w/{workspace}/steering/observe",
 })
+
+# Every query parameter a route reads, by its pattern: the values it takes, or None for any.
+QUERY = {
+    "GET /api/v1/teams/{team}/installations": {"repository": None},
+    "GET /w/{workspace}/api/v1/brain/digest": {"limit": None},
+    "GET /w/{workspace}/api/v1/brain/transcript": {"limit": None, "cursor": None},
+    "GET /w/{workspace}/api/v1/cards": {"state": frozenset({"live", "concluded"}), "track": None, "branch": None, "pull": None, "limit": None, "next": None},
+    "GET /w/{workspace}/api/v1/events": {"cursor": None},
+    "GET /w/{workspace}/api/v1/facts": {"limit": None, "state": None, "resource": None, "session": None, "ulid": None, "cursor": None, "before": None, "latest": frozenset({"1"})},
+    "GET /w/{workspace}/api/v1/gates": {"repo": None, "pr": None, "phase": None, "vendor": None, "limit": None, "next": None},
+    "GET /w/{workspace}/api/v1/gates/analysis": {"window": frozenset({"24h", "30d", "7d", "all"}), "kind": frozenset({"review"})},
+    "GET /w/{workspace}/api/v1/intents": {"disposition": frozenset({"open"}), "limit": None, "next": None},
+    "GET /w/{workspace}/api/v1/knowledge/brief": {"paths": None, "branch": None},
+    "GET /w/{workspace}/api/v1/machines": {"limit": None, "cursor": None},
+    "GET /w/{workspace}/api/v1/momentum": {"window": frozenset({"30d", "7d", "90d"})},
+    "GET /w/{workspace}/api/v1/needs": {"audience": frozenset({"owner", "seat"})},
+    "GET /w/{workspace}/api/v1/rooms/{room}/messages": {"limit": None, "cursor": None, "before": None, "wait": None},
+    "GET /w/{workspace}/api/v1/rulings": {"state": frozenset({"unacknowledged"}), "limit": None, "next": None},
+    "GET /w/{workspace}/api/v1/sessions": {"gone": frozenset({"1"})},
+    "GET /w/{workspace}/api/v1/snapshot": {"feed": None},
+}
 
 
 def path(route: str, **params: str) -> str:
