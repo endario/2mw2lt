@@ -117,6 +117,10 @@ ListedAccountUsage = typing.TypedDict("ListedAccountUsage", {
     "incentive": "AccountIncentive | None",
     "incentives": "list[AccountIncentive] | None",
     "sessions": "list[str] | None",
+    "owner": "str | None",
+    "serves": "bool",
+    "owner_login": "str | None",
+    "label": "str | None",
 })
 
 # UsageReading is an account's reading as its machine sent it (doc 77 §2): a field the wire did not
@@ -207,6 +211,37 @@ UnnamedDirectory = typing.TypedDict("UnnamedDirectory", {
     "provider": "str",
     "directory": "str",
     "machine": "str",
+})
+
+# AccountServe is the body of POST /accounts/serve: whether the account serves the team, set by its
+# owner from inside the team (#5996).
+AccountServe = typing.TypedDict("AccountServe", {
+    "vendor": "str",
+    "account_id": "str",
+    "serves": "bool",
+})
+
+# AccountServed is its answer: the account as the team resolves it, whether it serves, and its owner.
+AccountServed = typing.TypedDict("AccountServed", {
+    "vendor": "str",
+    "account_id": "str",
+    "serves": "bool",
+    "owner": "str",
+})
+
+# AccountLabel is the body of POST /accounts/label: the caller's own name for an account, or null to
+# clear it. A label is the member's alone and per team; digits are the team's number, never a label.
+AccountLabel = typing.TypedDict("AccountLabel", {
+    "vendor": "str",
+    "account_id": "str",
+    "label": "str | None",
+})
+
+# AccountLabelled is its answer: the account as the team resolves it and the label now held.
+AccountLabelled = typing.TypedDict("AccountLabelled", {
+    "vendor": "str",
+    "account_id": "str",
+    "label": "str | None",
 })
 
 # ActionBody asks a machine to act on a session's process: to wake it, set its level, end it or
@@ -529,6 +564,7 @@ StreamUsage = typing.TypedDict("StreamUsage", {
     "verdict": "AccountVerdict",
     "tightest": "UsageTightest | None",
     "incentive": "AccountIncentive | None",
+    "label": "str | None",
 })
 
 # StreamFleet tells the brain every published account of the team (doc 117 §4.1), each with
@@ -550,6 +586,15 @@ FleetAccount = typing.TypedDict("FleetAccount", {
     "tightest": "UsageTightest | None",
     "incentive": "AccountIncentive | None",
     "sessions": "list[str] | None",
+    "owner": "str | None",
+    "serves": "bool",
+    "labels": "list[FleetLabel] | None",
+})
+
+# FleetLabel is one member's name for an account, the member as Owner names one.
+FleetLabel = typing.TypedDict("FleetLabel", {
+    "member": "str",
+    "label": "str",
 })
 
 # StreamRevoked ends a hold that no longer stands.
@@ -2252,6 +2297,7 @@ LaunchBody = typing.TypedDict("LaunchBody", {
     "window": "typing.NotRequired[bool]",
     "reason": "str",
     "brief": "typing.NotRequired[str]",
+    "card": "typing.NotRequired[str]",
 })
 
 # LaunchWithdrawal withdraws a launch still waiting. It names nothing: the launch is the route's.
@@ -2991,6 +3037,7 @@ ListedAccount = typing.TypedDict("ListedAccount", {
     "vendor": "str",
     "account_id": "str",
     "number": "int | None",
+    "label": "str | None",
 })
 
 # ObservedReport is one model a session's machine observed it run. Vendor is its maker, empty when
@@ -3058,6 +3105,7 @@ SessionStatus = typing.TypedDict("SessionStatus", {
     "account": "typing.NotRequired[str]",
     "blocker": "typing.NotRequired[str]",
     "what": "typing.NotRequired[str]",
+    "card": "typing.NotRequired[str]",
 })
 
 # StreamFeed is one feed a stream follows and the position it has reached on it.
@@ -3602,11 +3650,14 @@ WorkerCensus = typing.TypedDict("WorkerCensus", {
 
 # WorkerCensusBody is the native census body before admission binds its uplink. Interactive is the
 # accounts the machine's declared launchers can start a Claude session on (doc 121 §2), nil when
-# this census does not say, which leaves the last one standing.
+# this census does not say, which leaves the last one standing. SignedOut is the accounts this
+# census withdrew — launchers whose login has lapsed, which had been offering them (#6031) — nil
+# when it does not say, an empty list when nothing is withdrawn.
 WorkerCensusBody = typing.TypedDict("WorkerCensusBody", {
     "uplink": "str",
     "worker_census": "WorkerCensus",
     "interactive": "typing.NotRequired[list[LauncherAccount] | None]",
+    "signed_out": "typing.NotRequired[list[LauncherAccount] | None]",
     "checkout": "typing.NotRequired[CheckoutCensus | None]",
     "machine_name": "typing.NotRequired[str | None]",
 })
@@ -3649,6 +3700,8 @@ ROUTES = frozenset({
     "POST /forge/hook",
     "GET /healthz",
     "GET /w/{workspace}/api/v1/accounts",
+    "POST /w/{workspace}/api/v1/accounts/label",
+    "POST /w/{workspace}/api/v1/accounts/serve",
     "POST /w/{workspace}/api/v1/actions",
     "GET /w/{workspace}/api/v1/board",
     "GET /w/{workspace}/api/v1/brain/digest",

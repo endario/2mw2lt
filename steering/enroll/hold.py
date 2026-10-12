@@ -722,11 +722,16 @@ def main(argv: list[str]) -> int:
             arming.enter_context(held(ws, session))
             port = agent_port(project)
             # A plugin owns reopening: probing an unavailable agent here would exit as a
-            # permanent refusal before the transport loop gets a chance to recover.
+            # permanent refusal before the transport loop gets a chance to recover. A session's
+            # own hold owns it the same way: a port nothing answers on is armed, and the
+            # transport loop reopens until the agent answers (#5974); only an agent naming
+            # another workspace still refuses here, that diagnosis being real.
             if not plugin:
-                port, why = agent_says(port, ws, session)
+                port, why = agent_says(port, ws, session, silent_ok=True)
                 if why:
-                    raise Refused(why)
+                    if port is None:
+                        raise Refused(why)
+                    print(why, file=sys.stderr)
         except (Refused, Undetermined) as why:
             if plugin:
                 ended = isinstance(why, Unenrolled)

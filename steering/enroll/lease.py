@@ -59,7 +59,7 @@ _LAUNCH = re.compile(r"^launch:\s*token\s+@lease\s+(?P<harness>[a-z][a-z0-9-]{0,
                      r"(?:\s+vendor\s+(?P<vendor>[a-z0-9][a-z0-9-]{0,31}))?"
                      r"(?:\s+account\s+(?P<account>\S{1,256}))?(?:\s+model\s+(?P<model>\S{1,128}))?"
                      r"(?:\s+thinking\s+(?P<thinking>[a-z]{1,32}))?(?:\s+effort\s+(?P<effort>low|medium|high|xhigh|max))?"
-                     r"(?:\s+(?P<window>window))?\s+because\s+(?P<reason>\S.*?)"
+                     r"(?:\s+(?P<window>window))?(?:\s+card\s+(?P<card>[0-9a-f]{24}))?\s+because\s+(?P<reason>\S.*?)"
                      # The launched session's first directive follows on its own line (doc 192).
                      r"(?:\nbrief:[ \t]*(?P<brief>.*?))?\s*$", re.S)
 _WITHDRAW = re.compile(r"^withdraw:\s*token\s+@lease\s+(?P<launch>[0-9a-f-]{36})\s*$")
@@ -199,7 +199,7 @@ def _go_launch(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
     import session_routes
     m = _LAUNCH.match(line)
     if not m:
-        return 2, refusal.use("launch", "malformed launch: its clauses go in the order on, vendor, account, model, thinking, effort, window; on Go, `on` names a machine as /sessions lists it in `machine`, a registration as /machines lists it, or the machine's name"), False
+        return 2, refusal.use("launch", "malformed launch: its clauses go in the order on, vendor, account, model, thinking, effort, window, card; on Go, `on` names a machine as /sessions lists it in `machine`, a registration as /machines lists it, or the machine's name"), False
     if m["harness"] == "claude" and not (m["model"] and m["effort"]):
         return 2, refusal.use("launch", "a claude launch names its model (as Claude Code takes it) and its effort"), False
     body = {k: m[k] for k in ("harness", "machine", "machine_name", "vendor", "account", "model", "thinking", "effort") if m[k]}
@@ -214,6 +214,10 @@ def _go_launch(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         body["brief"] = m["brief"]
     if m["window"]:
         body["window"] = True
+    if m["card"]:
+        if m["brief"] is None:
+            return 2, refusal.use("launch", "a launch naming a card hands it over: write the brief after `brief:`, pointing at the handover note"), False
+        body["card"] = m["card"]
     try:
         said = session_routes.seat_launch(rec["session"], rec["token"], body, key)
     except session_routes.NotSeated as why:

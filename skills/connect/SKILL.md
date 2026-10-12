@@ -10,7 +10,8 @@ Run from the wired repository or its worktree:
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/connect.py" --current
 ```
 
-The reply names your session, account, binding and `repo:`, the workspace's repository for `gh -R`. Use that **session** and printed
+The reply names your session, account, binding and `repo:`, the workspace's repository for `gh -R`, and `card:`, the card you execute now: after leaving and
+connecting again it says `none`, since leaving ends the engagement. Use that **session** and printed
 **account** below; replace each `<…>` placeholder before running a command. Clients read the
 stored enrollment credential themselves.
 
@@ -98,7 +99,7 @@ work in. Use the account from connect's reply:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> <issue>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> branch
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> branch [--card <id>]
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" announce <session> as <account> on <branch> doing "<work>"
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" blocked <session> on "<blocker>"
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" wait <session> for checks <pr>  # or merged <pr>, verdict <pr>, comment <pr>, at <UTC time>: told once it holds, instead of polling
@@ -216,7 +217,7 @@ changed locally, and the full suite locally when the change warrants one. Dispat
 From the branch's worktree:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> branch
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> branch [--card <id>]
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <session> critic <design-path>
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <session> review <pr>
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <session> status <commission-id>
@@ -241,6 +242,15 @@ Using that comment's URL:
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <session> handover <note-url>
 ```
+
+When your card's plan will hand tasks to other builders, as its brief names them, write it before
+building: under its subject's `plans/<n>/plan.md`, a builder named for each task, a task sized for
+the model that takes it, and commission the critic on it as on a design. Hand nothing over until it
+ends `build it`.
+
+When your card's design and plan are settled and the build would suit a cheaper model, provider
+or account, propose the move: write a `handover` checkpoint, then `say` to the brain the target
+(vendor, model, effort), the way you prefer, fresh or rehome, and why. The brain decides.
 
 Use `spec-settled` after the critic converges, `context` before compacting and `unit-done`
 when the brain requests it. Before leaving, record `exit` against the note, then disconnect:

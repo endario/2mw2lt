@@ -355,11 +355,52 @@ def answer(reply: object) -> str:
 
 
 # The waits before each resend. A send that timed out may have been settled, so it goes again
-# under the same id, which the door answers from its record of the first (doc 73 §3.2).
-RETRY_WAITS = (1.0, 2.0)
+# under the same id, which the door answers from its record of the first (doc 73 §3.2). A
+# stalled route needs more than two tries before one loss is called the door's answer (#5974).
+RETRY_WAITS = (1.0, 2.0, 4.0, 8.0)
 
 
 SEND_TIMEOUT = 5.0
+
+# A request whose answer the wire lost — no answer, a reset, a gateway speaking for a silo that
+# is down — is sent again under the key the first attempt carried within this budget and these
+# waits (#5974). The caller prints one line of progress per resend, so the wait is spoken.
+RESEND_WAITS = (0.5, 1.0, 2.0, 4.0, 8.0)
+RESEND_BUDGET = 30.0
+
+
+def resend_pause(started: float, attempt: int) -> float | None:
+    """The pause before resend number `attempt` (from 1) of a request the wire lost, or None once
+    the waits are spent or the outage has outlasted `RESEND_BUDGET` since `started`."""
+    if attempt > len(RESEND_WAITS):
+        return None
+    wait = RESEND_WAITS[attempt - 1]
+    if time.monotonic() - started + wait > RESEND_BUDGET:
+        return None
+    return wait
+
+
+def resender(started: float, label: str, action: str = "resending under the same key",
+             resend: bool = True):
+    """The `again` one request owns: the pause before its next resend, or None once the waits are
+    spent or the outage has outlasted the budget since `started` — one line of progress per
+    resend, so the wait is spoken rather than silent (#5974). `resend=False` names a write the
+    server records nothing to replay a resend under the key, which keeps one attempt however its
+    answer is lost."""
+    number = 0
+
+    def again(why: str) -> float | None:
+        nonlocal number
+        if not resend:
+            return None
+        number += 1
+        pause = resend_pause(started, number)
+        if pause is None:
+            return None
+        print(f"{label}: {why}; {action}", file=sys.stderr, flush=True)
+        return pause
+
+    return again
 
 # The door's own shape for a client-chosen request id (`remote.py`), narrowed to what this side
 # mints so a later change here cannot remint an id a retry is still carrying.
@@ -496,12 +537,16 @@ def outcome(line: str, timeout: float = SEND_TIMEOUT,
             return UNSENT, retry(f"the door at {base} did not answer: {e}")
         except CredentialRefused as e:
             return UNSENT, wire_up(e.reason)
-        except (urllib.error.URLError, OSError) as e:
+        except (urllib.error.URLError, OSError, http.client.HTTPException) as e:
+            if not configured_door():
+                # Named before any wait: a checkout with no door to resend to is a misconfiguration
+                # the first refusal already names, not an outage to wait out (#5974).
+                return UNSENT, wire_up(f"this checkout names no STEERING_DOOR, and no loopback daemon "
+                                       f"answered at {base} ({e})")
             if wait is None:
-                if not configured_door():
-                    return UNSENT, wire_up(f"this checkout names no STEERING_DOOR, and no loopback daemon "
-                                           f"answered at {base} ({e})")
                 return UNSENT, retry(f"the door at {base} did not answer: {e}")
+            print(f"door: the door at {base} did not answer ({e}); resending under the same id",
+                  file=sys.stderr, flush=True)
             time.sleep(wait)
 
 

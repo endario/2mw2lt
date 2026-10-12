@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import email.utils
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -37,9 +38,11 @@ INVALID_TOKEN = frozenset({"session-token-locator-read", "session-credential-car
 # refusal is reported rather than held, whatever wait Go asked for.
 RETRY_LIMIT = 30.0
 RETRY_ATTEMPTS = 5
-# A write whose answer was lost is sent again under its own key this many times in all: Go answers a
-# resend from the record of the first, so it is neither dropped nor done twice (#5405).
-WRITE_ATTEMPTS = 3
+# What the gateway answers when the silo behind it does not (`door.py` answers the same shape):
+# the request itself is not refused, the wire is down, so it is resent like a lost answer. A 503
+# that carries a `Retry-After` — one this client can read or not — is Go pacing the request, not
+# the wire: an unreadable wait is reported at once, exactly as a readable one is waited.
+GATEWAY_DOWN = frozenset({502, 503, 504})
 
 
 class Refused(Exception):
@@ -100,10 +103,17 @@ def session_headers(token: str) -> dict[str, str]:
     return {SESSION_CARRIER: token, MACHINE_CARRIER: _machine_token(), "User-Agent": door.USER_AGENT}
 
 
-def post(path: str, body: dict, key: str, carrier: str, token: str, timeout: float = 10.0) -> dict:
-    """One write under `key`, sent again under the same key while Go asks it to wait."""
+def post(path: str, body: dict, key: str, carrier: str, token: str, timeout: float = 10.0,
+         resend: bool = True) -> dict:
+    """One write under `key`, sent again under the same key while Go asks it to wait, and again
+    when the wire loses the answer — no answer, a reset, a gateway speaking for a silo that is
+    down, an answer that is not JSON, as a captive portal's is — within one budget the call owns,
+    each resend one line of progress on stderr (#5974). `resend=False` names a write Go records
+    nothing to replay a resend under the key (a mint), which keeps one attempt however its
+    answer is lost."""
     data = json.dumps(body).encode()
     started, attempts = time.monotonic(), 0
+    again = door.resender(started, f"session: {path}", resend=resend)
     while True:
         headers = (session_headers(token) if carrier == SESSION_CARRIER
                    else {carrier: token, "User-Agent": door.USER_AGENT})
@@ -114,29 +124,38 @@ def post(path: str, body: dict, key: str, carrier: str, token: str, timeout: flo
                 return json.loads(r.read() or b"{}")
         except urllib.error.HTTPError as e:
             problem = _problem(e)
-            pause = _retry_after(e) if e.code in (429, 503) else None
-            attempts += 1
-            if pause is None or attempts >= RETRY_ATTEMPTS or time.monotonic() - started + pause > RETRY_LIMIT:
-                wait = problem.get("wait_seconds")
-                detail = problem.get("detail")
-                raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
-                              wait if isinstance(wait, int) else None, _request(e, problem), _remedy(problem),
-                              detail if isinstance(detail, str) and len(detail) <= 200 else "") from None
-            time.sleep(pause)
-        except (urllib.error.URLError, OSError, TimeoutError) as e:
+            paced = (e.headers.get("Retry-After") or "").strip() if e.headers else ""
+            pause = _retry_after(e) if e.code in (429, 503) and paced else None
+            if pause is None:
+                if e.code in GATEWAY_DOWN and not (e.code == 503 and paced) \
+                        and (wait := again(f"the gateway answered {e.code}")) is not None:
+                    time.sleep(wait)
+                    continue
+            else:
+                # A wait Go named is waited out under the attempts this call owns: the pacing and
+                # the wire share one budget from the call's start, and a gateway resend spends
+                # none of the pacing's attempts.
+                attempts += 1
+                if attempts < RETRY_ATTEMPTS and time.monotonic() - started + pause <= RETRY_LIMIT:
+                    time.sleep(pause)
+                    continue
+            wait_seconds = problem.get("wait_seconds")
+            detail = problem.get("detail")
+            raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
+                          wait_seconds if isinstance(wait_seconds, int) else None, _request(e, problem), _remedy(problem),
+                          detail if isinstance(detail, str) and len(detail) <= 200 else "") from None
+        except (urllib.error.URLError, OSError, TimeoutError, http.client.HTTPException, ValueError) as e:
+            if (wait := again(f"no answer ({e})")) is not None:
+                time.sleep(wait)
+                continue
             raise Unsent(f"{_base()}{path}: no answer ({e})") from None
 
 
 def write(path: str, body: dict, key: str, carrier: str, token: str, timeout: float = 10.0) -> dict:
-    """`post` for a write one invocation sends under its own key, sent again when no answer comes. Not
-    for a write that is a fresh request each time, or that has a deadline or a recovery of its own."""
-    for attempt in range(1, WRITE_ATTEMPTS + 1):
-        try:
-            return post(path, body, key, carrier, token, timeout)
-        except Unsent:
-            if attempt == WRITE_ATTEMPTS:
-                raise
-            time.sleep(attempt * 0.5)
+    """`post` for a write one invocation sends under its own key. `post` itself resends a lost
+    answer under that key within its budget, so the write needs no loop of its own. Not for a
+    write that is a fresh request each time, or that has a deadline or a recovery of its own."""
+    return post(path, body, key, carrier, token, timeout)
 
 
 def _problem(e: urllib.error.HTTPError) -> dict:
@@ -472,9 +491,11 @@ def edge_card(card: str, unlink: bool, kind: str, to: dict, why: str, token: str
 def get(path: str, token: str, timeout: float = 10.0) -> dict:
     """One read on the session's carrier, asked again while Go answers 429 or 503, under the
     bounded backoff a write uses and honouring Retry-After: a read repeats safely, and a wait
-    Go names is waited out before the answer is called refused. Raises `Refused` or `Unsent`
-    as a write does."""
+    Go names is waited out before the answer is called refused. A read the wire lost is asked
+    again within one budget the call owns, one line of progress per ask (#5974). Raises
+    `Refused` or `Unsent` as a write does."""
     started, attempts = time.monotonic(), 0
+    again = door.resender(started, f"session: {path}", action="asking again")
     while True:
         req = urllib.request.Request(_base() + path, headers=session_headers(token))
         try:
@@ -482,13 +503,24 @@ def get(path: str, token: str, timeout: float = 10.0) -> dict:
                 return json.loads(r.read() or b"{}")
         except urllib.error.HTTPError as e:
             problem = _problem(e)
-            pause = _retry_after(e) if e.code in (429, 503) else None
-            attempts += 1
-            if pause is None or attempts >= RETRY_ATTEMPTS or time.monotonic() - started + pause > RETRY_LIMIT:
-                raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
-                              request=_request(e, problem), remedy=_remedy(problem)) from None
-            time.sleep(pause)
-        except (urllib.error.URLError, OSError, TimeoutError) as e:
+            paced = (e.headers.get("Retry-After") or "").strip() if e.headers else ""
+            pause = _retry_after(e) if e.code in (429, 503) and paced else None
+            if pause is None:
+                if e.code in GATEWAY_DOWN and not (e.code == 503 and paced) \
+                        and (wait := again(f"the gateway answered {e.code}")) is not None:
+                    time.sleep(wait)
+                    continue
+            else:
+                attempts += 1
+                if attempts < RETRY_ATTEMPTS and time.monotonic() - started + pause <= RETRY_LIMIT:
+                    time.sleep(pause)
+                    continue
+            raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
+                          request=_request(e, problem), remedy=_remedy(problem)) from None
+        except (urllib.error.URLError, OSError, TimeoutError, http.client.HTTPException, ValueError) as e:
+            if (wait := again(f"no answer ({e})")) is not None:
+                time.sleep(wait)
+                continue
             raise Unsent(f"{_base()}{path}: no answer ({e})") from None
 
 
@@ -514,17 +546,25 @@ def live_cards(token: str):
         page = "/cards?state=live&next=" + urllib.parse.quote(nxt, safe="") if nxt else ""
 
 
-def executing_card(session: str, token: str) -> dict | None:
-    """The live card this session executes — its executor engagement, not a merely planned one —:
-    what a branch claim's announce defaults its doing to, the brain having ruled there is no
-    separate claim primitive (2026-10-08)."""
+def executing_cards(session: str, token: str) -> list[dict]:
+    """Every live card this session executes — its executor engagements, not merely planned ones —
+    in the cards read's order: what a branch claim chooses among when it names no card."""
+    out = []
     for card in live_cards(token):
         # Live, not merely unended: an earlier epoch's engagement stays unended. An engagement
         # read without `live` is not taken, so no card's title is guessed (#4469).
         if any(e.get("session") == session and e.get("role") == "executor" and e.get("live") is True
                for e in card.get("executors") or []):
-            return card
-    return None
+            out.append(card)
+    return out
+
+
+def executing_card(session: str, token: str) -> dict | None:
+    """The live card this session executes — its executor engagement, not a merely planned one —:
+    what a branch claim's announce defaults its doing to, the brain having ruled there is no
+    separate claim primitive (2026-10-08). Of several, the first the cards read answers."""
+    cards = executing_cards(session, token)
+    return cards[0] if cards else None
 
 
 def status(session: str, token: str, key: str, body: dict) -> dict:
@@ -554,16 +594,23 @@ def raise_need(token: str, key: str, body: dict) -> dict:
 
 
 def announce_branch(session: str, token: str, branch: str, ws: Path, key: str,
-                    harness: str = "", account: str = "") -> str:
+                    harness: str = "", account: str = "", card: dict | None = None,
+                    resolved: dict | None = None) -> str:
     """A branch claim is an announce (the brain's ruling, 2026-10-08): the doing defaults to the
-    executed card's title, and the repository names the branch, which binds it to the card. There
+    executed card's title, and the repository names the branch, which binds it to the card. A card
+    given (`card`, one this session executes as the cards read answers) is named to the claim,
+    which binds the branch to it over the card the session engaged last (#5352); `resolved` is the
+    same read's answer handed in so the cards are read once, naming no card to the claim. There
     is no separate claim primitive on the wire. Answers the card it bound and the branch it
     displaced, or `REJECTED` with why nothing bound (#5084). Raises `ValueError` when no card names
     doing, `Refused` or `Unsent` as a write does."""
-    card = executing_card(session, token)
+    named = card is not None
+    card = card or resolved or executing_card(session, token)
     if card is None:
         raise ValueError(f"no live card of {session}'s names doing to announce")
     body: dict = {"state": "announce", "doing": card["name"], "branch": branch, "repo": card_repo(ws)}
+    if named:
+        body["card"] = card["id"]
     if harness:
         body["harness"] = harness
     if account:
@@ -589,6 +636,10 @@ UNBOUND = {
     "no-executed-card": [("declare: <session> token <t> card <ulid> <name> [<verb>:<n>[,<n>] …]",
                           "first, then claim the branch again")],
     "trunk": [("taking: branch <name> token <t>", "for the branch the work is on, since a trunk is never a card's")],
+    "card-unknown": [("taking: branch <name> --card <id> token <t>",
+                      "with a card id as the cards read answers it, for no card holds the one named")],
+    "card-not-executed": [("taking: branch <name> --card <id> token <t>",
+                           "with a card this session executes, declaring the card first if it should execute another")],
 }
 
 

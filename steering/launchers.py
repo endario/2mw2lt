@@ -179,7 +179,11 @@ def accounts(launchers: list[dict], readings: list[dict], run: Callable[[list[st
             why[launcher["path"]] = f"its reading names vendor {read[0]}, declared {launcher['vendor']}"
             continue
         out.append({"vendor": read[0], "account_id": read[1], "launcher": launcher, "where": where})
-    return out
+    # A launcher the agent wrote for an env file steps aside for a declared one placing the same
+    # home (#6001): the declaration is the owner's word, and two launchers for one account is a
+    # choice the launch would make for no reason.
+    declared_homes = {a["where"] for a in out if not a["launcher"].get("synthesized")}
+    return [a for a in out if not a["launcher"].get("synthesized") or a["where"] not in declared_homes]
 
 
 def offer(declared_: list[dict], readings: list[dict] | None, log: Callable[[str], None],
@@ -225,6 +229,21 @@ def census_offer(kept: dict, found: list[dict] | None, declared_paths: set[str],
     if found is None and not kept and declared_paths:
         return None
     return list(kept.values())
+
+
+def withdrawn(kept: dict, dead: set[str] | None) -> list[dict]:
+    """The accounts a read withdrew, as a census carries them beside the offer (#6031): each dead
+    launcher's kept offer, read before `census_offer` withdraws it, deduped and sorted by account.
+    A home offered while its account lived can hold a login that has since lapsed, and the seat
+    hears the withdrawal with the sessions it strands. A launcher signed out before it ever
+    offered is not here: nothing was withdrawn. `dead` None is a read that failed, which
+    withdraws nothing."""
+    out: list[dict] = []
+    for a in sorted((a for path, a in kept.items() if path in (dead or ())),
+                    key=lambda a: (a["vendor"], a["account_id"])):
+        if not any(o["vendor"] == a["vendor"] and o["account_id"] == a["account_id"] for o in out):
+            out.append(a)
+    return out
 
 
 def for_launch(offered: list[dict], fresh: list[dict], run: Callable[[list[str]], str] = _run) -> list[dict]:

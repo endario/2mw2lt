@@ -119,7 +119,11 @@ def _settled_refusal(e) -> str:
     if e.code == "not-holding-branch":
         return refusal.refuse(str(e), send=[("taking: branch <name> token <t>",
                                              "to claim the branch this checkout is on, then send this again")])
-    return refusal.refuse(str(e), send="/2mw2lt:gate")
+    if e.code == "serial-not-served":
+        why = f"{e}: {e.detail}" if e.detail else str(e)
+        return refusal.refuse(why, send=[("gate: review <repo> <branch> pr <n> token <t>",
+                                          "to commission a round on this head, and carry its pass once it ships")])
+    return refusal.refuse(f"{e}: {e.detail}" if e.detail else str(e), send="/2mw2lt:gate")
 
 
 def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, retry_id: str | None) -> int:

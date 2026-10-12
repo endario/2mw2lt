@@ -40,6 +40,11 @@ Boundary: `<boundary>` — session <your session>.
 **Links.** The record, the plan, the issues filed, and the lessons proposed.
 ```
 
+A `handover` note is read by a builder with none of your context, perhaps a smaller model: make
+**Next** the plan's path and the task to start from, the acceptance criteria, and the traps this
+work has already hit. Push the branch first: the builder starts from the remote, and a commit only
+in your worktree never reaches it.
+
 **3. Record it.** Lessons are optional: at most eight, each one rule and the mistake it prevents
 in 500 characters or fewer, scoped to repository paths or `"*"`.
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import spool
 
@@ -153,10 +154,52 @@ def origin_slug(anchor: Path, timeout: float | None = None) -> str | None:
     not: the same repository is cloned to a different directory, under a different name,
     on the next machine.
     """
+    remote = origin_url(anchor, timeout)
+    tail = (remote or "").removesuffix(".git").replace(":", "/").rsplit("/", 2)[-2:]
+    return "/".join(tail) if len(tail) == 2 and all(tail) else None
+
+
+def origin_url(anchor: Path, timeout: float | None = None) -> str | None:
+    """This checkout's origin URL, or None when it names none."""
     out = subprocess.run(["git", "-C", str(anchor), "remote", "get-url", "origin"],
                          capture_output=True, text=True, timeout=timeout)
-    tail = out.stdout.strip().removesuffix(".git").replace(":", "/").rsplit("/", 2)[-2:]
-    return "/".join(tail) if len(tail) == 2 and all(tail) else None
+    return out.stdout.strip() or None
+
+
+def ssh_host(alias: str, timeout: float | None = None) -> str:
+    """The host ssh connects `alias` to, as this machine's configuration resolves it: the alias
+    itself when ssh cannot say, since a literal host is its own answer."""
+    try:
+        out = subprocess.run(["ssh", "-G", alias], capture_output=True, text=True,
+                             timeout=timeout or 10)
+    except (OSError, subprocess.SubprocessError):
+        return alias
+    for line in out.stdout.splitlines():
+        key, _, value = line.partition(" ")
+        if key.strip() == "hostname":
+            return value.strip()
+    return alias
+
+
+def github_slug(remote: str, timeout: float | None = None) -> str | None:
+    """`owner/name` when remote is a GitHub repository however it is spelled, else None. The host
+    is checked, an ssh alias resolved first: a path alone would take any server's `…/owner/name`
+    for GitHub's (machine/internal/checkout/slug.go)."""
+    remote = remote.strip()
+    if "://" in remote:
+        parts = urlsplit(remote)
+        host, path = parts.hostname or "", parts.path
+        if parts.scheme == "ssh":
+            host = ssh_host(host, timeout)
+    elif ":" in remote and not remote.startswith(("/", ".")):
+        host, _, path = remote.partition(":")
+        host = ssh_host(host.rpartition("@")[2], timeout)
+    else:
+        return None
+    if (host or "").lower() != "github.com":
+        return None
+    segments = path.strip("/").removesuffix(".git").split("/")
+    return "/".join(segments) if len(segments) == 2 and all(segments) else None
 
 
 DEFAULT_AGENT_PORT = "9990"

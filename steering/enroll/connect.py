@@ -463,9 +463,14 @@ def serving(port: str, timeout: float = 2.0) -> list[str] | None:
             return None
 
 
-def agent_says(port: str, workspace: Path, session: str) -> tuple[str | None, str | None]:
+def agent_says(port: str, workspace: Path, session: str, silent_ok: bool = False) -> tuple[str | None, str | None]:
     """(the port to print, what to say about it). A port is printed only when the agent on it
     serves this workspace or cannot say which it serves.
+
+    With `silent_ok`, a port nothing answers on is printed with a note instead of withheld: the
+    caller arms and lets the transport's own reopening wait the agent out, so an agent
+    mid-restart is a wait rather than a refusal (#5974). An agent naming another workspace is
+    withheld whatever the flag says — that diagnosis is real, not transient.
 
     The refusal a session gets for holding a stream at another workspace's agent is the
     documented one for a session that is not enrolled, so it reads as a bad credential and
@@ -478,6 +483,10 @@ def agent_says(port: str, workspace: Path, session: str) -> tuple[str | None, st
               else f", recorded by {workspace}")
     served = serving(port)
     if served is None:
+        if silent_ok:
+            return port, (f"127.0.0.1:{port}{whence} did not answer; arming anyway: the hold "
+                          f"reopens until this workspace's agent answers, and says so while it "
+                          f"waits")
         # Not "no agent serves this workspace" and not "was not found": nothing answered on the
         # one port asked, after a retry, and an agent on another is exactly what this workspace
         # failed to record. "Not found" reads as a standing condition and its own remedy —
@@ -590,6 +599,22 @@ def plugin_out(line: str, note: str) -> tuple[str | None, str | None]:
     return (line.split(" is behind ", 1)[0] + note if note else None), line
 
 
+def card_line(ws: Path, session: str, psession: str) -> str:
+    """`card: <id> (<name>)`, each live card this session executes at its epoch, or `card: none`.
+    Leaving ends a session's executor engagement and connecting again does not restore it, so a
+    resumed session told nothing would go on as if it still held its card (#6069)."""
+    import session_routes  # noqa: E402
+    # Informational, as repo_line is: a read that fails names why rather than ending connect.
+    try:
+        _, token = own_enrolment(ws, psession, session)
+        cards = session_routes.executing_cards(session, token)
+        if not cards:
+            return "card: none: this session executes no live card; the brain engages one with card_session"
+        return "card: " + "; ".join(f"{c['id']} ({c['name']})" for c in cards)
+    except Exception as e:
+        return f"card: unknown ({type(e).__name__}: {e})"
+
+
 def repo_line(ws: Path) -> str:
     """`repo: owner/name`, the repository this workspace serves as its door names it. A checkout's
     `origin` may be an SSH host alias, which `gh` cannot resolve; `gh -R` with this line does not
@@ -689,6 +714,7 @@ def main(argv: list[str]) -> int:
         print(f"account: {acct}")
     print(f"speak: {say_invocation(h, psession, session)}")
     print(repo_line(ws))
+    print(card_line(ws, session, psession))
     # The stream this session holds at its agent names the incarnation it belongs to, and this
     # is the only place the recipe derives it.
     print(f"STEERING_RUNTIME_ID={rid}")

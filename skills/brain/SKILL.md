@@ -158,12 +158,17 @@ report to the owner because a notice arrived. A turn
 that answers a frame changing nothing the owner knows — a notice with nothing to delegate, a
 routine say — is one line at most, and no line when nothing in it is new to them.
 
-`data: {"kind": "fleet", "accounts": [{"account", "provider", "vendor", "verdict", "tightest", "incentive", "sessions"}]}`
+`data: {"kind": "fleet", "accounts": [{"account", "provider", "vendor", "verdict", "tightest", "incentive", "sessions", "owner", "serves", "labels"}]}`
 is every account's verdict,
-`account` its number and `sessions` this workspace's sessions drawing on it, sent when you take the
-seat, when you hold, and whenever any account's verdict or rank moves. It is the whole fleet every
+`account` its number, `sessions` this workspace's sessions drawing on it and `owner` the member who
+brought it to the platform, as a `from: console user` line names them, sent when you take the
+seat, when you hold, and whenever any account's verdict or rank moves. An account that reads
+`serves: false` and `excluded:unserving` is one its owner has not enabled for this team, and only
+its owner can. `labels` is `[{"member", "label"}]`: each member's own name for the account, the
+member written as `owner` is. It is the whole fleet every
 time, so the last one is the answer. Every held session, you included, is also sent
-`data: {"kind": "usage", "account", "verdict", "tightest", "incentive"}`: its own account's row,
+`data: {"kind": "usage", "account", "verdict", "tightest", "incentive", "label"}`: its own account's row
+and `label`, its member's name for it or `null`,
 on each hold and when that row's verdict or rank moves. `account` is `null` with an `unread` verdict
 when the session names no account (`no-account`) or no machine has read it yet (`no-reading`).
 The daemon ranks; you follow the ranking and quote it,
@@ -440,6 +445,10 @@ through the API, from any machine: `requested`, `refused`, `lapsed`, `launched` 
 session, or `launch-refused` with the agent's reason. Go waits a launch with no room rather than
 refusing it (`worker-full`, `host-full`), and the waiting line names the sessions it could
 reclaim, each as its standing reads: close or drive one, or drop a keep you no longer need. Go has no read of one launch.
+A launch its machine refused is placed again, on a machine that has not refused it, for a few
+attempts; it waits `launch-refused` meanwhile. Do not launch it again yourself. A launch asked for while older ones
+wait for a freed place answers `behind-waiting` and is placed in its turn. A launch pinned to a
+machine that stops being a worker here ends `launch-pin-unknown`.
 
 `rest.py` reads `/facts?state=<kind>` (the ledger, redacted, a page at a time; `--all` follows it
 to the head). Read it; do not reach for the ledger on the host.
@@ -476,7 +485,9 @@ account default decides the level. The daemon picks the best-ranked account of t
 to, and one whose usage it cannot read only after every ranked one, as unknown. `account <n>` starts
 that vendor's account, as the usage frames number it, or refuses; it never falls back to another. On
 Go the number is the one the team gave the account when it was first seen, never a machine's launcher
-name; the launch's answer names it with the account's id and whose it is. `on` names a machine by the name `/machines` shows (`on M4`, `on "M4 Pro"`), as
+name; the launch's answer names it with the account's id and whose it is. A member who names an account by
+a label ("launch on acme") means the label that `from:` line's member gave it in `labels`; write the
+team's number before `launch:` or `rehome:`, since the wire takes numbers and ids only. `on` names a machine by the name `/machines` shows (`on M4`, `on "M4 Pro"`), as
 `/machines` lists it (`m-<id>`), or as `/sessions` names its `machine`, and one naming no live
 machine is refused at once. A launch still waiting is withdrawn with
 `withdraw: token @lease <launch id>`, so it is never placed. Name the vendor
@@ -572,6 +583,48 @@ be out of its turn: a busy one is refused, and stopping one early is your delibe
 and never on one already stopped by its limit; compact on the new account afterwards with
 `control:` instead. A move across Anthropic organizations keeps the conversation but not the
 session's earlier thinking. Once it settles `rehomed`, relay the session to continue its card.
+
+## Move a card to another model
+
+**Plan the split when you delegate.** When a card's design is hard and much of its build is not,
+launch the designing session on a strong model with a brief that names the intended builders,
+matched to each part of the work by what it needs: a strong model for the contested core, a routine
+one (`glm-5.3`) for ordinary code and tests, a small one (`glm-5.3-flash`) for mechanical
+satellites and docs. Ask for the plan written for those builders.
+
+**The plan is gated.** Every major card owes a written plan. One that hands tasks to builders
+other than its author is also gated before any of its build is handed over: committed under its
+subject's `plans/<n>/plan.md`, naming a builder for each task, and passed by the critic
+(`gate.py <session> critic <plan path>` ending `build it`), since a lesser model needs its
+precision. Launch no builder on a card whose plan has not passed. Each builder takes its tasks by a fresh
+launch on the card in turn, or, where the plan splits into independent pieces, on its own card
+`part-of` the major one.
+
+A card planned on a strong model is built on a cheaper model, provider or account in one of two
+ways (#5856). The session holding the
+card may propose the move with a `say` naming the target and the way it prefers, after writing a
+`handover` checkpoint; you decide, and say why when you overrule it.
+
+| Prefer | When |
+|---|---|
+| Fresh | The plan is committed and written for a reader with no context; the target is a small model (flash); the conversation is long and mostly exploration; or the move crosses machines. |
+| Rehome | What matters is in the conversation and not in any file: mid-build debugging state, or an account running out with the work half done. Compact first while the source account can still run it. |
+
+Fresh is a launch naming the card, with a brief pointing at the handover note:
+
+```bash
+say "$(cat <<'LAUNCH'
+launch: token @lease claude [on <node>] vendor <vendor> [account <n>] model <model> effort <level> card <card> because <why>
+brief: Continue <card>: read the handover checkpoint <note url>, then the plan it names, and take the tasks it gives <model>.
+LAUNCH
+)"
+```
+
+Launch only once the holder's branch is pushed: the new session starts from the remote, and the
+daemon cannot see a commit left in the old worktree. The answer that starts the session makes it the card's executor, ending the previous one's
+engagement, and its brief opens with taking a worktree, then your words and the card's knowledge.
+Retire the previous session once the new one acknowledges its brief. If it is told to you as
+`launch-brief-unheard`, give the card back to the previous session with `card_session` as `executor`, or launch again.
 
 ## Keep a session fit for its work
 
@@ -828,8 +881,8 @@ Today's models are strong enough that `high` everywhere buys little and spends a
 
 | The work | Launch |
 |---|---|
-| Groundbreaking, highly innovative, technically demanding design | Fable 5.1 (`claude-fable-5-1`) at `medium` |
-| A standard large epic's design | Opus 5.5 at `high` |
+| An exceptionally groundbreaking feature, beyond anything the platform has done | Fable 5.1 (`claude-fable-5-1`) or the latest GPT Astra at `medium`, and only then (owner's ruling, 2026-10-12) |
+| Any other design, a large epic's or a demanding visual surface's included | Opus 5.5 at `high` |
 | Standard engineering, from the start or once its spec settles | Opus 5.5 at `medium`, or `low` where the work is simple; or an equal such as the latest GPT Sol |
 | Standard engineering that is well scoped and low-risk | Sonnet 5.5 at `high` or `xhigh`, or an equal |
 | Small, routine work | GLM 5.3 Flash at `high` (its `high` is about a frontier model's `low`), or an equal such as the latest GPT Luna |
@@ -854,7 +907,7 @@ same session lowered with `control:`, or a fresh launch. The rules below govern 
 already running.
 
 - Design, critic, security-shaped and cross-cutting work goes to a session **observed at `high`**,
-  or a Fable or Opus session at `medium`.
+  or an Opus session at `medium`.
   Which model is strongest is your judgement: the registry holds names, not an ordering. An Opus
   session at `medium` takes this work too (owner's ruling, 2026-09-19, repeated 2026-09-22): delegate
   it, send no `effort: … high` for it, and never ask the owner to raise it.

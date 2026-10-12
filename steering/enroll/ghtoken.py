@@ -54,9 +54,10 @@ def _keep(path: Path, token: str, until: float) -> None:
 
 def ask(session: str, enrolment: str) -> dict:
     """Go's answer to a mint on the session's own credential. Go records nothing to replay, so the
-    key is fresh; a paced answer is waited out by `session_routes.post`."""
+    key is fresh and a lost answer is not resent — a resend could mint twice; a paced answer is
+    waited out by `session_routes.post`."""
     return session_routes.post(f"/sessions/{session}/forge-token", {}, uuid.uuid4().hex,
-                               session_routes.SESSION_CARRIER, enrolment, TIMEOUT)
+                               session_routes.SESSION_CARRIER, enrolment, TIMEOUT, resend=False)
 
 
 def token(ws: Path, now=time.time, asked=ask) -> str:

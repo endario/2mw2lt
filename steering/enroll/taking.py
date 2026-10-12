@@ -17,6 +17,7 @@ import python_floor  # noqa: E402
 python_floor.require()
 
 import os
+import re
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -38,6 +39,12 @@ def main(argv: list[str]) -> int:
     if parsed is None:
         return error("taking", "malformed speaker flags")
     flags, args = parsed
+    card = ""
+    if "--card" in args:
+        i = args.index("--card")
+        if i + 1 >= len(args) or not re.fullmatch(r"[0-9a-f]{24}", args[i + 1]):
+            return error("taking", "taking --card names a card id, as the cards read answers")
+        card, args = args[i + 1], args[:i] + args[i + 2:]
     if not args or not args[0] or args[0].startswith("-") or any(c.isspace() for c in args[0]):
         return error("taking", "taking requires a session name")
     if len(args) in (2, 3) and args[1] == "branch":
@@ -53,6 +60,8 @@ def main(argv: list[str]) -> int:
         what = args[1].removeprefix("#")
     else:
         return error("taking", "taking requires an issue number or branch")
+    if card and not what.startswith("branch "):
+        return error("taking", "taking --card names the card a branch claim binds")
     session = args[0]
     ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
     import session_routes
@@ -70,8 +79,25 @@ def main(argv: list[str]) -> int:
         if what.startswith("branch "):
             # A lost answer can only be rerun as a new announce, and the CLI takes no --retry:
             # no id is printed for one nobody can resend.
+            candidates = session_routes.executing_cards(session, token)
+            named = None
+            if card:
+                named = next((c for c in candidates if c.get("id") == card), None)
+                if named is None:
+                    said = "; ".join(f"{c['id']} ({c['name']})" for c in candidates) or "none it executes"
+                    print(f"card {card} is no live card this session executes: {said}", file=sys.stderr)
+                    return 1
+            elif len(candidates) > 1:
+                # Without a named card the claim binds to whichever card was engaged last, which
+                # flips a branch between two cards' work (#5352): refuse naming both.
+                said = "; ".join(f"{c['id']} ({c['name']})" for c in candidates)
+                print(f"ambiguous: {session} executes {len(candidates)} live cards — {said}; name one "
+                      f"with taking.py {session} branch {what.removeprefix('branch ').strip()} --card <id>",
+                      file=sys.stderr)
+                return 1
             reply = session_routes.announce_branch(session, token, what.removeprefix("branch ").strip(),
-                                                   ws, occurrence())
+                                                   ws, occurrence(), card=named,
+                                                   resolved=candidates[0] if candidates else None)
         else:
             reply = session_routes.claim_issue(session, token, session_routes.card_repo(ws),
                                                int(what))

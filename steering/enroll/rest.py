@@ -22,7 +22,9 @@ import python_floor  # noqa: E402
 
 python_floor.require()
 
+import http.client
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -57,6 +59,10 @@ GO_UNSERVED = (
 
 def fetch(url: str, token: str | None, method: str = "GET", body: bytes | None = None,
           key: str | None = None) -> tuple[int, dict]:
+    """One call, sent again within one budget the call owns when the wire loses the answer — no
+    answer, a reset, a gateway speaking for a silo that is down, an answer that is not JSON, as
+    a captive portal's is — one line of progress per resend (#5974). A POST without an
+    idempotency key is never resent: the server could not tell the resend from a second write."""
     headers = {"Accept": "application/json", "User-Agent": door.USER_AGENT}
     if token:
         headers.update(session_routes.session_headers(token))
@@ -66,14 +72,28 @@ def fetch(url: str, token: str | None, method: str = "GET", body: bytes | None =
         headers["Idempotency-Key"] = key
     req = urllib.request.Request(url, headers=headers, method=method,
                                  data=(body if body is not None else b"") if method == "POST" else None)
-    try:
-        with door.open_direct(req, timeout=door.SEND_TIMEOUT) as r:
-            return r.status, json.loads(r.read() or b"{}")
-    except urllib.error.HTTPError as e:
+    again = door.resender(time.monotonic(), f"rest: {url}",
+                          action="resending under the same key" if key else "asking again")
+    resendable = method != "POST" or bool(key)
+    while True:
         try:
-            return e.code, json.loads(e.read() or b"{}")
-        except ValueError:
-            return e.code, {"title": f"the door answered {e.code}"}
+            with door.open_direct(req, timeout=door.SEND_TIMEOUT) as r:
+                return r.status, json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            paced = (e.headers.get("Retry-After") or "").strip() if e.headers else ""
+            if resendable and e.code in session_routes.GATEWAY_DOWN and not (e.code == 503 and paced) \
+                    and (pause := again(f"the gateway answered {e.code}")) is not None:
+                time.sleep(pause)
+                continue
+            try:
+                return e.code, json.loads(e.read() or b"{}")
+            except ValueError:
+                return e.code, {"title": f"the door answered {e.code}"}
+        except (urllib.error.URLError, OSError, TimeoutError, http.client.HTTPException, ValueError) as e:
+            if resendable and (pause := again(f"no answer ({e})")) is not None:
+                time.sleep(pause)
+                continue
+            raise
 
 
 def own_bearer(flags: dict[str, str]) -> tuple[str | None, str | None]:
@@ -143,7 +163,7 @@ def main(argv: list[str], stdin) -> int:
     while True:
         try:
             status, answer = fetch(url, token, method, body, valued.get("--key"))
-        except (urllib.error.URLError, OSError) as e:
+        except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as e:
             print(f"the door at {base} did not answer: {e}", file=sys.stderr)
             return 1
         if not isinstance(answer, dict):
