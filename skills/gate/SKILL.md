@@ -42,6 +42,12 @@ rounds, from a vendor no earlier round used where one can take it, and after its
 refuses another round, as at the ceiling. The round at the ceiling is final without asking. The
 review's run details say the tier and how the final round ran.
 
+`--judge <vendor>[/<model>][@<effort>]` asks for a named judge — for when the owner or the brain
+wants one, as in `--judge openai/gpt-6.1-sol@medium`. The commission is refused when the catalog
+holds no such judge for the tier (`judge-unknown`) or when the only judges matching it wrote the
+change (`judge-authored`), and a busy pinned judge waits like any gate. Never use it to steer a
+verdict: the choice of judge stays steering's otherwise.
+
 A standard round of a small diff, 50 changed lines unless the team's owner set another limit,
 runs read-only: no shell, network or writes. A migration, workflow, authorization,
 credential, isolation, release or gate path always runs full, and so does a heavy or final round, so name `--tier heavy` for a

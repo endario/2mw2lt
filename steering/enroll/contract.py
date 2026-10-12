@@ -503,6 +503,33 @@ StreamUplink = typing.TypedDict("StreamUplink", {
     "id": "str",
 })
 
+# StreamPolicy is the team's policy for the stream's machine (2395-machine-policy design, decision
+# 5): every machine key's effective value, and the version that names them, written when the stream
+# opens and again whenever the version moves. The agent answers it on POST …/agent/policy.
+StreamPolicy = typing.TypedDict("StreamPolicy", {
+    "kind": "str",
+    "team": "str",
+    "version": "str",
+    "values": "dict[str, typing.Any] | None",
+})
+
+# PolicyReceipt is the agent's answer to a policy frame: the version it holds now and each key of it
+# that it could not apply, with why.
+PolicyReceipt = typing.TypedDict("PolicyReceipt", {
+    "uplink": "str",
+    "version": "str",
+    "refused": "list[PolicyRefusal] | None",
+})
+
+PolicyRefusal = typing.TypedDict("PolicyRefusal", {
+    "key": "str",
+    "why": "str",
+})
+
+PolicyReceiptAnswer = typing.TypedDict("PolicyReceiptAnswer", {
+    "status": "str",
+})
+
 # StreamEnvelope is a directive written to a hold.
 StreamEnvelope = typing.TypedDict("StreamEnvelope", {
     "kind": "str",
@@ -1723,6 +1750,18 @@ GateCarryAnswer = typing.TypedDict("GateCarryAnswer", {
     "head": "str",
     "proof": "str",
     "replayed": "bool",
+})
+
+# GateCarryRead is a carry and where its status stands: its effect's state, pending, sent or
+# uncertain until its decision, settled once posted, or failed with the check that refused it.
+GateCarryRead = typing.TypedDict("GateCarryRead", {
+    "id": "str",
+    "repo": "str",
+    "pr": "int",
+    "head": "str",
+    "proof": "str",
+    "state": "str",
+    "check": "str | None",
 })
 
 # GateLiftBody is a lift of a gate series by one round past its ceiling: the series as its gate keys
@@ -3074,6 +3113,7 @@ ListedStatus = typing.TypedDict("ListedStatus", {
 Setting = typing.TypedDict("Setting", {
     "key": "str",
     "kind": "str",
+    "unit": "typing.NotRequired[str]",
     "title": "str",
     "says": "str",
     "min": "typing.NotRequired[int | None]",
@@ -3084,6 +3124,17 @@ Setting = typing.TypedDict("Setting", {
     "version": "int",
     "changed_by": "typing.NotRequired[str | None]",
     "changed_at": "typing.NotRequired[str | None]",
+    "on_machine": "typing.NotRequired[SettingOnMachine | None]",
+})
+
+# SettingOnMachine is a machine's answer to its policy for one key (2395-machine-policy design,
+# decision 7): applied, waiting for the machine to answer this version, refused with why, or
+# offline since seen_at, holding the policy it answered at held_at.
+SettingOnMachine = typing.TypedDict("SettingOnMachine", {
+    "state": "str",
+    "why": "typing.NotRequired[str]",
+    "seen_at": "typing.NotRequired[str | None]",
+    "held_at": "typing.NotRequired[str | None]",
 })
 
 # SettingList is a workspace's settings, and whether the reader may change them.
@@ -3733,6 +3784,8 @@ ROUTES = frozenset({
     "POST /api/v1/teams/{team}/installations",
     "POST /api/v1/teams/{team}/invitations",
     "POST /api/v1/teams/{team}/invitations/{invitation}/redeem",
+    "GET /api/v1/teams/{team}/machines/{machine}/settings",
+    "POST /api/v1/teams/{team}/machines/{machine}/settings/{key}",
     "POST /api/v1/teams/{team}/members",
     "POST /api/v1/teams/{team}/name",
     "GET /api/v1/teams/{team}/settings",
@@ -3785,6 +3838,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/gates/bench-lifts",
     "GET /w/{workspace}/api/v1/gates/benches",
     "POST /w/{workspace}/api/v1/gates/carries",
+    "GET /w/{workspace}/api/v1/gates/carries/{carry}",
     "POST /w/{workspace}/api/v1/gates/lifts",
     "GET /w/{workspace}/api/v1/gates/stats",
     "GET /w/{workspace}/api/v1/gates/{gate}",
@@ -3871,6 +3925,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/steering/agent/leaving",
     "POST /w/{workspace}/steering/agent/model",
     "GET /w/{workspace}/steering/agent/package/{sha}",
+    "POST /w/{workspace}/steering/agent/policy",
     "POST /w/{workspace}/steering/agent/reach",
     "POST /w/{workspace}/steering/agent/reading",
     "POST /w/{workspace}/steering/agent/received",
@@ -3907,6 +3962,7 @@ QUERY = {
     "GET /w/{workspace}/api/v1/rulings": {"state": frozenset({"unacknowledged"}), "limit": None, "next": None},
     "GET /w/{workspace}/api/v1/sessions": {"gone": frozenset({"1"})},
     "GET /w/{workspace}/api/v1/snapshot": {"feed": None},
+    "GET /w/{workspace}/steering/agent/stream": {"accepts": frozenset({"policy"})},
 }
 
 

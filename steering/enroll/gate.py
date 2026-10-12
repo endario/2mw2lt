@@ -38,10 +38,11 @@ MADE = re.compile(r"^(?:commit(?: \((?:amend|merge)\))?:|cherry-pick:|revert:|"
 
 
 def gate_flags(argv: list[str]) -> tuple[list[str], str] | None:
-    """The arguments without `--tier`, `--exclude` and `--final`, and what they add to a commission's
-    line (doc 127): the tier a series runs at, vendors that wrote the branch though no session held
-    it (doc 161 §6), and a round declared final."""
-    rest, tier, exclude, final = [], "", "", ""
+    """The arguments without `--tier`, `--exclude`, `--judge` and `--final`, and what they add to a
+    commission's line (doc 127): the tier a series runs at, vendors that wrote the branch though no
+    session held it (doc 161 §6), a judge the owner or the brain asked for (5907 slice-2 D3), and a
+    round declared final."""
+    rest, tier, exclude, judge, final = [], "", "", "", ""
     it = iter(argv)
     for a in it:
         if a == "--final":
@@ -61,9 +62,30 @@ def gate_flags(argv: list[str]) -> tuple[list[str], str] | None:
             if any(vendor not in gate_grammar.REVIEWERS for vendor in named.split(",")):
                 return None
             exclude = f" exclude {named}"
+        elif a == "--judge" or a.startswith("--judge="):
+            named = a.split("=", 1)[1] if "=" in a else next(it, "")
+            if judge or parse_judge(named) is None:
+                return None
+            judge = f" judge {named}"
         else:
             rest.append(a)
-    return rest, tier + exclude + final
+    return rest, tier + exclude + judge + final
+
+
+# A judge pin is `<vendor>[/<model>][@<effort>]`: no empty field, no whitespace, nothing past the
+# commission row's 128-char cap, and `@` only as a separator, so the parse is deterministic.
+JUDGE_SPEC = re.compile(r"(?P<vendor>[^/@\s]{1,128})(?:/(?P<model>[^@\s]{1,128}))?(?:@(?P<effort>[^@\s]{1,128}))?")
+
+
+def parse_judge(spec: str) -> dict | None:
+    """The pin as the commission body's judge object, only the fields it names, None when the spec is
+    malformed."""
+    if not spec:
+        return None
+    named = JUDGE_SPEC.fullmatch(spec)
+    if not named:
+        return None
+    return {k: v for k, v in named.groupdict().items() if v}
 
 
 from verb_help import error, help_requested, script_help  # noqa: E402
@@ -159,9 +181,13 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
     if kind in ("status", "pr"):
         return go_read(ws, session, flags, kind, what)
     tier = re.search(r" tier (\S+)", extra)
+    judge = re.search(r" judge (\S+)", extra)
     final = " final" in extra
-    if extra.replace(tier[0] if tier else "", "").replace(" final", ""):
-        print(f"a {kind} on a Go workspace takes --tier and --final only, so far", file=sys.stderr)
+    rest = extra
+    for piece in (tier[0] if tier else "", f" judge {judge[1]}" if judge else "", " final" if final else ""):
+        rest = rest.replace(piece, "", 1)
+    if rest.strip():
+        print(f"a {kind} on a Go workspace takes --tier, --judge and --final only, so far", file=sys.stderr)
         return 1
     here = Path.cwd()
     repo = origin_slug(here, timeout=5)
@@ -191,6 +217,8 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
             body["head"] = at
     if tier:
         body["tier"] = tier
+    if judge:
+        body["judge"] = parse_judge(judge[1])
     if final:
         body["final"] = True
     this = retry_id or occurrence()
@@ -226,6 +254,9 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
 GO_READ_PAGES = 20
 # How long a carry waits for GitHub to deliver a head it was refused as unobserved, and how often it asks.
 CARRY_UNOBSERVED_WAIT, CARRY_UNOBSERVED_POLL = 60.0, 5.0
+# How long a carry waits for its status's decision, and how often it asks: the decision takes a pass
+# of the effect queue, or half a minute more while a read names the pull request's base.
+CARRY_DECISION_WAIT, CARRY_DECISION_POLL = 60.0, 3.0
 
 
 def go_read(ws: Path, session: str, flags, kind: str, what: str) -> int:
@@ -340,7 +371,7 @@ def go_carry(ws: Path, session: str, flags, pr: int, retry_id: str | None) -> in
             answer = session_routes.write("/gates/carries", {"repo": repo, "pr": pr, "head": at, "equivalent": equivalent},
                                          this, session_routes.SESSION_CARRIER, token)
             if answer.get("id") and answer.get("proof"):
-                reply = f"carried: the pass on #{pr} to {at[:12]}, proved {answer['proof']}"
+                reply = carry_decided(pr, at, answer, token)
             else:
                 uncertain, reply = True, refusal.retry("Go answered the carry without naming it")
         except session_routes.Refused as e:
@@ -360,6 +391,31 @@ def go_carry(ws: Path, session: str, flags, pr: int, retry_id: str | None) -> in
     if uncertain:
         print(f"the carry may have landed: send it again with --retry={this} to learn which", file=sys.stderr)
     return 1 if reply.startswith("REJECTED") else 0
+
+
+def carry_decided(pr: int, at: str, answer: dict, token: str) -> str:
+    """What became of a carry Go admitted: its status posted, not posted with the check its decision
+    named, or still awaiting that decision when the wait is spent. Go admits a carry before it
+    decides its status, so an admission alone is not a carry (#6112)."""
+    import refusal
+    import session_routes
+    said = f"the pass on #{pr} to {at[:12]}, proved {answer['proof']}"
+    told = "you are told when it is posted or refused"
+    until, state = time.monotonic() + CARRY_DECISION_WAIT, "pending"
+    print(f"waiting for the decision on {at[:12]}'s review status", file=sys.stderr)
+    while True:
+        try:
+            read = session_routes.get(f"/gates/carries/{answer['id']}", token)
+        except (session_routes.Refused, session_routes.Unsent) as e:
+            return f"carried: {said}; its status could not be read ({e}): {told}"
+        state = read.get("state") or state
+        if state == "settled":
+            return f"carried: {said}; review status posted"
+        if state == "failed":
+            return refusal.refuse(f"review status not posted on {at[:12]}: {read.get('check')}", send="/2mw2lt:gate")
+        if time.monotonic() >= until:
+            return f"carried: {said}; its status awaits its decision ({state}): {told}"
+        time.sleep(CARRY_DECISION_POLL)
 
 
 def made_here(reflog: str) -> set[str]:

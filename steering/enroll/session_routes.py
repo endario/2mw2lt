@@ -721,6 +721,9 @@ def seat_launch(session: str, token: str, body: dict, key: str) -> str:
         return f"launched: {answer['id']} {body['harness']}{on}{_overloaded(answer.get('host_overloaded'))}"
     if answer.get("state") == "admitted":
         return f"launching: {answer['id']} {body['harness']}{on}{_overloaded(answer.get('host_overloaded'))}"
+    if answer.get("state") == "withdrawn":
+        # Ended at its publish, a pinned account barred or off, its pinned machine gone: not waiting.
+        return f"launch withdrawn: {answer['id']} {body['harness']}{on}: {answer.get('reason')}"
     return f"launch waiting: {answer['id']} {answer.get('reason') or answer.get('state')}{on}{_reclaimable(answer.get('reclaimable'))}"
 
 
