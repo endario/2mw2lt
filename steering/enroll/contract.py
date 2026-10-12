@@ -1055,6 +1055,23 @@ DirectiveIssue = typing.TypedDict("DirectiveIssue", {
     "body": "str",
 })
 
+# Dispatch is the body of POST /dispatches: the owner's own directive to the session To names
+# (doc 193).
+Dispatch = typing.TypedDict("Dispatch", {
+    "to": "str",
+    "text": "str",
+})
+
+# DispatchAnswer is where a dispatch went: the directive's id, open in the session's slot or
+# queued behind its open one, whether the key had sent it already, and its place on the
+# workspace's feed.
+DispatchAnswer = typing.TypedDict("DispatchAnswer", {
+    "id": "str",
+    "state": "str",
+    "replayed": "bool",
+    "position": "int",
+})
+
 # NameClaim is the body of POST /names.
 NameClaim = typing.TypedDict("NameClaim", {
     "key": "str",
@@ -1527,8 +1544,8 @@ GateOffer = typing.TypedDict("GateOffer", {
     "brief": "GateBrief",
 })
 
-# GateBrief is the incumbent gate runner's commission object. Knowledge stays empty until its
-# owner's brief API supplies the block and the identities it contains.
+# GateBrief is the incumbent gate runner's commission object. Knowledge is the block its commission
+# kept, and KnowledgeIDs the keys brief-shown recorded of it; empty where it carried none.
 GateBrief = typing.TypedDict("GateBrief", {
     "commission": "str",
     "kind": "str",
@@ -1558,6 +1575,7 @@ GateContext = typing.TypedDict("GateContext", {
     "plan_rows": "typing.NotRequired[list[GatePlanRow] | None]",
     "rulings": "typing.NotRequired[list[GateRuling] | None]",
     "required_checks": "list[str] | None",
+    "knowledge": "typing.NotRequired[str]",
 })
 
 # GatePlanRow is one plan table row whose label names the pull request's unit.
@@ -2163,6 +2181,33 @@ KnowledgeContract = typing.TypedDict("KnowledgeContract", {
     "path": "str",
     "lane": "str | None",
     "behind": "int",
+})
+
+# KnowledgeBrief answers GET /knowledge/brief (go-el6c-briefs-design.md D3): what a brief for the
+# paths, and the branch's own diff, carries at the applied commit. Partial says a branch's diff or
+# the ownership table could not be read, so contracts and records may be missing.
+KnowledgeBrief = typing.TypedDict("KnowledgeBrief", {
+    "paths": "list[str] | None",
+    "every": "list[KnowledgeUnit] | None",
+    "units": "list[KnowledgeUnit] | None",
+    "contracts": "list[KnowledgeBriefContract] | None",
+    "records": "list[KnowledgeBriefRecord] | None",
+    "source": "KnowledgeSource",
+    "stale": "bool",
+    "drift": "KnowledgeDrift | None",
+    "partial": "bool",
+})
+
+# KnowledgeBriefContract is a shared surface's document and the code it is the contract for.
+KnowledgeBriefContract = typing.TypedDict("KnowledgeBriefContract", {
+    "path": "str",
+    "code": "list[str] | None",
+})
+
+# KnowledgeBriefRecord is a track's document a brief carries.
+KnowledgeBriefRecord = typing.TypedDict("KnowledgeBriefRecord", {
+    "path": "str",
+    "track": "str",
 })
 
 # LaunchBody is the seat's launch: the harness to start and how, where when it names a machine or
@@ -2819,6 +2864,16 @@ ListedSession = typing.TypedDict("ListedSession", {
     "vitals": "SessionVitals | None",
     "origin": "SessionOrigin",
     "standing": "SessionStanding | None",
+    "checkpoint": "ListedCheckpoint | None",
+})
+
+# ListedCheckpoint is a session's current checkpoint: its boundary, its note's URL and when it was
+# recorded.
+ListedCheckpoint = typing.TypedDict("ListedCheckpoint", {
+    "id": "str",
+    "boundary": "str",
+    "note": "str",
+    "at": "str",
 })
 
 # SessionStanding is a session's standing as Go reads it (doc 189 §1), so the Fleet draws it rather
@@ -3301,6 +3356,24 @@ CardDTO = typing.TypedDict("CardDTO", {
     "conclusion": "typing.NotRequired[ConclusionDTO | None]",
     "board": "BoardDTO",
     "gates": "typing.NotRequired[CardGates | None]",
+    "knowledge": "typing.NotRequired[CardKnowledge | None]",
+})
+
+# CardKnowledge is a card's three knowledge stages at the applied knowledge commit.
+CardKnowledge = typing.TypedDict("CardKnowledge", {
+    "commit": "str",
+    "spec": "KnowledgeStage",
+    "record": "KnowledgeStage",
+    "harvest": "KnowledgeStage",
+})
+
+# KnowledgeStage is one stage: `met`, `none`, `unknown`, or the obligation's name while it stands. A
+# met spec names its unit; an owed record names the documents owed and the changed paths that owe them.
+KnowledgeStage = typing.TypedDict("KnowledgeStage", {
+    "state": "str",
+    "unit": "typing.NotRequired[str]",
+    "units": "typing.NotRequired[list[str] | None]",
+    "moved": "typing.NotRequired[list[str] | None]",
 })
 
 # CardGates is a card's gate: every round of the series on its branches and their pull requests,
@@ -3568,6 +3641,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/credentials/{credential}/revocations",
     "POST /w/{workspace}/api/v1/device-approvals",
     "POST /w/{workspace}/api/v1/device-exchanges",
+    "POST /w/{workspace}/api/v1/dispatches",
     "GET /w/{workspace}/api/v1/events",
     "GET /w/{workspace}/api/v1/facts",
     "GET /w/{workspace}/api/v1/gates",
@@ -3586,6 +3660,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/intents",
     "GET /w/{workspace}/api/v1/intents/{intent}",
     "POST /w/{workspace}/api/v1/intents/{intent}/disposition",
+    "GET /w/{workspace}/api/v1/knowledge/brief",
     "GET /w/{workspace}/api/v1/knowledge/contracts",
     "POST /w/{workspace}/api/v1/knowledge/syncs",
     "GET /w/{workspace}/api/v1/knowledge/units",

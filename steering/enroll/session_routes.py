@@ -455,17 +455,26 @@ def edge_card(card: str, unlink: bool, kind: str, to: dict, why: str, token: str
 
 
 def get(path: str, token: str, timeout: float = 10.0) -> dict:
-    """One read on the session's carrier. Raises `Refused` or `Unsent` as a write does."""
-    req = urllib.request.Request(_base() + path, headers=session_headers(token))
-    try:
-        with door.open_direct(req, timeout) as r:
-            return json.loads(r.read() or b"{}")
-    except urllib.error.HTTPError as e:
-        problem = _problem(e)
-        raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
-                      request=_request(e, problem), remedy=_remedy(problem)) from None
-    except (urllib.error.URLError, OSError, TimeoutError) as e:
-        raise Unsent(f"{_base()}{path}: no answer ({e})") from None
+    """One read on the session's carrier, asked again while Go answers 429 or 503, under the
+    bounded backoff a write uses and honouring Retry-After: a read repeats safely, and a wait
+    Go names is waited out before the answer is called refused. Raises `Refused` or `Unsent`
+    as a write does."""
+    started, attempts = time.monotonic(), 0
+    while True:
+        req = urllib.request.Request(_base() + path, headers=session_headers(token))
+        try:
+            with door.open_direct(req, timeout) as r:
+                return json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            problem = _problem(e)
+            pause = _retry_after(e) if e.code in (429, 503) else None
+            attempts += 1
+            if pause is None or attempts >= RETRY_ATTEMPTS or time.monotonic() - started + pause > RETRY_LIMIT:
+                raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
+                              request=_request(e, problem), remedy=_remedy(problem)) from None
+            time.sleep(pause)
+        except (urllib.error.URLError, OSError, TimeoutError) as e:
+            raise Unsent(f"{_base()}{path}: no answer ({e})") from None
 
 
 def machines_here(token: str) -> str:

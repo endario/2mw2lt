@@ -51,7 +51,7 @@ from local_workspace import agent_port, path_header, required_workspace_root, wo
 from moments import moment  # noqa: E402
 import door  # noqa: E402
 from bind import Refused, bind, incarnation, pid_arg  # noqa: E402
-from connect import agent_says, hand_over_pane, harness_of, minted_name, own_enrolment, project_dir, records  # noqa: E402
+from connect import agent_says, hand_over_pane, hand_over_tab, harness_of, minted_name, own_enrolment, project_dir, records  # noqa: E402
 import machine_harness as harness_mod  # noqa: E402
 from process_probe import Undetermined  # noqa: E402
 import spool  # noqa: E402
@@ -280,16 +280,18 @@ def rebound(ws: Path, session: str, token: str, psession: str, rid: str, pid: in
     """None once this process is bound to the session's own enrolment, else the refusal. A bind
     mints nothing: Go refuses it for an enrolment that was retired or detached, so a plugin's
     hold revives no session (#5641). Its answer is said either way. Bound, it hands over its
-    pane as connect does: the targeting Go holds names the earlier incarnation, and a wake,
-    control or retire is refused it until this one's is posted (#5733)."""
+    pane as connect does, or its VS Code tab as a turn's end does: the targeting Go holds names the
+    earlier incarnation, and a wake, control or retire is refused it until this one's is posted
+    (#5733, #5743)."""
     try:
         answer, _ = bind(session, token, psession, pid, provider)
     except (Refused, Undetermined) as why:
         answer = str(why)
     print(f"the stream named a runtime {session} is not bound to; rebinding: {answer}", file=sys.stderr)
     if answer.startswith("bound:"):
-        if pid is not None and (missed := hand_over_pane(ws, provider, psession, rid, pid, project)):
-            print(missed, file=sys.stderr)
+        for hand_over in (hand_over_pane, hand_over_tab) if pid is not None else ():
+            if missed := hand_over(ws, provider, psession, rid, pid, project):
+                print(missed, file=sys.stderr)
         return None
     code = REFUSAL_CODE.search(answer)
     if code and code.group(1) == "incarnation-unobserved":

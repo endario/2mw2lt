@@ -11,14 +11,16 @@ from typing import Callable, Iterable
 
 
 @contextlib.contextmanager
-def locked(entry: Path, block: bool = True):
-    """The entry's lock, held. The lock file is removed with its entry, so one opened before that
-    removal is not the lock any more: it is taken again until the file held is the one named."""
+def locked(entry: Path, block: bool = True, shared: bool = False):
+    """The entry's lock, held: `shared` by readers, alone by whoever changes the entry. The lock
+    file is removed with its entry, so one opened before that removal is not the lock any more: it
+    is taken again until the file held is the one named."""
     path = entry.parent / f"{entry.name}.lock"
+    mode = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
     while True:
         lock = open(path, "a")
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX if block else fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(lock, mode if block else mode | fcntl.LOCK_NB)
         except BlockingIOError:
             lock.close()
             raise

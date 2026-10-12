@@ -355,6 +355,42 @@ def hand_over_pane(ws: Path, provider: str, psession: str, rid: str, pid: int, p
     return None
 
 
+
+def hand_over_tab(ws: Path, provider: str, psession: str, rid: str, pid: int, project: Path, *,
+                  env=os.environ, post=None, instance=None, find=None) -> str | None:
+    """Post the VS Code tab a Claude Code session runs in, as the Stop hook captures it at a turn's
+    end, or answer why it was not. Only for a session the extension started and in no pane: a tmux
+    server started from a VS Code terminal hands its panes the extension's entrypoint (doc 118
+    §2.10), and their route is the pane. The pane is looked up as `hand_over_pane` does, since an
+    editor started from a pane hands its sessions a `TMUX` they do not run in. A rebind posts it,
+    since a resumed idle session ends no turn to post one (#5743)."""
+    import targeting
+    if provider != "claude" or env.get("CLAUDE_CODE_ENTRYPOINT") != targeting.TAB_ENTRYPOINT:
+        return None
+    if find is None:
+        import wakeexec
+        find = wakeexec.pane_of
+    tmux = env.get("TMUX")
+    if find(pid, socket=tmux.split(",", 1)[0] if tmux else None) is not None:
+        return None
+    if instance is None:
+        import runtime_id
+        instance = runtime_id.instance_of
+    rec = targeting.build(provider_session=psession, runtime_id=rid,
+                          observed_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                          entrypoint=targeting.TAB_ENTRYPOINT, pid=pid, instance=instance(pid), cwd=str(project))
+    why = targeting.validate(rec)
+    if why:
+        return f"VS Code tab not handed over: {why}"
+    if post is None:
+        import observe_post
+        post = observe_post.post
+    try:
+        post(rec, ws, 3.0, route="targeting")
+    except Exception as e:
+        return f"VS Code tab not handed over: {e}"
+    return None
+
 AGENT_PORT = os.environ.get("STEERING_AGENT_PORT") or "9990"
 # Seconds: past the agent's own wait for an uplink (UPLINK_WAIT) and for the orchestrator to answer
 # the reach it commits (COMMIT_WAIT), or a reach that landed is reported here as none (#1961).

@@ -351,30 +351,53 @@ def active_at(mtime: float | None) -> str | None:
 
 
 # A background task as Claude Code records it in the transcript (#5711): started, a tool result naming
-# a shell's `backgroundTaskId` or a subagent's `agentId` launched `async_launched` (#5736); ended, the
-# task-notification it queues, or the result of a TaskStop on it.
+# a shell's `backgroundTaskId`, or a subagent's `agentId` launched `async_launched` (#5736) or forked
+# in the background; ended, the task-notification it queues, or the result of a TaskStop on it.
 _NOTIFIED = re.compile(r"<task-notification>\s*<task-id>([^<]+)</task-id>")
-# By transcript: (inode, bytes read, {task: started, Unix ms}, ended tasks). A transcript is appended
-# to, so each read takes only what was written since; one replaced is read again from the start.
-_TASKS: dict[str, tuple[int, int, dict[str, int], set[str]]] = {}
+# A subagent's id as its transcript's file name carries it.
+_AGENT_ID = re.compile(r"[A-Za-z0-9._-]{1,128}")
+# By transcript: (inode, bytes read, {task: started, Unix ms}, ended tasks, {teammate: spawned, Unix
+# ms}). A transcript is appended to, so each read takes only what was written since; one replaced is
+# read again from the start.
+_TASKS: dict[str, tuple[int, int, dict[str, int], set[str], dict[str, int]]] = {}
 _TASKS_LOCK = threading.Lock()
+_MARKS = (b'"backgroundTaskId"', b'"async_launched"', b'"forked"', b'"teammate_spawned"', b'"queue-operation"', b'"task_id"')
 
 
 def background(path: Path, since: int) -> int:
     """How many background tasks the transcript at `path` records starting at or after `since`, in
     Unix milliseconds, and not ending: the tasks of a process that started then and runs them still.
-    A task an earlier process started died with it, whatever its transcript says."""
+    A task an earlier process started died with it, whatever its transcript says.
+
+    A named subagent is a teammate (#5797): spawned `teammate_spawned`, never notified, and its
+    idle_notification is not its end, since it may still wait on its own shells. It counts while its
+    own transcript, under the session's subagents, is mid-turn, and so do the tasks that records."""
+    n, teammates = _scan(path, since)
+    for agent in teammates:
+        own = path.with_suffix("") / "subagents" / f"agent-{agent}.jsonl"
+        try:
+            m, _ = _scan(own, since)
+        except FileNotFoundError:
+            n += 1  # spawned, and nothing written yet
+            continue
+        n += m + (1 if _mid_turn(own) else 0)
+    return n
+
+
+def _scan(path: Path, since: int) -> tuple[int, list[str]]:
+    """What was written to the transcript at `path` since its last read: its background tasks started
+    at or after `since` and not ended, and the teammates it spawned then."""
     key = str(path)
     with _TASKS_LOCK, open(path, "rb") as f:
         st = os.fstat(f.fileno())
-        inode, offset, launched, ended = _TASKS.get(key) or (st.st_ino, 0, {}, set())
+        inode, offset, launched, ended, teammates = _TASKS.get(key) or (st.st_ino, 0, {}, set(), {})
         if inode != st.st_ino or offset > st.st_size:
-            inode, offset, launched, ended = st.st_ino, 0, {}, set()
+            inode, offset, launched, ended, teammates = st.st_ino, 0, {}, set(), {}
         f.seek(offset)
         blob = f.read()
         whole = blob[:blob.rfind(b"\n") + 1]   # a line being written is read when it is whole
         for line in whole.splitlines():
-            if not any(k in line for k in (b'"backgroundTaskId"', b'"async_launched"', b'"queue-operation"', b'"task_id"')):
+            if not any(k in line for k in _MARKS):
                 continue
             try:
                 e = json.loads(line)
@@ -384,10 +407,14 @@ def background(path: Path, since: int) -> int:
                 continue
             result = e.get("toolUseResult")
             if e.get("type") == "user" and isinstance(result, dict):
-                task = result.get("backgroundTaskId") or (result.get("agentId") if result.get("status") == "async_launched" else None)
                 at = _millis(e.get("timestamp"))
+                agent, status = result.get("agentId"), result.get("status")
+                task = result.get("backgroundTaskId") or (
+                    agent if status == "async_launched" or status == "forked" and result.get("background") is True else None)
                 if isinstance(task, str) and task and at is not None:
                     launched[task] = at
+                elif status == "teammate_spawned" and isinstance(agent, str) and _AGENT_ID.fullmatch(agent) and at is not None:
+                    teammates[agent] = at
                 stopped = result.get("task_id")
                 if isinstance(stopped, str) and str(result.get("message", "")).startswith("Successfully stopped task"):
                     ended.add(stopped)
@@ -395,8 +422,28 @@ def background(path: Path, since: int) -> int:
                 m = _NOTIFIED.match(e["content"])
                 if m:
                     ended.add(m.group(1))
-        _TASKS[key] = (inode, offset + len(whole), launched, ended)
-        return sum(1 for task, at in launched.items() if at >= since and task not in ended)
+        _TASKS[key] = (inode, offset + len(whole), launched, ended, teammates)
+        return (sum(1 for task, at in launched.items() if at >= since and task not in ended),
+                [agent for agent, at in teammates.items() if at >= since])
+
+
+def _mid_turn(path: Path) -> bool:
+    """Whether the transcript at `path` last left its agent working: its last message is not an
+    assistant's that ended the turn."""
+    try:
+        text = tail(path)
+    except OSError:
+        return False
+    for line in reversed(text.split("\n")):
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(e, dict) or e.get("type") not in ("user", "assistant"):
+            continue
+        message = e.get("message")
+        return e["type"] == "user" or not (isinstance(message, dict) and message.get("stop_reason") == "end_turn")
+    return False
 
 
 def _millis(ts: object) -> int | None:
