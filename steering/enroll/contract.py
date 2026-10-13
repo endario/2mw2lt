@@ -244,8 +244,8 @@ AccountLabelled = typing.TypedDict("AccountLabelled", {
     "label": "str | None",
 })
 
-# ActionBody asks a machine to act on a session's process: to wake it, set its level, end it or
-# resume it under another account.
+# ActionBody asks a machine to act on a session's process: to wake it, set its level, end it,
+# resume it under another account, or stop it and keep its enrolment.
 ActionBody = typing.TypedDict("ActionBody", {
     "kind": "str",
     "to": "str",
@@ -317,6 +317,21 @@ RehomeReceipt = typing.TypedDict("RehomeReceipt", {
 # RehomeReceiptAnswer is the state the rehome took on that answer.
 RehomeReceiptAnswer = typing.TypedDict("RehomeReceiptAnswer", {
     "rehome": "str",
+    "state": "str",
+    "replayed": "bool",
+})
+
+# ParkReceipt is what a machine answers of a park it was offered: the park, and whether the session's
+# process stopped with its transcript kept, or why it refused.
+ParkReceipt = typing.TypedDict("ParkReceipt", {
+    "uplink": "str",
+    "park": "str",
+    "result": "typing.Any",
+})
+
+# ParkReceiptAnswer is the state the park took on that answer.
+ParkReceiptAnswer = typing.TypedDict("ParkReceiptAnswer", {
+    "park": "str",
     "state": "str",
     "replayed": "bool",
 })
@@ -703,6 +718,7 @@ MachineAction = typing.TypedDict("MachineAction", {
     "vendor": "typing.NotRequired[str]",
     "model": "typing.NotRequired[str]",
     "compact": "typing.NotRequired[bool]",
+    "until": "typing.NotRequired[str]",
 })
 
 # RetireAction is what a retire carries: the worker, pinned to its incarnation on this machine, the
@@ -748,6 +764,7 @@ StreamWake = typing.TypedDict("StreamWake", {
     "vendor": "typing.NotRequired[str]",
     "model": "typing.NotRequired[str]",
     "compact": "typing.NotRequired[bool]",
+    "until": "typing.NotRequired[str]",
 })
 
 # StreamControl is a control, by its id.
@@ -779,6 +796,7 @@ StreamControl = typing.TypedDict("StreamControl", {
     "vendor": "typing.NotRequired[str]",
     "model": "typing.NotRequired[str]",
     "compact": "typing.NotRequired[bool]",
+    "until": "typing.NotRequired[str]",
 })
 
 # StreamRehome is a rehome, by its id.
@@ -810,6 +828,39 @@ StreamRehome = typing.TypedDict("StreamRehome", {
     "vendor": "typing.NotRequired[str]",
     "model": "typing.NotRequired[str]",
     "compact": "typing.NotRequired[bool]",
+    "until": "typing.NotRequired[str]",
+})
+
+# StreamPark is a park, by its id.
+StreamPark = typing.TypedDict("StreamPark", {
+    "kind": "str",
+    "id": "str",
+    "session": "str",
+    "epoch": "int",
+    "provider_session": "str",
+    "psession": "str",
+    "runtime": "str",
+    "provider": "str",
+    "node": "str",
+    "os_user": "str",
+    "reason": "str",
+    "pid": "int",
+    "cwd": "str",
+    "entrypoint": "str",
+    "tmux_socket": "typing.NotRequired[str]",
+    "tmux_pane": "typing.NotRequired[str]",
+    "user_data_dir": "typing.NotRequired[str]",
+    "app_pid": "typing.NotRequired[int]",
+    "nonce": "typing.NotRequired[str]",
+    "role": "typing.NotRequired[str]",
+    "stuck": "typing.NotRequired[bool]",
+    "value": "typing.NotRequired[str]",
+    "effort": "typing.NotRequired[str]",
+    "account": "typing.NotRequired[str]",
+    "vendor": "typing.NotRequired[str]",
+    "model": "typing.NotRequired[str]",
+    "compact": "typing.NotRequired[bool]",
+    "until": "typing.NotRequired[str]",
 })
 
 # StreamRetire is a retire, by its id.
@@ -3828,8 +3879,18 @@ WorkerCensusBody = typing.TypedDict("WorkerCensusBody", {
     "worker_census": "WorkerCensus",
     "interactive": "typing.NotRequired[list[LauncherAccount] | None]",
     "signed_out": "typing.NotRequired[list[LauncherAccount] | None]",
+    "spends": "typing.NotRequired[list[HarnessSpend] | None]",
     "checkout": "typing.NotRequired[CheckoutCensus | None]",
     "machine_name": "typing.NotRequired[str | None]",
+})
+
+# HarnessSpend is the account an account-free launch of one harness would spend on this machine
+# (#6086): the account the machine's own default configuration resolves to, named only where the
+# machine can name it.
+HarnessSpend = typing.TypedDict("HarnessSpend", {
+    "harness": "str",
+    "vendor": "str",
+    "account_id": "str",
 })
 
 # LauncherAccount is an account one of a machine's launchers is signed in to.
@@ -4010,6 +4071,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/steering/agent/leaving",
     "POST /w/{workspace}/steering/agent/model",
     "GET /w/{workspace}/steering/agent/package/{sha}",
+    "POST /w/{workspace}/steering/agent/park",
     "POST /w/{workspace}/steering/agent/policy",
     "POST /w/{workspace}/steering/agent/reach",
     "POST /w/{workspace}/steering/agent/reading",
