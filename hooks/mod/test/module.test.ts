@@ -1,7 +1,7 @@
 import type { On } from 'claude-code'
 import { register } from '../register'
 import { test, expect, mock } from 'claude-code/testing'
-import { lines, atLeast, pick, invokes, nextSeat, asksSeat, seatCall, entryRefusal, framesEntry, obsoleteSeatRefusal, resendId, POINTER, CHECKPOINT, SEAT_SECTION } from '../frames'
+import { lines, atLeast, pick, invokes, lifecycle, nextSeat, asksSeat, seatCall, entryRefusal, framesEntry, obsoleteSeatRefusal, resendId, POINTER, CHECKPOINT, SEAT_SECTION } from '../frames'
 
 test('lines are whole only once their newline arrives', async () => {
   const a = lines('{"id":"f1","kind":"say","wakes":true}\n{"id":"f2","ki')
@@ -96,6 +96,9 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
     compacts: [] as { trigger: string; instructions?: string }[],
     recording,
     enrolled,
+    // What connect.py last wrote to the session's connect record; empty while it has written none.
+    connected: '',
+    bashThrows: false,
     sessionLookupCode: 0,
     retainedName: '',
     holdNextLookup: undefined as Promise<void> | undefined,
@@ -137,6 +140,7 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
       return { value: '{"version":"0.8.99"}' }
     }
     if (e.path === FRAME_PATH) { if (w.readGate) await w.readGate; return { value: w.recording } }
+    if (e.path === CLAIM_PATH.replace(/\.json$/, '.connect') && w.connected) return { value: w.connected }
     throw new Error('ENOENT')
   })
   on('fs.write', async ($, e) => { w.writes.push(e); return { value: undefined } })
@@ -193,7 +197,10 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
     if (submitRejects) throw new Error('the prompt was refused')
     return { text: e.text }
   })
-  on('tool.call', { tool: 'Bash' }, async () => ({ result: { stdout: '', stderr: '', interrupted: false } }) as never)
+  on('tool.call', { tool: 'Bash' }, (async () => {
+    if (w.bashThrows) throw new Error('the engine broke')
+    return { result: { stdout: '', stderr: '', interrupted: false } }
+  }) as never)
   on('ui.log', async ($, e) => {
     w.logs.push(e.text)
     const appended = /^2mw2lt: appends "(.*)"$/s.exec(e.text)
@@ -675,6 +682,61 @@ test('a hold that ends badly says why in the debug log, and one that broke its r
   expect(w.logs.some(l => /exited 1/.test(l) && l.includes('no fresh holder claim'))).toBe(true)
 })
 
+// Measured 2026-10-13: a session ran connect as `python3 $E/connect.py`, which `invokes` cannot see,
+// and held no stream for its whole life while connect said the plugin held it.
+test('a connect the command does not name still starts the hold, from the record connect wrote', async ($, on) => {
+  const w = world(on, { enrolled: false, rounds: [{ lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  expect(w.spawns.length).toBe(0)
+  w.enrolled = true
+  w.connected = '1791854530.9'
+  await $.tool.call({ tool: 'Bash', command: 'python3 $E/connect.py --current' } as never)
+  await w.clock.settle()
+  expect(w.spawns.length).toBe(1)
+  await $.tool.call({ tool: 'Bash', command: 'ls' } as never)
+  await w.clock.settle()
+  expect(w.spawns.length).toBe(1)                       // one record asks for one start
+})
+
+test('a connect run where no command of this session shows it starts the hold within a refresh', async ($, on) => {
+  const w = world(on, { enrolled: false, rounds: [{ lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  w.enrolled = true
+  w.connected = '1791854530.9'
+  await w.clock.advance(60_000)
+  await w.clock.settle()
+  expect(w.spawns.length).toBe(1)
+})
+
+test('a connect whose enrolment lookup failed keeps its record for the next refresh', async ($, on) => {
+  const w = world(on, { enrolled: false, rounds: [{ lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  w.enrolled = true
+  w.sessionLookupCode = 1
+  w.connected = '1791854530.9'
+  await $.tool.call({ tool: 'Bash', command: 'python3 $E/connect.py --current' } as never)
+  await w.clock.settle()
+  expect(w.spawns.length).toBe(0)
+  w.sessionLookupCode = 0
+  await w.clock.advance(60_000)
+  await w.clock.settle()
+  expect(w.spawns.length).toBe(1)
+})
+
+test('a connect record from before the session started asks for no second start', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  w.connected = '1791854530.9'
+  await begin($)
+  await w.clock.settle()
+  await w.clock.advance(60_000)
+  await $.tool.call({ tool: 'Bash', command: 'ls' } as never)
+  await w.clock.settle()
+  expect(w.spawns.length).toBe(1)
+})
+
 test('a project with no workspace is not asked for a claim path every minute', async ($, on) => {
   const w = world(on, { enrolled: false })
   w.claimFails = true
@@ -754,6 +816,25 @@ test('only an invocation of the client is one, never a read of it or its help', 
   expect(invokes('python3 "$ws/my plugins/steering/enroll/connect.py" --current', 'connect')).toBe(true)
   expect(invokes('python3 "$(dirname "$x")/steering/enroll/connect.py" --help', 'connect')).toBe(false)
   expect(invokes('python3 "$(dirname "$x")/steering/enroll/disconnect.py" s1', 'connect')).toBe(false)
+})
+
+test('lifecycle names the enrolment verb a command runs, or none', () => {
+  expect(lifecycle('python3 /p/steering/enroll/connect.py --current')).toBe('connect')
+  expect(lifecycle('python3 "/p/steering/enroll/disconnect.py" s1')).toBe('disconnect')
+  expect(lifecycle('python3 /p/steering/enroll/checkpoint.py s1 handover https://github.com/example-org/example-repo/pull/1')).toBe('checkpoint')
+  expect(lifecycle('python3 /p/steering/enroll/ack.py s1 01JENV')).toBe('ack')
+  expect(lifecycle('python3 /p/steering/enroll/say.py --to peer s1 hello')).toBe('say')
+  expect(lifecycle('python3 /p/steering/enroll/verb.py announce s1 as acct on b doing "w"')).toBe('announce')
+  expect(lifecycle('python3 "$ws/my plugins/steering/enroll/verb.py" announce s1 x')).toBe('announce')
+  // The board's verbs and a read of a client are not the enrolment lifecycle.
+  expect(lifecycle('python3 /p/steering/enroll/verb.py wait s1 for checks 1')).toBe(null)
+  expect(lifecycle('python3 /p/steering/enroll/verb.py done s1')).toBe(null)
+  expect(lifecycle('python3 /p/steering/enroll/taking.py s1 branch')).toBe(null)
+  expect(lifecycle('cat /p/steering/enroll/say.py')).toBe(null)
+  expect(lifecycle('grep -n say /p/steering/enroll/say.py')).toBe(null)
+  expect(lifecycle('python3 /p/steering/enroll/connect.py --help')).toBe(null)
+  expect(lifecycle('python3 /p/steering/enroll/say.py -h')).toBe(null)
+  expect(lifecycle('printf hi')).toBe(null)
 })
 
 const ack = (w: ReturnType<typeof world>) => w.runs.filter(argv => String(argv[1]).endsWith('/steering/enroll/ack.py')).map(argv => argv[3])
@@ -912,6 +993,54 @@ test('a subagent\'s connect or disconnect leaves the parent\'s hold, session and
   expect(w.spawns.length).toBe(1)                       // neither stopped nor restarted
   expect(w.state.get('session')).toBe('s1')
   expect(w.state.get('seat')).toBe('the rulings')
+})
+
+// A subagent presents its parent's credential: its provider session id is inherited, so its
+// lifecycle verbs are refused before they run — the seat tools' own refusal's shape (#3342).
+test('a subagent\'s lifecycle verbs are refused, and the parent\'s enrolment never learns of them', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  for (const [command, verb] of [
+    ['python3 /p/steering/enroll/connect.py --current', 'connect'],
+    ['python3 "/p/steering/enroll/disconnect.py" s1', 'disconnect'],
+    ['python3 /p/steering/enroll/checkpoint.py s1 handover https://github.com/example-org/example-repo/pull/1', 'checkpoint'],
+    ['python3 /p/steering/enroll/ack.py s1 01JENV', 'ack'],
+    ['python3 /p/steering/enroll/say.py --to peer s1 hello', 'say'],
+    ['python3 /p/steering/enroll/verb.py announce s1 as acct on b doing "w"', 'announce'],
+  ] as const) {
+    const got = await $.tool.call({ tool: 'Bash', command, agentId: 'sub-1' } as never)
+    expect(String((got as { deny?: string }).deny)).toContain(`refused: the enrolment lifecycle is the session's own, never a subagent's (${verb}`)
+  }
+  // A read, a help and the session's own loop are not runs to refuse: the verb is refused by who
+  // runs it, not by what it is.
+  for (const command of ['cat /p/steering/enroll/connect.py', 'python3 /p/steering/enroll/connect.py --help']) {
+    const got = await $.tool.call({ tool: 'Bash', command } as never)
+    expect((got as { deny?: string }).deny).toBeUndefined()
+  }
+  const own = await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/enroll/say.py s1 hello' } as never)
+  expect((own as { deny?: string }).deny).toBeUndefined()
+  expect(w.spawns.length).toBe(1)                       // the parent's hold was never stopped or restarted
+})
+
+// Only the guard's own evaluation is fail-closed: a chain that breaks past it is the engine's
+// error, however the harness answers it, never a refusal blaming the guard (#6208 round 1).
+test('an error past the lifecycle guard propagates, and a refusal still refuses', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  w.bashThrows = true
+  await begin($)
+  await w.clock.settle()
+  const denied = await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/enroll/connect.py --current', agentId: 'sub-1' } as never)
+  expect(String((denied as { deny?: string }).deny)).toContain("the enrolment lifecycle is the session's own")
+  let refused = false
+  let broke = false
+  try {
+    const got = await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/enroll/say.py s1 hello', agentId: 'sub-1' } as never)
+    refused = String((got as { deny?: string }).deny ?? '') !== ''
+  } catch {
+    broke = true
+  }
+  expect(refused || broke).toBe(true)
 })
 
 for (const [name, command] of [
@@ -1396,11 +1525,27 @@ test('a card write goes to card.py --lease as argv, and the reply to the brain r
   await begin($)
   await w.clock.settle()
   await $.tool.call({ tool: 'mcp__2mw2lt__card_retire', card: '01CARD', why: 'duplicate of 01OTHER' } as never)
-  await $.tool.call({ tool: 'mcp__2mw2lt__say', text: 'on it', key: 'k1' } as never)
+  await $.tool.call({ tool: 'mcp__2mw2lt__say', text: 'on it', request: 'k1' } as never)
   const [card, said] = leaseRuns(w)
   expect(card?.slice(2)).toEqual(['--lease', '--provider', 'claude', '--provider-session', 'ps-1', 'retire', '01CARD', 'duplicate of 01OTHER'])
   expect(said?.slice(6, 8)).toEqual(['post', '/steering/brain/reply'])
-  expect(JSON.parse(w.stdins[1] ?? '{}')).toEqual({ lease_token: '@lease', text: 'on it', key: 'k1' })
+  expect(JSON.parse(w.stdins[1] ?? '{}')).toEqual({ lease_token: '@lease', text: 'on it', request: 'k1' })
+})
+
+// #5555: the brain speaks to the owner first and goes on speaking, each call its own message.
+test('the brain speaks to the owner about no say, and a reply whose answer was lost goes once more as itself', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  w.leaseOut = ['REJECTED the door never answered\nif this reply may have been registered, resend with --retry=0123456789abcdef0123', 'replied: r1']
+  await begin($)
+  await w.clock.settle()
+  const r = await $.tool.call({ tool: 'mcp__2mw2lt__say', text: 'the deploy is out' } as never)
+  const runs = leaseRuns(w)
+  expect(runs.length).toBe(2)
+  expect(runs[0]?.slice(6)).toEqual(['post', '/steering/brain/reply'])
+  expect(runs[1]?.slice(6)).toEqual(['post', '/steering/brain/reply', '--retry=0123456789abcdef0123'])
+  expect(JSON.parse(w.stdins[0] ?? '{}')).toEqual({ lease_token: '@lease', text: 'the deploy is out' })
+  expect(w.stdins[1]).toBe(w.stdins[0])
+  expect((r as { result: unknown }).result).toBe('replied: r1')
 })
 
 test('a verb the settings ask about, or deny, sends nothing and says where it would apply', async ($, on) => {
@@ -1459,6 +1604,14 @@ test('seatCall: word fields are one word, enums hold, and unknown fields are ref
   expect(seatCall('card_scope', { name: 'The work', track: 'rt', anchors: ['resolves:12'], major: true })).toEqual(
     { client: 'card', argv: ['scope', 'The work', 'rt', 'resolves:12', 'major'] })
   expect(resendId('done')).toBeNull()
+})
+
+test('seatCall: a park names its until only when given, and needs a reason', async () => {
+  expect(seatCall('park', { session: 'teal', reason: 'a critic needs its slot' }))
+    .toEqual({ client: 'say', stdin: 'park: token @lease teal because a critic needs its slot' })
+  expect(seatCall('park', { session: 'teal', until: '2h', reason: 'a critic needs its slot' }))
+    .toEqual({ client: 'say', stdin: 'park: token @lease teal until 2h because a critic needs its slot' })
+  expect(seatCall('park', { session: 'teal' })).toEqual({ refused: 'reason is required' })
 })
 
 test('seatCall: a rehome names the account, and compacts first only when asked', async () => {

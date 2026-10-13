@@ -58,6 +58,7 @@ def workspace_of(fd: int, rel: Path, workspace: str, provider: str) -> str | Non
 
 GOOSE_CONFIG = ".local/share/goose"
 OPENCODE_CONFIG = ".local/share/opencode"
+ZCODE_CONFIG = ".zcode"
 ROOT = "steering-workers"
 
 
@@ -171,6 +172,48 @@ def opencode_path_of(worker: str) -> Path | None:
 
 def opencode_workspace_of(fd: int, rel: Path, workspace: str) -> str | None:
     return workspace_of(fd, rel, workspace, "opencode")
+
+
+def zcode_workers_dir() -> Path:
+    return Path.home() / ZCODE_CONFIG / ROOT
+
+
+def zcode_transcript(worker: str) -> Path:
+    return zcode_workers_dir() / f"{worker}.jsonl"
+
+
+def zcode_path_of(worker: str) -> Path | None:
+    p = zcode_transcript(worker)
+    return p if p.exists() else None
+
+
+def zcode_launch_record(worker: str) -> Path:
+    return record(zcode_workers_dir(), worker)
+
+
+def zcode_declared_pid(worker: str) -> int | None:
+    """The process this worker was launched as, on goose's rule: the record's pid live, its
+    manager live, and the one the other's child — a forged record cannot choose who forked it."""
+    rec = read(zcode_workers_dir(), worker)
+    if rec is None:
+        return None
+    pid, by = rec.get("pid"), rec.get("by")
+    if not _live(pid, rec.get("since")) or not _live(by, rec.get("by_since")):
+        return None
+    return pid if runtime_id.parent_of(pid) == by else None
+
+
+def zcode_pid_of(worker: str) -> int | None:
+    named = zcode_declared_pid(worker)
+    return named if named is not None and named in writers(zcode_transcript(worker)) else None
+
+
+def zcode_loaded(worker: str) -> bool:
+    return zcode_pid_of(worker) is not None
+
+
+def zcode_workspace_of(fd: int, rel: Path, workspace: str) -> str | None:
+    return workspace_of(fd, rel, workspace, "zcode")
 
 
 _live = live

@@ -22,6 +22,25 @@ def claim_path(ws: Path, psession: str) -> Path:
     return Path(ws) / ".claude" / "steering-holders" / f"{psession}.json"
 
 
+def connect_path(ws: Path, psession: str) -> Path:
+    """Where connect records that it bound this session, for the module to start its hold from."""
+    return claim_path(ws, psession).with_suffix(".connect")
+
+
+def mark_connected(ws: Path, psession: str, now: float | None = None) -> None:
+    try:
+        connect_path(ws, psession).write_text(repr(time.time() if now is None else now))
+    except (OSError, ValueError):
+        pass  # the module still starts on the command it recognises, or within its next refresh
+
+
+def connected_at(ws: Path, psession: str) -> float | None:
+    try:
+        return float(connect_path(ws, psession).read_text())
+    except (OSError, ValueError):
+        return None
+
+
 def fresh(ws: Path, psession: str, now: float | None = None) -> bool:
     try:
         claim = json.loads(claim_path(ws, psession).read_text())
@@ -47,7 +66,7 @@ def state(ws: Path, psession: str, now: float | None = None) -> dict | None:
 def _at(t: object) -> str:
     try:
         return time.strftime("%H:%M:%SZ", time.gmtime(float(t)))   # type: ignore[arg-type]
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError, OSError):
         return "?"
 
 
@@ -66,8 +85,27 @@ def said(hold: dict) -> str:
     return "The 2mw2lt plugin is starting this session's hold."
 
 
+# How long after connect the module may take to start its hold before that is said as a fault: it
+# reacts to the connect command at once, and to the connect record within its 60 s refresh.
+START_S = 75
+
+
+def unstarted(ws: Path, psession: str, now: float | None = None) -> str | None:
+    """With a live module that has started no hold since connect asked it to: why, and the remedy."""
+    if not fresh(ws, psession, now) or state(ws, psession, now) is not None:
+        return None
+    at, now = connected_at(ws, psession), time.time() if now is None else now
+    if at is None:   # never connected here, or a module from before connect's record: nothing to judge
+        return None
+    if now - at < START_S:
+        return f"The 2mw2lt plugin is starting this session's hold, asked by connect at {_at(at)}. Arm no hold yourself."
+    return (f"The 2mw2lt plugin's module started no hold after connect at {_at(at)}. Run connect.py --current "
+            "again; if it still starts none, restart or --resume this process so the module reloads. "
+            "Arm no hold yourself.")
+
+
 def describe(ws: Path, psession: str) -> str | None:
-    """`hold.py --plugin-state <provider session>`: the line above, or nothing when the plugin
-    does not hold this session."""
+    """`hold.py --plugin-state <provider session>`: the line above, why a live module holds nothing,
+    or nothing when the plugin's module is not live for this session."""
     hold = state(ws, psession)
-    return said(hold) if hold is not None else None
+    return said(hold) if hold is not None else unstarted(ws, psession)

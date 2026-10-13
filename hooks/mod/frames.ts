@@ -105,6 +105,17 @@ export function invokes(command: string, name: string, dir = 'steering/enroll'):
   return false
 }
 
+// The enrolment lifecycle verbs (#3342): a subagent presents its parent's credential — the harness
+// hands its provider session id down — so its connect would mint nothing of its own and its
+// disconnect would end the parent's enrolment. Which verb a command runs, or None: announce rides
+// verb.py, and the other verb.py subcommands move the board, not the enrolment.
+export function lifecycle(command: string): string | null {
+  for (const name of ['connect', 'disconnect', 'checkpoint', 'ack', 'say'])
+    if (invokes(command, name)) return name
+  if (invokes(command, 'verb') && /\bverb\.py"?\s+announce\b/.test(command)) return 'announce'
+  return null
+}
+
 // The seat's section (#4551 step 3): the knowledge's standing rulings, which seat_section.py composes for a
 // session that holds the seat. It is a `session` section: after the boundary shared across
 // organizations, and still in this session's own cached prefix, so it changes only when the seat does,
@@ -126,7 +137,7 @@ export function asksSeat(kind: string): boolean {
 // The seat's lease verbs as typed tools (#4551 step 2). Each is a thin wrapper over the Python
 // client: a `say` line or a body for lease.py, or card.py's argv, with `@lease` where the token
 // goes. The module never holds the token; the client fills it from the store.
-export type SeatCall = { client: 'say'; stdin: string } | { client: 'post'; path: string; stdin: string } | { client: 'card'; argv: string[] }
+export type SeatCall = { client: 'say'; stdin: string } | { client: 'reply'; stdin: string } | { client: 'post'; path: string; stdin: string } | { client: 'card'; argv: string[] }
 type Field = { type: 'string' | 'integer' | 'boolean' | 'array'; description: string; word?: boolean; enum?: string[] }
 type SeatTool = { description: string; fields: Record<string, Field>; required: string[]; oneOf?: string[]; refuse?: (a: Record<string, unknown>) => string | null; build: (a: Record<string, unknown>) => SeatCall }
 
@@ -176,6 +187,12 @@ export const SEAT_TOOLS: Record<string, SeatTool> = {
       a.model !== undefined ? ` model ${str(a, 'model')}` : ''}${a.effort !== undefined ? ` effort ${str(a, 'effort')}` : ''}${a.compact === true
       ? (a.without_checkpoint === true ? ' compact without checkpoint' : ' compact') : ''} because ${str(a, 'reason')}` }),
   },
+  park: {
+    description: 'Seat only: park an idle Claude Code session: its process stops and frees its worker slot, its enrolment, cards and queued messages stay, and a wake resumes it with its conversation. Refused unless idle. The park stands an hour unless until says otherwise; then you are told it is over.',
+    fields: { session: word('The session to park.'), until: word('When the park ends: a time (RFC 3339) or a duration such as 45m or 2h.'), reason: text('What needs its slot.') },
+    required: ['session', 'reason'],
+    build: a => ({ client: 'say', stdin: `park: token @lease ${str(a, 'session')}${a.until !== undefined ? ` until ${str(a, 'until')}` : ''} because ${str(a, 'reason')}` }),
+  },
   keep: {
     description: 'Seat only: keep a finished session idle on purpose, because work in its territory is expected soon. Name the plan as the reason; the keep stands half an hour unless until says otherwise, and work placed on the session ends it.',
     fields: { session: word('The session to keep.'), until: word('When the keep ends: a time (RFC 3339) or a duration such as 45m or 2h.'), reason: text('The work expected in its territory, and when.') },
@@ -216,11 +233,11 @@ export const SEAT_TOOLS: Record<string, SeatTool> = {
     build: a => ({ client: 'card', argv: ['session', str(a, 'card'), str(a, 'session'), str(a, 'role')] }),
   },
   say: {
-    description: 'Seat only: reply to a say, as the brain.',
-    fields: { text: text('The reply.'), key: word('The say\'s id, when replying to one.') },
+    description: 'Seat only: speak to the owner on the Direct line, as the brain: first, again, or about a say they sent. Each call is one message.',
+    fields: { text: text('What you say.'), request: word('The id of the owner\'s say this is about, if it is about one.') },
     required: ['text'],
-    build: a => ({ client: 'post', path: '/steering/brain/reply',
-                   stdin: JSON.stringify({ lease_token: '@lease', text: str(a, 'text'), ...(a.key !== undefined ? { key: str(a, 'key') } : {}) }) }),
+    build: a => ({ client: 'reply',
+                   stdin: JSON.stringify({ lease_token: '@lease', text: str(a, 'text'), ...(a.request !== undefined ? { request: str(a, 'request') } : {}) }) }),
   },
 }
 

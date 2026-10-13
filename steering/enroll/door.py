@@ -39,7 +39,42 @@ class _Unclosed(http.client.HTTPSConnection):
 
 class _UnclosedHTTPS(urllib.request.HTTPSHandler):
     def https_open(self, req):
+        # Built on first use, not at import: on a Mac without certifi it runs `security`.
+        if not getattr(self, "_trusted", False):
+            self._context, self._trusted = _ssl_context(), True
         return self.do_open(_Unclosed, req, context=self._context)
+
+
+def _ssl_context():
+    """A Python whose OpenSSL bundle was never installed trusts nothing (#3324): certifi's roots
+    where present, else the Mac's own through truststore or the system keychains."""
+    import ssl
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        pass
+    except Exception as e:  # a broken bundle falls through to the next source
+        print(f"door: certifi's roots were not loaded ({type(e).__name__}: {e})", file=sys.stderr)
+    if sys.platform != "darwin":
+        return ssl.create_default_context()
+    try:
+        import truststore  # type: ignore
+        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    except ImportError:
+        pass
+    except Exception as e:
+        print(f"door: truststore's context was not built ({type(e).__name__}: {e})", file=sys.stderr)
+    context = ssl.create_default_context()
+    try:
+        roots = subprocess.run(["security", "find-certificate", "-a", "-p",
+                                "/System/Library/Keychains/SystemRootCertificates.keychain",
+                                "/Library/Keychains/System.keychain"],
+                               capture_output=True, timeout=5, check=True).stdout.decode()
+        context.load_verify_locations(cadata=roots)
+    except (OSError, subprocess.SubprocessError, ssl.SSLError, ValueError) as e:
+        print(f"door: the system's root certificates were not loaded ({type(e).__name__}: {e})", file=sys.stderr)
+    return context
 
 
 # The proxy environment on a developer machine hijacks loopback and tailnet traffic (doc 08), and

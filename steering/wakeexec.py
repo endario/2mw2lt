@@ -454,6 +454,16 @@ def tab_target(frame: dict) -> dict:
     return tgt
 
 
+def turn_state(psession: str) -> str | None:
+    """The harness registry row's status for the session — its own observed turn state, which a
+    tab's Stop button does not carry: a hold shows Stop as much as a turn (#4725). None when no
+    row speaks or its row is not one."""
+    try:
+        return row_for(psession).get("status")
+    except Exception:
+        return None
+
+
 @contextlib.contextmanager
 def tab_input(frame: dict, t, posting, *, still_offered=None, workspace: Path | None = None,
               lock_path: str | None = None, wait: float = TYPING_WAIT_SECONDS, idle: bool = False):
@@ -477,6 +487,11 @@ def tab_input(frame: dict, t, posting, *, still_offered=None, workspace: Path | 
             raise Refused("the session's owning app no longer verifies")
 
     deadline = time.monotonic() + max(0.0, wait)
+    # The compact must not type into a queue that waits for a turn: the registry row is the
+    # session's own observed turn state, and a tab shows Stop for a background hold as much as for
+    # a turn, so the row — not the button — is what clears the composer (#4725).
+    if idle and turn_state(tgt["psession"]) == "busy":
+        raise Refused("its harness says the session's turn is busy; compact it when the turn is out")
     with pane_lock(tgt["udd"], f"vscode:{tgt['psession']}", wait=wait), contextlib.ExitStack() as keyboard:
         keyboard.enter_context(_typing(lock_path, max(0.0, deadline - time.monotonic())))
         fresh()
@@ -1219,8 +1234,17 @@ class Typist:
         tgt = self._target
         if tab_for(tgt["udd"], tgt["psession"]) != self._binding:
             raise Refused("the target's stored tab binding changed before native input")
-        ready = macax.idle if getattr(self, "_idle", False) else macax.ready
-        return self._native(ready, tgt["app_pid"], *self._binding)
+        if getattr(self, "_idle", False):
+            # Read again at every verification: a turn that starts mid-compact refuses here
+            # rather than taking a command into its queue (#4725).
+            return self._native(macax.idle, tgt["app_pid"], *self._binding, self.turn_cleared())
+        return self._native(macax.ready, tgt["app_pid"], *self._binding)
+
+    def turn_cleared(self) -> bool:
+        status = turn_state(self._target["psession"])
+        if status == "busy":
+            raise Refused("its harness says the session's turn is busy; compact it when the turn is out")
+        return status in ("idle", "shell")
 
     def _key(self, code: int | str, flags: int = 0, *, expected_text: str | None = None) -> None:
         if isinstance(code, str):

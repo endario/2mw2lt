@@ -1,5 +1,5 @@
 import type { Register, EngineInterface, Timer, HookStream, ProcessSpawnChunk, ProcessSpawnResult } from 'claude-code'
-import { lines, atLeast, pick, invokes, tokensOf, due, owed, framesEntry, obsoleteSeatRefusal, nextSeat, asksSeat, seatCall, seatSchema, resendId, entryRefusal, READ_KEPT, POINTER, CHECKPOINT, SEAT_SECTION, SEAT_TOOLS } from './frames'
+import { lines, atLeast, pick, invokes, lifecycle, tokensOf, due, owed, framesEntry, obsoleteSeatRefusal, nextSeat, asksSeat, seatCall, seatSchema, resendId, entryRefusal, READ_KEPT, POINTER, CHECKPOINT, SEAT_SECTION, SEAT_TOOLS } from './frames'
 import type { Line, SeatCall } from './frames'
 
 // The plugin's hooks module (#3872): it holds a connected Claude session's steering stream through
@@ -65,6 +65,27 @@ async function claim($: EngineInterface, live: boolean, ps?: string): Promise<bo
   const at = live ? (await $.clock.now()) / 1000 : 0
   await $.fs.write(path, JSON.stringify({ provider_session: id, module: version, at, ...(hold ? { hold } : {}) }))
   return true
+}
+
+// connect.py records when it bound this session (holder.connect_path): the hold starts from that
+// record, read after each command and on each refresh, since a command that names connect through a
+// variable or an alias never matches `invokes`. A record newer than the last start, else 0.
+let connectedAt = 0
+async function connected($: EngineInterface): Promise<number> {
+  const path = await claimPath($, await $.session.id())
+  if (!path) return 0
+  let at = 0
+  try { at = Number(String(await $.fs.read(path.replace(/\.json$/, '.connect')))) } catch { return 0 }
+  return at > connectedAt ? at : 0
+}
+
+// Start the hold for a connect, and only then spend its record: a lookup that failed leaves it
+// for the next command or refresh.
+async function startConnected($: EngineInterface, at: number) {
+  const session = await sessionOf($)
+  if (!session) return
+  if (at) connectedAt = Math.max(connectedAt, at)
+  await start($, session)
 }
 
 // What the summariser keeps: rebrief.py's line, or the session alone when it gives none.
@@ -219,9 +240,10 @@ async function runSeatCall($: EngineInterface, call: SeatCall): Promise<{ result
     return r.exitCode === 0 ? { result: words } : { deny: words }
   }
   if (call.client === 'card') return answer(await run(['python3', script($, 'card.py'), '--lease', ...speaker, ...call.argv]))
-  const argv = ['python3', script($, 'lease.py'), ...speaker, ...(call.client === 'say' ? ['say'] : ['post', call.path])]
+  const argv = ['python3', script($, 'lease.py'), ...speaker,
+    ...(call.client === 'say' ? ['say'] : call.client === 'reply' ? ['post', '/steering/brain/reply'] : ['post', call.path])]
   let r = await run(argv, call.stdin)
-  const again = call.client === 'say' ? resendId(r.stdout) : null
+  const again = call.client !== 'post' ? resendId(r.stdout) : null
   if (again) r = await run([...argv, `--retry=${again}`], call.stdin)
   return answer(r)
 }
@@ -374,7 +396,15 @@ export const register: Register = on => {
     refresh?.cancel()
     // The root is fixed for the session: where no claim path is named (a project that is no
     // workspace), asking again every minute would only fail again.
-    if (await claim($, true)) refresh = $.clock.every(REFRESH_MS, () => { void claim($, true).catch(() => undefined) })
+    if (await claim($, true)) {
+      connectedAt = Math.max(connectedAt, await connected($))   // a record from before this start asks for no second
+      refresh = $.clock.every(REFRESH_MS, () => {
+        void claim($, true).then(async () => {
+          const at = await connected($)
+          if (at) await startConnected($, at)
+        }).catch(() => undefined)
+      })
+    }
     await $.tool.register({
       name: 'frames',
       description: 'Read the steering frames waiting for this session, each with its daemon-written from: line. Acknowledges the envelopes it returns.',
@@ -461,15 +491,33 @@ export const register: Register = on => {
     return { result: text || 'No steering frame is waiting.' }
   })
 
+  // A subagent presents its parent's credential: the harness hands its provider session id down,
+  // so its connect would mint nothing of its own and its disconnect would end the parent's
+  // enrolment (#3342). The lifecycle verbs are refused to a subagent loop outright, as the seat
+  // tools are (plans/3872 backlog §1.3). Only the guard's own evaluation is fail-closed: an error
+  // past it propagates, as the observer's does, and is never mistaken for a refusal.
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    const { agentId } = e as unknown as { agentId?: string }
+    if (agentId === undefined || !root) return next(e)
+    let verb: string | null
+    try {
+      verb = lifecycle(e.command)
+    } catch {
+      return { deny: 'refused: the subagent lifecycle guard could not be evaluated, so the call is refused rather than passed (#3342)' }
+    }
+    if (!verb) return next(e)
+    return { deny: `refused: the enrolment lifecycle is the session's own, never a subagent's (${verb} would act on its parent's credential). Ask the session to run it` }
+  })
+
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const result = await next(e)
     // The completed call is a trigger only; its output is never parsed (design D3). A subagent's
     // command is its own, never the session's: only the parent's loop moves its hold (#5688).
     const { agentId } = e as unknown as { agentId?: string }
     if (!root || agentId !== undefined || result.deny !== undefined || result.isError) return result
-    if (invokes(e.command, 'connect')) {
-      const session = await sessionOf($)
-      if (session) await start($, session)
+    const at = await connected($)
+    if (at || invokes(e.command, 'connect')) {
+      await startConnected($, at)
     } else if (invokes(e.command, 'promote', 'steering') || ((invokes(e.command, 'door') || invokes(e.command, 'lease')) && /\/steering\/brain\/(attach|detach)\b/.test(e.command))) {
       // Taking the seat, handing it on or handing it back: no frame tells the session that left it.
       askSeat($, true)

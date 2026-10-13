@@ -116,7 +116,8 @@ say `from: session <id>` naming the session it is about:
   with nothing it waits on open, and has written nothing since. Drive it, or keep it with what it
   waits on.
 - **`session-lapsing`**: its prompt cache lapses within 15 minutes. Resumed after that, it re-reads
-  its whole context.
+  its whole context. While your keep stands you are not told: the platform gives the session a turn
+  that refreshes its cache instead, once per lifetime.
 - **`session-kept-over`**: its keep's until passed and no work reached it.
 
 A session that finishes is closed, driven with its next piece of work, or kept, and nothing else:
@@ -214,19 +215,23 @@ for line in sys.stdin.read().splitlines():
 
 ## Reply
 
+Speak to the owner whenever you have something to say: before they ask, about a say they sent,
+or again after you have answered it. Each send is one message.
+
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" post /steering/brain/reply <<'JSON'
-{"lease_token":"@lease","key":"<the say's id>","text":"..."}
+{"lease_token":"@lease","request":"<the say's id, when it is about one>","text":"..."}
 JSON
 ```
 
-**Send `key`, and retry on anything that is not an answer.** Every frame carries an `id`, and
-the say you are answering is the key of the reply to it. A resend under the same key is recorded
-once (#1428), so a timeout after the door
-committed is not a second reply to the owner — which is the only reason retrying is safe. Sent
-without a key a reply is a fresh one every time, and a retry the owner reads twice is the
-failure this exists to prevent. Nothing answers for the brain when it does not retry: a reply
-lost to a timeout is a question the owner asked and never heard back on.
+Leave `request` out when the message is about no say. The first message about a say answers it;
+later ones about it are more messages, not answers. The `mcp__2mw2lt__say` tool sends the same.
+
+**Retry under the id the send printed.** The client prints `id <occurrence>` before it sends.
+When no answer comes, send the same body again with `--retry=<occurrence>`: Go answers it from
+the first, so a timeout after it committed is not a second message to the owner. Other words under
+that id are refused. A send without `--retry` is always a new message, so a plain resend is one
+the owner reads twice.
 
 ## Ask the owner
 
@@ -441,7 +446,10 @@ worker spends.
 what each host already runs. Send work to the host with the most room, not the one you are on:
 the machine the owner works at often carries the seat, their interactive sessions and CI
 runners, so fill it last. Name `on` only to put work where the score would not, and then choose the
-quietest host that has the account. Re-read the spread whenever a launch lands or a session ends, and move
+quietest host that has the account. To see where the arbiter would put a launch before you
+send it, read `rest.py '/placement?harness=<harness>&vendor=<vendor>&model=<model>&effort=<level>'`:
+the ranked machines and accounts with their verdicts, terms and order, the one it would choose
+first, and each one a check took out. It places nothing. Re-read the spread whenever a launch lands or a session ends, and move
 the next launch, not a running session, to rebalance.
 
 The brain, the daemon and the agents sit on different machines as a matter of course, so there is no
@@ -453,7 +461,7 @@ An opencode worker runs confined, in a clone of its own, and its branch is pushe
 `rest.py "/launches/<id>"`: its state, each machine it was offered to and what that machine
 answered, why each vendor's route was passed over while it waits, and the session it started. Go waits a launch with no room rather than
 refusing it (`worker-full`, `host-full`), and the waiting line names the sessions it could
-reclaim, each as its standing reads: close or drive one, or drop a keep you no longer need. A launch every machine bars by a rule
+reclaim, each as its standing reads: park an idle one, close or drive one, or drop a keep you no longer need. A launch every machine bars by a rule
 rather than by load is withdrawn `launch-unsatisfiable` at once: change the ask, since waiting
 will not place it.
 A launch its machine refused is placed again, on a machine that has not refused it, for a few
@@ -596,6 +604,24 @@ be out of its turn: a busy one is refused, and stopping one early is your delibe
 and never on one already stopped by its limit; compact on the new account afterwards with
 `control:` instead. A move across Anthropic organizations keeps the conversation but not the
 session's earlier thinking. Once it settles `rehomed`, relay the session to continue its card.
+
+## Park a session to free its slot
+
+When a launch waits `worker-full` and an idle Claude Code session holds the slot it needs, park
+that session rather than closing it:
+
+```bash
+say "park: token @lease <session> [until <time or duration>] because <the work that needs its slot>"
+```
+
+Its machine stops the process at an idle turn and keeps the session's enrolment, cards and waiting
+messages. The slot frees at the machine's next census. `wake:` it later and it resumes from its
+own transcript at the same epoch, with its conversation intact. A session mid-turn is refused
+`park-not-idle`: park it once it is idle, since stopping it mid-turn loses the work in flight.
+The park stands an hour unless `until` says otherwise. When it runs out you are told
+`session-parked-over`, and after that the session reads as any session with no process: stale,
+reclaimable, retired by `retire:`. A wake while its machine is full is refused `resume-host-full`;
+wake it again once there is room.
 
 ## Move a card to another model
 

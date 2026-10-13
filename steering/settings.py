@@ -70,9 +70,12 @@ def validate(data) -> dict:
     routing = data.get("routing", {})
     if not isinstance(routing, dict):
         raise ValueError("[routing] is not a table")
-    extra = set(routing) - {"judges_exclude", "claude_launchers", "worker_forge", "account_uses"}
+    extra = set(routing) - {"judges_exclude", "claude_launchers", "worker_forge", "account_uses",
+                            "glm_harness"}
     if extra:
         raise ValueError(f"[routing] has an unknown key ({', '.join(sorted(extra))})")
+    if routing.get("glm_harness", "claude-code") not in ("claude-code", "zcode"):
+        raise ValueError(f"[routing].glm_harness={routing['glm_harness']!r} is not claude-code or zcode")
     if "judges_exclude" in routing and not (isinstance(routing["judges_exclude"], list)
                                             and all(isinstance(v, str) for v in routing["judges_exclude"])):
         raise ValueError("[routing].judges_exclude is not a list of vendor names")
@@ -260,6 +263,14 @@ def judges_exclude(path: Path = DEFAULT_PATH) -> set[str] | None:
     if "judges_exclude" not in routing:
         return None
     return {v.strip() for v in routing["judges_exclude"] if v.strip()}
+
+
+def glm_harness(path: Path = DEFAULT_PATH) -> str:
+    """Which harness the machine's glm judge runs: "zcode" (ZCode, zcode-app-cli) or "claude-code"
+    (the claude-glm wrapper, the default when the file holds no opinion or a malformed one). One
+    knob, no env twin — a deliberate divergence from judges_exclude (plans/
+    2026-10-13-zcode-glm-judge-design.md §The flag)."""
+    return capacity(path).get("routing", {}).get("glm_harness", "claude-code")
 
 
 def claude_launchers(path: Path = DEFAULT_PATH) -> list | None:

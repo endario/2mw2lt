@@ -157,14 +157,22 @@ class App:
 
 
 def _match(app, folder, title, deadline=None):
-    matches = []
+    matches, aliases, windows = [], 0, 0
     for window in app.get(app.root, "AXWindows") or []:
+        # Electron can list the application element itself as a window (#4716): it is no window,
+        # and its tree holds every real window's tabs again.
+        if app.same(window, app.root) or app.get(window, "AXRole") == "AXApplication":
+            aliases += 1
+            continue
+        windows += 1
         name = app.get(window, "AXTitle") or ""
         if not folder or not re.search(rf"(?<![\w.-]){re.escape(folder)}(?![\w.-])", name):
             continue
         for tab in app.tabs(window, deadline=deadline):
             if title in (app.get(tab, "AXTitle"), app.get(tab, "AXDescription")):
                 matches.append((window, tab))
+    if aliases and not windows:
+        raise Unavailable("the running app reports the application itself as its windows")
     if len(matches) != 1:
         raise Unavailable("the running app has no unique existing workspace/tab match")
     return matches[0]
@@ -277,13 +285,17 @@ def ready(pid: int, folder: str, title: str):
         return _ready(app, window, tab, title, deadline)
 
 
-def idle(pid: int, folder: str, title: str):
-    """Read the native control composer, not the queue-another-message input of a busy tab."""
+def idle(pid: int, folder: str, title: str, holding: bool = False):
+    """Read the native control composer, not the queue-another-message input of a busy tab. The
+    caller clears the session's turn first — its harness registry row says whether a turn runs,
+    and a background hold runs out of the turn — so `holding` reads a tab whose button shows Stop
+    for that hold as the same idle composer a Send one is (#4725)."""
     with App(pid) as app:
         deadline = time.monotonic() + 2.0
         window, tab = _match(app, folder, title, deadline)
         _ready(app, window, tab, title, deadline)
         sends = []
+        stops = 0
         for element, role in app.elements(window, prune_history=True, deadline=deadline):
             if role in ("AXDialog", "AXMenu", "AXList"):
                 raise Unavailable("the target window shows a dialog, menu or list, not an idle composer")
@@ -293,12 +305,15 @@ def idle(pid: int, folder: str, title: str):
             if name not in ("Stop", "Send message") or not _owns_input(app, element, window, title, deadline):
                 continue
             if name == "Stop":
-                raise Unavailable("the target tab shows Stop, not an idle composer")
-            sends.append(element)
-        if len(sends) != 1:
+                if not holding:
+                    raise Unavailable("the target tab shows Stop, not an idle composer")
+                stops += 1
+            else:
+                sends.append(element)
+        if len(sends) != 1 and not (holding and stops == 1 and not sends):
             raise Unavailable("the target tab has no unique idle Send message control")
         text = _ready(app, window, tab, title, deadline)
-        if text and not app.get(sends[0], "AXEnabled"):
+        if sends and text and not app.get(sends[0], "AXEnabled"):
             raise Unavailable("the target tab's Send message control is disabled")
         return text
 

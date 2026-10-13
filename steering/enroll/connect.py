@@ -733,6 +733,8 @@ def main(argv: list[str]) -> int:
         print(f"STEERING_AGENT_PORT={port}")
     if why:
         print(why, file=sys.stderr)
+    if psession and holder.fresh(ws, psession):
+        holder.mark_connected(ws, psession)
     line = plugin_line(h.provider)
     if line:
         out, warn = plugin_out(line, holder_note(ws, psession, h.provider))

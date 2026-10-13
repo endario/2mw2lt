@@ -27,8 +27,9 @@ An invitation code (`2MW-` and four groups of four) is passed through as given, 
 alone: the engine takes it as the code, and the sign-in carries it to GitHub. It admits the GitHub
 account it was made for, by login or by verified email, once. A code is optional: the sign-in also
 carries the workspace's GitHub login, and an invite waiting for the account that signs in admits it.
-When the person means to sign in as another GitHub account than the workspace's, pass
-`--login <login>`.
+Without a code, the approval page offers Approve only to the workspace's GitHub login: the account
+that signs in decides which team the workspace lands in. When the person means to sign in as another
+GitHub account, pass `--login <login>`.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" . 2MW-7KQ4-XN2D-9HTB-M3PC

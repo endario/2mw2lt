@@ -66,6 +66,7 @@ _LAUNCH = re.compile(r"^launch:\s*token\s+@lease\s+(?P<harness>[a-z][a-z0-9-]{0,
                      # The launched session's first directive follows on its own line (doc 192).
                      r"(?:\nbrief:[ \t]*(?P<brief>.*?))?\s*$", re.S)
 _WITHDRAW = re.compile(r"^withdraw:\s*token\s+@lease\s+(?P<launch>[0-9a-f-]{36})\s*$")
+_CANCEL = re.compile(r"^cancel:\s*token\s+@lease\s+(?P<action>[0-9a-f-]{36})\s*$")
 _BACKLOG = re.compile(r"^backlog:\s*token\s+@lease\s*$")
 _ROSTER = re.compile(r"^roster:\s*token\s+@lease(?P<gone>\s+with\s+gone)?\s*$")
 # The seat's machine actions on Go, each naming the session it acts on.
@@ -80,12 +81,15 @@ _ACTION = {
                          r"(?:\s+model\s+(?P<model>\S{1,128}))?(?:\s+effort\s+(?P<effort>low|medium|high|xhigh|max))?"
                          r"(?P<compact>\s+compact(?:\s+without\s+checkpoint)?)?"
                          r"\s+because\s+(?P<reason>\S.*?)\s*$", re.S),
+    # A park stops an idle session's process and keeps its enrolment, for a wake to resume it.
+    "park": re.compile(r"^park:\s*token\s+@lease\s+(?P<to>\S+)(?:\s+until\s+(?P<until>\S+))?\s+because\s+(?P<reason>\S.*?)\s*$", re.S),
 }
 _ACTION_USAGE = {
     "wake": "wake: token @lease <session> because <reason>",
     "control": "control: token @lease <session> effort <level> | model <model> | compact [without checkpoint] because <reason>",
     "retire": "retire: token @lease <session> [to <successor>] because <reason>",
     "rehome": "rehome: token @lease <session> to [vendor <vendor>] <account> [model <model>] [effort <level>] [compact [without checkpoint]] because <reason>",
+    "park": "park: token @lease <session> [until <time or duration>] because <reason>",
 }
 # The seat's keep of a session it leaves idle on purpose, with its plan, and the keep's clearing
 # (doc 189 §2). The until is a time or a duration, Go's half hour when the line names none.
@@ -94,7 +98,7 @@ _UNKEEP = re.compile(r"^unkeep:\s*token\s+@lease\s+(?P<to>\S+)\s*$")
 _KEEP_USAGE = {"keep": "keep: token @lease <session> [until <time or duration>] because <reason>",
                "unkeep": "unkeep: token @lease <session>"}
 # Every lease verb `go_say` sends to Go, so a refusal of another names what this client takes.
-GO_VERBS = tuple(sorted({"authorship", "backlog", "dispose", "launch", "lift", "promote", "relay", "roster",
+GO_VERBS = tuple(sorted({"authorship", "backlog", "cancel", "dispose", "launch", "lift", "promote", "relay", "roster",
                          "withdraw", *_ACTION, *_KEEP_USAGE}))
 # The paths `go_post` takes: each is the seat's own command, translated to the route Go serves.
 POST_TARGETS = ("/steering/seat/read", "/steering/brain/reply", "/steering/brain/attach",
@@ -126,6 +130,8 @@ def go_say(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         return _go_launch(rec, line, key)
     if verb == "withdraw":
         return _go_withdraw(rec, line, key)
+    if verb == "cancel":
+        return _go_cancel(rec, line, key)
     if verb in _ACTION:
         return _go_action(rec, verb, line, key)
     if verb in _KEEP_USAGE:
@@ -268,8 +274,33 @@ def _go_withdraw(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
     return 0, said, False
 
 
+def _go_cancel(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
+    """`cancel:` on Go: the seat withdraws an action still only offered, so the ask that superseded
+    it goes again."""
+    import refusal
+    import session_routes
+    m = _CANCEL.match(line)
+    if not m:
+        return 2, refusal.use("cancel", "malformed cancel: cancel: token @lease <action id>"), False
+    try:
+        said = session_routes.seat_cancel(rec["session"], rec["token"], m["action"], key)
+    except session_routes.NotSeated as why:
+        return 1, GO_NOT_SEATED.format(why=why), False
+    except session_routes.Unsent as e:
+        return 1, refusal.retry(str(e)), True
+    except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale, False
+        if e.code in SEAT_LOST:
+            return 1, GO_NOT_SEATED.format(why=e), False
+        if session_routes.settled(e):
+            return 1, refusal.use("cancel", str(e)), False
+        return 1, refusal.retry(str(e)), True
+    return 0, said, False
+
+
 def _go_action(rec: dict, verb: str, line: str, key: str) -> tuple[int, str, bool]:
-    """`wake:`, `control:`, `retire:` or `rehome:` on Go: the brain asks the session's machine to act on it."""
+    """`wake:`, `control:`, `retire:`, `rehome:` or `park:` on Go: the brain asks the session's machine to act on it."""
     import refusal
     import session_routes
     m = _ACTION[verb].match(line)
@@ -282,6 +313,8 @@ def _go_action(rec: dict, verb: str, line: str, key: str) -> tuple[int, str, boo
         body["value"] = " ".join([*(["vendor", m["vendor"]] if m["vendor"] else []), m["account"],
                                   *(["model", m["model"]] if m["model"] else []),
                                   *(["effort", m["effort"]] if m["effort"] else []), *(m["compact"] or "").split()])
+    if verb == "park" and m["until"]:
+        body["value"] = m["until"]
     if verb == "retire" and m["successor"]:
         body["value"] = m["successor"]
     try:
@@ -471,11 +504,9 @@ def go_read(rec: dict, body: bytes) -> tuple[int, str]:
     return 0, "read: frames"
 
 
-def go_post(rec: dict, target: str, body: bytes) -> tuple[int, str]:
-    """A lease post: (exit code, answer). The seat's reply to a say answers the
-    request the say was (`session_routes.answer`), at the generation the holder holds; Go has no
-    reply that answers no request, so one without the say's key is refused. Handing the seat on
-    and handing it back are the holder's own seat commands at that generation, and so is a raise."""
+def go_post(rec: dict, target: str, body: bytes, occurrence: str | None = None) -> tuple[int, str]:
+    """A lease post: (exit code, answer). Handing the seat on and handing it back are the holder's
+    own seat commands at the generation it holds, and so is a raise; a reply is `go_reply`'s."""
     import refusal
     import session_routes
     target = target.rstrip("/")
@@ -494,22 +525,51 @@ def go_post(rec: dict, target: str, body: bytes) -> tuple[int, str]:
         return go_raise(rec, obj)
     if target != "/steering/brain/reply":
         return go_seat(rec, target, obj)
-    if not isinstance(obj.get("text"), str) or not obj["text"].strip():
+    return go_reply(rec, obj, occurrence)
+
+
+# The line a send that may have been registered unanswered ends with, which the plugin's seat tools
+# read to send it once more as itself (`resendId`).
+RESEND = "\nif this reply may have been registered, resend with --retry={}"
+
+
+def go_reply(rec: dict, obj: dict, occurrence: str | None) -> tuple[int, str]:
+    """The brain speaks to the owner: whenever it has something to say, about a say or about
+    nothing (the owner's ruling of 2026-10-13 on #5555). `request` names the say it answers, or is
+    absent; the older form's `key` names it the same way. The occurrence names the message, so a
+    resend under `--retry` is answered from the first and two messages are two, whatever they say.
+    An older post with a key and no `--retry` is named by its say and words, so the resend that form
+    was told to make stays one message."""
+    import door
+    import refusal
+    import session_routes
+    text = obj.get("text")
+    if not isinstance(text, str) or not text.strip():
         return 2, f'refused: a reply is a JSON object with "lease_token": "{PLACEHOLDER}" and a text'
-    if not isinstance(obj.get("key"), str) or not obj["key"]:
-        return 1, "refused: a reply answers a say, so name the say's key"
+    named = "request" if "request" in obj else "key" if "key" in obj else None
+    request = obj.get(named) if named else None
+    if request is not None:
+        try:
+            request = str(uuid.UUID(request)) if isinstance(request, str) else None
+        except ValueError:
+            request = None
+        if request is None:
+            return 2, f'refused: a reply\'s "{named}" is the id of the say it answers, or is left out'
+    if occurrence is None:
+        occurrence = (session_routes._own_key("reply", request, text) if named == "key" else door.occurrence())
+        print(f"id {occurrence}", file=sys.stderr)
     try:
         generation = session_routes.seat_generation(rec["session"], rec["token"])
-        session_routes.answer(rec["session"], rec["token"], obj["key"], generation, obj["text"])
+        got = session_routes.reply(rec["session"], rec["token"], generation, text, occurrence, request)
     except session_routes.NotSeated as why:
         return 1, GO_NOT_SEATED.format(why=why)
     except session_routes.Unsent as e:
-        return 1, refusal.retry(str(e))
+        return 1, refusal.retry(str(e)) + RESEND.format(occurrence)
     except session_routes.Refused as e:
         if (stale := session_routes.outdated(e)) is not None:
             return 1, stale
-        return 1, f"refused: {e}" if session_routes.settled(e) else refusal.retry(str(e))
-    return 0, f"answered: {obj['key']}"
+        return 1, f"refused: {e}" if session_routes.settled(e) else refusal.retry(str(e)) + RESEND.format(occurrence)
+    return 0, f"answered: {request}" if got.get("completed") else f"replied: {got.get('id')}"
 
 
 def go_raise(rec: dict, obj: dict) -> tuple[int, str]:
@@ -595,14 +655,15 @@ def main(argv: list[str]) -> int:
         if unsure:
             print(f"if this line may have been registered, resend with --retry={key}")
         return code
-    if rest[:1] == ["post"] and len(rest) == 2 and retry is None:
+    # Only a reply is a message a resend names; every other post is named by what it does.
+    if rest[:1] == ["post"] and len(rest) == 2 and (retry is None or rest[1].rstrip("/") == "/steering/brain/reply"):
         if rec is None:
             print(NONE)
             return 1
-        code, said = go_post(rec, rest[1], sys.stdin.buffer.read())
+        code, said = go_post(rec, rest[1], sys.stdin.buffer.read(), retry)
         print(said)
         return code
-    return error("lease", "say [--retry=<id>], or post <path>")
+    return error("lease", "say [--retry=<id>], post <path>, or post /steering/brain/reply [--retry=<id>]")
 
 
 if __name__ == "__main__":

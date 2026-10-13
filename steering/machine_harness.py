@@ -437,6 +437,64 @@ def _goose_loaded(psession: str) -> bool:
     return worker_probe.goose_loaded(psession)
 
 
+def _zcode_pid(psession: str) -> int | None:
+    import worker_probe
+    return worker_probe.zcode_pid_of(psession)
+
+
+def _zcode_loaded(psession: str) -> bool:
+    import worker_probe
+    return worker_probe.zcode_loaded(psession)
+
+
+def _zcode_transcript(psession: str):
+    import worker_probe
+    return worker_probe.zcode_path_of(psession)
+
+
+def _zcode_workspace(fd: int, rel, workspace: str) -> str | None:
+    import worker_probe
+    return worker_probe.zcode_workspace_of(fd, rel, workspace)
+
+
+def zcode_version() -> str | None:
+    import zcode_probe
+    return zcode_probe.version()
+
+
+def _zcode_reading(psession: str, config: str | None = None) -> dict | None:
+    """What the account db says the session is, from outside the session: the model the last
+    request served and the tokens its turns spent, in the vitals record's own shape. None when
+    the db says nothing, never a guess."""
+    import zcode_probe
+    import vitals
+    home = (Path(config) if config else zcode_probe.config_dir())
+    rec = zcode_probe.reading(psession, home)
+    if rec is None:
+        return None
+    facts = {"provider_session": psession,
+             "source_version": zcode_version(),
+             "observed_at": round(time.time(), 3),
+             **(rec.get("tokens") or {})}
+    if rec.get("model"):
+        facts["model"] = rec["model"]
+    return vitals.stated("zcode", facts)
+
+
+def _zcode_process_names() -> tuple[str, ...]:
+    return "zcode", "zcode-cli"
+
+
+def _zcode_process(argv: list[str]) -> str | None:
+    args = _command(argv, ("zcode", "zcode-cli"))
+    if args is None or any(x in args for x in ("--version", "--help", "-v", "-h")):
+        return None
+    if args and args[0] in ("login", "logout", "plugins", "plugin", "doctor", "skills", "commands",
+                            "tui", "version", "app-server"):
+        return None
+    return "worker"
+
+
 def _goose_transcript(psession: str):
     import worker_probe
     return worker_probe.goose_path_of(psession)
@@ -703,6 +761,16 @@ HARNESSES = {h.provider: h for h in (
             shape=_goose_shape, workspace=_opencode_workspace,
             delivery="inject", loaded=_opencode_loaded, process_kind=_opencode_process,
             process_names=_opencode_process_names),
+    # The same launched-worker posture for ZCode: the door trusts the platform's managed record,
+    # the account db is the reading, and no env export names a session (measured on 0.16.9), so
+    # the platform passes the worker id as goose's does. A person-started zcode session is
+    # refused enrolment — doc 83's rule — until the owner moves that boundary.
+    Harness("zcode", agent="zcode", config=".zcode", config_env="ZCODE_DATA_BASE_DIR",
+            transcript_root="steering-workers",
+            harness_pid=_zcode_pid, transcript=_zcode_transcript, version=zcode_version,
+            shape=_goose_shape, workspace=_zcode_workspace,
+            delivery="inject", loaded=_zcode_loaded, reading=_zcode_reading,
+            process_kind=_zcode_process, process_names=_zcode_process_names),
 )}
 
 

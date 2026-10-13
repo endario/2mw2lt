@@ -29,6 +29,29 @@ from local_workspace import required_workspace_root  # noqa: E402
 from verb_help import error, help_requested, script_help  # noqa: E402
 
 
+RULES = Path("coordination/internal/credentialscan/gitleaks.toml")
+
+
+def credential_shaped(text: str, rules: Path | None) -> str:
+    """`detected` when the text carries a credential-shaped string, `clean` when it does not, and
+    `failed` when the scanner could not run — the gitleaks rules half of the scan the say route
+    runs (#6178); the route decides on its full scan. No rules, or no gitleaks, scans nothing
+    here; the route refuses there."""
+    import shutil
+    import subprocess
+    if rules is None or not shutil.which("gitleaks"):
+        return "failed"
+    try:
+        scan = subprocess.run(
+            ["gitleaks", "stdin", "--config", str(rules), "--exit-code", "10",
+             "--ignore-gitleaks-allow", "--gitleaks-ignore-path", os.devnull,
+             "--no-banner", "--redact", "--log-level", "error", "--timeout", "60"],
+            input=text.encode(), capture_output=True, timeout=65)
+    except (OSError, subprocess.SubprocessError):
+        return "failed"
+    return {10: "detected", 0: "clean"}.get(scan.returncode, "failed")
+
+
 def _on_go(session: str, token: str, this: str, text: str, target: str | None) -> int:
     """The say on a Go workspace's own route: answered there, or refused in its words."""
     import refusal
@@ -87,6 +110,14 @@ def main(argv: list[str]) -> int:
               f"  {board_invocation()} {verb} {session} <text>", file=sys.stderr)
         return 2
     ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
+    # A say is speech, and a credential-shaped one is refused here rather than sent to be stored
+    # or delivered (#6178). A scanner that cannot run says so; the route still scans.
+    verdict = credential_shaped(text, ws / RULES)
+    if verdict == "detected":
+        print("refused: the text carries a credential-shaped string; it is not sent", file=sys.stderr)
+        return 2
+    if verdict == "failed":
+        print("the local credential scan could not run; the say route still scans", file=sys.stderr)
     try:
         session, token = speaking_as(ws, session, flags)
     except Refused as why:

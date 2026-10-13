@@ -32,6 +32,7 @@ _RAW_FORMS = {
     "note": ["note: token <lease token> <text>"],
     "launch": ["launch: token <lease token> <harness> [on <node>] [vendor <vendor>] [account <n>] [model <model>] [thinking <level>] [effort <level>] [window] [card <card>|resolves <owner>/<name>#<n>] because <reason> [<newline> brief: <directive>]"],
     "withdraw": ["withdraw: token <lease token> <launch id>"],
+    "cancel": ["cancel: token <lease token> <action id>"],
     "relay": ["relay: token <lease token> to <session>[@<epoch>] <text>"],
     "retire": ["retire: token <lease token> <worker> on <node>"],
     "card": ["card: token <lease token> <verb> <args…>"],
@@ -39,6 +40,7 @@ _RAW_FORMS = {
     "wake": ["wake: token <lease token> <session> because <reason>"],
     "control": ["control: token <lease token> <session> effort <level> because <reason>", "control: token <lease token> <session> model <model> because <reason>", "control: token <lease token> <session> compact [without checkpoint] because <reason>"],
     "rehome": ["rehome: token <lease token> <session> to [vendor <vendor>] <account> [model <model>] [effort <level>] [compact [without checkpoint]] because <reason>"],
+    "park": ["park: token <lease token> <session> [until <time or duration>] because <reason>"],
     "keep": ["keep: token <lease token> <session> [until <time or duration>] because <reason>"],
     "unkeep": ["unkeep: token <lease token> <session>"],
     "roster": ["roster: token <lease token> [with gone]"],
@@ -56,7 +58,7 @@ _RAW_FORMS = {
 
 _AUDIENCE = {
     **{verb: "session" for verb in ("announce", "blocked", "wait", "done", "recommend", "ask", "claim", "taking", "declare", "checkpoint", "holds", "enroll", "bind", "ack", "say", "detach", "gate")},
-    **{verb: "seat" for verb in ("note", "launch", "withdraw", "relay", "retire", "card", "effort", "wake", "control", "rehome", "keep", "unkeep", "roster", "lift", "authorship", "dispose", "promote", "backlog", "night")},
+    **{verb: "seat" for verb in ("note", "launch", "withdraw", "relay", "retire", "card", "effort", "wake", "control", "rehome", "park", "cancel", "keep", "unkeep", "roster", "lift", "authorship", "dispose", "promote", "backlog", "night")},
     "rebind": "operator",
     "supersede": "operator",
 }
@@ -83,6 +85,7 @@ _EXAMPLES = {
     "note": ["note: token <lease token> review is waiting"],
     "launch": ["launch: token <lease token> claude on build vendor anthropic model opus-5.5 effort high because review"],
     "withdraw": ["withdraw: token <lease token> 1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00"],  # gitleaks:allow (a placeholder launch id)
+    "cancel": ["cancel: token <lease token> 1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00"],  # gitleaks:allow (a placeholder action id)
     "relay": ["relay: token <lease token> to violet@1 review the branch"],
     "retire": ["retire: token <lease token> worker-1 on build"],
     "card": ["card: token <lease token> reclassify 010101010101010101010101 state live"],
@@ -90,6 +93,7 @@ _EXAMPLES = {
     "wake": ["wake: token <lease token> violet because review arrived"],
     "control": ["control: token <lease token> violet effort high because review", "control: token <lease token> violet model opus-5.5 because review", "control: token <lease token> violet compact without checkpoint because context full"],
     "rehome": ["rehome: token <lease token> violet to vendor zai 4 model glm-5.3 effort high compact because account 2 is spent"],
+    "park": ["park: token <lease token> violet until 2h because a critic needs its slot"],
     "keep": ["keep: token <lease token> violet until 45m because the review on #5536 lands within the hour"],
     "unkeep": ["unkeep: token <lease token> violet"],
     "roster": ["roster: token <lease token> with gone"],
@@ -192,7 +196,7 @@ TOOLS = {
     ]},
     "lease": {"forms": [
         {"topic": "say", "usage": "say " + _SPEAKER_USAGE + " [--retry=<id>]", "example": "lease say < line.txt"},
-        {"topic": "post", "usage": "post <path> " + _SPEAKER_USAGE, "example": "lease post /steering/brain/reply < body.json"},
+        {"topic": "post", "usage": "post <path> " + _SPEAKER_USAGE + " [--retry=<id>, a reply only]", "example": "lease post /steering/brain/reply < body.json"},
     ]},
     "seat_section": {"bare": False, "forms": [
         {"topic": None, "usage": _SPEAKER_USAGE, "example": "seat_section --provider claude --provider-session 9a77"},

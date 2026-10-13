@@ -103,6 +103,19 @@ def session_headers(token: str) -> dict[str, str]:
     return {SESSION_CARRIER: token, MACHINE_CARRIER: _machine_token(), "User-Agent": door.USER_AGENT}
 
 
+def _renewed(e: urllib.error.HTTPError, problem: dict, presented: str | None) -> bool:
+    """Whether the machine credential a request presented was superseded by its renewal between
+    the read and the send. Go refuses it before any effect, so the request goes once more on the
+    renewed one (measured 2026-10-13: a gate carry 100 ms after a renewal)."""
+    if e.code != 403 or problem.get("code") != "binding-lifecycle-mismatch" or not presented:
+        return False
+    import credential  # noqa: E402
+    try:
+        return _machine_token() != presented
+    except (SystemExit, credential.NoCredential):
+        return False
+
+
 def post(path: str, body: dict, key: str, carrier: str, token: str, timeout: float = 10.0,
          resend: bool = True) -> dict:
     """One write under `key`, sent again under the same key while Go asks it to wait, and again
@@ -114,6 +127,7 @@ def post(path: str, body: dict, key: str, carrier: str, token: str, timeout: flo
     data = json.dumps(body).encode()
     started, attempts = time.monotonic(), 0
     again = door.resender(started, f"session: {path}", resend=resend)
+    renewed = False
     while True:
         headers = (session_headers(token) if carrier == SESSION_CARRIER
                    else {carrier: token, "User-Agent": door.USER_AGENT})
@@ -124,6 +138,9 @@ def post(path: str, body: dict, key: str, carrier: str, token: str, timeout: flo
                 return json.loads(r.read() or b"{}")
         except urllib.error.HTTPError as e:
             problem = _problem(e)
+            if not renewed and carrier == SESSION_CARRIER and _renewed(e, problem, req.get_header(MACHINE_CARRIER.capitalize())):
+                renewed = True
+                continue
             paced = (e.headers.get("Retry-After") or "").strip() if e.headers else ""
             pause = _retry_after(e) if e.code in (429, 503) and paced else None
             if pause is None:
@@ -366,6 +383,17 @@ def answer(session: str, token: str, request: str, generation: int, text: str) -
                 key, SESSION_CARRIER, token)
 
 
+def reply(session: str, token: str, generation: int, text: str, occurrence: str, request: str | None = None) -> dict:
+    """The seat's holder speaks to the owner on the Direct line (documentation/steering/plans/5555-direct-line):
+    unprompted, or about the request `request` names. The first reply about an unanswered request
+    completes it; any later one is another message. The occurrence is the message's own name, so a
+    resend after a lost answer is answered from the first. Raises `Refused` or `Unsent`."""
+    body: dict = {"session": session, "generation": generation, "text": text}
+    if request is not None:
+        body["request"] = request
+    return post("/brain/replies", body, _own_key("reply", session, occurrence), SESSION_CARRIER, token)
+
+
 def _own_key(*parts: str) -> str:
     """A write's own key, from what makes it that write, so a retry after a lost answer is answered
     from the first rather than done twice."""
@@ -496,6 +524,7 @@ def get(path: str, token: str, timeout: float = 10.0) -> dict:
     `Refused` or `Unsent` as a write does."""
     started, attempts = time.monotonic(), 0
     again = door.resender(started, f"session: {path}", action="asking again")
+    renewed = False
     while True:
         req = urllib.request.Request(_base() + path, headers=session_headers(token))
         try:
@@ -503,6 +532,9 @@ def get(path: str, token: str, timeout: float = 10.0) -> dict:
                 return json.loads(r.read() or b"{}")
         except urllib.error.HTTPError as e:
             problem = _problem(e)
+            if not renewed and _renewed(e, problem, req.get_header(MACHINE_CARRIER.capitalize())):
+                renewed = True
+                continue
             paced = (e.headers.get("Retry-After") or "").strip() if e.headers else ""
             pause = _retry_after(e) if e.code in (429, 503) and paced else None
             if pause is None:
@@ -728,7 +760,7 @@ def seat_launch(session: str, token: str, body: dict, key: str) -> str:
 
 
 def _overloaded(host: dict | None) -> str:
-    """The measured load of an overloaded host the launch was placed on, as the seat reads it."""
+    """The measured load of an overloaded host the launch was placed on, as the brain reads it."""
     if not host:
         return ""
     said = []
@@ -768,13 +800,21 @@ def seat_withdraw(session: str, token: str, launch: str, key: str) -> str:
     return f"withdrawn: {answer.get('id', launch)}"
 
 
+def seat_cancel(session: str, token: str, action: str, key: str) -> str:
+    """The holder withdraws an action still only offered (`POST /actions/{action}/cancel`), keyed by
+    the line's own key. Raises `NotSeated`, `Refused` or `Unsent`."""
+    seat_generation(session, token)
+    answer = write(f"/actions/{action}/cancel", {}, key, SESSION_CARRIER, token)
+    return f"cancelled: {answer['kind']} {answer.get('id', action)}"
+
+
 def seat_action(session: str, token: str, body: dict, key: str) -> str:
-    """The holder asks the machine a session runs on to wake, control, retire or rehome it
+    """The holder asks the machine a session runs on to wake, control, retire, rehome or park it
     (`POST /actions`), keyed by the line's own key so a rerun after a lost answer is answered from
     the first. Raises `NotSeated`, `Refused` or `Unsent`."""
     seat_generation(session, token)
     answer = write("/actions", body, key, SESSION_CARRIER, token)
-    doing = {"wake": "waking", "control": "controlling", "retire": "retiring", "rehome": "rehoming"}[body["kind"]]
+    doing = {"wake": "waking", "control": "controlling", "retire": "retiring", "rehome": "rehoming", "park": "parking"}[body["kind"]]
     value = f" {body['value']}" if body.get("value") else ""
     return f"{doing}: {answer['id']} {body['to']}{value}, offered"
 

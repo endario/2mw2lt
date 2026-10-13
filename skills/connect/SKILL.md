@@ -110,6 +110,9 @@ A `say` from `kick <id>` means you hold a card and your turn ended with nothing 
 Carry on with the work, declare what you wait on with `wait`, or say `done` or `blocked`. Do not
 answer it in words.
 
+A `say` from `warm <id>` is the platform refreshing your prompt cache while the brain keeps you.
+End the turn without a word.
+
 When work needs a card and has neither an owning issue nor a gate yet, declare it:
 
 ```bash

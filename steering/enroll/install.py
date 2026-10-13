@@ -148,7 +148,11 @@ def ask(method: str, url: str, body: dict | None = None, token: str | None = Non
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     try:
-        with door_mod.send(req, timeout) as r:
+        # A terminal session is the request's one credential: coordination refuses a machine's agent
+        # credential beside it as ambiguous, which `door.send` adds for any door this machine holds.
+        if token:
+            req.add_header("User-Agent", door_mod.USER_AGENT)
+        with (door_mod.open_direct(req, timeout) if token else door_mod.send(req, timeout)) as r:
             status, raw = r.status, r.read()
     except urllib.error.HTTPError as e:
         try:
@@ -809,8 +813,11 @@ def install(root: Path, codex: bool = False, team: str | None = None,
         say("machine", f"{door} is the workspace's alias door, which the alias cut retires; admitting this "
                        "machine at its address")
     if view is None:
-        # The workspace's GitHub login is the account the person most likely signs in as (#3954).
-        token = sign_in(console, f"install {repo} on {label}", invite, login or name, named=login is not None)
+        # The workspace's GitHub login is the account the person most likely signs in as (#3954). With no
+        # invitation to decide it, the account that signs in decides the team the workspace lands in, so
+        # the approval page refuses any other: a team of another account's is chosen with --login.
+        token = sign_in(console, f"install {repo} on {label}", invite, login or name,
+                        named=login is not None or invite is None)
         try:
             door, authority, team_id, owner = admit_on_go(console, token, go_access(console, token), repo, team)
             record(root, door, authority)
@@ -1079,7 +1086,15 @@ def retire_on(console: str, wid: str) -> None:
     # Its own scope: an install's carries the approval page on to GitHub for the repository (#4015).
     token = sign_in(console, f"retire {wid}")
     try:
-        status, got = call("POST", f"{console}{door_mod.routed(wid)}/api/v1/workspace/retirement", {}, token,
+        # A workspace's uuid, as install prints it, is no route: its address, which the person's access names, is.
+        route = wid
+        if door_rewrite.is_uuid(wid):
+            route = next((w["address"] for t in go_access(console, token)["teams"] if isinstance(t, dict)
+                          for w in t.get("workspaces") or [] if isinstance(w, dict) and w.get("workspace_id") == wid
+                          and isinstance(w.get("address"), str)), None)
+            if route is None:
+                raise Stop(f"none of the teams you signed in to holds workspace {wid}; sign in as its team's owner")
+        status, got = call("POST", f"{console}{door_mod.routed(route)}/api/v1/workspace/retirement", {}, token,
                            key=str(uuid.uuid4()))
         if status != 200:
             raise Stop(f"coordination would not retire {wid} ({status}): {got.get('code') or got}")

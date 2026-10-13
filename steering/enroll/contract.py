@@ -119,8 +119,27 @@ ListedAccountUsage = typing.TypedDict("ListedAccountUsage", {
     "sessions": "list[str] | None",
     "owner": "str | None",
     "serves": "bool",
+    "stopped_by_login": "str | None",
     "owner_login": "str | None",
     "label": "str | None",
+    "manages": "bool",
+    "co_owners": "list[AccountCoOwner] | None",
+    "shared": "AccountShared | None",
+})
+
+# AccountCoOwner is one open share: the login it names, the subject's own once they signed in, and
+# whether they have.
+AccountCoOwner = typing.TypedDict("AccountCoOwner", {
+    "id": "str",
+    "login": "str",
+    "bound": "bool",
+    "granted_by_login": "str | None",
+})
+
+# AccountShared is the account's owner and the member who shared it with the reader.
+AccountShared = typing.TypedDict("AccountShared", {
+    "owner_login": "str | None",
+    "granted_by_login": "str | None",
 })
 
 # UsageReading is an account's reading as its machine sent it (doc 77 §2): a field the wire did not
@@ -244,6 +263,30 @@ AccountLabelled = typing.TypedDict("AccountLabelled", {
     "label": "str | None",
 })
 
+# AccountShare is the body of POST /accounts/co-owners: share the account with a GitHub account, by
+# its numeric id and the login the console resolved it to (#6236).
+AccountShare = typing.TypedDict("AccountShare", {
+    "vendor": "str",
+    "account_id": "str",
+    "github_id": "int",
+    "login": "str",
+})
+
+# AccountShareAnswer is a share as it stands: new or the open one already naming that id.
+AccountShareAnswer = typing.TypedDict("AccountShareAnswer", {
+    "id": "str",
+    "vendor": "str",
+    "account_id": "str",
+    "login": "str",
+    "bound": "bool",
+})
+
+# AccountUnshareAnswer is the answer to DELETE /accounts/co-owners/{id}.
+AccountUnshareAnswer = typing.TypedDict("AccountUnshareAnswer", {
+    "id": "str",
+    "revoked": "bool",
+})
+
 # ActionBody asks a machine to act on a session's process: to wake it, set its level, end it,
 # resume it under another account, or stop it and keep its enrolment.
 ActionBody = typing.TypedDict("ActionBody", {
@@ -260,6 +303,9 @@ ActionAnswer = typing.TypedDict("ActionAnswer", {
     "state": "str",
     "replayed": "bool",
 })
+
+# ActionCancel withdraws an action still only offered; the route's path names it.
+ActionCancel = typing.TypedDict("ActionCancel", {})
 
 # WakeReceipt is what a machine answers of a wake it was offered: the attempt, and its result as
 # the agent reports it, a state of sent, closed-refused or closed-uncertain with what it kept.
@@ -2409,7 +2455,7 @@ LaunchAnswer = typing.TypedDict("LaunchAnswer", {
     "host_overloaded": "typing.NotRequired[HostOverloaded | None]",
 })
 
-# LaunchRead is one launch as the seat reads it: its answer, why each vendor was passed over at its
+# LaunchRead is one launch as the brain reads it: its answer, why each vendor was passed over at its
 # last decision, each machine it was offered to, and the session it started.
 LaunchRead = typing.TypedDict("LaunchRead", {
     "id": "str",
@@ -2762,6 +2808,13 @@ InstallationClaimAnswer = typing.TypedDict("InstallationClaimAnswer", {
     "replayed": "typing.NotRequired[bool]",
 })
 
+# InstallationReleaseAnswer is the team's giving up of an installation it holds: "released", or
+# the same answer a retry reads ("replayed").
+InstallationReleaseAnswer = typing.TypedDict("InstallationReleaseAnswer", {
+    "status": "str",
+    "replayed": "typing.NotRequired[bool]",
+})
+
 # WorkspaceCreateBody installs a new repository for a team: the repository the workspace serves,
 # which is its name, and the alias it is reached at, /w/<alias>, which the service mints when none
 # is named.
@@ -2848,6 +2901,59 @@ InstallationHeld = typing.TypedDict("InstallationHeld", {
     "held": "bool",
     "installation_id": "typing.NotRequired[int]",
     "repository": "typing.NotRequired[str]",
+})
+
+# PlacementRead is where the arbiter would place a launch, read without placing it: each judged
+# candidate, the chosen one first and the rest by the order they were ranked by, then the ones a
+# check took out before judging. Reason is why none would be chosen, empty when one would.
+PlacementRead = typing.TypedDict("PlacementRead", {
+    "reason": "typing.NotRequired[str]",
+    "candidates": "list[PlacementCandidate] | None",
+    "filtered": "list[PlacementFiltered] | None",
+})
+
+# PlacementCandidate is one judged machine and account: the account's verdict and number, the
+# host's measured room and worker cap, the launch terms and their weighted order, and the check that
+# passed it over, empty when it was ranked.
+PlacementCandidate = typing.TypedDict("PlacementCandidate", {
+    "machine": "str",
+    "vendor": "str",
+    "account": "typing.NotRequired[str]",
+    "chosen": "bool",
+    "account_number": "typing.NotRequired[int | None]",
+    "account_sessions": "typing.NotRequired[int | None]",
+    "verdict": "typing.NotRequired[PlacementVerdict | None]",
+    "overloaded": "bool",
+    "load_room": "typing.NotRequired[float | None]",
+    "worker_limit": "typing.NotRequired[int | None]",
+    "worker_used": "typing.NotRequired[int | None]",
+    "terms": "typing.NotRequired[PlacementTerms | None]",
+    "order": "typing.NotRequired[float | None]",
+    "passed": "typing.NotRequired[str]",
+})
+
+# PlacementVerdict is the account's verdict as placement judged it.
+PlacementVerdict = typing.TypedDict("PlacementVerdict", {
+    "state": "str",
+    "reason": "typing.NotRequired[str]",
+    "tier": "int",
+    "score": "float",
+})
+
+# PlacementTerms are a launch candidate's terms before weighting.
+PlacementTerms = typing.TypedDict("PlacementTerms", {
+    "runway": "float",
+    "room": "float",
+    "load": "float",
+    "spread": "float",
+})
+
+# PlacementFiltered is a candidate a check took out before judging, and the check.
+PlacementFiltered = typing.TypedDict("PlacementFiltered", {
+    "machine": "str",
+    "vendor": "str",
+    "account": "typing.NotRequired[str]",
+    "reason": "str",
 })
 
 # Problem is every refusal's body (RFC 9457), on every route. Code names the check that refused,
@@ -3140,7 +3246,15 @@ SessionStanding = typing.TypedDict("SessionStanding", {
     "since": "str | None",
     "stale": "bool",
     "keep": "StandingKeep | None",
+    "park": "StandingPark | None",
     "cache": "StandingCache | None",
+})
+
+# StandingPark is the seat's park on a session: its process stopped, its enrolment kept, until when,
+# and Over once that has passed with no wake (#5907 slice 5).
+StandingPark = typing.TypedDict("StandingPark", {
+    "until": "str",
+    "over": "bool",
 })
 
 # StandingKeep is the seat's keep on a session: why, until when, and Over once that has passed with
@@ -3910,6 +4024,7 @@ RESERVED_TEAM_SLUGS = frozenset({"alpha", "api", "connect", "consent", "device",
 ROUTES = frozenset({
     "GET /api/v1/access",
     "GET /api/v1/csrf",
+    "POST /api/v1/installations/{installation}/release",
     "POST /api/v1/team-authorizations",
     "POST /api/v1/teams",
     "GET /api/v1/teams/{team}/collaborators",
@@ -3922,6 +4037,7 @@ ROUTES = frozenset({
     "POST /api/v1/teams/{team}/collaborators/{collaborator}/title",
     "GET /api/v1/teams/{team}/installations",
     "POST /api/v1/teams/{team}/installations",
+    "POST /api/v1/teams/{team}/installations/{installation}/release",
     "GET /api/v1/teams/{team}/invitations",
     "POST /api/v1/teams/{team}/invitations",
     "DELETE /api/v1/teams/{team}/invitations/{invitation}",
@@ -3940,9 +4056,12 @@ ROUTES = frozenset({
     "POST /forge/hook",
     "GET /healthz",
     "GET /w/{workspace}/api/v1/accounts",
+    "POST /w/{workspace}/api/v1/accounts/co-owners",
+    "DELETE /w/{workspace}/api/v1/accounts/co-owners/{id}",
     "POST /w/{workspace}/api/v1/accounts/label",
     "POST /w/{workspace}/api/v1/accounts/serve",
     "POST /w/{workspace}/api/v1/actions",
+    "POST /w/{workspace}/api/v1/actions/{action}/cancel",
     "GET /w/{workspace}/api/v1/board",
     "GET /w/{workspace}/api/v1/brain/digest",
     "POST /w/{workspace}/api/v1/brain/replies",
@@ -4008,6 +4127,7 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/needs",
     "POST /w/{workspace}/api/v1/needs",
     "POST /w/{workspace}/api/v1/needs/{need}/transitions",
+    "GET /w/{workspace}/api/v1/placement",
     "GET /w/{workspace}/api/v1/push/key",
     "POST /w/{workspace}/api/v1/push/key",
     "GET /w/{workspace}/api/v1/push/subscriptions",
@@ -4105,6 +4225,7 @@ QUERY = {
     "GET /w/{workspace}/api/v1/machines": {"limit": None, "cursor": None},
     "GET /w/{workspace}/api/v1/momentum": {"window": frozenset({"30d", "7d", "90d"})},
     "GET /w/{workspace}/api/v1/needs": {"audience": frozenset({"owner", "seat"})},
+    "GET /w/{workspace}/api/v1/placement": {"harness": None, "vendor": None, "model": None, "effort": None},
     "GET /w/{workspace}/api/v1/rooms/{room}/messages": {"limit": None, "cursor": None, "before": None, "wait": None},
     "GET /w/{workspace}/api/v1/rulings": {"state": frozenset({"unacknowledged"}), "limit": None, "next": None},
     "GET /w/{workspace}/api/v1/sessions": {"gone": frozenset({"1"})},
