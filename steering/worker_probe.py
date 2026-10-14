@@ -204,8 +204,12 @@ def zcode_declared_pid(worker: str) -> int | None:
 
 
 def zcode_pid_of(worker: str) -> int | None:
+    """opencode's rule: on Linux the recorded process is the cage's outer bubblewrap, and the
+    runtime it forked below holds the transcript."""
     named = zcode_declared_pid(worker)
-    return named if named is not None and named in writers(zcode_transcript(worker)) else None
+    if named is None:
+        return None
+    return named if any(_descends(w, named) for w in writers(zcode_transcript(worker))) else None
 
 
 def zcode_loaded(worker: str) -> bool:

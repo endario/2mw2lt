@@ -168,12 +168,25 @@ def _running(provider: str) -> list[int] | None:
     return pids
 
 
+def _alive(pid: int) -> bool:
+    """Whether any process has pid. A signal denied for permissions still names a live one."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
 def session_gone(psession: str, runtime: str) -> bool:
     """Whether the process `runtime` names, on this machine, is known to have ended. A Claude Code
-    session's registry row is gone, or names a pid that no longer derives to it (a pid is reused by
-    the OS; the derived id is not). A served worker's (#5697) is no process here that derives to it.
-    False wherever this machine cannot say: another provider, another machine, a process table or a
-    start time it could not read, or a process that is still that runtime."""
+    session's registry row is gone, or names a pid that no longer derives to it and no longer
+    exists: a pid that still lives in the session's own row is a newer incarnation of it, not a
+    death, so the retire asks that session to exit rather than calling it gone (#6308). A served
+    worker's (#5697) is no process here that derives to it. False wherever this machine cannot
+    say: another provider, another machine, a process table or start time it could not read, or a
+    process that is still that runtime."""
     provider = runtime_id.provider_of(runtime)
     if runtime_id.node_of(runtime) != runtime_id.node_id():
         return False
@@ -192,7 +205,7 @@ def session_gone(psession: str, runtime: str) -> bool:
         pid = row_for(psession).get("pid")
     except Refused:
         return True
-    return not isinstance(pid, int) or runtime_id.derive("claude", pid=pid) != runtime
+    return not isinstance(pid, int) or (runtime_id.derive("claude", pid=pid) != runtime and not _alive(pid))
 
 
 def terminate(psession: str, runtime: str, *, wait_s: float = 10.0, kill=os.kill, row=None,

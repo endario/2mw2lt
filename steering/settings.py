@@ -70,8 +70,8 @@ def validate(data) -> dict:
     routing = data.get("routing", {})
     if not isinstance(routing, dict):
         raise ValueError("[routing] is not a table")
-    extra = set(routing) - {"judges_exclude", "claude_launchers", "worker_forge", "account_uses",
-                            "glm_harness"}
+    extra = set(routing) - {"judges_exclude", "launches_exclude", "claude_launchers", "worker_forge",
+                            "account_uses", "glm_harness"}
     if extra:
         raise ValueError(f"[routing] has an unknown key ({', '.join(sorted(extra))})")
     if routing.get("glm_harness", "claude-code") not in ("claude-code", "zcode"):
@@ -79,6 +79,9 @@ def validate(data) -> dict:
     if "judges_exclude" in routing and not (isinstance(routing["judges_exclude"], list)
                                             and all(isinstance(v, str) for v in routing["judges_exclude"])):
         raise ValueError("[routing].judges_exclude is not a list of vendor names")
+    if "launches_exclude" in routing and not (isinstance(routing["launches_exclude"], list)
+                                              and all(isinstance(v, str) for v in routing["launches_exclude"])):
+        raise ValueError("[routing].launches_exclude is not a list of harness names")
     # Only the shape: whether each entry names a launcher is `launchers.declared()`'s to judge, so a
     # missing binary refuses the launch it would serve and not the limits beside it.
     if "claude_launchers" in routing and not (isinstance(routing["claude_launchers"], list)
@@ -263,6 +266,12 @@ def judges_exclude(path: Path = DEFAULT_PATH) -> set[str] | None:
     if "judges_exclude" not in routing:
         return None
     return {v.strip() for v in routing["judges_exclude"] if v.strip()}
+
+
+def launches_exclude(path: Path = DEFAULT_PATH) -> set[str]:
+    """The harnesses this machine withholds from launching, as the Go agent reads the same key. An
+    absent key withholds nothing."""
+    return {v.strip() for v in capacity(path).get("routing", {}).get("launches_exclude", []) if v.strip()}
 
 
 def glm_harness(path: Path = DEFAULT_PATH) -> str:

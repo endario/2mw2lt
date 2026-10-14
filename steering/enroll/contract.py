@@ -119,6 +119,8 @@ ListedAccountUsage = typing.TypedDict("ListedAccountUsage", {
     "sessions": "list[str] | None",
     "owner": "str | None",
     "serves": "bool",
+    "serves_for": "list[str] | None",
+    "resets_by": "str | None",
     "stopped_by_login": "str | None",
     "owner_login": "str | None",
     "label": "str | None",
@@ -238,6 +240,7 @@ AccountServe = typing.TypedDict("AccountServe", {
     "vendor": "str",
     "account_id": "str",
     "serves": "bool",
+    "for": "typing.NotRequired[list[str] | None]",
 })
 
 # AccountServed is its answer: the account as the team resolves it, whether it serves, and its owner.
@@ -245,7 +248,23 @@ AccountServed = typing.TypedDict("AccountServed", {
     "vendor": "str",
     "account_id": "str",
     "serves": "bool",
+    "for": "typing.NotRequired[list[str] | None]",
     "owner": "str",
+})
+
+# AccountReset is the body of POST /accounts/reset: the time by which the account's windows reset,
+# sooner than its reading says, stated by its owner; null clears it (go-owner-account-word-design.md §3).
+AccountReset = typing.TypedDict("AccountReset", {
+    "vendor": "str",
+    "account_id": "str",
+    "resets_at": "str | None",
+})
+
+# AccountResetStated is its answer: the account as the team resolves it and the reset now stated.
+AccountResetStated = typing.TypedDict("AccountResetStated", {
+    "vendor": "str",
+    "account_id": "str",
+    "resets_at": "str | None",
 })
 
 # AccountLabel is the body of POST /accounts/label: the caller's own name for an account, or null to
@@ -558,6 +577,20 @@ AgentLeavingAnswer = typing.TypedDict("AgentLeavingAnswer", {
     "left": "list[str] | None",
 })
 
+# AgentRoutesBody is what each account on a machine serves, as its vendor publishes it: sent on each
+# uplink and when it changes, and replacing what the machine said before.
+AgentRoutesBody = typing.TypedDict("AgentRoutesBody", {
+    "uplink": "str",
+    "accounts": "list[AccountRoutes] | None",
+})
+
+# AccountRoutes is one account's models, each by the vendor's own id, which its dispatch takes.
+AccountRoutes = typing.TypedDict("AccountRoutes", {
+    "vendor": "str",
+    "account_id": "str",
+    "models": "list[str] | None",
+})
+
 # StreamUplink opens a generation of the machine's uplink: every later call names its id.
 StreamUplink = typing.TypedDict("StreamUplink", {
     "kind": "str",
@@ -676,6 +709,7 @@ FleetAccount = typing.TypedDict("FleetAccount", {
     "sessions": "list[str] | None",
     "owner": "str | None",
     "serves": "bool",
+    "serves_for": "list[str] | None",
     "labels": "list[FleetLabel] | None",
 })
 
@@ -954,13 +988,18 @@ AgentGateBody = typing.TypedDict("AgentGateBody", {
     "result": "AgentGateResult",
 })
 
-# AgentGateResult is one of: the run's verdict, why this machine cannot take the run, or why it
-# was refused or failed. The verdict is the run's own report, which the gate reads as it was sent.
+# AgentGateResult is one of: the run's verdict, why this machine cannot take the run, why the
+# judge left it unresolved, or why it was refused or failed. The verdict is the run's own report,
+# which the gate reads as it was sent; `given` is the answer as the vendor gave it, and `reviewer`
+# the vendor, model and evidence of the run that judged.
 AgentGateResult = typing.TypedDict("AgentGateResult", {
     "verdict": "typing.NotRequired[typing.Any]",
     "unavailable": "typing.NotRequired[str]",
+    "unresolved": "typing.NotRequired[str]",
     "refused": "typing.NotRequired[str]",
     "failed": "typing.NotRequired[str]",
+    "given": "typing.NotRequired[typing.Any]",
+    "reviewer": "typing.NotRequired[typing.Any]",
 })
 
 # AgentGateAnswer is the run's receipt as recorded.
@@ -2564,6 +2603,7 @@ FleetCensus = typing.TypedDict("FleetCensus", {
     "unattributed": "int",
     "complete": "bool",
     "gaps": "list[str] | None",
+    "draining": "typing.NotRequired[bool]",
     "expires_at": "str",
     "historical": "bool",
 })
@@ -2907,6 +2947,7 @@ InstallationHeld = typing.TypedDict("InstallationHeld", {
 # candidate, the chosen one first and the rest by the order they were ranked by, then the ones a
 # check took out before judging. Reason is why none would be chosen, empty when one would.
 PlacementRead = typing.TypedDict("PlacementRead", {
+    "arbiter_first": "bool",
     "reason": "typing.NotRequired[str]",
     "candidates": "list[PlacementCandidate] | None",
     "filtered": "list[PlacementFiltered] | None",
@@ -2946,6 +2987,7 @@ PlacementTerms = typing.TypedDict("PlacementTerms", {
     "room": "float",
     "load": "float",
     "spread": "float",
+    "dedicated": "float",
 })
 
 # PlacementFiltered is a candidate a check took out before judging, and the check.
@@ -3609,7 +3651,8 @@ EngagementBody = typing.TypedDict("EngagementBody", {
     "why": "typing.NotRequired[str]",
 })
 
-# LinkBody names exactly one target: a card by its id, or an issue.
+# LinkBody names exactly one target: a card by its id or an issue a card requires, or a goal by its
+# id that a card or a goal is part of.
 LinkBody = typing.TypedDict("LinkBody", {
     "kind": "str",
     "to_card": "typing.NotRequired[str]",
@@ -3617,6 +3660,23 @@ LinkBody = typing.TypedDict("LinkBody", {
     "to_goal": "typing.NotRequired[str]",
     "why": "str",
     "source": "typing.NotRequired[str]",
+})
+
+# SourceRowBody is one row of an imported register: its key in the source, what it says there, the
+# disposition the source itself gives it, and the criteria it maps to, none for an unmapped row.
+SourceRowBody = typing.TypedDict("SourceRowBody", {
+    "key": "str",
+    "statement": "str",
+    "disposition": "typing.NotRequired[str]",
+    "criteria": "typing.NotRequired[list[str] | None]",
+})
+
+# SourceImportBody imports one revision of a source against a goal, its rows in the source's order.
+# The register is declared input: the import does not read the source to verify it.
+SourceImportBody = typing.TypedDict("SourceImportBody", {
+    "source": "str",
+    "revision": "str",
+    "rows": "list[SourceRowBody] | None",
 })
 
 UnlinkBody = typing.TypedDict("UnlinkBody", {
@@ -3867,6 +3927,324 @@ CardAnswer = typing.TypedDict("CardAnswer", {
     "position": "int",
 })
 
+# CriterionBody is one criterion of a goal's revision, in its order: a criterion of the goal's
+# current revision by its id, kept with its statement, or a new statement.
+CriterionBody = typing.TypedDict("CriterionBody", {
+    "criterion": "typing.NotRequired[str]",
+    "statement": "typing.NotRequired[str]",
+})
+
+# GoalCreateBody makes a goal at its first revision, whose criteria may be empty.
+GoalCreateBody = typing.TypedDict("GoalCreateBody", {
+    "title": "str",
+    "context": "typing.NotRequired[str]",
+    "criteria": "list[CriterionBody] | None",
+})
+
+# GoalRevisionBody replaces the goal's title, context and criteria, from the revision it expects.
+GoalRevisionBody = typing.TypedDict("GoalRevisionBody", {
+    "expected_revision": "int",
+    "title": "str",
+    "context": "typing.NotRequired[str]",
+    "criteria": "list[CriterionBody] | None",
+    "why": "str",
+})
+
+CriterionDTO = typing.TypedDict("CriterionDTO", {
+    "id": "str",
+    "statement": "str",
+})
+
+# GoalRevisionDTO is one immutable revision of a goal. CriteriaDigest pins its title, context and
+# ordered criteria, in hex.
+GoalRevisionDTO = typing.TypedDict("GoalRevisionDTO", {
+    "revision": "int",
+    "title": "str",
+    "context": "str",
+    "criteria_digest": "str",
+    "criteria": "list[CriterionDTO] | None",
+    "why": "typing.NotRequired[str]",
+    "by": "WorkActor",
+    "at": "str",
+})
+
+# ContributionDTO is one occurrence of a card, by its id, or a goal being part of a goal, live or
+# ended. Workspace names the far end's workspace when it is not the goal's own.
+ContributionDTO = typing.TypedDict("ContributionDTO", {
+    "goal": "str",
+    "card": "typing.NotRequired[str]",
+    "from_goal": "typing.NotRequired[str]",
+    "workspace": "typing.NotRequired[str]",
+    "why": "str",
+    "source": "typing.NotRequired[str]",
+    "by": "WorkActor",
+    "at": "str",
+    "ended": "typing.NotRequired[UnlinkedDTO | None]",
+})
+
+# EvidenceBody names one piece of a judgment's evidence: a card of the goal's workspace by its id, or a
+# pull request a live source of the workspace observed.
+EvidenceBody = typing.TypedDict("EvidenceBody", {
+    "card": "typing.NotRequired[str]",
+    "pull": "typing.NotRequired[IssueRef | None]",
+})
+
+# CriterionJudgmentBody judges one criterion of the revision it expects.
+CriterionJudgmentBody = typing.TypedDict("CriterionJudgmentBody", {
+    "expected_revision": "int",
+    "verdict": "str",
+    "rationale": "str",
+    "evidence": "list[EvidenceBody] | None",
+})
+
+# GoalJudgmentBody judges the goal in the revision it expects, over the criterion judgments it names:
+# exactly those now effective.
+GoalJudgmentBody = typing.TypedDict("GoalJudgmentBody", {
+    "expected_revision": "int",
+    "criterion_judgments": "list[str] | None",
+    "verdict": "str",
+    "rationale": "str",
+    "evidence": "list[EvidenceBody] | None",
+})
+
+# PulledEvidenceDTO is a pull request as the source read that observed it recorded it when the
+# judgment admitted it.
+PulledEvidenceDTO = typing.TypedDict("PulledEvidenceDTO", {
+    "repo": "str",
+    "n": "int",
+    "state": "str",
+    "head": "typing.NotRequired[str]",
+    "merge_commit": "typing.NotRequired[str]",
+})
+
+# CardEvidenceDTO is a card as it stood when the judgment admitted it; Position is its newest entry
+# in the workspace's journal then.
+CardEvidenceDTO = typing.TypedDict("CardEvidenceDTO", {
+    "id": "str",
+    "name": "str",
+    "state": "str",
+    "concluded": "bool",
+    "position": "int",
+})
+
+EvidenceDTO = typing.TypedDict("EvidenceDTO", {
+    "card": "typing.NotRequired[CardEvidenceDTO | None]",
+    "pull": "typing.NotRequired[PulledEvidenceDTO | None]",
+})
+
+# JudgmentDTO is one explicit judgment of a criterion, or of the goal when Criterion is empty, with the
+# policy state it was judged under. Omitted counts the evidence the reader may no longer see.
+JudgmentDTO = typing.TypedDict("JudgmentDTO", {
+    "id": "str",
+    "revision": "int",
+    "criterion": "typing.NotRequired[str]",
+    "verdict": "str",
+    "rationale": "str",
+    "evidence": "list[EvidenceDTO] | None",
+    "omitted": "typing.NotRequired[int]",
+    "considered": "typing.NotRequired[list[str] | None]",
+    "policy_state": "str",
+    "by": "WorkActor",
+    "at": "str",
+})
+
+# SelectionBody is one selection of a plan, in its order: a card by its id, or an issue for an
+# exclusion, with the brain's stated reason.
+SelectionBody = typing.TypedDict("SelectionBody", {
+    "card": "typing.NotRequired[str]",
+    "issue": "typing.NotRequired[IssueRef | None]",
+    "role": "str",
+    "statement": "str",
+})
+
+# CriterionWorkChangeBody adds a criterion-to-card association to the plan's map or removes one.
+CriterionWorkChangeBody = typing.TypedDict("CriterionWorkChangeBody", {
+    "change": "str",
+    "criterion": "str",
+    "card": "str",
+})
+
+# PlanBody adopts the goal's next plan from the goal, plan, policy and inputs it expects. The inputs
+# are the plan_inputs the goal read answered.
+PlanBody = typing.TypedDict("PlanBody", {
+    "expected_goal_revision": "int",
+    "expected_plan_revision": "int",
+    "policy": "str",
+    "expected_policy_revision": "str",
+    "expected_input_digest": "str",
+    "purpose": "str",
+    "cutoff": "typing.NotRequired[str]",
+    "selections": "list[SelectionBody] | None",
+    "associations": "list[CriterionWorkChangeBody] | None",
+})
+
+SelectionDTO = typing.TypedDict("SelectionDTO", {
+    "position": "int",
+    "card": "typing.NotRequired[str]",
+    "issue": "typing.NotRequired[IssueRef | None]",
+    "role": "str",
+    "statement": "str",
+})
+
+CriterionWorkDTO = typing.TypedDict("CriterionWorkDTO", {
+    "criterion": "str",
+    "card": "str",
+})
+
+# PlanDTO is one adopted plan revision. Stale names each pin that no longer holds: "scope" when the
+# goal has revised its criteria since, "policy" when the policy unit has moved or gone. PolicyNow is
+# the policy unit's revision now, the one a plan adopted under it must expect; empty when the unit is
+# no longer an active decision.
+PlanDTO = typing.TypedDict("PlanDTO", {
+    "revision": "int",
+    "criteria_revision": "int",
+    "policy": "str",
+    "policy_revision": "str",
+    "input_digest": "str",
+    "purpose": "str",
+    "cutoff": "str",
+    "selections": "list[SelectionDTO] | None",
+    "criterion_work": "list[CriterionWorkDTO] | None",
+    "stale": "list[str] | None",
+    "policy_now": "str",
+    "by": "WorkActor",
+    "at": "str",
+})
+
+# GoalDTO is a goal: its current revision, the earlier ones oldest first, what contributes to it, what
+# it is part of, its judgments and plans oldest first, and the inputs a plan adopted now must expect.
+# Accepted holds only while the newest goal judgment of the current revision accepted it over the
+# criterion judgments now effective.
+GoalDTO = typing.TypedDict("GoalDTO", {
+    "id": "str",
+    "by": "WorkActor",
+    "at": "str",
+    "current": "GoalRevisionDTO",
+    "earlier": "list[GoalRevisionDTO] | None",
+    "contributions": "list[ContributionDTO] | None",
+    "part_of": "list[ContributionDTO] | None",
+    "judgments": "list[JudgmentDTO] | None",
+    "accepted": "bool",
+    "plans": "list[PlanDTO] | None",
+    "plan_inputs": "str",
+})
+
+# EffectiveJudgmentDTO is a criterion's newest judgment in the current revision.
+EffectiveJudgmentDTO = typing.TypedDict("EffectiveJudgmentDTO", {
+    "id": "str",
+    "verdict": "str",
+    "at": "str",
+})
+
+# CriterionReadingDTO is a criterion of the goal's current revision, in its order, as the reading
+# shows it: its effective judgment, null before one, and the cards the plan's map names under it.
+CriterionReadingDTO = typing.TypedDict("CriterionReadingDTO", {
+    "id": "str",
+    "statement": "str",
+    "judgment": "EffectiveJudgmentDTO | None",
+    "cards": "list[str] | None",
+})
+
+# PriorScopeDTO is the newest plan's map when no plan maps the current criteria: the map of an earlier
+# criteria revision, for explicit re-adoption.
+PriorScopeDTO = typing.TypedDict("PriorScopeDTO", {
+    "plan": "int",
+    "criteria_revision": "int",
+    "criterion_work": "list[CriterionWorkDTO] | None",
+})
+
+# CardElsewhereDTO is a card the reading names that another workspace holds, by its id and workspace.
+CardElsewhereDTO = typing.TypedDict("CardElsewhereDTO", {
+    "id": "str",
+    "workspace": "str",
+})
+
+# ImportDTO is a source's newest import against the goal.
+ImportDTO = typing.TypedDict("ImportDTO", {
+    "id": "str",
+    "source": "str",
+    "revision": "str",
+    "criteria_revision": "int",
+    "at": "str",
+    "rows": "int",
+    "unmapped": "int",
+})
+
+# GoalReading is a goal's working sheet: the goal; its current criteria with their judgments and
+# work; the plan revision whose map is that work, null before one, and the earlier map then; the
+# live contributors no criterion names; the workspace's cards it names as the board renders them,
+# and those another workspace holds by reference; each source's newest import; and the workspace's
+# sources as last read.
+GoalReading = typing.TypedDict("GoalReading", {
+    "goal": "GoalDTO",
+    "criteria": "list[CriterionReadingDTO] | None",
+    "work_from": "int | None",
+    "prior_scope": "PriorScopeDTO | None",
+    "unassociated": "list[str] | None",
+    "cards": "list[CardDTO] | None",
+    "elsewhere": "list[CardElsewhereDTO] | None",
+    "imports": "list[ImportDTO] | None",
+    "sources": "list[SourceState] | None",
+})
+
+# RegisterRowDTO is one row of a source's newest import, with the criteria it maps to, none for an
+# unmapped row.
+RegisterRowDTO = typing.TypedDict("RegisterRowDTO", {
+    "import": "str",
+    "source": "str",
+    "revision": "str",
+    "criteria_revision": "int",
+    "position": "int",
+    "key": "str",
+    "statement": "str",
+    "disposition": "str",
+    "criteria": "list[str] | None",
+})
+
+# GoalRegister is a page of the goal's register, in a stable order.
+GoalRegister = typing.TypedDict("GoalRegister", {
+    "rows": "list[RegisterRowDTO] | None",
+    "next": "typing.NotRequired[str]",
+})
+
+# GoalSummaryDTO is a goal as the workspace's list of goals names it: its current revision, how many
+# of that revision's criteria each verdict judges now, whether that revision is accepted, and its
+# newest plan, null before one.
+GoalSummaryDTO = typing.TypedDict("GoalSummaryDTO", {
+    "id": "str",
+    "at": "str",
+    "revision": "int",
+    "title": "str",
+    "revised_at": "str",
+    "criteria": "int",
+    "verdicts": "dict[str, int] | None",
+    "accepted": "bool",
+    "plan": "PlanSummaryDTO | None",
+})
+
+# PlanSummaryDTO is a plan revision with each of its pins that no longer holds, as PlanDTO's Stale.
+PlanSummaryDTO = typing.TypedDict("PlanSummaryDTO", {
+    "revision": "int",
+    "at": "str",
+    "stale": "list[str] | None",
+})
+
+# GoalList is a page of the workspace's goals, newest first.
+GoalList = typing.TypedDict("GoalList", {
+    "goals": "list[GoalSummaryDTO] | None",
+    "next": "typing.NotRequired[str]",
+})
+
+GoalAnswer = typing.TypedDict("GoalAnswer", {
+    "goal": "GoalDTO",
+    "replayed": "bool",
+    "position": "int",
+})
+
+GoalRead = typing.TypedDict("GoalRead", {
+    "goal": "GoalDTO",
+})
+
 # IntentRead and CardRead answer a read.
 IntentRead = typing.TypedDict("IntentRead", {
     "intent": "IntentDTO",
@@ -3981,6 +4359,7 @@ WorkerCensus = typing.TypedDict("WorkerCensus", {
     "unattributed": "int",
     "complete": "bool",
     "gaps": "list[str] | None",
+    "draining": "typing.NotRequired[bool]",
 })
 
 # WorkerCensusBody is the native census body before admission binds its uplink. Interactive is the
@@ -3994,6 +4373,7 @@ WorkerCensusBody = typing.TypedDict("WorkerCensusBody", {
     "interactive": "typing.NotRequired[list[LauncherAccount] | None]",
     "signed_out": "typing.NotRequired[list[LauncherAccount] | None]",
     "spends": "typing.NotRequired[list[HarnessSpend] | None]",
+    "launches": "typing.NotRequired[list[str] | None]",
     "checkout": "typing.NotRequired[CheckoutCensus | None]",
     "machine_name": "typing.NotRequired[str | None]",
 })
@@ -4011,6 +4391,7 @@ HarnessSpend = typing.TypedDict("HarnessSpend", {
 LauncherAccount = typing.TypedDict("LauncherAccount", {
     "vendor": "str",
     "account_id": "str",
+    "unrouted": "typing.NotRequired[bool]",
 })
 
 # The names a door `/<team>/<workspace>` is read by: a team's slug, at most TEAM_SLUG_MAX long and
@@ -4059,6 +4440,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/accounts/co-owners",
     "DELETE /w/{workspace}/api/v1/accounts/co-owners/{id}",
     "POST /w/{workspace}/api/v1/accounts/label",
+    "POST /w/{workspace}/api/v1/accounts/reset",
     "POST /w/{workspace}/api/v1/accounts/serve",
     "POST /w/{workspace}/api/v1/actions",
     "POST /w/{workspace}/api/v1/actions/{action}/cancel",
@@ -4107,6 +4489,18 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/gates/stats",
     "GET /w/{workspace}/api/v1/gates/{gate}",
     "POST /w/{workspace}/api/v1/gates/{gate}/cancellation",
+    "GET /w/{workspace}/api/v1/goals",
+    "POST /w/{workspace}/api/v1/goals",
+    "GET /w/{workspace}/api/v1/goals/{goal}",
+    "POST /w/{workspace}/api/v1/goals/{goal}/criteria/{criterion}/judgments",
+    "POST /w/{workspace}/api/v1/goals/{goal}/imports",
+    "POST /w/{workspace}/api/v1/goals/{goal}/judgments",
+    "POST /w/{workspace}/api/v1/goals/{goal}/links",
+    "POST /w/{workspace}/api/v1/goals/{goal}/plans",
+    "GET /w/{workspace}/api/v1/goals/{goal}/reading",
+    "GET /w/{workspace}/api/v1/goals/{goal}/register",
+    "POST /w/{workspace}/api/v1/goals/{goal}/revisions",
+    "POST /w/{workspace}/api/v1/goals/{goal}/unlinks",
     "POST /w/{workspace}/api/v1/incarnations",
     "GET /w/{workspace}/api/v1/intents",
     "POST /w/{workspace}/api/v1/intents",
@@ -4200,6 +4594,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/steering/agent/release",
     "POST /w/{workspace}/steering/agent/renew",
     "POST /w/{workspace}/steering/agent/retire",
+    "POST /w/{workspace}/steering/agent/routes",
     "GET /w/{workspace}/steering/agent/stream",
     "GET /w/{workspace}/steering/agent/target",
     "POST /w/{workspace}/steering/agent/undelivered",
@@ -4220,6 +4615,8 @@ QUERY = {
     "GET /w/{workspace}/api/v1/facts": {"limit": None, "state": None, "resource": None, "session": None, "ulid": None, "cursor": None, "before": None, "latest": frozenset({"1"})},
     "GET /w/{workspace}/api/v1/gates": {"repo": None, "pr": None, "phase": None, "vendor": None, "limit": None, "next": None},
     "GET /w/{workspace}/api/v1/gates/analysis": {"window": frozenset({"24h", "30d", "7d", "all"}), "kind": frozenset({"review"})},
+    "GET /w/{workspace}/api/v1/goals": {"limit": None, "next": None},
+    "GET /w/{workspace}/api/v1/goals/{goal}/register": {"limit": None, "next": None},
     "GET /w/{workspace}/api/v1/intents": {"disposition": frozenset({"open"}), "limit": None, "next": None},
     "GET /w/{workspace}/api/v1/knowledge/brief": {"paths": None, "branch": None},
     "GET /w/{workspace}/api/v1/machines": {"limit": None, "cursor": None},

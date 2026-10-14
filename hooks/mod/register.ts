@@ -1,5 +1,5 @@
 import type { Register, EngineInterface, Timer, HookStream, ProcessSpawnChunk, ProcessSpawnResult } from 'claude-code'
-import { lines, atLeast, pick, invokes, lifecycle, tokensOf, due, owed, framesEntry, obsoleteSeatRefusal, nextSeat, asksSeat, seatCall, seatSchema, resendId, entryRefusal, READ_KEPT, POINTER, CHECKPOINT, SEAT_SECTION, SEAT_TOOLS } from './frames'
+import { lines, atLeast, pick, invokes, lifecycle, tokensOf, due, owed, framesEntry, obsoleteSeatRefusal, nextSeat, asksSeat, seatCall, seatSchema, resendId, entryRefusal, refusalTurn, READ_KEPT, POINTER, CHECKPOINT, SEAT_SECTION, SEAT_TOOLS } from './frames'
 import type { Line, SeatCall } from './frames'
 
 // The plugin's hooks module (#3872): it holds a connected Claude session's steering stream through
@@ -361,11 +361,15 @@ async function holdLoop($: EngineInterface, session: string, gen: number) {
     // The plugin holds every session's stream, the seat's included, and never hands that to the
     // session (owner ruling, #5641): a revoked (3) or refused (1) hold is held again like any
     // other end, and the session is asked nothing. Those two keep backing off however long the
-    // hold lasted. A refusal hold.py names as one no retry outlives stops the loop, and says so.
+    // hold lasted. A refusal hold.py names as one no retry outlives stops the loop — and is the
+    // one exception (#6308): nothing else will ever reach the session, so it is told, once, below.
     const now = await $.clock.now()
     if (refused && refused.retry === false) {
       hold = { state: 'stopped', refusal: refused.why ?? `the hold exited ${code}`, remedy: refused.remedy ?? '', at: now / 1000 }
       await claim($, true, ps).catch(() => undefined)
+      // The stopped claim alone reaches nobody: a turn of its own says the refusal, so the session
+      // reconnects or exits (#6308). This loop is not re-armed, so the turn comes once.
+      await tell($, refusalTurn(refused.why, refused.remedy))
       return
     }
     if (code !== 1 && code !== 3 && now - began > 60_000) { wait = 1000; attempt = 0 }   // it held: this is no crash loop
@@ -407,7 +411,7 @@ export const register: Register = on => {
     }
     await $.tool.register({
       name: 'frames',
-      description: 'Read the steering frames waiting for this session, each with its daemon-written from: line. Acknowledges the envelopes it returns.',
+      description: 'Read the frames waiting for this session, each with its daemon-written from: line. Acknowledges the envelopes it returns.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     })
     for (const name of Object.keys(SEAT_TOOLS)) {
@@ -444,7 +448,7 @@ export const register: Register = on => {
 
   on('tool.call', { tool: TOOL }, async ($, e, next) => {
     const { agentId } = e as unknown as { agentId?: string }
-    if (!framesEntry(agentId, next.origin.plugin)) return { result: 'No steering frame is waiting.' }
+    if (!framesEntry(agentId, next.origin.plugin)) return { result: 'Nothing is waiting.' }
     const { value: session = '' } = await $.state.get(SESSION)
     const pending = await locked(async () => (await $.state.get(PENDING)).value ?? [])
     let recording = ''
@@ -488,7 +492,7 @@ export const register: Register = on => {
       await unpoint($)
       if (left.some(id => !pending.includes(id))) await point($)
     })
-    return { result: text || 'No steering frame is waiting.' }
+    return { result: text || 'Nothing is waiting.' }
   })
 
   // A subagent presents its parent's credential: the harness hands its provider session id down,

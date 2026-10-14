@@ -530,7 +530,7 @@ test('a subagent frames call does not consume the main loop\'s pending frames', 
   await begin($)
   await w.clock.settle()
   const got = await $.tool.call({ tool: TOOL, agentId: 'subagent-1' } as never)
-  expect((got as { result?: string }).result).toBe('No steering frame is waiting.')
+  expect((got as { result?: string }).result).toBe('Nothing is waiting.')
   expect(w.state.get('pending')).toEqual([id])
   expect(w.runs.filter(argv => argv.some(arg => String(arg).endsWith('/ack.py') || String(arg).endsWith('/lease.py')))).toEqual([])
 })
@@ -563,7 +563,7 @@ test('the actual frames tool hook leaves pending frames untouched for another pl
     ui: { log: () => undefined },
   }
   const got = await frames!(engine, { tool: TOOL }, { origin: { plugin: 'other-plugin' } }) as { result?: string }
-  expect(got.result).toBe('No steering frame is waiting.')
+  expect(got.result).toBe('Nothing is waiting.')
   expect(w.state.get('pending')).toEqual([id])
   expect(w.runs).toEqual([])
 })
@@ -649,6 +649,27 @@ test('a revoked stream is held again by the plugin, and the session is asked not
   expect(w.spawns.length).toBe(2)
   expect(w.submits).toEqual([])
   expect(w.appends).toEqual([])
+})
+
+// Measured 2026-10-13 (#6308): a retired session's hold was refused for good, the module stopped
+// it and said nothing, and the session went deaf — it could neither reconnect nor exit, and the
+// owner found out only by typing into it. A refusal no retry outlives now starts one turn that
+// says the refusal, the remedy, and the retire that may stand behind it.
+test('a hold refused for good starts one turn saying the refusal, the remedy and the exit path', async ($, on) => {
+  const refused = JSON.stringify({ id: null, kind: 'refused', wakes: false,
+    why: 'refused 401: session-token-locator-read.', retry: false,
+    remedy: 'run /2mw2lt:connect, which the plugin\'s hold follows' }) + '\n'
+  const w = world(on, { rounds: [{ lines: [refused], code: 1 }, { lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  expect(w.spawns.length).toBe(1)
+  expect(w.submits.length).toBe(1)
+  expect(w.submits[0]).toContain('refused 401: session-token-locator-read')
+  expect(w.submits[0]).toContain('/2mw2lt:disconnect')
+  expect(w.submits[0]).toContain('run /2mw2lt:connect, which the plugin\'s hold follows')
+  await w.clock.advance(120_000)
+  expect(w.spawns.length).toBe(1)                          // the loop stopped; the turn is not repeated
+  expect(w.submits.length).toBe(1)
 })
 
 test('a contested stream keeps backing off however long each hold lasted, so two holders do not trade it every second', async ($, on) => {
@@ -973,7 +994,7 @@ test('a pending frame the recording does not hold yet stays pending', async ($, 
   const early = await $.tool.call({ tool: TOOL } as never)
   w.recording = 'data: {"kind":"say","id":"f1","text":"hi"}\n'
   const later = await $.tool.call({ tool: TOOL } as never)
-  expect((early as { result: unknown }).result).toBe('No steering frame is waiting.')
+  expect((early as { result: unknown }).result).toBe('Nothing is waiting.')
   expect((later as { result: unknown }).result).toBe('{"kind":"say","id":"f1","text":"hi"}')
   expect(w.submits).toEqual([POINTER])          // a frame still missing does not wake the session again
 })
@@ -1242,7 +1263,7 @@ test('a refusal a retry can outlive is recorded as retrying, with the attempt, t
   expect(w.spawns.length).toBe(2)
 })
 
-test('a refusal no retry outlives stops the loop and records its remedy, asking the session nothing', async ($, on) => {
+test('a refusal no retry outlives stops the loop, records its remedy and tells the session once', async ($, on) => {
   const w = world(on, { rounds: [
     { lines: [JSON.stringify({ id: null, kind: 'refused', wakes: false, why: 'refused 403: session-not-enrolled', retry: false, remedy: 'run /2mw2lt:connect' }) + '\n'], code: 1 },
     { lines: [], code: 0, hold: never },
@@ -1252,7 +1273,9 @@ test('a refusal no retry outlives stops the loop and records its remedy, asking 
   await w.clock.advance(300_000)
   expect(w.spawns.length).toBe(1)
   expect(lastHold(w)).toEqual({ state: 'stopped', refusal: 'refused 403: session-not-enrolled', remedy: 'run /2mw2lt:connect', at: 1000 })
-  expect(w.submits).toEqual([])
+  expect(w.submits.length).toBe(1)
+  expect(w.submits[0]).toContain('refused 403: session-not-enrolled')
+  expect(w.submits[0]).toContain('run /2mw2lt:connect')
 })
 
 test('a hold refused after a connect is held again by the plugin, its claim kept live, and the session is asked nothing', async ($, on) => {

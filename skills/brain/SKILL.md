@@ -53,7 +53,7 @@ nothing reaches you until you take it.
 
 **When connect's `plugin:` line ends `the plugin holds this session's stream, so arm no hold`, arm
 nothing here.** The plugin's module holds one stream for the life of the process and wakes you
-with `A steering frame is waiting`; call `mcp__2mw2lt__frames` then. A hold re-armed by hand on
+with `Call mcp__2mw2lt__frames.`, which you do. A hold re-armed by hand on
 top of it closes after every frame, and in each gap the brain cannot answer and the fleet loses
 it (#4520). A line that says the module
 holds no stream here may mean this process fetched its plugins before the module existed, and a
@@ -233,12 +233,19 @@ the first, so a timeout after it committed is not a second message to the owner.
 that id are refused. A send without `--retry` is always a new message, so a plain resend is one
 the owner reads twice.
 
+## Discover the goals
+
+When the owner asks what the work should achieve, or the Ledger's Explore or Discuss sends you a
+request, follow `/2mw2lt:discover`: bring a sourced position in a room thread, not a questionnaire,
+and record what is agreed through native rulings and goal commands.
+
 ## Ask the owner
 
 A decision with choices goes to the owner as a structured ask on your own session, not as a
 question inside a reply. The desk draws `context` as markdown and, for a single choice, each
 option as an answer button, with the recommended one marked; the answer returns as a directive
-naming who gave it.
+naming who gave it. An ask raises a row in Needs You, so it is for a decision that unblocks a
+next action; goal discovery's strategic questions belong to its room thread instead.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" ask <your session> 'json {"question":"<one short question>","context":"<markdown: what is known, what each path costs>","options":[{"label":"<action>","description":"<its consequence>","recommended":true},{"label":"<action>","description":"<its consequence>"}],"allow_other":true}'
@@ -300,8 +307,8 @@ someone else posts in one, your stream carries `{"kind": "room", "room", "seq", 
 where to read, never what was said. Read it and speak in it on the lease token:
 
 ```bash
-printf %s "$LEASE" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" "/rooms/<room>/messages"
-printf %s "$LEASE" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --post "/rooms/<room>/messages" \
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease "/rooms/<room>/messages"
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post "/rooms/<room>/messages" \
   --json '{"text": "…"}' --key <a key of your own for this message>
 ```
 
@@ -357,9 +364,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease scope <name> <tr
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease session <card> <session> executor
 ```
 
-Delegating a card is also when you say what it waits on and which goal it serves; a goal is a major
-card whose acceptance criteria are numbered lines. Name the plan's sentence as `--source` when an
-edge comes from one:
+Delegating a card is also when you say what it waits on and which goal it serves. A goal is the
+Ledger's own record, and a card joins it with
+`rest.py --lease --post /cards/<card>/links --json '{"kind": "part-of", "to_goal": "<goal>", "why": "…"}' --key <a key of your own for this link>`.
+Name the plan's sentence as `--source` when an edge comes from one:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease link <card> requires|part-of <card>|<owner>/<name>#<n> [--source <where>] <why>
@@ -441,16 +449,27 @@ that vendor ranks first, naming the account and the forecast in its reply; name 
 override that. With no model, or another provider's, it refuses: nothing it reads is what that
 worker spends.
 
-**Spread the fleet.** Before every launch, read `/machines` for each host's `readings.load`
-(one, five, fifteen against `logical_cores`), `readings.memory` and `worker_census`, and `/sessions` for
-what each host already runs. Send work to the host with the most room, not the one you are on:
-the machine the owner works at often carries the seat, their interactive sessions and CI
-runners, so fill it last. Name `on` only to put work where the score would not, and then choose the
-quietest host that has the account. To see where the arbiter would put a launch before you
-send it, read `rest.py '/placement?harness=<harness>&vendor=<vendor>&model=<model>&effort=<level>'`:
-the ranked machines and accounts with their verdicts, terms and order, the one it would choose
-first, and each one a check took out. It places nothing. Re-read the spread whenever a launch lands or a session ends, and move
-the next launch, not a running session, to rebalance.
+**Where a launch goes.** Before every launch, read
+`rest.py '/placement?harness=<harness>&vendor=<vendor>&model=<model>&effort=<level>'`: the ranked
+machines and accounts with their verdicts, terms and order, the one the platform would choose first,
+and each one a check took out. It places nothing. Its `arbiter_first` is the workspace's
+`placement.arbiter_first` setting, inheriting the team's, which the owner turns on in the console:
+
+- **On:** launch unpinned, with no `on` and no `account`, and the platform places it. A goose
+  launch still names its node, since its account is that machine's own. Otherwise name a machine or
+  an account only when the owner names one for a reason the platform cannot see, and give that
+  reason in `because`. Correct a placement after the launch rather than steering it beforehand:
+  `rehome:` the session to another account on its machine, or retire it and launch again. Say on the
+  issue what the platform missed, since a fact it lacks is a gap to close in the product.
+- **Off:** you choose where work goes, and the read gives the platform's pick beside yours. Put both
+  in the launch's `because`, so the trial compares your pick with the platform's actual one.
+
+To choose, spread the fleet. Read `/machines` for each host's `readings.load` (one, five, fifteen
+against `logical_cores`), `readings.memory` and `worker_census`, and `/sessions` for what each host
+already runs. Send work to the host with the most room, not the one you are on: the machine the
+owner works at often carries the seat, their interactive sessions and CI runners, so fill it last.
+Re-read the spread whenever a launch lands or a session ends, and move the next launch, not a running
+session, to rebalance.
 
 The brain, the daemon and the agents sit on different machines as a matter of course, so there is no
 machine of your own to default to. `loopback` is the orchestrator's node, not yours: use it

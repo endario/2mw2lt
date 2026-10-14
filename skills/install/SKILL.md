@@ -105,8 +105,6 @@ engine again. These are the stops that need a person:
   machine's `gh` is signed in as more than one login that can read the repository. Ask the
   person which login the workspace's workers act as, then run the engine again with
   `--gh-account <login>`. The choice is recorded, so later runs need no flag.
-- **`the agent is started by launchd, and this machine runs …`**: only macOS installs here. A
-  Linux host is provisioned by the operator with `steering/host/provision-agent-host.sh`.
 
 Other stops, and what to do; one not listed here names its own remedy:
 

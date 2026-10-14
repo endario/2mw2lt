@@ -30,7 +30,7 @@ PREFIX = "2mw2lt-launch-"         # every session this module starts, and nothin
 STATUS_TIMEOUT = 20.0
 LAUNCH_DEADLINE_S = 300.0
 PLUGIN = "2mw2lt@2mw2lt"
-KEYS = {"path", "direct", "proxy", "vendor"}
+KEYS = {"path", "direct", "proxy", "vendor", "unrouted"}
 VENDOR = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
 # What a launched session inherits (§4): the headless brain's list less its token, and the door.
 KEPT = ("HOME", "USER", "LOGNAME", "SHELL", "PATH", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "TERM",
@@ -53,8 +53,9 @@ class Undeclared(Exception):
 
 
 def declared(env: dict | None = None) -> list[dict]:
-    """The declared launchers (doc 121 §2), each `{path, direct, proxy, vendor}` with `path` an
-    absolute executable. An entry is a path, or an object saying what the launcher cannot. The
+    """The declared launchers (doc 121 §2), each `{path, direct, proxy, vendor, unrouted}` with `path`
+    an absolute executable. An entry is a path, or an object saying what the launcher cannot; an
+    unrouted one starts only launches naming its vendor, never one routed by its model. The
     agent.toml's `[routing]` declares them where it does, read at the call so a change needs no
     restart (#2394); an `env` given is judged alone."""
     items, source = None, ENV
@@ -80,6 +81,8 @@ def declared(env: dict | None = None) -> list[dict]:
                              f"an object of {', '.join(sorted(KEYS))}")
         if not isinstance(d.get("direct", False), bool):
             raise Undeclared(f"{d['path']}: direct is true or false")
+        if not isinstance(d.get("unrouted", False), bool):
+            raise Undeclared(f"{d['path']}: unrouted is true or false")
         if "proxy" in d and not (isinstance(d["proxy"], str) and codex_proxy.loopback_port(d["proxy"])):
             raise Undeclared(f"{d['path']}: proxy is not a loopback URL")
         if "vendor" in d and not (isinstance(d["vendor"], str) and VENDOR.fullmatch(d["vendor"])):
@@ -93,7 +96,7 @@ def declared(env: dict | None = None) -> list[dict]:
         # choosing its account by the name it is run as, and resolving the link runs every name as
         # the target's one account (#2368).
         out.append({"path": str(p), "direct": d.get("direct", False),
-                    "proxy": d.get("proxy"), "vendor": d.get("vendor")})
+                    "proxy": d.get("proxy"), "vendor": d.get("vendor"), "unrouted": d.get("unrouted", False)})
     return out
 
 

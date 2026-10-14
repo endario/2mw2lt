@@ -3,9 +3,18 @@
 
 export type Line = { id: string | null; kind: string; wakes: boolean; hold?: string; session?: string; why?: string; retry?: boolean; remedy?: string }
 
-export const POINTER = 'A steering frame is waiting. Call mcp__2mw2lt__frames to read it.'
+export const POINTER = 'Call mcp__2mw2lt__frames.'
 export const CHECKPOINT = 'Compaction is near. Write your checkpoint (/2mw2lt:checkpoint) now.'
 export const FLOOR = [2, 1, 289] as const
+
+// What a hold that no retry outlives tells the session in a turn of its own (#6308): the refusal
+// and its remedy, and the retire that may stand behind it, so the session exits or reconnects
+// instead of going deaf until somebody types into it. The refusal a plugin hold re-arms for stays
+// the module's alone (#5641).
+export const refusalTurn = (why?: string, remedy?: string) =>
+  `2mw2lt: this session's steering stream was refused for good${why ? `: ${why}` : ''}. ` +
+  `If the seat retired this session, post any checkpoint due, run /2mw2lt:disconnect, and end the session; ` +
+  `otherwise ${remedy || 'run /2mw2lt:connect'}.`
 
 // The checkpoint prompt goes this far along the way to the engine's auto-compact point, which its
 // settings, the account and the model decide. It is not a share of the window: a session set to

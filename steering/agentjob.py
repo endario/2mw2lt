@@ -8,6 +8,7 @@ python_floor.require()
 import contextlib
 import fcntl
 import os
+import platform
 import plistlib
 import re
 import shlex
@@ -152,9 +153,13 @@ def tunables(home: Path) -> Path:
     return home / ".config" / "2mw2lt" / "agent.toml"
 
 
+def log_directory(home: Path) -> Path:
+    """Where the machine's jobs log, by its init system; nothing is created."""
+    return home / ".local" / "state" / "2mw2lt" if init_system() == "systemd" else home / "Library" / "Logs" / "2mw2lt"
+
+
 def logs(home: Path, label: str) -> tuple[Path, Path]:
-    directory = (home / ".local" / "state" / "2mw2lt" if init_system() == "systemd"
-                 else home / "Library" / "Logs" / "2mw2lt")
+    directory = log_directory(home)
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(directory, 0o700)
     startup = directory / f"{label}.startup.log"
@@ -195,10 +200,44 @@ def active_release(home: Path) -> tuple[Path, str]:
     return release, wanted
 
 
+def runtime_choice(home: Path) -> Path:
+    """The machine's choice of agent during the bridge (go-machine-a6-plan.md): `go`, or Python when
+    absent. A file of its own, not agent.toml, whose readers in releases before the bridge refuse a
+    table they do not know."""
+    return home / ".config" / "2mw2lt" / "runtime"
+
+
+def go_agent(release: Path) -> Path:
+    """The release's Go agent for this platform, as build-machine.sh places it."""
+    arch = {"x86_64": "amd64", "aarch64": "arm64"}.get(platform.machine(), platform.machine())
+    return release / "bin" / f"{sys.platform}-{arch}" / "2mw2lt"
+
+
+def runtime(home: Path, release: Path) -> tuple[str, str | None]:
+    """The agent the job runs, and why it is Python when Go was chosen."""
+    try:
+        chosen = runtime_choice(home).read_text().strip()
+    except FileNotFoundError:
+        return "python", None
+    except OSError as e:
+        return "python", f"{runtime_choice(home)} could not be read ({e.strerror or e})"
+    if chosen != "go":
+        return "python", None if chosen in ("", "python") else f"{runtime_choice(home)} names {chosen!r}, not go or python"
+    binary = go_agent(release)
+    if not binary.is_file() or not os.access(binary, os.X_OK):
+        return "python", f"release {release.name} has no Go agent at {binary}"
+    return "go", None
+
+
 def program(home: Path, release: Path) -> list[str]:
     """The job's arguments for `release`: under launchd, behind the launcher whose signature the
-    owner's privacy grant is keyed to (doc 141), when one can be had."""
-    arguments = [str(release / "steering" / ".venv" / "bin" / "python"), str(release / "steering" / "agent.py")]
+    owner's privacy grant is keyed to (doc 141), when one can be had. Go when the machine chose it
+    and the release carries it; otherwise Python, saying why when Go was chosen."""
+    chosen, why = runtime(home, release)
+    if why:
+        print(f"agentjob: running the Python agent: {why}", file=sys.stderr)
+    arguments = ([str(go_agent(release)), "agent"] if chosen == "go" else
+                 [str(release / "steering" / ".venv" / "bin" / "python"), str(release / "steering" / "agent.py")])
     front = launcher.ensure(root(home), release) if init_system() == "launchd" else None
     return [str(front), *arguments] if front else arguments
 
@@ -300,7 +339,8 @@ def steering_jobs(directory: Path) -> list[tuple[Path, dict]]:
         arguments = document.get("ProgramArguments") or []
         environment = document.get("EnvironmentVariables") or {}
         if ((environment.get("STEERING_AGENT_WORKSPACE") or document.get("Label") == MACHINE_LABEL)
-                and arguments and str(arguments[-1]).endswith("steering/agent.py")):
+                and arguments and (str(arguments[-1]).endswith("steering/agent.py")
+                                   or len(arguments) >= 2 and str(arguments[-2]).endswith("/2mw2lt") and arguments[-1] == "agent")):
             found.append((path, document))
     return found
 

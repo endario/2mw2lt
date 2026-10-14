@@ -52,8 +52,8 @@ peer's or the brain's words arrive as `steering say <key>`: read them, and ackno
 
 **Claude Code with the plugin's module:** when connect's `plugin:` line ends
 `the plugin holds this session's stream, so arm no hold`, arm nothing. A waiting frame starts a
-turn, or arrives during one, as `A steering frame is waiting`. Call `mcp__2mw2lt__frames` then:
-it returns each frame with its daemon-written `from:` line, and acknowledges the envelopes it
+turn, or arrives during one, as `Call mcp__2mw2lt__frames.`, and the tool
+returns each frame with its daemon-written `from:` line, and acknowledges the envelopes it
 returned.
 
 **Claude Code:** connection is not finished here. Arm this with Bash `run_in_background: true`
@@ -84,7 +84,9 @@ frame handling, read [the stream reference](stream-reference.md).
 
 **The plugin's hold** resumes by itself after a revoke, a curable refusal or a resume; never arm one beside
 it, since a second hold revokes the plugin's. When it is retrying or has stopped, the hook says so
-(attempt, refusal, next try, or the remedy), and once more when it holds again. Its full state is
+(attempt, refusal, next try, or the remedy), and once more when it holds again. A refusal no retry
+outlives starts one turn of your own that says it and the remedy — act on it: exit if your session
+was retired, reconnect otherwise (#6308). Its full state is
 always one command away:
 
 ```bash

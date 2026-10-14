@@ -108,9 +108,10 @@ PASSING = frozenset({"verifier-unavailable", "authority-elapsed", "deadline", "u
 class Unanswered(Exception):
     """The console or a door did not answer, or a gateway answered for it: worth asking again."""
 
-    def __init__(self, reason: str, after: float | None = None):
+    def __init__(self, reason: str, after: float | None = None, limited: bool = False):
         super().__init__(reason)
         self.after = after
+        self.limited = limited  # it did answer: a rate limit asking for a pause (#6457)
 
 
 def _who(url: str) -> str:
@@ -131,7 +132,9 @@ def _reason(e: BaseException) -> str:
 
 def _retry_after(headers) -> float | None:
     try:
-        return max(0.0, float(headers.get("Retry-After"))) if headers is not None else None
+        # Better Auth's limiter names its pause X-Retry-After.
+        after = headers.get("Retry-After") or headers.get("X-Retry-After") if headers is not None else None
+        return max(0.0, float(after)) if after is not None else None
     except (TypeError, ValueError):
         return None
 
@@ -163,6 +166,8 @@ def ask(method: str, url: str, body: dict | None = None, token: str | None = Non
         # Coordination's refusal names its check as `code`, a capacity deferral's 503 among them;
         # of those, only a passing outage is asked again.
         code = got.get("code") if isinstance(got, dict) else None
+        if e.code == 429:
+            raise Unanswered("429, too many requests", _retry_after(e.headers), limited=True) from None
         if e.code in TRANSIENT and (code in PASSING or not (isinstance(got, dict) and (got.get("error") or code))):
             raise Unanswered(str(code or e.code), _retry_after(e.headers)) from None
         return e.code, got if isinstance(got, dict) else {}
@@ -204,7 +209,7 @@ def waited(method: str, url: str, deadline: float, body: dict | None = None,
             if time.monotonic() + pause > deadline:
                 raise Stop(f"{_who(url)} at {_origin(url)} did not answer ({e}); "
                            "check the network, then run install again") from None
-            say("", f"{_who(url)} did not answer ({e}); retrying")
+            say("", f"{_who(url)} {'asked for a pause' if e.limited else 'did not answer'} ({e}); retrying")
             time.sleep(pause)
             delay = min(delay * 2, 60.0)
 
@@ -576,10 +581,10 @@ def agent_answers(port: int, root: Path) -> bool:
         if isinstance(e.reason, ConnectionRefusedError):
             return False
         raise Stop(f"the agent on 127.0.0.1:{port} did not answer ({_reason(e)}); "
-                   "its log is under ~/Library/Logs/2mw2lt/") from None
+                   f"its log is under {log_directory()}") from None
     except (TimeoutError, ConnectionError, http.client.HTTPException) as e:
         raise Stop(f"the agent on 127.0.0.1:{port} did not answer ({_reason(e)}); "
-                   "its log is under ~/Library/Logs/2mw2lt/") from None
+                   f"its log is under {log_directory()}") from None
     except (ValueError, AttributeError):
         served = None
     if not isinstance(served, list):
@@ -590,10 +595,8 @@ def agent_answers(port: int, root: Path) -> bool:
 
 def machine_port() -> int:
     """The port the machine's one agent job listens on, or the default when it has none yet."""
-    import plistlib
-    try:
-        doc = plistlib.loads((Path.home() / "Library" / "LaunchAgents" / f"{agentjob.MACHINE_LABEL}.plist").read_bytes())
-    except (OSError, plistlib.InvalidFileException):
+    doc = agentjob.load(agentjob.job_path(agentjob.jobs_directory(Path.home()), agentjob.MACHINE_LABEL))
+    if doc is None:
         return int(DEFAULT_AGENT_PORT)
     named = str((doc.get("EnvironmentVariables") or {}).get("STEERING_AGENT_PORT") or "") if isinstance(doc, dict) else ""
     return int(named) if named.isdecimal() else int(DEFAULT_AGENT_PORT)
@@ -674,8 +677,6 @@ def ensure_agent(root: Path, authority: str, door: str) -> int:
     if agent_answers(port, root):
         write_agent_port(root, str(port))
         return port
-    if platform.system() != "Darwin":
-        raise unsupported()
     # The job is written by the installer of the release it runs, not by this plugin's copy.
     run_installer(release(door), root, door, port)
     write_agent_port(root, str(port))
@@ -688,13 +689,12 @@ def ensure_agent(root: Path, authority: str, door: str) -> int:
         except Stop as e:  # an agent starting up may drop a connection before it serves
             why = e
         if time.monotonic() > end:
-            raise why or Stop(f"the agent did not answer on 127.0.0.1:{port}; its log is under ~/Library/Logs/2mw2lt/")
+            raise why or Stop(f"the agent did not answer on 127.0.0.1:{port}; its log is under {log_directory()}")
         time.sleep(1)
 
 
-def unsupported() -> Stop:
-    return Stop(f"the agent is started by launchd, and this machine runs {platform.system()}; only macOS "
-                "installs here. A Linux host is provisioned with steering/host/provision-agent-host.sh")
+def log_directory() -> Path:
+    return agentjob.log_directory(Path.home())
 
 
 def record(root: Path, door: str, authority: str) -> None:
@@ -774,8 +774,6 @@ def install(root: Path, codex: bool = False, team: str | None = None,
     console = platform_url()
     repo = repository(root)
     say("repository", repo)
-    if platform.system() != "Darwin" and not agent_answers(machine_port(), root):
-        raise unsupported()
     name = github_account(root, repo, gh_account)
     label = f"{socket.gethostname().split('.')[0]} as {getpass.getuser()}"
     bound = checkout_binding.id_at(root)
