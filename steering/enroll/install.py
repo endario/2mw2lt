@@ -74,6 +74,7 @@ DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
 DEFAULT_TRACKS = tracksdoc.DEFAULT_SOURCE
 POLL = 5.0
 GRANT = 900.0  # how long the person may take to connect the App before the run stops to resume
+SAID = 1.0  # how long the work between two lines must take before a step's line says it
 
 
 class Stop(SystemExit):
@@ -81,11 +82,20 @@ class Stop(SystemExit):
 
 
 _at = ""  # the step last shown, which a stop names
+_at_line = time.monotonic()  # when the previous line was said, which a slow step's line names
 
 
 def say(step: str, text: str) -> None:
-    global _at
-    _at = step or _at
+    """One line of the transcript. A line opening a step says how long the work since the previous
+    line took, once that is at least `SAID`: the work between lines is that step's. A continuation
+    line (blank step) never does — the waits it belongs to carry their own elapsed."""
+    global _at, _at_line
+    now = time.monotonic()
+    if step:
+        _at = step
+        if now - _at_line >= SAID:
+            text += f" ({elapsed(now - _at_line)})"
+    _at_line = now
     print(f"{step:<10}  {text}", flush=True)
 
 
@@ -305,6 +315,7 @@ def sign_in(console: str, scope: str, invite: str | None = None, login: str | No
         status, answer = waited("POST", f"{console}/api/auth/device/token", deadline,
                                 {"grant_type": DEVICE_GRANT, "device_code": got["device_code"], "client_id": CLIENT})
         if status == 200 and answer.get("access_token"):
+            say("", f"the sign-in is approved ({elapsed(time.monotonic() - start)})")
             return answer["access_token"]
         error = answer.get("error")
         if error == "slow_down":
@@ -528,7 +539,7 @@ def wait_for_go_grant(console: str, token: str, team: str, repo: str, owner: boo
             raise Stop(f"the App does not reach {repo} yet: the team's owner, signed in with GitHub, chooses "
                        f"Connect GitHub on {console}/; then run this again")
         time.sleep(POLL)
-    say("", f"{repo} is readable")
+    say("", f"{repo} is readable after ({elapsed(time.monotonic() - start)})")
 
 
 def authorities(door: str) -> dict | None:
@@ -680,6 +691,8 @@ def ensure_agent(root: Path, authority: str, door: str) -> int:
     # The job is written by the installer of the release it runs, not by this plugin's copy.
     run_installer(release(door), root, door, port)
     write_agent_port(root, str(port))
+    # The release's installer runs silent, so the wait names the step a run is in while it lasts.
+    say("agent", f"waiting for the agent to answer on 127.0.0.1:{port}")
     end = time.monotonic() + 60
     while True:
         try:
@@ -771,6 +784,9 @@ def github_account(root: Path, repo: str, chosen: str | None = None) -> str:
 
 def install(root: Path, codex: bool = False, team: str | None = None,
             gh_account: str | None = None, invite: str | None = None, login: str | None = None) -> int:
+    # A direct call, as the guards make, starts its transcript afresh — not off the import-time clock.
+    global _at, _at_line
+    _at, _at_line = "", time.monotonic()
     console = platform_url()
     repo = repository(root)
     say("repository", repo)
@@ -1191,8 +1207,9 @@ def main(argv: list[str]) -> int:
             # sibling's hooks and door (#3431).
             raise Stop(f"{anchor} is a linked worktree; {action} acts on the checkout its worktrees "
                        f"share, so run it from {root}")
-    global _at
+    global _at, _at_line
     _at = ""
+    _at_line = time.monotonic()
     try:
         if action == "retire":
             return retire_workspace(paths[0])

@@ -57,7 +57,9 @@ _NEED = re.compile(r"^(?P<verb>dispose|promote):\s*token\s+@lease\s+(?P<item>\S+
 _LAUNCH = re.compile(r"^launch:\s*token\s+@lease\s+(?P<harness>[a-z][a-z0-9-]{0,31})"
                      r"(?:\s+on\s+(?:(?:m-)?(?P<machine>[0-9a-f-]{36})|\"(?P<quoted>[^\"\n]{1,64})\"|(?P<machine_name>[^\s\"]{1,64})))?"
                      r"(?:\s+vendor\s+(?P<vendor>[a-z0-9][a-z0-9-]{0,31}))?"
-                     r"(?:\s+account\s+(?P<account>\S{1,256}))?(?:\s+model\s+(?P<model>\S{1,128}))?"
+                     r"(?:\s+account\s+(?P<account>\S{1,256}))?"
+                     # A floor names the least rarity its model may have, in place of the model (#6499).
+                     r"(?:\s+model\s+(?P<model>\S{1,128})|\s+floor\s+(?P<floor>uncommon|rare|epic|legendary))?"
                      r"(?:\s+thinking\s+(?P<thinking>[a-z]{1,32}))?(?:\s+effort\s+(?P<effort>low|medium|high|xhigh|max))?"
                      r"(?:\s+(?P<window>window))?(?:\s+card\s+(?P<card>[0-9a-f]{24})"
                      # Or the card by the issue it resolves, which the seat holds as a number.
@@ -208,10 +210,12 @@ def _go_launch(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
     import session_routes
     m = _LAUNCH.match(line)
     if not m:
-        return 2, refusal.use("launch", "malformed launch: its clauses go in the order on, vendor, account, model, thinking, effort, window, card or resolves; on Go, `on` names a machine as /sessions lists it in `machine`, a registration as /machines lists it, or the machine's name"), False
-    if m["harness"] == "claude" and not (m["model"] and m["effort"]):
-        return 2, refusal.use("launch", "a claude launch names its model (as Claude Code takes it) and its effort"), False
-    body = {k: m[k] for k in ("harness", "machine", "machine_name", "vendor", "account", "model", "thinking", "effort") if m[k]}
+        return 2, refusal.use("launch", "malformed launch: its clauses go in the order on, vendor, account, model or floor, thinking, effort, window, card or resolves; on Go, `on` names a machine as /sessions lists it in `machine`, a registration as /machines lists it, or the machine's name"), False
+    if m["harness"] == "claude" and not ((m["model"] or m["floor"]) and m["effort"]):
+        return 2, refusal.use("launch", "a claude launch names its model (as Claude Code takes it) or a floor, and its effort"), False
+    if m["floor"] and (m["machine"] or m["quoted"] or m["machine_name"] or m["vendor"] or m["account"]):
+        return 2, refusal.use("launch", "a floor is placed by the platform: leave out on, vendor and account, or name the model"), False
+    body = {k: m[k] for k in ("harness", "machine", "machine_name", "vendor", "account", "model", "floor", "thinking", "effort") if m[k]}
     if m["quoted"]:
         body["machine_name"] = m["quoted"]
     body["reason"] = " ".join(m["reason"].split())

@@ -719,6 +719,18 @@ FleetLabel = typing.TypedDict("FleetLabel", {
     "label": "str",
 })
 
+# StreamBulletin tells a hold what the workspace's bulletin says: a fresh snapshot when the session
+# reads as an audience it was not shown for, or the lines added, replaced or retracted since the
+# revision it was last shown (the bulletin design, §4). Information, never direction: the frame
+# wakes nobody, and Revision is the head the text was rendered at.
+StreamBulletin = typing.TypedDict("StreamBulletin", {
+    "kind": "str",
+    "to": "str",
+    "hold": "str",
+    "revision": "int",
+    "text": "str",
+})
+
 # StreamRevoked ends a hold that no longer stands.
 StreamRevoked = typing.TypedDict("StreamRevoked", {
     "kind": "str",
@@ -1429,6 +1441,68 @@ BootstrapView = typing.TypedDict("BootstrapView", {
     "reason": "typing.NotRequired[str]",
 })
 
+# BulletinPostBody is a line's text, audience and until. Audience "all" when absent; until absent
+# means the line is standing.
+BulletinPostBody = typing.TypedDict("BulletinPostBody", {
+    "text": "str",
+    "audience": "typing.NotRequired[str]",
+    "until": "typing.NotRequired[str | None]",
+})
+
+# BulletinRetractBody ends a live line with its reason.
+BulletinRetractBody = typing.TypedDict("BulletinRetractBody", {
+    "reason": "str",
+})
+
+# BulletinLineDTO is one live line: its key, text, audience, end, and the attribution the daemon
+# wrote from the principal.
+BulletinLineDTO = typing.TypedDict("BulletinLineDTO", {
+    "key": "str",
+    "text": "str",
+    "audience": "str",
+    "until": "typing.NotRequired[str | None]",
+    "tier": "str",
+    "author": "str",
+    "revision": "int",
+})
+
+# BulletinRead answers the caller's audience: the live lines, the head, and, with render=snapshot,
+# the bounded text a session is shown. Marked says a session's mark was taken.
+BulletinRead = typing.TypedDict("BulletinRead", {
+    "head": "int",
+    "lines": "list[BulletinLineDTO] | None",
+    "text": "typing.NotRequired[str]",
+    "marked": "typing.NotRequired[bool]",
+})
+
+# BulletinAnswer is a post's or a retraction's receipt: the key and the revision it wrote.
+BulletinAnswer = typing.TypedDict("BulletinAnswer", {
+    "key": "str",
+    "revision": "int",
+    "replayed": "bool",
+})
+
+# BulletinRevisionDTO is one revision of the history: a post or a retraction, with its attribution.
+BulletinRevisionDTO = typing.TypedDict("BulletinRevisionDTO", {
+    "revision": "int",
+    "key": "str",
+    "kind": "str",
+    "text": "typing.NotRequired[str]",
+    "audience": "typing.NotRequired[str]",
+    "until": "typing.NotRequired[str | None]",
+    "by": "WorkActor",
+    "author": "str",
+    "reason": "typing.NotRequired[str]",
+    "at": "str",
+})
+
+# BulletinHistoryRead is a window of the history: the lines live at the window's start, then every
+# revision inside it, retracted and lapsed ones included.
+BulletinHistoryRead = typing.TypedDict("BulletinHistoryRead", {
+    "opening": "list[BulletinLineDTO] | None",
+    "revisions": "list[BulletinRevisionDTO] | None",
+})
+
 # CallbackBody is a host's subscribe to a room's posts, as the console's MCP facade carries it
 # (documentation/architecture/go-room-deliveries-design.md, decision 8). URL is the callback as the
 # console normalized it, which the subscription's id is derived from.
@@ -1488,14 +1562,15 @@ CheckoutWorktree = typing.TypedDict("CheckoutWorktree", {
 })
 
 # CheckpointBody is a session's checkpoint at a boundary of its work (doc 154 §5): its client's
-# occurrence, the card it executes when it names one, the boundary, the note it posted and the note's
-# digest as the client read it, and what it learned.
+# occurrence, the card it executes when it names one, the boundary, its text or the pointer to a note,
+# and what it learned.
 CheckpointBody = typing.TypedDict("CheckpointBody", {
     "occurrence": "str",
     "card": "typing.NotRequired[str]",
     "boundary": "str",
-    "note": "str",
-    "note_sha256": "str",
+    "text": "typing.NotRequired[str]",
+    "note": "typing.NotRequired[str]",
+    "note_sha256": "typing.NotRequired[str]",
     "learned": "typing.NotRequired[list[LessonBody] | None]",
 })
 
@@ -1520,6 +1595,9 @@ CheckpointDTO = typing.TypedDict("CheckpointDTO", {
     "dropped": "int",
     "at": "str",
     "current": "bool",
+    "text": "str | None",
+    "expires_at": "str | None",
+    "expired": "bool",
 })
 
 # CheckpointAnswer is a checkpoint write's answer.
@@ -1529,7 +1607,7 @@ CheckpointAnswer = typing.TypedDict("CheckpointAnswer", {
     "position": "int",
 })
 
-# CheckpointList is a card's checkpoints, oldest first.
+# CheckpointList is a card's checkpoints, oldest first, or a session's, newest first.
 CheckpointList = typing.TypedDict("CheckpointList", {
     "checkpoints": "list[CheckpointDTO] | None",
 })
@@ -2035,6 +2113,7 @@ GateRow = typing.TypedDict("GateRow", {
     "sha": "str",
     "base": "str",
     "by": "str",
+    "card": "GateCard | None",
     "commissioned_at": "str",
     "phase": "str",
     "why": "str | None",
@@ -2049,6 +2128,12 @@ GateRow = typing.TypedDict("GateRow", {
     "passed_over": "typing.NotRequired[dict[str, list[str] | None] | None]",
 })
 
+# GateCard is a commission's card by its id and its name now.
+GateCard = typing.TypedDict("GateCard", {
+    "id": "str",
+    "name": "str",
+})
+
 # GateReviewer is who the commission's attempt was given to: the route and effort it was offered
 # with, and, once judged, the model its receipt observed.
 GateReviewer = typing.TypedDict("GateReviewer", {
@@ -2058,6 +2143,7 @@ GateReviewer = typing.TypedDict("GateReviewer", {
     "effort": "str | None",
     "model": "str | None",
     "model_source": "str | None",
+    "rarity": "str | None",
     "deeper": "typing.NotRequired[bool]",
     "reused": "typing.NotRequired[bool]",
 })
@@ -2114,6 +2200,7 @@ GateRead = typing.TypedDict("GateRead", {
     "sha": "str",
     "base": "str",
     "by": "str",
+    "card": "GateCard | None",
     "commissioned_at": "str",
     "phase": "str",
     "why": "str | None",
@@ -2467,6 +2554,7 @@ LaunchBody = typing.TypedDict("LaunchBody", {
     "vendor": "typing.NotRequired[str]",
     "account": "typing.NotRequired[str]",
     "model": "typing.NotRequired[str]",
+    "floor": "typing.NotRequired[str]",
     "thinking": "typing.NotRequired[str]",
     "effort": "typing.NotRequired[str]",
     "window": "typing.NotRequired[bool]",
@@ -2550,6 +2638,59 @@ LaunchOffer = typing.TypedDict("LaunchOffer", {
     "thinking": "typing.NotRequired[str]",
     "effort": "typing.NotRequired[str]",
     "window": "typing.NotRequired[bool]",
+})
+
+# WaitingLaunches answers the waiting launches a reader may see, in the order the recheck takes
+# them (#6604).
+WaitingLaunches = typing.TypedDict("WaitingLaunches", {
+    "items": "list[WaitingLaunch] | None",
+})
+
+# WaitingLaunch is one launch still waiting: what the seat asked for, why it waits, its place
+# among the team's waiting launches, and the machines whose room it waits for.
+WaitingLaunch = typing.TypedDict("WaitingLaunch", {
+    "id": "str",
+    "workspace": "WaitingWorkspace",
+    "harness": "str",
+    "model": "str | None",
+    "floor": "str | None",
+    "card": "str | None",
+    "reason": "str",
+    "machine": "str | None",
+    "account": "typing.NotRequired[LaunchAccount | None]",
+    "since": "str",
+    "recheck_at": "str | None",
+    "place": "int",
+    "decided_at": "str | None",
+    "hosts": "list[WaitingHost] | None",
+})
+
+# WaitingWorkspace is the workspace a waiting launch belongs to.
+WaitingWorkspace = typing.TypedDict("WaitingWorkspace", {
+    "id": "str",
+    "name": "str",
+})
+
+# WaitingHost is a machine a waiting launch's last decision passed over for want of room there.
+# Limit and Used are its worker headroom now, absent when Headroom says why they cannot be told.
+# Sessions are the team's sessions on it the reader may name; Elsewhere counts those in workspaces
+# the reader may not; Unnamed estimates the workers its census counts that no session of the team
+# accounts for, which are never named.
+WaitingHost = typing.TypedDict("WaitingHost", {
+    "machine": "str",
+    "reason": "str",
+    "limit": "int | None",
+    "used": "int | None",
+    "headroom": "typing.NotRequired[str]",
+    "sessions": "list[HoldingSession] | None",
+    "elsewhere": "int",
+    "unnamed": "int",
+})
+
+# HoldingSession is an enrolled session on a machine a launch waits for.
+HoldingSession = typing.TypedDict("HoldingSession", {
+    "name": "str",
+    "workspace": "str",
 })
 
 # MachineSample is one independently ordered machine fact. Value contains the validated JSON value.
@@ -2971,6 +3112,8 @@ PlacementCandidate = typing.TypedDict("PlacementCandidate", {
     "terms": "typing.NotRequired[PlacementTerms | None]",
     "order": "typing.NotRequired[float | None]",
     "passed": "typing.NotRequired[str]",
+    "model": "typing.NotRequired[str]",
+    "above": "typing.NotRequired[int]",
 })
 
 # PlacementVerdict is the account's verdict as placement judged it.
@@ -3080,6 +3223,21 @@ PushRaiseBody = typing.TypedDict("PushRaiseBody", {
 PushRaiseAnswer = typing.TypedDict("PushRaiseAnswer", {
     "raise": "str",
     "enqueued": "int",
+})
+
+# RebindBody is the seat moving a session to the machine that succeeded its own: the session, and
+# that machine's registration as the session list names it (`machine_registration`).
+RebindBody = typing.TypedDict("RebindBody", {
+    "to": "str",
+    "machine": "str",
+})
+
+# RebindAnswer is the session a rebind moved and the machine registration it now stands on.
+RebindAnswer = typing.TypedDict("RebindAnswer", {
+    "session": "str",
+    "machine": "str",
+    "status": "str",
+    "replayed": "bool",
 })
 
 RoomAuthor = typing.TypedDict("RoomAuthor", {
@@ -3266,6 +3424,7 @@ ListedSession = typing.TypedDict("ListedSession", {
     "origin": "SessionOrigin",
     "standing": "SessionStanding | None",
     "checkpoint": "ListedCheckpoint | None",
+    "rarity": "str | None",
 })
 
 # ListedCheckpoint is a session's current checkpoint: its boundary, its note's URL and when it was
@@ -3275,6 +3434,7 @@ ListedCheckpoint = typing.TypedDict("ListedCheckpoint", {
     "boundary": "str",
     "note": "str",
     "at": "str",
+    "expires_at": "str | None",
 })
 
 # SessionStanding is a session's standing as Go reads it (doc 189 §1), so the Fleet draws it rather
@@ -3635,6 +3795,30 @@ CardCreateBody = typing.TypedDict("CardCreateBody", {
     "intents": "typing.NotRequired[list[str] | None]",
     "anchors": "typing.NotRequired[list[AnchorBody] | None]",
     "track": "typing.NotRequired[str]",
+    "triage": "typing.NotRequired[TriageBody | None]",
+})
+
+# CardTriage is a card's latest triage: its answers, the floor each stage is held to (a stage it does
+# not name takes the build floor, or the review floor for a judged stage), whether triage advises a
+# split, where the policy it applied was set, and who triaged it, when and why.
+CardTriage = typing.TypedDict("CardTriage", {
+    "criticality": "str",
+    "size": "str",
+    "floors": "dict[str, str] | None",
+    "split_advised": "bool",
+    "policy_source": "str",
+    "by": "str",
+    "why": "str | None",
+    "at": "str",
+})
+
+# TriageBody is what triage says of a card: its criticality and size, the floors it names beyond the
+# team's policy, and why. A card's later triage always says why.
+TriageBody = typing.TypedDict("TriageBody", {
+    "criticality": "str",
+    "size": "str",
+    "floors": "typing.NotRequired[dict[str, str] | None]",
+    "why": "typing.NotRequired[str]",
 })
 
 # AssociationBody names one anchor or one branch. A dissociation says why.
@@ -3644,11 +3828,19 @@ AssociationBody = typing.TypedDict("AssociationBody", {
     "why": "typing.NotRequired[str]",
 })
 
-# EngagementBody names a session of the workspace. A disengagement says why.
+# EngagementBody names a session of the workspace. A disengagement says why; an executor
+# engagement may name the lifecycle stage it begins (#6499), with the reason it hands off at.
 EngagementBody = typing.TypedDict("EngagementBody", {
     "session": "str",
     "role": "typing.NotRequired[str]",
+    "stage": "typing.NotRequired[str]",
     "why": "typing.NotRequired[str]",
+})
+
+# StageRetierBody raises the floor a card's stage is held to (#6499), saying why.
+StageRetierBody = typing.TypedDict("StageRetierBody", {
+    "floor": "str",
+    "why": "str",
 })
 
 # LinkBody names exactly one target: a card by its id or an issue a card requires, or a goal by its
@@ -3838,6 +4030,7 @@ CardDTO = typing.TypedDict("CardDTO", {
     "board": "BoardDTO",
     "gates": "typing.NotRequired[CardGates | None]",
     "knowledge": "typing.NotRequired[CardKnowledge | None]",
+    "triage": "typing.NotRequired[CardTriage | None]",
 })
 
 # CardKnowledge is a card's three knowledge stages at the applied knowledge commit.
@@ -4340,6 +4533,48 @@ TracksBindAnswer = typing.TypedDict("TracksBindAnswer", {
     "position": "int",
 })
 
+# LadderBody rates selectors on the team's ladder (#6565): a rung, "none" to unrate a selector the
+# platform rates, or "platform" to take the platform's rating again, with why. Model is the id a
+# launch dispatches for a rated selector where no route is published.
+LadderBody = typing.TypedDict("LadderBody", {
+    "ratings": "list[LadderRatingBody] | None",
+    "why": "str",
+})
+
+LadderRatingBody = typing.TypedDict("LadderRatingBody", {
+    "selector": "str",
+    "rarity": "str",
+    "model": "typing.NotRequired[str]",
+})
+
+# LadderRead is the ladder the team's floors are judged by now: the platform's, or the team's own
+# version of it, with who rated it last, when and why.
+LadderRead = typing.TypedDict("LadderRead", {
+    "version": "int",
+    "team": "bool",
+    "by": "WorkActor | None",
+    "why": "str | None",
+    "at": "str",
+    "rows": "list[LadderRowDTO] | None",
+})
+
+# LadderRowDTO is one selector, its rung, the model a launch dispatches for it, and whether the team
+# rated it.
+LadderRowDTO = typing.TypedDict("LadderRowDTO", {
+    "selector": "str",
+    "rarity": "str",
+    "model": "typing.NotRequired[str]",
+    "team": "bool",
+})
+
+# LadderAnswer answers a rating, with the ladder as it stands once the rating is read back.
+LadderAnswer = typing.TypedDict("LadderAnswer", {
+    "status": "str",
+    "replayed": "bool",
+    "position": "int",
+    "ladder": "LadderRead",
+})
+
 # WorkRoute is one route of the work wire: its method and path under WorkBase, the query form that
 # selects it when one path answers several, and the names of its request body and answer in
 # testdata/work.json; a read has no request.
@@ -4423,6 +4658,7 @@ ROUTES = frozenset({
     "POST /api/v1/teams/{team}/invitations",
     "DELETE /api/v1/teams/{team}/invitations/{invitation}",
     "POST /api/v1/teams/{team}/invitations/{invitation}/redeem",
+    "GET /api/v1/teams/{team}/launches/waiting",
     "GET /api/v1/teams/{team}/machines/{machine}/settings",
     "POST /api/v1/teams/{team}/machines/{machine}/settings/{key}",
     "GET /api/v1/teams/{team}/members",
@@ -4452,6 +4688,10 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/brain/requests/{request}",
     "POST /w/{workspace}/api/v1/brain/requests/{request}/answer",
     "GET /w/{workspace}/api/v1/brain/transcript",
+    "GET /w/{workspace}/api/v1/bulletin",
+    "GET /w/{workspace}/api/v1/bulletin/history",
+    "PUT /w/{workspace}/api/v1/bulletin/{key}",
+    "POST /w/{workspace}/api/v1/bulletin/{key}/retraction",
     "GET /w/{workspace}/api/v1/cards",
     "POST /w/{workspace}/api/v1/cards",
     "GET /w/{workspace}/api/v1/cards/{card}",
@@ -4465,7 +4705,9 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/cards/{card}/links",
     "POST /w/{workspace}/api/v1/cards/{card}/retirement",
     "POST /w/{workspace}/api/v1/cards/{card}/revival",
+    "POST /w/{workspace}/api/v1/cards/{card}/stages/{stage}/retier",
     "POST /w/{workspace}/api/v1/cards/{card}/track",
+    "POST /w/{workspace}/api/v1/cards/{card}/triage",
     "POST /w/{workspace}/api/v1/cards/{card}/unconclusion",
     "POST /w/{workspace}/api/v1/cards/{card}/unlinks",
     "POST /w/{workspace}/api/v1/checkpoints",
@@ -4511,7 +4753,10 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/knowledge/syncs",
     "GET /w/{workspace}/api/v1/knowledge/units",
     "GET /w/{workspace}/api/v1/knowledge/units/{id}",
+    "GET /w/{workspace}/api/v1/ladder",
+    "POST /w/{workspace}/api/v1/ladder",
     "POST /w/{workspace}/api/v1/launches",
+    "GET /w/{workspace}/api/v1/launches/waiting",
     "GET /w/{workspace}/api/v1/launches/{launch}",
     "POST /w/{workspace}/api/v1/launches/{launch}/withdrawal",
     "POST /w/{workspace}/api/v1/machine-renewals",
@@ -4545,12 +4790,14 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/sessions",
     "POST /w/{workspace}/api/v1/sessions",
     "POST /w/{workspace}/api/v1/sessions/{session}/bindings",
+    "GET /w/{workspace}/api/v1/sessions/{session}/checkpoints",
     "POST /w/{workspace}/api/v1/sessions/{session}/detachment",
     "POST /w/{workspace}/api/v1/sessions/{session}/directives",
     "POST /w/{workspace}/api/v1/sessions/{session}/directives/{directive}/acknowledgement",
     "POST /w/{workspace}/api/v1/sessions/{session}/forge-token",
     "POST /w/{workspace}/api/v1/sessions/{session}/keep",
     "POST /w/{workspace}/api/v1/sessions/{session}/push/raises",
+    "POST /w/{workspace}/api/v1/sessions/{session}/rebind",
     "POST /w/{workspace}/api/v1/sessions/{session}/says",
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/acquisition",
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/handover",
@@ -4610,6 +4857,8 @@ QUERY = {
     "GET /api/v1/teams/{team}/installations": {"repository": None},
     "GET /w/{workspace}/api/v1/brain/digest": {"limit": None},
     "GET /w/{workspace}/api/v1/brain/transcript": {"limit": None, "cursor": None},
+    "GET /w/{workspace}/api/v1/bulletin": {"render": frozenset({"snapshot"}), "mark": frozenset({"1"})},
+    "GET /w/{workspace}/api/v1/bulletin/history": {"since": None, "until": None},
     "GET /w/{workspace}/api/v1/cards": {"state": frozenset({"live", "concluded"}), "track": None, "branch": None, "pull": None, "limit": None, "next": None},
     "GET /w/{workspace}/api/v1/events": {"cursor": None},
     "GET /w/{workspace}/api/v1/facts": {"limit": None, "state": None, "resource": None, "session": None, "ulid": None, "cursor": None, "before": None, "latest": frozenset({"1"})},
@@ -4622,10 +4871,11 @@ QUERY = {
     "GET /w/{workspace}/api/v1/machines": {"limit": None, "cursor": None},
     "GET /w/{workspace}/api/v1/momentum": {"window": frozenset({"30d", "7d", "90d"})},
     "GET /w/{workspace}/api/v1/needs": {"audience": frozenset({"owner", "seat"})},
-    "GET /w/{workspace}/api/v1/placement": {"harness": None, "vendor": None, "model": None, "effort": None},
+    "GET /w/{workspace}/api/v1/placement": {"harness": None, "vendor": None, "model": None, "floor": frozenset({"uncommon", "rare", "epic", "legendary"}), "effort": None},
     "GET /w/{workspace}/api/v1/rooms/{room}/messages": {"limit": None, "cursor": None, "before": None, "wait": None},
     "GET /w/{workspace}/api/v1/rulings": {"state": frozenset({"unacknowledged"}), "limit": None, "next": None},
     "GET /w/{workspace}/api/v1/sessions": {"gone": frozenset({"1"})},
+    "GET /w/{workspace}/api/v1/sessions/{session}/checkpoints": {"epoch": frozenset({"current"}), "limit": None},
     "GET /w/{workspace}/api/v1/snapshot": {"feed": None},
     "GET /w/{workspace}/steering/agent/stream": {"accepts": frozenset({"policy"})},
 }

@@ -21,6 +21,10 @@ NOTIFICATION_TYPES = {"permission_prompt", "idle_prompt", "auth_success", "elici
 
 
 MIN_VERSION = (2, 1, 196)  # prompt_id on every hook (doc 15 §3)
+# The harnesses whose hook payloads this adapter admits, each with its own version floor. The
+# floor is Claude Code's fact; zcode's runtime sends Claude-shaped payloads on its own version
+# line, which Claude's floor does not measure (#6257), so it has none.
+FLOORS: dict[str, tuple[int, ...]] = {"claude": MIN_VERSION, "zcode": ()}
 # What a permission dialog is about, in the order a tool names it. The owner is being asked to
 # allow one act, and this is the argument that says which (#812).
 ASK_KEYS = ("command", "file_path", "path", "url", "pattern")
@@ -77,15 +81,19 @@ def ask(tool_name: object, tool_input: object) -> dict | None:
     return None
 
 
-def observe(hook: dict, occurrence: str, observed_at: str, source_version: str, epoch: int) -> dict | None:
+def observe(hook: dict, occurrence: str, observed_at: str, source_version: str, epoch: int,
+            source: str = "claude") -> dict | None:
     """The allow-listed observation from one Claude hook payload — identifiers and enums only.
     None for an event this slice does not consume, a payload without its session, or a
-    Claude Code below the version floor (coverage `none`, not a guess)."""
+    Claude Code below the version floor (coverage `none`, not a guess), or a source this adapter
+    does not admit."""
     event = hook.get("hook_event_name")
     sid = hook.get("session_id")
-    if event not in ADMITTED or not isinstance(sid, str) or not sid or _version(source_version) < MIN_VERSION:
+    floor = FLOORS.get(source)
+    if (floor is None or event not in ADMITTED or not isinstance(sid, str) or not sid
+            or not source_version or _version(source_version) < floor):
         return None
-    o = {"v": 4, "source": "claude", "source_version": source_version, "session": sid, "epoch": epoch,
+    o = {"v": 4, "source": source, "source_version": source_version, "session": sid, "epoch": epoch,
          "event": event, "occurrence": occurrence, "observed_at": observed_at}
     for k in _KEEP:
         v = hook.get(k)

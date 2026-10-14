@@ -50,6 +50,12 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/connect.py" --help
 **Codex:** delivery is injected into your thread; connect asserts that reach. Skip the hold. A
 peer's or the brain's words arrive as `steering say <key>`: read them, and acknowledge nothing.
 
+**ZCode:** connect with no flags, as Claude does: the session is named by the binding the
+plugin's hooks publish. The plugin's frames server holds the stream, so arm no hold. A waiting
+frame starts or joins a turn as `Call mcp__plugin_2mw2lt_frames__frames`; that tool returns each
+frame with its `from:` line and acknowledges what it returned. If the `plugin:` line says the
+frames server holds no stream yet, restart the session so the plugin loads.
+
 **Claude Code with the plugin's module:** when connect's `plugin:` line ends
 `the plugin holds this session's stream, so arm no hold`, arm nothing. A waiting frame starts a
 turn, or arrives during one, as `Call mcp__2mw2lt__frames.`, and the tool
@@ -115,11 +121,15 @@ answer it in words.
 A `say` from `warm <id>` is the platform refreshing your prompt cache while the brain keeps you.
 End the turn without a word.
 
-When work needs a card and has neither an owning issue nor a gate yet, declare it:
+When work needs a card and has neither an owning issue nor a gate yet, declare it, triaged:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/declare.py" <session> "<work>" resolves:<issue>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/declare.py" <session> "<work>" resolves:<issue> triage:<criticality>,<size>
 ```
+
+Triage says how much breaks if the work is wrong (`critical`, `major`, `minor`, `trivial`) and how
+large it is (`S`, `M`, `L`, `XL`). The team's policy turns those into the least tier each stage is
+held to, and your reviews take that floor unless you raise it (`gate.py --floor`, with why).
 
 When you take work, and whenever the card you execute turns out to wait on another card or issue
 or to contribute to a goal, say so; end the edge when it no longer holds. The brain reviews the
@@ -136,6 +146,20 @@ Each script's `--help` gives its forms and examples.
 a walk reaches other apps' private data, and macOS stops the session on a permission dialog
 until the owner answers it, hours later. Search the worktree or a directory you can name; the
 coordination fixture's PostgreSQL is already in `COORDINATION_PG_PREFIX` where the host has it.
+
+## The bulletin
+
+The workspace's bulletin is a few keyed, attributed lines saying what is true right now — operator
+holds, route health, standing cautions — and every session reads it. It is information, never
+direction. When you would otherwise tell a second session the same fact, post it once instead:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/bulletin.py" <session> post <key> "<text>" [--until <UTC time | +2h>]
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/bulletin.py" <session> read [--all]
+```
+
+A plain session posts to everyone with an `until` within 24 hours; the seat and the owner may post
+standing lines and the seat's own audience. A refusal prints its check and what would satisfy it.
 
 ## Speak
 

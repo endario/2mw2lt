@@ -107,6 +107,10 @@ def harness_of(provider: str | None) -> harness_mod.Harness:
             raise Refused("more than one harness says this is its session ("
                           + ", ".join(h.provider for h in found)
                           + "): name the one you mean with --provider")
+        if not found and harness_mod.zcode_unbound:
+            # Inside a zcode session whose binding did not resolve: Claude's default would
+            # refuse for the wrong reason.
+            raise Refused(f"this zcode session names no session: {harness_mod.zcode_unbound}")
         return found[0] if found else harness_mod.HARNESSES[harness_mod.DEFAULT]
     h = harness_mod.of(provider)
     if h is None:
@@ -584,8 +588,12 @@ def holder_note(ws: Path, psession: str | None, provider: str | None = None,
     if not psession:
         return ""
     if holder.fresh(ws, psession):
-        return "; the plugin holds this session's stream, so arm no hold"
-    if provider == "claude" and (plugin_root / "hooks" / "mods.json").is_file():
+        return "; the plugin holds this session's stream, so arm no hold" + (
+            "; read frames with the plugin's frames tool" if provider == "zcode" else "")
+    if provider == "zcode":
+        return ("; the plugin's frames server holds no stream here yet (it starts with the "
+                "session: restart it if the plugin was installed after), so arm no hold")
+    if provider == "claude" and (plugin_root / "mods.json").is_file():
         return ("; the plugin's module holds no stream here (this process may have started before the "
                 "plugin gained it: restart it or --resume), so arm a hold")
     return ""
@@ -613,6 +621,16 @@ def card_line(ws: Path, session: str, psession: str) -> str:
         return "card: " + "; ".join(f"{c['id']} ({c['name']})" for c in cards)
     except Exception as e:
         return f"card: unknown ({type(e).__name__}: {e})"
+
+
+def bulletin_snapshot(ws: Path, session: str, psession: str) -> str | None:
+    """The workspace's bulletin as the snapshot this session is shown at connect (#6473 design §4),
+    or None when nothing is live. The read marks what it showed, so the delivery pass tells the
+    session only the changes after it. Raises whatever the read raised; the caller says why on
+    stderr rather than failing a connect that has already bound."""
+    import session_routes  # noqa: E402
+    _, token = own_enrolment(ws, psession, session)
+    return session_routes.get("/bulletin?render=snapshot&mark=1", token).get("text") or None
 
 
 def repo_line(ws: Path) -> str:
@@ -691,7 +709,8 @@ def main(argv: list[str]) -> int:
     repinned = hooks.repin(ws) if h.hooks else None
     if repinned:
         print(f"repinned: {repinned}")
-    if h.hooks:
+    # Claude's hooks are wired in the workspace's settings; zcode's ship in the plugin.
+    if h.hooks and h.provider == "claude":
         settings = hooks.load(hooks.settings_path(ws))
         wired = any(hooks.wired_by(entry)
                     for entries in settings.get("hooks", {}).values() for entry in entries)
@@ -715,6 +734,16 @@ def main(argv: list[str]) -> int:
     print(f"speak: {say_invocation(h, psession, session)}")
     print(repo_line(ws))
     print(card_line(ws, session, psession))
+    # The bulletin is shown wherever a session's context is fresh, and connect is the cross-harness
+    # moment (design §4). Informational, as the card line is: a door older than the bulletin answers
+    # no such route, and a connect that bound stays bound.
+    try:
+        snapshot = bulletin_snapshot(ws, session, psession)
+    except Exception as e:
+        snapshot = None
+        print(f"bulletin: unread ({type(e).__name__}: {e})", file=sys.stderr)
+    if snapshot:
+        print(snapshot)
     # The stream this session holds at its agent names the incarnation it belongs to, and this
     # is the only place the recipe derives it.
     print(f"STEERING_RUNTIME_ID={rid}")

@@ -117,13 +117,14 @@ def _renewed(e: urllib.error.HTTPError, problem: dict, presented: str | None) ->
 
 
 def post(path: str, body: dict, key: str, carrier: str, token: str, timeout: float = 10.0,
-         resend: bool = True) -> dict:
+         resend: bool = True, method: str = "POST") -> dict:
     """One write under `key`, sent again under the same key while Go asks it to wait, and again
     when the wire loses the answer — no answer, a reset, a gateway speaking for a silo that is
     down, an answer that is not JSON, as a captive portal's is — within one budget the call owns,
     each resend one line of progress on stderr (#5974). `resend=False` names a write Go records
     nothing to replay a resend under the key (a mint), which keeps one attempt however its
-    answer is lost."""
+    answer is lost. `method` names the verb where a route's is not POST, as the bulletin's post
+    is a PUT."""
     data = json.dumps(body).encode()
     started, attempts = time.monotonic(), 0
     again = door.resender(started, f"session: {path}", resend=resend)
@@ -132,7 +133,7 @@ def post(path: str, body: dict, key: str, carrier: str, token: str, timeout: flo
         headers = (session_headers(token) if carrier == SESSION_CARRIER
                    else {carrier: token, "User-Agent": door.USER_AGENT})
         headers.update({"Content-Type": "application/json", "Idempotency-Key": key})
-        req = urllib.request.Request(_base() + path, data=data, method="POST", headers=headers)
+        req = urllib.request.Request(_base() + path, data=data, method=method, headers=headers)
         try:
             with door.open_direct(req, timeout) as r:
                 return json.loads(r.read() or b"{}")
@@ -209,7 +210,7 @@ def settled(e: Refused) -> bool:
 
 
 def _current_machine_refusal(e: Refused) -> str:
-    return refusal.resend(str(e), "from the session's current machine")
+    return refusal.resend(str(e), "from the session's current machine, or have the brain rebind the session to this one if its host was admitted again")
 
 
 def _incarnation(provider: str, psession: str, runtime: str) -> dict:
@@ -485,7 +486,7 @@ def card_repo(ws: Path | None = None) -> str:
     return url
 
 
-def declare_card(card: str, name: str, anchors: dict, token: str, repo: str = "") -> str:
+def declare_card(card: str, name: str, anchors: dict, token: str, repo: str = "", triage: dict | None = None) -> str:
     """The session declares its own card (`POST /cards`), which engages it as executor; Go answers
     a minted id whose declaration is the same one with that card. The key is the declaration's own,
     so a retry after a lost answer never mints a second card. `repo` names the anchors'
@@ -494,6 +495,8 @@ def declare_card(card: str, name: str, anchors: dict, token: str, repo: str = ""
     if anchors:
         body["anchors"] = [{"verb": verb, "repo": repo, "n": n}
                            for verb, ns in sorted(anchors.items()) for n in ns]
+    if triage:
+        body["triage"] = triage
     answer = write("/cards", body, _own_key("declare", card, json.dumps(body, sort_keys=True)),
                   SESSION_CARRIER, token)
     return f"declared: {card}" + (" (replayed)" if answer.get("replayed") else "")
@@ -887,6 +890,8 @@ def _card_write(fact: dict, repo: str) -> tuple[str, dict] | None:
             body["anchors"] = [{"verb": v, "repo": repo, "n": n} for v, ns in sorted(anchors.items()) for n in ns]
         if fact.get("major"):
             body["major"] = True
+        if fact.get("triage"):
+            body["triage"] = fact["triage"]
         return "/cards", body
     if state in ("card-branch", "card-unbranch"):
         # An ending carries the reason every ending records; Go refuses its absence.
@@ -894,7 +899,12 @@ def _card_write(fact: dict, repo: str) -> tuple[str, dict] | None:
                 {"branch": {"repo": fact["repo"], "branch": fact["branch"]},
                  **({"why": fact["why"]} if fact.get("why") else {})})
     if state == "card-session":
-        return f"/cards/{card}/engagements", {"session": fact["session"], "role": fact["role"]}
+        return (f"/cards/{card}/engagements",
+                {"session": fact["session"], "role": fact["role"],
+                 **({"stage": fact["stage"]} if fact.get("stage") else {}),
+                 **({"why": fact["why"]} if fact.get("why") else {})})
+    if state == "card-retiered":
+        return f"/cards/{card}/stages/{fact['stage']}/retier", {"floor": fact["floor"], "why": fact["why"]}
     if state == "card-unsession":
         return f"/cards/{card}/disengagements", {"session": fact["session"],
                                                  **({"why": fact["why"]} if fact.get("why") else {})}

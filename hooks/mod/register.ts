@@ -1,5 +1,5 @@
 import type { Register, EngineInterface, Timer, HookStream, ProcessSpawnChunk, ProcessSpawnResult } from 'claude-code'
-import { lines, atLeast, pick, invokes, lifecycle, tokensOf, due, owed, framesEntry, obsoleteSeatRefusal, nextSeat, asksSeat, seatCall, seatSchema, resendId, entryRefusal, refusalTurn, READ_KEPT, POINTER, CHECKPOINT, SEAT_SECTION, SEAT_TOOLS } from './frames'
+import { lines, atLeast, pick, invokes, lifecycle, tokensOf, due, owed, framesEntry, obsoleteSeatRefusal, nextSeat, asksSeat, seatCall, seatSchema, resendId, entryRefusal, refusalTurn, capBulletin, sectionRevision, READ_KEPT, POINTER, CHECKPOINT, SEAT_SECTION, BULLETIN_SECTION, SEAT_TOOLS } from './frames'
 import type { Line, SeatCall } from './frames'
 
 // The plugin's hooks module (#3872): it holds a connected Claude session's steering stream through
@@ -17,6 +17,8 @@ const WARNED = { plugin: '2mw2lt', key: 'warned' } as const
 const POINT = { plugin: '2mw2lt', key: 'point' } as const
 const SESSION = { plugin: '2mw2lt', key: 'session' } as const
 const SEAT = { plugin: '2mw2lt', key: 'seat' } as const
+const BULLETIN = { plugin: '2mw2lt', key: 'bulletin' } as const
+const BULLETINS = { plugin: '2mw2lt', key: 'bulletins' } as const
 
 const TOOL = 'mcp__2mw2lt__frames'
 const SEAT_TOOL = new RegExp(`^mcp__2mw2lt__(${Object.keys(SEAT_TOOLS).join('|')})$`)
@@ -207,6 +209,9 @@ let seatChain: Promise<unknown> = Promise.resolve()
 function refreshSeat($: EngineInterface, refresh: boolean): Promise<void> {
   const run = seatChain.then(async () => {
     if (!root || !(await $.state.get(SESSION)).value) return
+    // The bulletin reads beside the seat's own run, not after it: the two write independent keys,
+    // and a door that is down should cost the chain one retry budget, not two.
+    const beside = refresh ? refreshBulletin($) : undefined
     const r = await $.process.run(
       ['python3', script($, 'seat_section.py'), '--provider', 'claude', '--provider-session', await $.session.id()],
       { cwd: root })
@@ -215,13 +220,93 @@ function refreshSeat($: EngineInterface, refresh: boolean): Promise<void> {
     const { value: was = '' } = await $.state.get(SEAT)
     const next = nextSeat(was, r.exitCode, r.stdout, refresh)
     if (next !== was) await $.state.set(SEAT, next)
+    if (beside) await beside
   })
   seatChain = run.catch(() => undefined)
   return run
 }
 
+async function refreshBulletin($: EngineInterface): Promise<void> {
+  // A connected teammate renders no section, so its refresh must not mark one shown either: the
+  // mark would keep the changes from every process on this enrolment (plan unit 7b).
+  if (teammate) return
+  const r = await $.process.run(
+    ['python3', script($, 'bulletin.py'), '--provider', 'claude', '--provider-session', await $.session.id(), 'section'],
+    { cwd: root })
+  if (r.exitCode !== 0 && r.exitCode !== 1) $.ui.log(`2mw2lt: bulletin.py section exited ${r.exitCode}: ${r.stderr.trim()}`, { to: 'debug' })
+  // An answer that arrives after the session disconnected is dropped, as the seat's is; and any
+  // exit but 0 and 1 keeps the bytes it had — a door that cannot tell, or a child that broke, is
+  // never a reason to drop the lines.
+  if (!(await $.state.get(SESSION)).value) return
+  if (r.exitCode !== 0 && r.exitCode !== 1) return
+  const { value: was = '' } = await $.state.get(BULLETIN)
+  const next = r.exitCode === 0 ? r.stdout.trim() : ''
+  if (next !== was) await $.state.set(BULLETIN, next)
+  // The fresh section holds every change older than the head it was rendered at: appending them
+  // again would bill the same changes twice over a render that already spent the cache.
+  const rendered = r.exitCode === 0 ? sectionRevision(next) : undefined
+  if (rendered !== undefined) await dropHeldBulletins($, rendered)
+}
+
+// The revision each pending bulletin frame was rendered at, read from the recording the frames
+// tool reads. A frame the recording no longer holds answers nothing, so its caller keeps it.
+async function bulletinRevisions($: EngineInterface): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  const { value: session = '' } = await $.state.get(SESSION)
+  if (!root || !session) return out
+  const at = await $.process.run(['python3', script($, 'hold.py'), '--frame-path', session], { cwd: root }).catch(() => undefined)
+  if (!at || at.exitCode !== 0) return out
+  const recording = String(await $.fs.read(at.stdout.trim()).catch(() => ''))
+  for (const raw of recording.split('\n')) {
+    if (!raw.startsWith('data: ')) continue
+    let f: { kind?: unknown; id?: unknown; revision?: unknown }
+    try { f = JSON.parse(raw.slice(6)) } catch { continue }
+    if (f && f.kind === 'bulletin' && typeof f.id === 'string' && typeof f.revision === 'number' && Number.isSafeInteger(f.revision)) {
+      out.set(f.id, f.revision)
+    }
+  }
+  return out
+}
+
+async function dropHeldBulletins($: EngineInterface, rendered: number) {
+  await locked(async () => {
+    const { value: ids = [] } = await $.state.get(BULLETINS)
+    if (!ids.length) return
+    const revisions = await bulletinRevisions($)
+    const left = ids.filter(id => (revisions.get(id) ?? Number.POSITIVE_INFINITY) > rendered)
+    if (left.length === ids.length) return
+    await $.state.set(BULLETINS, left)
+  })
+}
+
 const askSeat = ($: EngineInterface, refresh: boolean) =>
   void refreshSeat($, refresh).catch(err => $.ui.log(`2mw2lt: the seat check broke: ${String(err)}`, { to: 'debug' }))
+
+// The bulletin's changes reach the model as one message appended into the turn that just started
+// (plan unit 7b): an idle session is spent nothing, and a working one reads them at its next
+// turn. What the recording still holds is read; an id it has lost stays pending, as a waking
+// frame's does.
+async function tellBulletins($: EngineInterface) {
+  if (!root) return
+  const { value: ids = [] } = await $.state.get(BULLETINS)
+  if (!ids.length) return
+  const { value: session = '' } = await $.state.get(SESSION)
+  let recording = ''
+  if (session) {
+    const at = await $.process.run(['python3', script($, 'hold.py'), '--frame-path', session], { cwd: root })
+    if (at.exitCode === 0) recording = String(await $.fs.read(at.stdout.trim()).catch(() => ''))
+  }
+  const { bulletins, found } = pick(recording, ids)
+  if (bulletins.length) await append($, capBulletin(bulletins))
+  await locked(async () => {
+    const { value: now = [] } = await $.state.get(BULLETINS)
+    const left = now.filter(id => !found.includes(id))
+    await $.state.set(BULLETINS, left)
+    const { value: read = [] } = await $.state.get(READ)
+    const added = found.filter(id => !read.includes(id))
+    if (added.length) await $.state.set(READ, [...read, ...added].slice(-READ_KEPT))
+  })
+}
 
 // A kick or a say asks only a holder: it is how the daemon tells one the seat was taken. A session
 // that does not hold the seat is seated by a seat frame or promote.py, never by either.
@@ -272,6 +357,11 @@ let child: HookStream<ProcessSpawnChunk, ProcessSpawnResult> | undefined
 let hold: Record<string, unknown> | undefined
 // The model whose window the engine did not recognise, once named in the log.
 let named = ''
+// Whether the last prompt composition this process rendered was a teammate's. A connected
+// teammate renders no bulletin section, so its refresh must not mark one shown either: the mark
+// would keep the changes from every process on this enrolment (plan unit 7b). Unknown until the
+// first render, and a module variable because the trait reaches only `prompt.compose`.
+let teammate: boolean | undefined
 
 function stop() {
   generation++
@@ -308,6 +398,16 @@ async function holdOnce($: EngineInterface, ps: string, session: string, gen: nu
       if (l.kind === 'refused') { refused = l; continue }
       if (l.kind === 'seat') askSeat($, true)
       else if (asksSeat(l.kind)) await askHolder($)
+      if (l.kind === 'bulletin' && l.id) {
+        // Recorded for the turn that next starts; it wakes nobody, so no pointer either.
+        const fid = l.id
+        await locked(async () => {
+          const { value: ids = [] } = await $.state.get(BULLETINS)
+          const { value: read = [] } = await $.state.get(READ)
+          if (!ids.includes(fid) && !read.includes(fid)) await $.state.set(BULLETINS, [...ids, fid])
+        })
+        continue
+      }
       if (!l.wakes || l.kind === 'closed') continue
       woke = true
       await locked(async () => {
@@ -535,6 +635,8 @@ export const register: Register = on => {
       await claim($, true).catch(() => undefined)
       await $.state.set(SESSION, '')
       await $.state.set(SEAT, '')
+      await $.state.set(BULLETIN, '')
+      await $.state.set(BULLETINS, [])
     }
     return result
   }).catch(($, e, next) => next(e))
@@ -542,6 +644,7 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     // A subagent's turn starts inside ours, and the run is the outer turn's.
     await $.state.set(BUSY, true)
+    if (e.agentId === undefined) await tellBulletins($).catch(err => $.ui.log(`2mw2lt: the bulletin turn broke: ${String(err)}`, { to: 'debug' }))
     return next(e)
   })
 
@@ -608,9 +711,15 @@ export const register: Register = on => {
   // lead's prompt and holds no seat.
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e)
-    if (e.traits.includes('teammate')) return composed
-    const { value: text = '' } = await $.state.get(SEAT)
-    return text ? { sections: [...composed.sections, { id: SEAT_SECTION, text, scope: 'session' as const }] } : composed
+    teammate = e.traits.includes('teammate')
+    if (teammate) return composed
+    const sections = [...composed.sections]
+    let added = false
+    const { value: seat = '' } = await $.state.get(SEAT)
+    if (seat) { sections.push({ id: SEAT_SECTION, text: seat, scope: 'session' as const }); added = true }
+    const { value: bulletin = '' } = await $.state.get(BULLETIN)
+    if (bulletin) { sections.push({ id: BULLETIN_SECTION, text: bulletin, scope: 'session' as const }); added = true }
+    return added ? { sections } : composed
   }).catch(($, e, next) => next(e))
 
   // Stop the loop before anything else: the engine ends the child before this runs, and a loop

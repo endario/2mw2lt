@@ -54,19 +54,22 @@ export function atLeast(version: string, floor: readonly number[] = FLOOR): bool
 }
 
 // The recording holds `data: {json}` lines. Every frame carries the daemon's `id`, which hold.py
-// prints; return the pending ones verbatim and in order, with each envelope's ulid for ack.py.
-export function pick(recording: string, pending: readonly string[]): { text: string; envelopes: string[]; envelopeIds: string[]; found: string[]; read: { directives: string[]; seatGeneration?: number; seatFrameId?: string } } {
+// prints; return the pending ones verbatim and in order, with each envelope's ulid for ack.py. A
+// `bulletin` frame's text is collected separately: it reaches the model as one appended message
+// at a turn's start, never as the `frames` tool's result.
+export function pick(recording: string, pending: readonly string[]): { text: string; envelopes: string[]; envelopeIds: string[]; bulletins: string[]; found: string[]; read: { directives: string[]; seatGeneration?: number; seatFrameId?: string } } {
   const want = new Set(pending)
   const out: string[] = []
   const envelopes: string[] = []
   const envelopeIds: string[] = []
+  const bulletins: string[] = []
   const found: string[] = []
   const directives: string[] = []
   let seatGeneration: number | undefined
   let seatFrameId: string | undefined
   for (const raw of recording.split('\n')) {
     if (!raw.startsWith('data: ')) continue
-    let f: { kind?: unknown; ulid?: unknown; id?: unknown; directive?: unknown; generation?: unknown }
+    let f: { kind?: unknown; ulid?: unknown; id?: unknown; directive?: unknown; generation?: unknown; text?: unknown }
     try { f = JSON.parse(raw.slice(6)) } catch { continue }
     if (!f || typeof f.id !== 'string' || !want.has(f.id)) continue
     want.delete(f.id)
@@ -74,12 +77,37 @@ export function pick(recording: string, pending: readonly string[]): { text: str
     out.push(raw.slice(6))
     if (f.kind === 'envelope' && typeof f.ulid === 'string') { envelopes.push(f.ulid); envelopeIds.push(f.id); directives.push(f.ulid) }
     if (f.kind === 'say') directives.push(typeof f.directive === 'string' ? f.directive : f.id)
+    if (f.kind === 'bulletin' && typeof f.text === 'string') bulletins.push(f.text)
     if (f.kind === 'seat' && typeof f.generation === 'number' && Number.isSafeInteger(f.generation)) {
       seatGeneration = f.generation
       seatFrameId = f.id
     }
   }
-  return { text: out.join('\n'), envelopes, envelopeIds, found, read: { directives, ...(seatGeneration !== undefined ? { seatGeneration, seatFrameId } : {}) } }
+  return { text: out.join('\n'), envelopes, envelopeIds, bulletins, found, read: { directives, ...(seatGeneration !== undefined ? { seatGeneration, seatFrameId } : {}) } }
+}
+
+// The bulletin changes one turn appends stay within the same 1024-byte budget a change frame is
+// rendered under (the bulletin design §5): whole lines in order while they fit beside the
+// overflow line they may need, counted in UTF-8 bytes as Go's capLines counts them.
+export const BULLETIN_TURN_MAX = 1024
+const utf8 = new TextEncoder()
+export function capBulletin(texts: readonly string[], max = BULLETIN_TURN_MAX): string {
+  const rows = texts.join('\n').split('\n')
+  for (let n = rows.length; n >= 0; n--) {
+    const parts = rows.slice(0, n)
+    const rest = rows.length - n
+    if (rest > 0) parts.push(`+${rest} more: bulletin.py read`)
+    const out = parts.join('\n')
+    if (utf8.encode(out).length <= max) return out
+  }
+  return ''
+}
+
+// The section's first line names the head it was rendered at ("Bulletin r42: …"): the revision a
+// fresh section holds every older change frame against.
+export function sectionRevision(section: string): number | undefined {
+  const m = /^Bulletin r(\d+):/.exec(section)
+  return m ? Number(m[1]) : undefined
 }
 
 // How many ids of frames the model has read are kept to recognise a replay by.
@@ -131,6 +159,7 @@ export function lifecycle(command: string): string | null {
 // or where the module may refresh it (`refresh`): the text from 0, nothing from 1, and what the
 // session already had from anything else, a door that did not answer included.
 export const SEAT_SECTION = '2mw2lt:seat'
+export const BULLETIN_SECTION = '2mw2lt:bulletin'
 export function nextSeat(was: string, code: number, stdout: string, refresh: boolean): string {
   if (code === 1) return ''
   if (code !== 0) return was
@@ -230,10 +259,13 @@ export const SEAT_TOOLS: Record<string, SeatTool> = {
   card_scope: {
     description: 'Seat only: make placed work a card.',
     fields: { name: text('The card\'s name.'), track: word('Its lane.'), anchors: { type: 'array', description: 'Anchors, as resolves:<n> or advances:<n>.' },
-              major: { type: 'boolean', description: 'Declare the work major.' }, card: word('The card id to scope under, to retry one.') },
+              major: { type: 'boolean', description: 'Declare the work major.' }, card: word('The card id to scope under, to retry one.'),
+              criticality: { type: 'string', description: 'Triage: how much breaks if the work is wrong.', enum: ['critical', 'major', 'minor', 'trivial'] },
+              size: { type: 'string', description: 'Triage: how large the work is.', enum: ['S', 'M', 'L', 'XL'] } },
     required: ['name', 'track'],
     build: a => ({ client: 'card', argv: ['scope', ...(a.card !== undefined ? ['--card', str(a, 'card')] : []), str(a, 'name'), str(a, 'track'),
-                                         ...((a.anchors as unknown[] | undefined) ?? []).map(String), ...(a.major === true ? ['major'] : [])] }),
+                                         ...((a.anchors as unknown[] | undefined) ?? []).map(String), ...(a.major === true ? ['major'] : []),
+                                         ...(a.criticality !== undefined || a.size !== undefined ? [`triage:${str(a, 'criticality')},${str(a, 'size')}`] : [])] }),
   },
   card_session: {
     description: 'Seat only: name a session as a card\'s executor or planned one.',

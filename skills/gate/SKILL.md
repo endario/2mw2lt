@@ -35,23 +35,27 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> critic <d
 reviewer from a vendor that wrote none of the branch has the run. Steering chooses it; there is no
 provider to pass.
 
-`--tier heavy` runs the series on each vendor's heavy model (Sol, Opus, GLM-5.3) — for a large
-diff, a new mechanism, or a security, concurrency or attestation property; later rounds keep the
-tier unless they name one. `--final` declares this round the last: it runs deeper than the finding
-rounds, from a vendor no earlier round used where one can take it, and after its verdict steering
-refuses another round, as at the ceiling. The round at the ceiling is final without asking. The
-review's run details say the tier and how the final round ran.
+`--floor <rarity> --why "<reason>"` holds the series' judge to a rung of the ladder (`uncommon`,
+`rare`, `epic`, `legendary`): steering takes a judge at the floor, and one rung up only when none at
+it can take the round; a final round puts a vendor no earlier round used before either. Name `epic` for a large diff, a new mechanism, or a security, concurrency or
+attestation property; the reason is recorded beside the floor, so say why in a sentence. Never name a
+model for depth: the ladder decides which models stand at each rung. Later rounds keep the floor
+unless they name one. A floor no judge meets is refused (`floor-unservable`). `--final` declares this
+round the last: it runs deeper than the finding rounds, from a vendor no
+earlier round used where one can take it, and after its verdict steering refuses another round, as
+at the ceiling. The round at the ceiling is final without asking. The review's run details say the
+floor and how the final round ran.
 
 `--judge <vendor>[/<model>][@<effort>]` asks for a named judge — for when the owner or the brain
 wants one, as in `--judge openai/gpt-6.1-sol@medium`. The commission is refused when the catalog
-holds no such judge for the tier (`judge-unknown`) or when the only judges matching it wrote the
+holds no such judge at the floor (`judge-unknown`) or when the only judges matching it wrote the
 change (`judge-authored`), and a busy pinned judge waits like any gate. Never use it to steer a
 verdict: the choice of judge stays steering's otherwise.
 
-A standard round of a small diff, 50 changed lines unless the team's owner set another limit,
-runs read-only: no shell, network or writes. A migration, workflow, authorization,
-credential, isolation, release or gate path always runs full, and so does a heavy or final round, so name `--tier heavy` for a
-small change that needs the reviewer to run it. The team's owner turns this off, or changes the limit and the paths kept full, in the console's
+A round at a `rare` floor or below on a small diff, 50 changed lines unless the team's owner set
+another limit, runs read-only: no shell, network or writes. A migration, workflow, authorization,
+credential, isolation, release or gate path always runs full, and so does an `epic` or final round,
+so name `--floor epic` for a small change that needs the reviewer to run it. The team's owner turns this off, or changes the limit and the paths kept full, in the console's
 Workspace settings, or Team settings for every workspace; no session can.
 
 The reviewer holds its own full tool set — shell, network, builds and tests — in a clone with no
@@ -69,7 +73,7 @@ In a repository 2mw2lt steers this gate replaces `/independent-review` and `/ind
 | | this gate | the runner |
 |---|---|---|
 | reviewer | a vendor that wrote none of the branch, chosen by usage | routed by round and usage, away from the host |
-| tier, final round | `--tier`, `--final`; the final round deeper, from a vendor no earlier round used | `--tier`, `--complement-of` |
+| depth, final round | `--floor`, `--final`; the final round deeper, from a vendor no earlier round used | `--tier`, `--complement-of` |
 | tools | full inside a cage that withholds every credential but the reviewer's own | full with the host's access; `--sandbox` |
 | persona | the project's, read from the base commit | the project's, read from the checkout |
 | record | a fact per round, published by `2mw2lt[bot]` with a status pinned to the commit | a local artifact, published as the user |

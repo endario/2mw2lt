@@ -135,6 +135,15 @@ lapse knowingly, or close it. On `session-stale`, `session-quiet` or `session-ke
 that turn. Only Anthropic's cache lifetime, one hour, is stated; another vendor's session carries no
 cache and raises no `session-lapsing`.
 
+A host admitted again is a new machine, and every session on it is refused `session-binding-moved`
+until you move it to that machine, named by one of its `registrations` in `rest.py /machines --all`.
+Only a machine stating the same OS login and hardware is taken (`rebind-other-node` otherwise):
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post "/sessions/<you>/rebind" \
+  --json '{"to": "<session>", "machine": "<machine registration>"}' --key <uuid>
+```
+
 A session executing a live card reads as waiting, not concluded, even after its branch merged
 (#5588): conclude its card when its unit is done. Each notice is a suggestion; Go closes,
 wakes and keeps nothing for it. Who you can reach is
@@ -238,6 +247,20 @@ the owner reads twice.
 When the owner asks what the work should achieve, or the Ledger's Explore or Discuss sends you a
 request, follow `/2mw2lt:discover`: bring a sourced position in a room thread, not a questionnaire,
 and record what is agreed through native rulings and goal commands.
+
+## Post the bulletin, not a repeated say
+
+The seat repeated one fact to session after session; the bulletin is where such a fact lives now.
+Post it instead of saying it twice:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/bulletin.py" <session> post <key> "<text>" [--until +2h] [--standing] [--seat]
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/bulletin.py" <session> retract <key> "<reason>"
+```
+
+Retract what is wrong, with its reason. A standing line that has stood for weeks is a knowledge
+unit not yet written — write the unit and retract the line. When a post is refused
+`bulletin-full`, prune: retract the lines that stopped being true.
 
 ## Ask the owner
 
@@ -360,8 +383,25 @@ the session as its executor. A session may also declare its own card with `decla
 asking you.
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease scope <name> <track> [<verb>:<n>[,<n>] ...]
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease scope <name> <track> [<verb>:<n>[,<n>] ...] triage:<criticality>,<size>
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease session <card> <session> executor
+```
+
+Triage every card you scope (#6499): criticality (`critical`, `major`, `minor`, `trivial`) and size
+(`S`, `M`, `L`, `XL`). The team's policy, the `triage.policy` setting, makes those the floor each stage
+is held to, and the tier you launch its builder at should meet the build floor. Re-triage with a
+reason through `rest.py --lease --post /cards/<card>/triage --json '{"criticality": "…", "size": "…", "why": "…"}'`;
+lowering a floor is yours or the owner's alone.
+
+A floor is met by the team's model ladder (#6565): the platform's ratings, with whatever the team
+rates on top. You rate when the owner tells you a rating, with why.
+Each rating is a rung, `none` to unrate a model the platform rates, or `platform` to take the
+platform's rating again. Read the ladder before you rate it:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /ladder
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post /ladder --key <a key of your own for this rating> \
+  --json '{"ratings": [{"selector": "\\bmimo-v2\\.6-pro\\b", "rarity": "rare", "model": "mimo-v2.6-pro"}], "why": "…"}'
 ```
 
 Delegating a card is also when you say what it waits on and which goal it serves. A goal is the
@@ -493,13 +533,18 @@ whose load or memory is over its limit still goes, and its line ends
 `rest.py` reads `/facts?state=<kind>` (the ledger, redacted, a page at a time; `--all` follows it
 to the head). Read it; do not reach for the ledger on the host.
 **Launch with the work.** A `brief:` line after the launch line is the worker's first directive,
-written as you would relay it. Send it through a quoted heredoc, so nothing in the brief is
-expanded by the shell:
+written as you would relay it. Name the card the worker executes in the launch line itself —
+`resolves <owner>/<name>#<n>`, the issue its one live card resolves, or `card <wire id>` for a
+card held by its wire id — and the session the launch starts becomes that card's executor when
+it is handed the brief, ending the engagement of the executor before it: a card has one
+executor, and the ending is recorded on the card, not silent. A launch that names a card is
+refused without a brief, and its brief is the handover. Send it through a quoted heredoc, so
+nothing in the brief is expanded by the shell:
 
 ```bash
 say "$(cat <<'LAUNCH'
-launch: token @lease claude model <model> effort <level> because <why>
-brief: <the card, its issue, PR and design doc, and what done reports>
+launch: token @lease claude floor <rarity> effort <level> resolves <owner>/<name>#<n> because <why>
+brief: <the handover: the card, its issue, PR and design doc, and what done reports>
 LAUNCH
 )"
 ```
@@ -511,16 +556,28 @@ not acknowledged it after ten minutes. A launch without a brief appears in `/ses
 delegate to it like any idle session. One launch is in flight per machine, and an agent refuses
 one past `STEERING_MAX_WORKERS` live workers.
 
+**Name a floor, not a model.** A launch names the least rarity its work needs, `uncommon`, `rare`,
+`epic` or `legendary`, and the platform places it on whichever account serves a model at that rung
+on the ladder, or one rung above when nothing at it has room. Judge the floor for the stage the
+session begins as triage does. Name a model only for a reason the
+ladder cannot see, and give that reason in `because`: the launch is recorded as yours, not the
+platform's. A floor takes no `on`, `vendor` or `account`, since naming the place is naming the model,
+and runs on the harness it names: a `claude` floor is placed only where Claude reaches the account.
+`rest.py '/placement?harness=claude&floor=<rarity>&effort=<level>'` shows the model each account would
+start and how far above the floor it stands, and passes over `floor-unserved` an account serving no
+model at it.
+
 An interactive Claude Code session, one a person can watch and type into, is a `launch:` too:
 
 ```bash
-say "launch: token @lease claude [on <node>] [vendor <vendor>] [account <n>] model <model> effort <level> [window] because <why>"
+say "launch: token @lease claude floor <rarity> effort <level> [resolves <owner>/<name>#<n>] [window] because <why>"
+say "launch: token @lease claude [on <node>] [vendor <vendor>] [account <n>] model <model> effort <level> [resolves <owner>/<name>#<n>] [window] because <the reason you name the model>"
 ```
 
 with its `brief:` line sent as above.
 
-`model` is Claude Code's own (`opus`, `opus[1m]`) and both it and `effort` are required, so no
-account default decides the level. The daemon picks the best-ranked account of the vendor named
+`model` is Claude Code's own (`opus`, `opus[1m]`); a model or a floor, and `effort`, are required,
+so no account default decides the level. The daemon picks the best-ranked account of the vendor named
 (`anthropic` when none is; `openai`, `zai`, … or `any`) that some machine has a launcher signed in
 to, and one whose usage it cannot read only after every ranked one, as unknown. `account <n>` starts
 that vendor's account, as the usage frames number it, or refuses; it never falls back to another. On
@@ -644,6 +701,23 @@ wake it again once there is room.
 
 ## Move a card to another model
 
+**A move between stages is a handoff, not a split.** One card carries its stages from spec to
+verify, and each engagement names the stage it begins (#6499): the record then shows who held which
+stage at what floor, without splitting the card or moving its branch. Hand the card to the next
+executor with the stage named, and its floor comes from the card's triage:
+
+```bash
+card: token <lease token> session <card> <session> executor stage <stage> [<why>]
+```
+
+The same form names the next stage for the executor already holding the card. When a stage proves
+harder than its floor, raise it rather than starting over — the executor raises its own stage, and
+you or the owner any stage; lowering is a re-triage:
+
+```bash
+card: token <lease token> retier <card> <stage> <floor> <why>   # legendary|epic|rare|uncommon
+```
+
 **Plan the split when you delegate.** When a card's design is hard and much of its build is not,
 launch the designing session on a strong model with a brief that names the intended builders,
 matched to each part of the work by what it needs: a strong model for the contested core, a routine
@@ -685,8 +759,10 @@ when several do.
 Launch only once the holder's branch is pushed: the new session starts from the remote, and the
 daemon cannot see a commit left in the old worktree. The answer that starts the session makes it the card's executor, ending the previous one's
 engagement, and its brief opens with taking a worktree, then your words and the card's knowledge.
-Retire the previous session once the new one acknowledges its brief. If it is told to you as
-`launch-brief-unheard`, give the card back to the previous session with `card_session` as `executor`, or launch again.
+That engagement names no stage, so follow it with the `session … stage` form above to record the
+handoff between stages it began. Retire the previous session once the new one acknowledges its brief.
+If it is told to you as `launch-brief-unheard`, give the card back to the previous session with
+`card_session` as `executor`, or launch again.
 
 ## Keep a session fit for its work
 

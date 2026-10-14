@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 import time
+from urllib.parse import quote, unquote
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -37,23 +38,32 @@ MADE = re.compile(r"^(?:commit(?: \((?:amend|merge)\))?:|cherry-pick:|revert:|"
                   r"rebase \((?:pick|reword|edit|squash|fixup|continue)\):|merge [^:]+: Merge made by )")
 
 
+RUNGS = ("uncommon", "rare", "epic", "legendary")
+
+
 def gate_flags(argv: list[str]) -> tuple[list[str], str] | None:
-    """The arguments without `--tier`, `--exclude`, `--judge` and `--final`, and what they add to a
-    commission's line (doc 127): the tier a series runs at, vendors that wrote the branch though no
-    session held it (doc 161 §6), a judge the owner or the brain asked for (5907 slice-2 D3), and a
-    round declared final."""
-    rest, tier, exclude, judge, final = [], "", "", "", ""
+    """The arguments without `--floor`, `--why`, `--exclude`, `--judge` and `--final`, and what they
+    add to a commission's line (doc 127): the least rarity the round's judge may have and why it was
+    asked for (#6499), vendors that wrote the branch though no session held it (doc 161 §6), a judge
+    the owner or the brain asked for (5907 slice-2 D3), and a round declared final. A floor needs its
+    reason, and a reason its floor."""
+    rest, floor, why, exclude, judge, final = [], "", "", "", "", ""
     it = iter(argv)
     for a in it:
         if a == "--final":
             if final:
                 return None
             final = " final"
-        elif a == "--tier" or a.startswith("--tier="):
+        elif a == "--floor" or a.startswith("--floor="):
             named = a.split("=", 1)[1] if "=" in a else next(it, "")
-            if named not in ("standard", "heavy") or tier:
+            if named not in RUNGS or floor:
                 return None
-            tier = f" tier {named}"
+            floor = f" floor {named}"
+        elif a == "--why" or a.startswith("--why="):
+            said = a.split("=", 1)[1] if "=" in a else next(it, "")
+            if not said.strip() or said.startswith("--") or len(said) > 500 or why:
+                return None
+            why = f" why {quote(said, safe='')}"
         elif a == "--exclude" or a.startswith("--exclude="):
             named = a.split("=", 1)[1] if "=" in a else next(it, "")
             if not named or named.startswith("-") or re.search(r"\s", named) or exclude:
@@ -69,7 +79,9 @@ def gate_flags(argv: list[str]) -> tuple[list[str], str] | None:
             judge = f" judge {named}"
         else:
             rest.append(a)
-    return rest, tier + exclude + judge + final
+    if bool(floor) != bool(why):
+        return None
+    return rest, floor + why + exclude + judge + final
 
 
 # A judge pin is `<vendor>[/<model>][@<effort>]`: no empty field, no whitespace, nothing past the
@@ -180,14 +192,15 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
         return go_carry(ws, session, flags, int(what.lstrip("#")), retry_id)
     if kind in ("status", "pr"):
         return go_read(ws, session, flags, kind, what)
-    tier = re.search(r" tier (\S+)", extra)
+    floor = re.search(r" floor (\S+)", extra)
+    why = re.search(r" why (\S+)", extra)
     judge = re.search(r" judge (\S+)", extra)
     final = " final" in extra
     rest = extra
-    for piece in (tier[0] if tier else "", f" judge {judge[1]}" if judge else "", " final" if final else ""):
+    for piece in (floor[0] if floor else "", why[0] if why else "", f" judge {judge[1]}" if judge else "", " final" if final else ""):
         rest = rest.replace(piece, "", 1)
     if rest.strip():
-        print(f"a {kind} on a Go workspace takes --tier, --judge and --final only, so far", file=sys.stderr)
+        print(f"a {kind} on a Go workspace takes --floor, --why, --judge and --final only, so far", file=sys.stderr)
         return 1
     here = Path.cwd()
     repo = origin_slug(here, timeout=5)
@@ -200,8 +213,7 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
     except Refused as why:
         print(str(why), file=sys.stderr)
         return 1
-    # A round that names no tier keeps the one its series was last commissioned at (Go decides).
-    tier = tier[1] if tier else None
+    # A round that names no floor keeps the one its series was last commissioned at (Go decides).
     # Go pins what it observed of the pull request, or a critique at the branch head its mirror holds;
     # naming this checkout's head refuses a stale one.
     at = head(here)
@@ -215,8 +227,8 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
         body = {"repo": repo, "pr": int(what.lstrip("#"))}
         if at:
             body["head"] = at
-    if tier:
-        body["tier"] = tier
+    if floor:
+        body["floor"], body["why"] = floor[1], unquote(why[1])
     if judge:
         body["judge"] = parse_judge(judge[1])
     if final:

@@ -12,7 +12,7 @@ happens next. Only the consequential calls come back to you.
 
 Stay in the work. Hold the standard. Keep the thread.
 
-This repository is the plugin that connects Claude Code and Codex sessions to your workspace.
+This repository is the plugin that connects Claude Code, Codex and ZCode sessions to your workspace.
 
 ## Install
 
@@ -24,6 +24,9 @@ claude plugin marketplace add endario/2mw2lt && claude plugin install 2mw2lt@2mw
 
 # Codex
 codex plugin marketplace add endario/2mw2lt --ref main && codex plugin add 2mw2lt@2mw2lt
+
+# ZCode (the official app's CLI; the plugin's frames server and hooks load by plugin)
+zcode plugins marketplace add endario/2mw2lt && zcode plugins install 2mw2lt@2mw2lt
 ```
 
 Then open your coding tool in the repository and run `/2mw2lt:install`. It signs you in at

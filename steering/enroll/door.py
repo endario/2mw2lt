@@ -117,6 +117,18 @@ def send(req: urllib.request.Request, timeout: float):
     return open_direct(req, timeout)
 
 
+def agent_credential_failed(e: Exception) -> Exception:
+    """The failure to raise for a credential an agent path could not present, in the incumbent's
+    two shapes: the console refusing this machine's enrolment (revoked, bound elsewhere) is a
+    CredentialRefused naming the remedy — it is not changed by sending again — while a console
+    that did not answer, or throttled, is an OSError the caller may retry."""
+    import credential  # noqa: E402
+    status = getattr(e, "status", None)
+    if isinstance(e, credential.NoCredential) and status is not None and 400 <= status < 500 and status != 429:
+        return CredentialRefused(f"the console refused this machine's agent credential: {e}")
+    return OSError(f"no usable agent credential: {e}")
+
+
 def send_agent(req: urllib.request.Request, timeout: float, *, required: bool = False):
     parent = str(Path(__file__).resolve().parent.parent)
     if parent not in sys.path:
@@ -125,11 +137,7 @@ def send_agent(req: urllib.request.Request, timeout: float, *, required: bool = 
     try:
         token = credential.for_url(req.full_url)
     except credential.NoCredential as e:
-        # The console refusing this machine's enrolment (revoked, bound elsewhere) is not
-        # changed by sending again; a console that did not answer, or throttled, may be.
-        if e.status is not None and 400 <= e.status < 500 and e.status != 429:
-            raise CredentialRefused(f"the console refused this machine's agent credential: {e}") from None
-        raise OSError(f"no usable agent credential: {e}") from None
+        raise agent_credential_failed(e) from None
     if required and not token:
         raise CredentialRefused("this OS user holds no agent credential for this door")
     if token:

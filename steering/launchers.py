@@ -4,8 +4,19 @@ environment a launched session runs with (§4).
 A launcher runs its arguments with one account's configuration. Nothing here knows which: the
 account is the usage reading of the launcher's usage source, its own `auth status`'s
 `configDirectory` or the claude-code-proxy it declares, and no vendor is named in this module.
+An entry may instead name its account — `{"account": "<vendor>/<id>"}` (#6458) — and the command
+is found on this machine through `discovered`, which pairs `unlimited accounts` with the
+machine's executables and probes what each is.
 """
 from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parent))
+import python_floor  # noqa: E402
+
+python_floor.require()
 
 import asyncio
 import contextlib
@@ -13,10 +24,8 @@ import json
 import os
 import re
 import subprocess
-import sys
 import tempfile
 import time
-from pathlib import Path
 from typing import Callable
 
 import codex_proxy
@@ -30,8 +39,13 @@ PREFIX = "2mw2lt-launch-"         # every session this module starts, and nothin
 STATUS_TIMEOUT = 20.0
 LAUNCH_DEADLINE_S = 300.0
 PLUGIN = "2mw2lt@2mw2lt"
-KEYS = {"path", "direct", "proxy", "vendor", "unrouted"}
+KEYS = {"path", "direct", "proxy", "vendor", "unrouted", "account"}
 VENDOR = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
+ACCOUNT_MAX = 128
+# Each account entry's last resolved command, so a read of `unlimited accounts` that missed never
+# withdraws what the entry offered (#3046): the entry keeps the command it last resolved to in
+# this process, keyed by the `<vendor>/<id>` the entry names.
+_resolved: dict[str, dict] = {}
 # What a launched session inherits (§4): the headless brain's list less its token, and the door.
 KEPT = ("HOME", "USER", "LOGNAME", "SHELL", "PATH", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "TERM",
         "STEERING_DOOR", "STEERING_PORT", "COORDINATION_PG_PREFIX")
@@ -52,12 +66,23 @@ class Undeclared(Exception):
     """The declaration is missing or names something that is not an executable."""
 
 
-def declared(env: dict | None = None) -> list[dict]:
+def declared(env: dict | None = None, log: Callable[[str], None] | None = None,
+             commands: Callable[[Callable[[str], None]], dict[str, list[dict]] | None] | None = None) -> list[dict]:
     """The declared launchers (doc 121 §2), each `{path, direct, proxy, vendor, unrouted}` with `path`
     an absolute executable. An entry is a path, or an object saying what the launcher cannot; an
-    unrouted one starts only launches naming its vendor, never one routed by its model. The
-    agent.toml's `[routing]` declares them where it does, read at the call so a change needs no
-    restart (#2394); an `env` given is judged alone."""
+    unrouted one starts only launches naming its vendor, never one routed by its model. An entry
+    may instead name its account — `{"account": "<vendor>/<id>"}` (#6458) — which resolves to this
+    machine's command for it, the first `discovered.commands()` finds, its harness from the probe
+    and its vendor from the key, and carries `account` and the `found_by` name (this machine's own
+    key to its command, never sent) beside the path entries' shape. The resolution is the
+    caller's to give — this module is in the enrollment client's boundary, and `discovered`
+    reaches the harness stack, which stays out of it — so an account entry with no `commands`
+    given resolves to nothing, said through `log`. So does one a read names no command for; when
+    `unlimited accounts` itself cannot be asked, the entry keeps the command it last resolved to
+    in this process, so a missed read never withdraws an offer (#3046). A path entry may carry
+    `account` too, which then asserts where it must land (`accounts`). The agent.toml's `[routing]`
+    declares them where it does, read at the call so a change needs no restart (#2394); an `env`
+    given is judged alone."""
     items, source = None, ENV
     if env is None:
         import settings
@@ -73,16 +98,56 @@ def declared(env: dict | None = None) -> list[dict]:
             raise Undeclared(f"{ENV} is not a JSON list") from None
         if not isinstance(items, list) or not items:
             raise Undeclared(f"{ENV} is not a JSON list of launchers")
+    log = log or (lambda line: None)
+    found = commands(log) if any(isinstance(i, dict) and isinstance(i.get("account"), str)
+                                 and "path" not in i for i in items) and commands else None
     out = []
     for item in items:
         d = {"path": item} if isinstance(item, str) else item
-        if not isinstance(d, dict) or not isinstance(d.get("path"), str) or set(d) - KEYS:
+        if not isinstance(d, dict) or set(d) - KEYS \
+                or not (isinstance(d.get("path"), str) or ("account" in d and "path" not in d)):
             raise Undeclared(f"{source} entry {json.dumps(item)[:80]} is not a path or "
                              f"an object of {', '.join(sorted(KEYS))}")
+        account = None
+        if "account" in d:
+            vendor, sep, ident = (d["account"] if isinstance(d["account"], str) else "").partition("/")
+            if not sep or not VENDOR.fullmatch(vendor) or not 0 < len(ident) <= ACCOUNT_MAX:
+                raise Undeclared(f"{d.get('account')!r}: account is not <vendor>/<account id>")
+            if d.get("vendor") not in (None, vendor):
+                raise Undeclared(f"{d['account']}: account names vendor {vendor}, declared {d['vendor']}")
+            account = d["account"]
         if not isinstance(d.get("direct", False), bool):
-            raise Undeclared(f"{d['path']}: direct is true or false")
+            raise Undeclared(f"{d.get('path', account)}: direct is true or false")
         if not isinstance(d.get("unrouted", False), bool):
-            raise Undeclared(f"{d['path']}: unrouted is true or false")
+            raise Undeclared(f"{d.get('path', account)}: unrouted is true or false")
+        if "path" not in d:
+            # An account entry runs the command that is found for it: never a proxy of its own,
+            # and never a `direct` the probe would override — what the command is, is probed.
+            if "proxy" in d:
+                raise Undeclared(f"{account}: an account entry declares no proxy")
+            if "direct" in d:
+                raise Undeclared(f"{account}: an account entry declares no direct; the probe decides")
+            cmd = None
+            if found is not None:
+                got = found.get(account)
+                if got:
+                    _resolved[account] = got[0]
+                    cmd = got[0]
+                else:
+                    # A read that names no command for the account is an answer, not a miss: what
+                    # it last resolved to must not come back on a later read that fails.
+                    _resolved.pop(account, None)
+            else:
+                cmd = _resolved.get(account)
+            if cmd is None:
+                log(f"launcher account {account} resolves to no command"
+                    + (", and no commands were given to resolve it with" if commands is None
+                       else ", and unlimited could not be asked" if found is None else ""))
+                continue
+            out.append({"path": cmd["path"], "direct": cmd["harness"] == "direct", "proxy": None,
+                        "vendor": account.partition("/")[0], "unrouted": d.get("unrouted", False),
+                        "account": account, "found_by": Path(cmd["path"]).name})
+            continue
         if "proxy" in d and not (isinstance(d["proxy"], str) and codex_proxy.loopback_port(d["proxy"])):
             raise Undeclared(f"{d['path']}: proxy is not a loopback URL")
         if "vendor" in d and not (isinstance(d["vendor"], str) and VENDOR.fullmatch(d["vendor"])):
@@ -96,7 +161,8 @@ def declared(env: dict | None = None) -> list[dict]:
         # choosing its account by the name it is run as, and resolving the link runs every name as
         # the target's one account (#2368).
         out.append({"path": str(p), "direct": d.get("direct", False),
-                    "proxy": d.get("proxy"), "vendor": d.get("vendor"), "unrouted": d.get("unrouted", False)})
+                    "proxy": d.get("proxy"), "vendor": d.get("vendor"), "unrouted": d.get("unrouted", False),
+                    **({"account": account} if account else {})})
     return out
 
 
@@ -110,13 +176,29 @@ def _claude(launcher: dict) -> list[str]:
     return [launcher["path"]] if launcher.get("direct") else [launcher["path"], "claude"]
 
 
+def _login_lapsed(where: str) -> bool:
+    import claude_signin
+    return claude_signin.login_lapsed(Path(where))
+
+
 def status(launcher: dict, run: Callable[[list[str]], str] = _run) -> dict:
-    """The launcher's `auth status --json`, or {} when it does not answer one."""
+    """The launcher's `auth status --json`, or {} when it does not answer one. It answers signed in
+    on a claude.ai sign-in whose refresh has lapsed, which a launched session cannot use (#6477):
+    that reads as signed out, `loginLapsed` saying why. A token, a key or a proxy is not that
+    sign-in, whatever record the home still holds."""
     try:
         got = json.loads(run([*_claude(launcher), "auth", "status", "--json"]))
     except (ValueError, OSError, subprocess.SubprocessError):
         return {}
-    return got if isinstance(got, dict) else {}
+    if not isinstance(got, dict):
+        return {}
+    where = got.get("configDirectory")
+    if got.get("loggedIn") is True and got.get("authMethod") == "claude.ai" \
+            and not launcher.get("proxy") and isinstance(where, str) and where and _login_lapsed(where):
+        got["loggedIn"], got["loginLapsed"] = False, True
+        print(f"launchers: {launcher['path']}: login in {where} has lapsed: the sign-in's refresh "
+              "expiry has passed", file=sys.stderr, flush=True)
+    return got
 
 
 def plugin_installed(config_dir: str) -> bool:
@@ -163,6 +245,9 @@ def accounts(launchers: list[dict], readings: list[dict], run: Callable[[list[st
                 dead.add(launcher["path"])
             why[launcher["path"]] = (f"not signed in first-party (loggedIn {s.get('loggedIn')}, "
                                      f"apiProvider {s.get('apiProvider')})")
+            if s.get("loginLapsed") is True:
+                why[launcher["path"]] = ("its login has lapsed: the sign-in's refresh expiry has passed, "
+                                         "so a session would stop at its login screen")
             continue
         if not isinstance(where, str) or not where:
             why[launcher["path"]] = "its auth status names no configDirectory"
@@ -173,10 +258,27 @@ def accounts(launchers: list[dict], readings: list[dict], run: Callable[[list[st
         else:
             key, probed = ("claude", own), f"directory {own}"
         read = by.get(key) if key else None
+        if launcher.get("account"):
+            # An entry that names its account asserts where it must land (#6458): only a reading
+            # of that very account, or — with no reading for its home — a home labelled by the
+            # name the command was found by, places it. Anything else offers nothing, both
+            # identities said.
+            claimed = tuple(launcher["account"].split("/", 1))
+            if read is not None and read != claimed:
+                why[launcher["path"]] = (f"its reading names {read[0]} account {read[1]}, "
+                                         f"its entry claims {launcher['account']}")
+                continue
+            if read is None:
+                found_by = launcher.get("found_by")
+                if not found_by or found_by != own:
+                    why[launcher["path"]] = (f"no reading for directory {own}, and it was found as "
+                                             f"{found_by or 'a path'}, not a name of that account")
+                    continue
+            read = claimed
         # A proxy whose reading is not found now has an account all the same, only unread this
         # time: naming it after the directory would give one launcher two identities (#2325's
         # live test), so it offers nothing until its reading is found again.
-        if read is None and launcher.get("vendor") and not launcher.get("proxy"):
+        elif read is None and launcher.get("vendor") and not launcher.get("proxy"):
             read = (launcher["vendor"], own)
         if key is None:
             why[launcher["path"]] = probed
@@ -197,11 +299,29 @@ def accounts(launchers: list[dict], readings: list[dict], run: Callable[[list[st
             why[launcher["path"]] = f"its reading names vendor {read[0]}, declared {launcher['vendor']}"
             continue
         out.append({"vendor": read[0], "account_id": read[1], "launcher": launcher, "where": where})
+    # One home is offered once where an entry names its account (#6458): a path entry and an
+    # `account` entry for it are one launcher in two forms, kept side by side while a machine
+    # moves between them, and offering both is a choice the launch would make for no reason. Two
+    # plain path entries on one home stay both offered — the owner's `aN` beside a direct
+    # launcher is a deliberate pair — and the first entry that places a home wins.
+    placed: set[str] = set()
+    placed_by_account: set[str] = set()
+    once = []
+    for a in out:
+        if not a["launcher"].get("synthesized"):
+            names_account = bool(a["launcher"].get("account"))
+            if a["where"] in placed and (names_account or a["where"] in placed_by_account):
+                why[a["launcher"]["path"]] = f"another launcher already placed directory {a['where']}"
+                continue
+            placed.add(a["where"])
+            if names_account:
+                placed_by_account.add(a["where"])
+        once.append(a)
+    out = once
     # A launcher the agent wrote for an env file steps aside for a declared one placing the same
     # home (#6001): the declaration is the owner's word, and two launchers for one account is a
     # choice the launch would make for no reason.
-    declared_homes = {a["where"] for a in out if not a["launcher"].get("synthesized")}
-    return [a for a in out if not a["launcher"].get("synthesized") or a["where"] not in declared_homes]
+    return [a for a in out if not a["launcher"].get("synthesized") or a["where"] not in placed]
 
 
 def offer(declared_: list[dict], readings: list[dict] | None, log: Callable[[str], None],
@@ -225,6 +345,15 @@ def offer(declared_: list[dict], readings: list[dict] | None, log: Callable[[str
 def declared_paths(env: dict | None = None) -> set[str]:
     """The launcher paths as declared, held as declared (#2368)."""
     return {d["path"] for d in declared(env)}
+
+
+def census_entries(offered: list[dict]) -> list[dict]:
+    """The offer a census carries as its `interactive` array: each account by its vendor and id,
+    never a machine's own name for its command or its path (#6458 §2.6) — two machines whose
+    commands for one account are named differently send the same entry, and coordination keys by
+    the id both name."""
+    return [{"vendor": a["vendor"], "account_id": a["account_id"],
+             **({"unrouted": True} if a["launcher"].get("unrouted") else {})} for a in offered]
 
 
 def census_offer(kept: dict, found: list[dict] | None, declared_paths: set[str],
@@ -403,3 +532,18 @@ def argv(launcher: dict, workspace: str, model: str | None, effort: str | None, 
             "/usr/bin/env", "-i", *[kv for kv in environment(env) if kv.partition("=")[0] not in (forge_env or {})],
             *[f"{k}={v}" for k, v in (forge_env or {}).items()], *bootstrap,
             *_claude(launcher), *settings, *(["--resume", resume] if resume else []), *level, "/2mw2lt:connect"]
+
+
+def _suggest() -> int:
+    """The `suggest` subcommand (#6458 §2.5): this machine's suggestion lines, printed. The
+    logic is `launcher_suggest`'s own, run as its own process — a launch the boundary policy
+    declares — because importing it here would pull the harness stack into the enrollment
+    client's closure (the plan's unit 2 ruling)."""
+    import subprocess
+    script = Path(__file__).parent / "launcher_suggest.py"
+    return subprocess.run([sys.executable, str(script), "suggest"]).returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(_suggest() if sys.argv[1:] == ["suggest"] else
+                     (print("usage: launchers.py suggest", file=sys.stderr), 2)[1])

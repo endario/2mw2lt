@@ -29,7 +29,9 @@ def connect_path(ws: Path, psession: str) -> Path:
 
 def mark_connected(ws: Path, psession: str, now: float | None = None) -> None:
     try:
-        connect_path(ws, psession).write_text(repr(time.time() if now is None else now))
+        path = connect_path(ws, psession)
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        path.write_text(repr(time.time() if now is None else now))
     except (OSError, ValueError):
         pass  # the module still starts on the command it recognises, or within its next refresh
 

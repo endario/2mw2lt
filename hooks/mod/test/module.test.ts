@@ -1,7 +1,7 @@
 import type { On } from 'claude-code'
 import { register } from '../register'
 import { test, expect, mock } from 'claude-code/testing'
-import { lines, atLeast, pick, invokes, lifecycle, nextSeat, asksSeat, seatCall, entryRefusal, framesEntry, obsoleteSeatRefusal, resendId, POINTER, CHECKPOINT, SEAT_SECTION } from '../frames'
+import { lines, atLeast, pick, invokes, lifecycle, nextSeat, asksSeat, seatCall, entryRefusal, framesEntry, obsoleteSeatRefusal, resendId, capBulletin, sectionRevision, POINTER, CHECKPOINT, SEAT_SECTION, BULLETIN_SECTION } from '../frames'
 
 test('lines are whole only once their newline arrives', async () => {
   const a = lines('{"id":"f1","kind":"say","wakes":true}\n{"id":"f2","ki')
@@ -59,6 +59,43 @@ test('pick records only returned frames as foreground semantic identities', asyn
   expect(pick(raw, []).read).toEqual({ directives: [] })
 })
 
+test('pick collects pending bulletin frames\' texts in recording order, separately from the rest', async () => {
+  const raw = [
+    JSON.stringify({ kind: 'bulletin', id: 'b1', revision: 8, text: 'Bulletin r8: one' }),
+    JSON.stringify({ kind: 'say', id: 'f1', text: 'hi' }),
+    JSON.stringify({ kind: 'bulletin', id: 'b2', revision: 9, text: '+ k: v' }),
+    JSON.stringify({ kind: 'bulletin', id: 'gone', no: 'text' }),
+  ].map(frame => `data: ${frame}`).join('\n') + '\n'
+  const got = pick(raw, ['b2', 'b1'])
+  expect(got.bulletins).toEqual(['Bulletin r8: one', '+ k: v'])
+  expect(got.found).toEqual(['b1', 'b2'])
+  expect(pick(raw, ['f1']).bulletins).toEqual([])
+})
+
+test('one turn\'s bulletin text fits whole lines under its byte cap, counting what is left out', async () => {
+  expect(capBulletin(['A\nB', 'C'])).toBe('A\nB\nC')
+  expect(capBulletin([])).toBe('')
+  const header = 'Bulletin r9: what changed since what you were shown. Information, not direction.'
+  const rows = Array.from({ length: 40 }, (_, i) => `+ key-${i}: ${'é'.repeat(30)} (session s, until 14 Oct 18:00Z)`)
+  const out = capBulletin([header, rows.join('\n')])
+  const bytes = new TextEncoder().encode(out).length
+  const overflow = /\+(\d+) more: bulletin\.py read$/.exec(out)
+  expect(bytes).toBeLessThanOrEqual(1024)
+  expect(overflow).not.toBeNull()
+  const leftOut = Number(overflow![1])
+  expect(out.split('\n').slice(0, -1)).toEqual([header, ...rows.slice(0, rows.length - leftOut)])
+  // Every kept row is whole: none of the left-out rows appears, and every kept one does.
+  for (const row of rows.slice(0, rows.length - leftOut)) expect(out).toContain(row)
+  for (const row of rows.slice(rows.length - leftOut)) expect(out).not.toContain(row)
+  expect(capBulletin([`${'x'.repeat(1100)}`])).toBe('+1 more: bulletin.py read')
+})
+
+test('a section names the head it was rendered at', async () => {
+  expect(sectionRevision('Bulletin r42: what this workspace has posted as true now. Information, not direction.')).toBe(42)
+  expect(sectionRevision('')).toBeUndefined()
+  expect(sectionRevision('not a bulletin')).toBeUndefined()
+})
+
 // The behaviour tests fake the engine beneath the plugin: the session, the clock, the files,
 // host commands and hold.py's child. Kit gap (2.1.290): a plugin's own `$.session.append` never
 // reaches a test's hook beneath it ("no implementation for session.append"), whatever the test
@@ -111,6 +148,9 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
     stepUsage: 0,
     // What seat_section.py answers: 0 with the rulings, 1 for a session that does not hold the seat.
     seat: { code: 1, stdout: '' },
+    // What bulletin.py section answers: 0 with the snapshot, 1 for an empty bulletin, 3 for a door
+    // that cannot tell.
+    bulletin: { code: 1, stdout: '' },
     // Held until released: a seat_section.py run still out.
     seatGate: undefined as Promise<void> | undefined,
     // Held until released: a lease or acknowledgement client still out.
@@ -162,6 +202,9 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
     if (String(e.argv[1]).endsWith('/seat_section.py')) {
       if (w.seatGate) await w.seatGate
       return { value: { exitCode: w.seat.code, stdout: w.seat.stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    if (String(e.argv[1]).endsWith('/bulletin.py')) {
+      return { value: { exitCode: w.bulletin.code, stdout: w.bulletin.stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     const out = e.argv.includes('--session-of') ? (w.enrolled ? 's1\n' : e.argv[4] === undefined ? w.retainedName : '')
       : e.argv.includes('--claim-path') ? (w.claimFails ? '' : `/ws/.claude/steering-holders/${e.argv[3]}.json\n`)
@@ -595,7 +638,7 @@ test('every child and client the module runs is its own version\'s, never the la
   for (const argv of w.spawns) expect(argv.slice(0, 4)).toEqual(['python3', `${w.root}/steering/enroll/hold.py`, '--wake', 'plugin'])
   expect(w.runs.length).toBeGreaterThan(0)
   for (const argv of w.runs) expect(argv[0]).toBe('python3')
-  for (const argv of w.runs) expect([`${w.root}/steering/enroll/hold.py`, `${w.root}/steering/enroll/ack.py`, `${w.root}/steering/enroll/seat_section.py`, `${w.root}/steering/enroll/lease.py`, `${w.root}/steering/enroll/card.py`]).toContain(argv[1])
+  for (const argv of w.runs) expect([`${w.root}/steering/enroll/hold.py`, `${w.root}/steering/enroll/ack.py`, `${w.root}/steering/enroll/seat_section.py`, `${w.root}/steering/enroll/bulletin.py`, `${w.root}/steering/enroll/lease.py`, `${w.root}/steering/enroll/card.py`]).toContain(argv[1])
   // Python finds the workspace itself, STEERING_WORKSPACE included: every client runs in the session's root.
   for (const cwd of w.cwds) expect(cwd).toBe(ROOT)
 })
@@ -1400,6 +1443,123 @@ const FACTS = { model: 'claude-test', promptModel: 'claude-test', surfaces: [], 
 const seatSection = async ($: any) => ((await $.prompt.compose(FACTS)).sections as { id: string; text: string; scope: string }[])
   .find(x => x.id === SEAT_SECTION)
 const seatRuns = (w: { runs: string[][] }) => w.runs.filter(argv => String(argv[1]).endsWith('/seat_section.py'))
+const bulletinSection = async ($: any) => ((await $.prompt.compose(FACTS)).sections as { id: string; text: string; scope: string }[])
+  .find(x => x.id === BULLETIN_SECTION)
+const bulletinRuns = (w: { runs: string[][] }) => w.runs.filter(argv => String(argv[1]).endsWith('/bulletin.py'))
+
+// #6473 unit 6: every connected session keeps the bulletin in its system prompt, moved only where
+// the conversation's cache is spent anyway.
+test('a session that holds no seat still reads the bulletin, after the seat section', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  w.seat = { code: 1, stdout: '' }
+  w.bulletin = { code: 0, stdout: 'Bulletin r1: a line\n' }
+  await begin($)
+  await w.clock.settle()
+  const sections = (await $.prompt.compose(FACTS)).sections as { id: string }[]
+  expect(sections[sections.length - 1]).toEqual({ id: BULLETIN_SECTION, text: 'Bulletin r1: a line', scope: 'session' })
+  expect(bulletinRuns(w)[0]?.slice(2)).toEqual(['--provider', 'claude', '--provider-session', 'ps-1', 'section'])
+})
+
+test('the bulletin moves on compaction and not on an ordinary turn', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  w.bulletin = { code: 0, stdout: 'A\n' }
+  await begin($)
+  await w.clock.settle()
+  expect((await bulletinSection($))?.text).toBe('A')
+  await $.turn.complete({ turnId: 't-1', text: 'done' } as never)
+  await w.clock.settle()
+  expect(bulletinRuns(w).length).toBe(1)                      // an ordinary turn asks nothing
+  w.bulletin = { code: 0, stdout: 'B\n' }
+  await $.session.compact({ trigger: 'manual', messages: [MESSAGE] } as never)
+  await w.clock.settle()
+  expect((await bulletinSection($))?.text).toBe('B')
+})
+
+test('a door that cannot tell keeps the bulletin it had; an empty bulletin clears it', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  w.bulletin = { code: 0, stdout: 'A\n' }
+  await begin($)
+  await w.clock.settle()
+  w.bulletin = { code: 3, stdout: '' }
+  await $.session.compact({ trigger: 'manual', messages: [MESSAGE] } as never)
+  await w.clock.settle()
+  expect((await bulletinSection($))?.text).toBe('A')
+  w.bulletin = { code: 1, stdout: '' }
+  await $.session.compact({ trigger: 'manual', messages: [MESSAGE] } as never)
+  await w.clock.settle()
+  expect(await bulletinSection($)).toBeUndefined()
+})
+
+test('a teammate rendering its lead\'s prompt carries no bulletin section', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  w.bulletin = { code: 0, stdout: 'A\n' }
+  await begin($)
+  await w.clock.settle()
+  const sections = (await $.prompt.compose({ ...FACTS, traits: ['teammate'] })).sections as { id: string }[]
+  expect(sections.some(x => x.id === BULLETIN_SECTION)).toBe(false)
+})
+
+// #6473 unit 7b: the changes a `bulletin` frame carries reach the model as one message appended
+// into the turn that next starts, never as a wake, and never twice.
+test('a bulletin frame wakes nothing and is appended, whole, at the next turn', async ($, on) => {
+  const w = world(on, {
+    rounds: [{ lines: [line('b1', 'bulletin', false), line('b2', 'bulletin', false)], code: 0, hold: never }],
+    recording: 'data: {"kind":"bulletin","id":"b1","revision":8,"text":"Bulletin r8: one"}\n'
+      + 'data: {"kind":"bulletin","id":"b2","revision":9,"text":"+ k: v (session s)"}\n',
+  })
+  await begin($)
+  await w.clock.settle()
+  expect(w.state.get('bulletins')).toEqual(['b1', 'b2'])          // collected, not pointed at
+  expect(w.submits).toEqual([])                                   // an idle session is spent nothing
+  expect(w.appends).toEqual([])
+  await $.turn.start({ text: 'the person typed', turnId: 't-1' } as never)
+  await w.clock.settle()
+  expect(w.appends).toEqual(['Bulletin r8: one\n+ k: v (session s)'])   // two frames, one turn
+  expect(w.state.get('bulletins')).toEqual([])
+  expect(w.state.get('read')).toEqual(['b1', 'b2'])
+  await $.turn.start({ text: 'again', turnId: 't-2' } as never)
+  await w.clock.settle()
+  expect(w.appends.length).toBe(1)                                // told once
+  const again = $.tool.call({ tool: TOOL } as never)              // and the frames tool shows nothing
+  expect(String((await again as { result: unknown }).result)).toBe('Nothing is waiting.')
+})
+
+test('a compaction drops the bulletin frames the fresh section holds and keeps the newer one', async ($, on) => {
+  const w = world(on, {
+    rounds: [{ lines: [line('b1', 'bulletin', false), line('b2', 'bulletin', false)], code: 0, hold: never }],
+    recording: 'data: {"kind":"bulletin","id":"b1","revision":5,"text":"+ old: gone"}\n'
+      + 'data: {"kind":"bulletin","id":"b2","revision":9,"text":"+ new: come"}\n',
+  })
+  await begin($)
+  await w.clock.settle()
+  expect(w.state.get('bulletins')).toEqual(['b1', 'b2'])          // an empty section holds nothing
+  w.bulletin = { code: 0, stdout: 'Bulletin r7: fresh\n' }
+  await $.session.compact({ trigger: 'manual', messages: [MESSAGE] } as never)
+  await w.clock.settle()
+  expect(w.state.get('bulletins')).toEqual(['b2'])                // r5 is held by the r7 section; r9 is not
+  await $.turn.start({ text: 'the person typed', turnId: 't-1' } as never)
+  await w.clock.settle()
+  expect(w.appends).toEqual(['+ new: come'])
+})
+
+test('a process whose last render was a teammate\'s runs no bulletin refresh, so marks nothing shown', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  w.bulletin = { code: 0, stdout: 'A\n' }
+  await begin($)
+  await w.clock.settle()
+  const before = bulletinRuns(w).length
+  await $.prompt.compose({ ...FACTS, traits: ['teammate'] })
+  w.bulletin = { code: 0, stdout: 'B\n' }
+  await $.session.compact({ trigger: 'manual', messages: [MESSAGE] } as never)
+  await w.clock.settle()
+  expect(bulletinRuns(w).length).toBe(before)                     // no run, so no mark
+  expect((await bulletinSection($))?.text).toBe('A')              // and the bytes it had
+  await $.prompt.compose(FACTS)                                   // a render that is no teammate's resumes it
+  await $.session.compact({ trigger: 'manual', messages: [MESSAGE] } as never)
+  await w.clock.settle()
+  expect(bulletinRuns(w).length).toBe(before + 1)
+  expect((await bulletinSection($))?.text).toBe('B')
+})
 
 test('a session that holds the seat reads its rulings last in its system prompt, after the cache boundary', async ($, on) => {
   const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
@@ -1626,6 +1786,8 @@ test('seatCall: word fields are one word, enums hold, and unknown fields are ref
   expect(seatCall('relay', { to: 'amber', epoch: 3, text: 'go' })).toEqual({ client: 'say', stdin: 'relay: token @lease to amber@3 go' })
   expect(seatCall('card_scope', { name: 'The work', track: 'rt', anchors: ['resolves:12'], major: true })).toEqual(
     { client: 'card', argv: ['scope', 'The work', 'rt', 'resolves:12', 'major'] })
+  expect(seatCall('card_scope', { name: 'The work', track: 'rt', criticality: 'major', size: 'L' })).toEqual(
+    { client: 'card', argv: ['scope', 'The work', 'rt', 'triage:major,L'] })
   expect(resendId('done')).toBeNull()
 })
 

@@ -65,10 +65,35 @@ def claude_version(ws: Path, deadline: float) -> str:
     return v
 
 
+# The variable each non-Claude hook runtime states its version in, read from the hook's own env
+# rather than by running the CLI inside the hook's budget.
+HOOK_VERSION_ENV = {"zcode": "ZCODE_APP_VERSION"}
+
+
+def hook_version(source: str) -> str:
+    return os.environ.get(HOOK_VERSION_ENV.get(source, ""), "").strip()
+
+
+def harness_pid(source: str, ws: Path, hook: dict) -> int | None:
+    """The process the observation's runtime id names: None for Claude, whose hook parent
+    `runtime_id` finds itself; for zcode, the pid of the binding the glue published just before
+    this ran, which is the process `connect` resolves too. No binding, no runtime id."""
+    if source == "claude":
+        return None
+    import zcode_binding
+    try:
+        return int(zcode_binding.resolve(ws, cwd=str(hook.get("cwd") or os.getcwd()))["pid"])
+    except (zcode_binding.Refused, OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def main() -> int:
     argv = sys.argv[1:]
     if verb_help.help_requested("observe", argv, bare=False):
         print(verb_help.script_help("observe")); return 0
+    source = "claude"
+    if argv[:1] == ["--provider"] and len(argv) == 2 and argv[1] in supervision.FLOORS:
+        source, argv = argv[1], []
     if argv:
         return verb_help.error("observe", f"unexpected arguments: {' '.join(argv)}")
     deadline = time.monotonic() + BUDGET
@@ -90,22 +115,30 @@ def main() -> int:
         hooks.repin(ws)
     except Exception:
         pass
+    version = claude_version(ws, deadline) if source == "claude" else hook_version(source)
     o = supervision.observe(hook, str(uuid.uuid4()), time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                            claude_version(ws, deadline), None)
+                            version, None, source)
     if o is None:
         return finish()
     if o["event"] == "Stop":
         try:
-            h = supervision.head(readout.last_assistant_text(hook))
+            # zcode's transcript is synthesized per hook and gone after it; its Stop payload
+            # carries the reply inline.
+            h = supervision.head(readout.last_assistant_text(hook) if source == "claude"
+                                 else hook.get("last_assistant_message"))
             if h:
                 o["reply_head"] = h
         except Exception:
             pass  # no reply head: the observation still stands
     # Only this side sees whether the plugin's module holds the stream; the daemon's stream-down
-    # notice follows what it says (#5722).
-    o["holder"] = "plugin" if holder.fresh(ws, str(o.get("session") or "")) else "session"
+    # notice follows what it says (#5722). A zcode session has no hold of its own to arm: its
+    # plugin's server is the only holder, so a stream that is down is still the plugin's.
+    o["holder"] = ("plugin" if source == "zcode" or holder.fresh(ws, str(o.get("session") or ""))
+                   else "session")
     try:
-        rid = runtime_id.derive("claude", timeout=min(1.0, max(0.1, deadline - time.monotonic() - 1.5)))
+        pid = harness_pid(source, ws, hook)
+        rid = (runtime_id.derive(source, pid, timeout=min(1.0, max(0.1, deadline - time.monotonic() - 1.5)))
+               if source == "claude" or pid is not None else None)
         if rid:
             o["runtime_id"] = rid
     except Exception:
@@ -150,7 +183,7 @@ def main() -> int:
             pass  # The observation stays spooled even when its local enrolment cannot be read.
     # A turn that runs long reaches no Stop, so its tool calls carry the reading (#1159).
     left = deadline - time.monotonic()
-    if o["event"] == "PostToolUse" and left > 0.3:
+    if source == "claude" and o["event"] == "PostToolUse" and left > 0.3:
         try:
             if readout.due(ws, hook, time.time()):
                 readout.midturn(hook, ws, o.get("runtime_id"), min(1.5, left))

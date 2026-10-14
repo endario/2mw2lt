@@ -56,7 +56,8 @@ def main(argv: list[str]) -> int:
     import session_routes
     try:
         reply = session_routes.declare_card(card, fact["name"], fact.get("anchors") or {}, token,
-                                            repo=session_routes.card_repo(ws) if fact.get("anchors") else "")
+                                            repo=session_routes.card_repo(ws) if fact.get("anchors") else "",
+                                            triage=fact.get("triage"))
     except session_routes.Refused as e:
         reply = refusal.use("declare", f"{card}: {e}")
     except session_routes.Unsent as e:

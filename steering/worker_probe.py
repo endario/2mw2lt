@@ -212,10 +212,6 @@ def zcode_pid_of(worker: str) -> int | None:
     return named if any(_descends(w, named) for w in writers(zcode_transcript(worker))) else None
 
 
-def zcode_loaded(worker: str) -> bool:
-    return zcode_pid_of(worker) is not None
-
-
 def zcode_workspace_of(fd: int, rel: Path, workspace: str) -> str | None:
     return workspace_of(fd, rel, workspace, "zcode")
 

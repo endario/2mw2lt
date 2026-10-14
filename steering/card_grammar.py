@@ -11,6 +11,11 @@ from wire_instants import is_instant, now
 VERBS = ("resolves", "subsumes", "advances", "spawned", "ref")
 ROLES = ("executor", "planned")
 
+# A stage an engagement names (#6499), and the rarities a floor names.
+STAGES = ("research", "spec", "critic", "plan", "build", "test", "review", "verify", "report",
+          "verdict", "approve", "execute")
+RARITIES = ("legendary", "epic", "rare", "uncommon")
+
 # What a line that claims the verb and does not parse is refused with. A card write carries a
 # credential, so a line the grammar did not match is refused rather than queued as a message
 # for the standup — which reads as success and is how other verbs' malformed lines were lost.
@@ -24,7 +29,9 @@ STATES = ("card-scoped", "card-branch", "card-unbranch", "card-session", "card-u
           # What a card waits on or contributes to (doc 167).
           "card-link", "card-unlink",
           # What the work is for, and the daemon's reading of it (doc 185 §5).
-          "card-outcome", "card-outcome-read")
+          "card-outcome", "card-outcome-read",
+          # A stage's floor raised (#6499).
+          "card-retiered")
 SIGNS = ("gate", "anchor")
 FIELDS = ("track", "significance", "state", "priority", "major", "name")
 
@@ -90,6 +97,10 @@ def validate(fact: dict) -> str | None:
                 return "an anchor is a positive issue number"
         if "major" in fact and not isinstance(fact["major"], bool):
             return "major is true or false"
+        tri = fact.get("triage")
+        if tri is not None and not (isinstance(tri, dict) and set(tri) == {"criticality", "size"}
+                                    and tri["criticality"] in CRITICALITY and tri["size"] in SIZES):
+            return f"triage is triage:<{'|'.join(CRITICALITY)}>,<{'|'.join(SIZES)}>"
     elif state in ("card-branch", "card-unbranch"):
         if not _text(fact.get("repo"), 120) or not _text(fact.get("branch"), 200):
             return "repo and branch are required"
@@ -98,6 +109,18 @@ def validate(fact: dict) -> str | None:
             return "session is required"
         if fact.get("role") not in ROLES:
             return f"role must be one of {ROLES}"
+        if "stage" in fact:
+            if fact.get("role") != "executor" or fact.get("stage") not in STAGES:
+                return "stage names a lifecycle stage an executor begins"
+            if fact.get("why") is not None and not _text(fact.get("why"), 200):
+                return "why says why the stage begins"
+    elif state == "card-retiered":
+        if fact.get("stage") not in STAGES:
+            return f"stage must be one of {STAGES}"
+        if fact.get("floor") not in RARITIES:
+            return f"floor must be one of {RARITIES}"
+        if not _text(fact.get("why"), 200):
+            return "a raise says why"
     elif state == "card-concluded":
         if not _text(fact.get("by"), 120):
             return "by must name who concluded it"
@@ -226,7 +249,8 @@ def _edge_refusal(fact: dict) -> str | None:
 
 
 def scoped(name: str, track: str | None, units: list | None = None, card: str | None = None,
-           anchors: dict | None = None, by: str | None = None, major: bool = False) -> dict:
+           anchors: dict | None = None, by: str | None = None, major: bool = False,
+           triage: dict | None = None) -> dict:
     """A card, minted. `card` is the client's id for a new one, or an existing one's to re-scope.
 
     `units` is omitted rather than written empty: a card that has not said what its blocks are
@@ -246,6 +270,8 @@ def scoped(name: str, track: str | None, units: list | None = None, card: str | 
         fact["anchors"] = {v: list(anchors.get(v, [])) for v in VERBS if anchors.get(v)}
     if major:
         fact["major"] = True
+    if triage is not None:
+        fact["triage"] = triage
     return {**fact, "ts": now()}
 
 
@@ -268,12 +294,13 @@ def _fact(state: str, card: str, **kw) -> dict:
 
 def declaration(session: str, card: str, words: list[str]) -> tuple[dict | None, str | None]:
     """Build the declaration's first fact without consulting the ledger."""
+    tri, words = _triage(words)
     tail = len(words)
     while tail and _ANCHOR_ARG.match(words[tail - 1]):
         tail -= 1
     try:
         first = scoped(" ".join(words[:tail]), None, card=card,
-                       anchors=_anchors(words[tail:]), by=f"session {session}")
+                       anchors=_anchors(words[tail:]), by=f"session {session}", triage=tri)
     except ValueError as e:
         return None, str(e)
     refusal = validate(first)
@@ -310,8 +337,10 @@ def built(verb: str, rest: list[str]) -> tuple[list[dict], str | None]:
             if not valid_ulid(rest[1]):
                 return [], "--card must be a ULID"
             weight, tail = _weight(rest[4:])
-            return [scoped(rest[2], rest[3], card=rest[1], anchors=_anchors(tail),
-                           major=weight)], None
+            tri, tail = _triage(tail)
+            made = scoped(rest[2], rest[3], card=rest[1], anchors=_anchors(tail), major=weight, triage=tri)
+            refusal = validate(made)
+            return ([], refusal) if refusal else ([made], None)
         if verb == "rescope" and len(rest) >= 3:
             weight, tail = _weight(rest[3:])
             return [scoped(rest[1], rest[2], card=rest[0], anchors=_anchors(tail),
@@ -326,6 +355,12 @@ def built(verb: str, rest: list[str]) -> tuple[list[dict], str | None]:
                           **({"why": rest[3]} if len(rest) == 4 else {}))], None
         if verb == "session" and len(rest) == 3:
             return [_fact("card-session", rest[0], session=rest[1], role=rest[2])], None
+        if verb == "session" and len(rest) >= 5 and rest[3] == "stage":
+            # An executor engagement names the lifecycle stage it begins (#6499), with why.
+            if rest[2] != "executor" or rest[4] not in STAGES:
+                return [], "stage names a lifecycle stage an executor begins"
+            return [_fact("card-session", rest[0], session=rest[1], role=rest[2], stage=rest[4],
+                          **({"why": " ".join(rest[5:])} if len(rest) > 5 else {}))], None
         if verb == "unsession" and len(rest) in (2, 3):
             return [_fact("card-unsession", rest[0], session=rest[1],
                           **({"why": rest[2]} if len(rest) == 3 else {}))], None
@@ -338,6 +373,13 @@ def built(verb: str, rest: list[str]) -> tuple[list[dict], str | None]:
             return [_fact("card-unconcluded", rest[0], **({"why": rest[1]} if len(rest) == 2 else {}))], None
         if verb == "retire" and len(rest) == 2:
             return [_fact("card-retired", rest[0], why=rest[1])], None
+        if verb == "retier" and len(rest) >= 4:
+            if rest[1] not in STAGES:
+                return [], f"stage must be one of {STAGES}"
+            if rest[2] not in RARITIES:
+                return [], f"floor must be one of {RARITIES}"
+            return [_fact("card-retiered", rest[0], stage=rest[1], floor=rest[2],
+                          why=" ".join(rest[3:]))], None
         if verb == "reclassify" and len(rest) >= 4 and rest[1] in FIELDS:
             if (wrong := correction_value_refusal(rest[1], rest[2])):
                 return [], wrong
@@ -448,6 +490,23 @@ def _to(word: str) -> dict:
 
 # Only the anchor verbs, so a reason's own `pr:123` stays in the reason.
 _ANCHOR_ARG = __import__("re").compile(rf"^(?:{'|'.join(VERBS)}):\d[\d,]*$")
+
+
+# Triage's answers (#6499), as a card's declaration and the brain's scope name them:
+# `triage:<criticality>,<size>`. The floors they make are the team policy's, which Go applies.
+CRITICALITY = ("critical", "major", "minor", "trivial")
+SIZES = ("S", "M", "L", "XL")
+
+
+def _triage(args: list[str]) -> tuple[dict | None, list[str]]:
+    """The arguments with a `triage:<criticality>,<size>` word pulled out of them, and its answers.
+    A malformed one is kept as an answer the fact's validation refuses, not passed on as a word."""
+    said = [a for a in args if a.startswith("triage:")]
+    if not said:
+        return None, args
+    crit, _, size = said[-1][len("triage:"):].partition(",")
+    rest = [a for a in args if not a.startswith("triage:")]
+    return ({"criticality": crit, "size": size} if len(said) == 1 else {"criticality": "", "size": ""}), rest
 
 
 def _weight(args: list[str]) -> tuple[bool, list[str]]:

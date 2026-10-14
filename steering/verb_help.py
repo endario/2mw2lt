@@ -30,7 +30,7 @@ _RAW_FORMS = {
     "ack": ["ack: <ulid> token <t>"],
     "say": ["say: <session> [to <target>] token <t> <text>"],
     "note": ["note: token <lease token> <text>"],
-    "launch": ["launch: token <lease token> <harness> [on <node>] [vendor <vendor>] [account <n>] [model <model>] [thinking <level>] [effort <level>] [window] [card <card>|resolves <owner>/<name>#<n>] because <reason> [<newline> brief: <directive>]"],
+    "launch": ["launch: token <lease token> <harness> [on <node>] [vendor <vendor>] [account <n>] [model <model>|floor <rarity>] [thinking <level>] [effort <level>] [window] [card <card>|resolves <owner>/<name>#<n>] because <reason> [<newline> brief: <directive>]"],
     "withdraw": ["withdraw: token <lease token> <launch id>"],
     "cancel": ["cancel: token <lease token> <action id>"],
     "relay": ["relay: token <lease token> to <session>[@<epoch>] <text>"],
@@ -119,7 +119,7 @@ VERBS = {
 
 # Runnable entrypoints own client syntax once; wire forms reference these by script and topic.
 _SPEAKER_USAGE = "[--provider <harness>] [--provider-session <id>]"
-_COMMISSION_USAGE = "[--tier standard|heavy] [--exclude <vendors>] [--final] [--retry=<id>]"
+_COMMISSION_USAGE = "[--floor uncommon|rare|epic|legendary --why <reason>] [--exclude <vendors>] [--final] [--retry=<id>]"
 TOOLS = {
     "ack": {"verb": "ack", "forms": [
         {"topic": "send", "usage": "<session> <directive id>", "example": "ack violet 1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00"},
@@ -132,8 +132,18 @@ TOOLS = {
     "bind": {"verb": "bind", "current": True, "forms": [
         {"topic": None, "usage": "[--provider <provider>] [--provider-session <id>] [--pid <pid>] [session]", "example": "bind --current"},
     ]},
+    "bulletin": {"forms": [
+        {"topic": "read", "usage": _SPEAKER_USAGE + " <session> read [--all]", "example": "bulletin violet read"},
+        {"topic": "post", "usage": _SPEAKER_USAGE + " <session> post <key> \"<text>\" [--until <UTC time | +2h>] [--standing] [--seat]",
+         "example": "bulletin violet post deploy-hold \"deploys held for a perf window\" --until +2h"},
+        {"topic": "retract", "usage": _SPEAKER_USAGE + " <session> retract <key> \"<reason>\"", "example": "bulletin violet retract deploy-hold \"the window closed\""},
+        {"topic": "history", "usage": _SPEAKER_USAGE + " <session> history [--since <UTC time | -24h>]", "example": "bulletin violet history --since -24h"},
+        {"topic": "section", "usage": _SPEAKER_USAGE + " section", "example": "bulletin --provider claude --provider-session 9a77 section"},
+    ]},
     "card": {"verb": "card", "bare": False, "forms": [
         {"topic": None, "usage": "--lease <verb> <args…>", "example": "card --lease retire 1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00 settled"},
+        {"topic": "session", "usage": "--lease session <card> <session> executor|planned [stage <stage> [<why>]]", "example": "card --lease session 1b6f6a8e… violet executor stage build the design landed"},
+        {"topic": "retier", "usage": "--lease retier <card> <stage> <floor> <why>", "example": "card --lease retier 1b6f6a8e… build epic the ledger shape moved"},
     ]},
     "checkpoint": {"verb": "checkpoint", "forms": [
         {"topic": None, "usage": "<session> <boundary> <note-url> [--learned-file <json-file>] [--retry=<id>]", "example": "checkpoint violet unit-done https://github.com/example/repo/pull/1#issuecomment-1"},
@@ -142,7 +152,7 @@ TOOLS = {
         {"topic": None, "usage": "[--as <harness/account>] [--doing <text>] [--provider <provider>] [--provider-session <id>] [--pid <pid>] [session]", "example": "connect --current"},
     ]},
     "declare": {"verb": "declare", "forms": [
-        {"topic": None, "usage": "<session> [--card <ulid>] <name> [resolves:<n> advances:<n> ...]", "example": "declare violet verb-help"},
+        {"topic": None, "usage": "<session> [--card <ulid>] <name> [resolves:<n> advances:<n> ...] [triage:<criticality>,<size>]", "example": "declare violet verb-help triage:minor,S"},
     ]},
     "edge": {"verb": "declare", "forms": [
         {"topic": "link", "usage": "<session> link <card> requires|part-of <card>|<owner>/<name>#<n> [--source <where>] <why>",
@@ -233,7 +243,7 @@ TOOLS = {
     "delete_guard": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "delete_guard --help"}]},
     "trap_guard": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "trap_guard --help"}]},
     "ghtoken": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "ghtoken --help"}]},
-    "observe": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "observe --help"}]},
+    "observe": {"bare": False, "forms": [{"topic": None, "usage": "[--provider zcode] [--help]", "example": "observe --help"}]},
     "readout": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "readout --help"}]},
     "rebrief": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "rebrief --help"},
                                          {"topic": "--keep", "usage": "--keep <session>", "example": "rebrief --keep violet"}]},

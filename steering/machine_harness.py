@@ -437,14 +437,38 @@ def _goose_loaded(psession: str) -> bool:
     return worker_probe.goose_loaded(psession)
 
 
+# Why the last binding read inside a zcode session answered nothing, for the caller to report.
+zcode_unbound: str | None = None
+
+
+def _zcode_binding() -> dict | None:
+    """The binding of the zcode session this process is a tool child of, or None outside one.
+
+    The runtime exports `ZCODE_APP_CLI_ENTRY` to its tool children (measured 2026-10-14), so its
+    absence says this is no zcode session without walking a process chain."""
+    global zcode_unbound
+    if not os.environ.get("ZCODE_APP_CLI_ENTRY"):
+        return None
+    import zcode_binding
+    from local_workspace import workspace_root
+    try:
+        return zcode_binding.resolve(workspace_root(Path.cwd(), timeout=2.0), cwd=os.getcwd())
+    except (zcode_binding.Refused, OSError, RuntimeError) as why:
+        zcode_unbound = str(why)
+        return None
+
+
+def _zcode_session() -> str | None:
+    binding = _zcode_binding()
+    return binding["psession"] if binding else None
+
+
 def _zcode_pid(psession: str) -> int | None:
+    binding = _zcode_binding()
+    if binding and binding.get("psession") == psession and isinstance(binding.get("pid"), int):
+        return binding["pid"]
     import worker_probe
     return worker_probe.zcode_pid_of(psession)
-
-
-def _zcode_loaded(psession: str) -> bool:
-    import worker_probe
-    return worker_probe.zcode_loaded(psession)
 
 
 def _zcode_transcript(psession: str):
@@ -761,15 +785,16 @@ HARNESSES = {h.provider: h for h in (
             shape=_goose_shape, workspace=_opencode_workspace,
             delivery="inject", loaded=_opencode_loaded, process_kind=_opencode_process,
             process_names=_opencode_process_names),
-    # The same launched-worker posture for ZCode: the door trusts the platform's managed record,
-    # the account db is the reading, and no env export names a session (measured on 0.16.9), so
-    # the platform passes the worker id as goose's does. A person-started zcode session is
-    # refused enrolment — doc 83's rule — until the owner moves that boundary.
+    # One stream harness, like Claude (the owner's ruling, 2026-10-14, #6257): every zcode
+    # session holds its own stream through the plugin's frames server and is observed by the
+    # plugin's hooks, so it names its session by the binding those hooks publish. A platform-
+    # launched worker still passes its id explicitly, and its transcript is the file the manager
+    # hands it.
     Harness("zcode", agent="zcode", config=".zcode", config_env="ZCODE_DATA_BASE_DIR",
             transcript_root="steering-workers",
-            harness_pid=_zcode_pid, transcript=_zcode_transcript, version=zcode_version,
-            shape=_goose_shape, workspace=_zcode_workspace,
-            delivery="inject", loaded=_zcode_loaded, reading=_zcode_reading,
+            session_id=_zcode_session, harness_pid=_zcode_pid, transcript=_zcode_transcript,
+            version=zcode_version, shape=_goose_shape, workspace=_zcode_workspace, hooks=True,
+            reading=_zcode_reading,
             process_kind=_zcode_process, process_names=_zcode_process_names),
 )}
 

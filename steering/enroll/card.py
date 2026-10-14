@@ -31,8 +31,9 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
              "       card.py --lease rescope <card> <name> <track> [<verb>:<n>[,<n>] ...] [major]\n"
              "       card.py --lease branch <card> <repo> <branch>\n"
              "       card.py --lease unbranch <card> <repo> <branch> [<why>]  (Go requires the why)\n"
-             "       card.py --lease session <card> <session> executor|planned\n"
+             "       card.py --lease session <card> <session> executor|planned [stage <stage> [<why>]]\n"
              "       card.py --lease unsession <card> <session> [<why>]  (Go requires the why)\n"
+             "       card.py --lease retier <card> <stage> <floor> <why>\n"
              "       card.py --lease conclude <card> <by> <evidence> [--branch-is-the-work]\n"
              "       card.py --lease unconclude <card> [<why>]  (Go requires the why)\n"
              "       card.py --lease retire <card> <why>\n"
@@ -50,6 +51,8 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
              "\n"
              "       `major` is the brain's declaration that a card's work is major (doc 148 §5): "
              "a major card owes a spec until a critic-passed knowledge record names it.\n"
+             "       `retier` raises a stage's floor (#6499): <floor> is legendary|epic|rare|uncommon, "
+             "and only the executor's own stage, the seat and the owner any stage.\n"
              "       `outcome` is the brain's alone (doc 185): each text field is one quoted argument, and a "
              "brief with a reading has the daemon take its baseline as it is written.")
     usage = usage.replace("card.py", prog)
