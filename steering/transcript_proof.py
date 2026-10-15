@@ -51,7 +51,10 @@ def account_of(config_dir: Path, provider: str = "claude") -> str:
     h = harness.of(provider)
     if h is not None and name == h.config:
         return "default"
-    return _NOT_ACCOUNT.sub("-", name.lstrip(".").lower()).strip("-")[:64] or "default"
+    # Lowered a character at a time, as Go's strings.ToLower does (`accounts.Label`): `str.lower`
+    # turns İ into two characters, and the label must be the one the Go agent derives (#6766).
+    lowered = "".join(c.lower()[:1] for c in name.lstrip("."))
+    return _NOT_ACCOUNT.sub("-", lowered).strip("-")[:64] or "default"
 
 
 def account_of_root(root: Path, provider: str = "claude") -> str:

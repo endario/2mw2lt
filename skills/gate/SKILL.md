@@ -106,8 +106,9 @@ still queued after an hour is refused, and `cancel` withdraws a queued one.
 
 On Go, a review commissioned at a head the server has not yet observed, sent a second after the
 push, is `awaiting`, not refused: GitHub's delivery of that head queues it. Do not send it again. If
-a later head is observed first, or none within a minute, you are told why from `gate <id>`, and
-`cancel` withdraws an awaiting one too.
+a later head is observed first, or none within a minute, you are told why from `gate <id>`; one
+still not commissioned an hour after you asked is refused like a queued one, naming the check
+its last try was refused on. `cancel` withdraws an awaiting one too.
 
 Fix what you verify, push, and commission again: the next round is briefed with every earlier
 round's findings. A `ship it` closes the gate. At the ceiling steering refuses another round and

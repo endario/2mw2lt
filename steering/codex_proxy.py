@@ -15,10 +15,11 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
+
+import runtime_id
 
 NAME = "claude-code-proxy"
 ACCOUNT_ID = re.compile(r"[A-Za-z0-9_-]{1,200}")
@@ -76,37 +77,16 @@ def listening(port: int, run=None) -> tuple[int | None, str]:
     return None, f"nothing listens on port {port}"
 
 
-def _env_word(words: list[str], name: str) -> str:
-    """The last `name=` word, or empty: the environment follows the arguments in one word list,
-    so an argument cannot come after it."""
-    got = [w.split("=", 1)[1] for w in words if w.startswith(name + "=")]
-    return got[-1] if got else ""
-
-
-def _command_and_env(pid: int, run) -> list[str]:
-    """The words of pid's command line followed by its environment's: `ps -E` prints both on
-    macOS; Linux's ps has no `-E`, answering only `error: unsupported SysV option`, so the
-    environment is read there from `/proc/<pid>/environ`, which one login's processes may read of
-    another's."""
-    ps = _tool("ps")
-    if sys.platform == "darwin":
-        return (run([ps, "-Eww", "-o", "command=", "-p", str(pid)]) if ps else "").split()
-    words = (run([ps, "-o", "command=", "-p", str(pid)]) if ps else "").split()
-    try:
-        raw = Path(f"/proc/{pid}/environ").read_bytes()
-    except OSError:
-        return words
-    return [*words, *(w.decode("utf-8", "replace") for w in raw.split(b"\0") if w)]
-
-
-def proxy_home(pid: int, run=None, home: Path | None = None) -> Path | None:
+def proxy_home(pid: int, home: Path | None = None) -> Path | None:
     """The configuration root of the claude-code-proxy running as `pid`, from its own environment:
     its `XDG_CONFIG_HOME`, else its own `HOME`'s `.config`, else the reader's. None when the
-    process is not claude-code-proxy, or names a relative root."""
-    words = _command_and_env(pid, run or _run)
-    if not words or Path(words[0]).name != NAME:
+    process is not claude-code-proxy, or names a relative root. Both are read from the kernel
+    (`runtime_id`), as the Go agent's `proc` reads them."""
+    argv = runtime_id.process_argv(pid)
+    if not argv or Path(argv[0]).name != NAME:
         return None
-    xdg, own = _env_word(words[1:], "XDG_CONFIG_HOME"), _env_word(words[1:], "HOME")
+    env = runtime_id.process_env(pid) or {}
+    xdg, own = env.get("XDG_CONFIG_HOME", ""), env.get("HOME", "")
     root = Path(xdg) if xdg else (Path(own) if own else (home or Path.home())) / ".config"
     return root if root.is_absolute() else None
 
@@ -147,7 +127,7 @@ def home_of(base_url: str | None, run=None, home: Path | None = None) -> Path | 
     """The home of the claude-code-proxy a base URL names."""
     port = loopback_port(base_url)
     pid = listener(port, run) if port else None
-    return proxy_home(pid, run, home) if pid else None
+    return proxy_home(pid, home) if pid else None
 
 
 def proxied_account(base_url: str | None, run=None, home: Path | None = None) -> str | None:
@@ -164,7 +144,7 @@ def homes(run=None, home: Path | None = None) -> list[Path]:
     for line in (run([ps, "-Aww", "-o", "pid=,command="]) if ps else "").splitlines():
         pid, _, command = line.strip().partition(" ")
         if pid.isdigit() and command.split() and Path(command.split()[0]).name == NAME:
-            root = proxy_home(int(pid), run, home)
+            root = proxy_home(int(pid), home)
             if root and root not in out:
                 out.append(root)
     return out

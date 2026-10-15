@@ -66,6 +66,24 @@ class Undeclared(Exception):
     """The declaration is missing or names something that is not an executable."""
 
 
+class NoDeclaration(Undeclared):
+    """The machine declares no launcher at all, which other sources may offer for; any other
+    `Undeclared` is a declaration that is wrong, and offers nothing."""
+
+
+def offering(declare: Callable[[], list[dict]], beside: list[dict]) -> list[dict]:
+    """What the declaration and the launchers beside it offer together. A machine declaring nothing
+    offers what is beside it, refused with the declaration's own refusal when that is nothing too; a
+    declaration that is wrong offers nothing, since what it would have said — an account unrouted,
+    a proxy — would otherwise be lost to a profile offering the same account unrestricted."""
+    try:
+        return declare() + beside
+    except NoDeclaration:
+        if not beside:
+            raise
+        return list(beside)
+
+
 def declared(env: dict | None = None, log: Callable[[str], None] | None = None,
              commands: Callable[[Callable[[str], None]], dict[str, list[dict]] | None] | None = None) -> list[dict]:
     """The declared launchers (doc 121 §2), each `{path, direct, proxy, vendor, unrouted}` with `path`
@@ -86,12 +104,15 @@ def declared(env: dict | None = None, log: Callable[[str], None] | None = None,
     items, source = None, ENV
     if env is None:
         import settings
-        items, source = settings.claude_launchers(), "agent.toml [routing].claude_launchers"
+        try:
+            items, source = settings.claude_launchers(), "agent.toml [routing].claude_launchers"
+        except settings.Rejected as ex:
+            raise Undeclared(str(ex)) from None
     if items is None:
         source = ENV
         raw = (os.environ if env is None else env).get(ENV)
         if not raw:
-            raise Undeclared(f"this machine declares no launcher ({ENV})")
+            raise NoDeclaration(f"this machine declares no launcher ({ENV})")
         try:
             items = json.loads(raw)
         except ValueError:
@@ -167,8 +188,16 @@ def declared(env: dict | None = None, log: Callable[[str], None] | None = None,
 
 
 def _run(argv: list[str]) -> str:
+    """A launcher's answer, asked in the environment a launched session gets (`environment`): an
+    agent's own variables must not decide which account a launcher lands on, since the launch
+    replaces them whole."""
     return subprocess.run(argv, capture_output=True, text=True, stdin=subprocess.DEVNULL,
-                          timeout=STATUS_TIMEOUT, check=False).stdout
+                          timeout=STATUS_TIMEOUT, check=False, env=launch_env()).stdout
+
+
+def launch_env(env: dict | None = None) -> dict[str, str]:
+    """`environment()` as a mapping, for a process the agent runs as a launch would run it."""
+    return dict(kv.split("=", 1) for kv in environment(env))
 
 
 def _claude(launcher: dict) -> list[str]:
@@ -215,7 +244,8 @@ def plugin_installed(config_dir: str) -> bool:
 
 def accounts(launchers: list[dict], readings: list[dict], run: Callable[[list[str]], str] = _run,
              proxy_label: Callable[[str], tuple[tuple[str, str] | None, str]] = None,
-             why: dict | None = None, dead: set[str] | None = None) -> list[dict]:
+             why: dict | None = None, dead: set[str] | None = None,
+             redundant: dict | None = None) -> list[dict]:
     """`{vendor, account_id, launcher}` for each launcher signed in first-party, the account being
     the usage reading (`readings`, as the agent sends them) labelled by the launcher's usage
     source; with none, its declared vendor and its directory's label, an account with no verdict.
@@ -258,6 +288,12 @@ def accounts(launchers: list[dict], readings: list[dict], run: Callable[[list[st
         else:
             key, probed = ("claude", own), f"directory {own}"
         read = by.get(key) if key else None
+        if launcher.get("joined") == "credential":
+            # A discovered profile's key is its evidence (6814 §2.3): unlimited named the account by
+            # that very key, and its session spends it whatever login or reading its home holds.
+            out.append({"vendor": launcher["vendor"], "account_id": launcher["account"].split("/", 1)[1],
+                        "launcher": launcher, "where": where})
+            continue
         if launcher.get("account"):
             # An entry that names its account asserts where it must land (#6458): only a reading
             # of that very account, or — with no reading for its home — a home labelled by the
@@ -318,10 +354,57 @@ def accounts(launchers: list[dict], readings: list[dict], run: Callable[[list[st
                 placed_by_account.add(a["where"])
         once.append(a)
     out = once
-    # A launcher the agent wrote for an env file steps aside for a declared one placing the same
-    # home (#6001): the declaration is the owner's word, and two launchers for one account is a
-    # choice the launch would make for no reason.
-    return [a for a in out if not a["launcher"].get("synthesized") or a["where"] not in placed]
+    # A launcher the agent wrote for an env file, or a profile it discovered, steps aside for a
+    # declared one placing the same home (#6001, 6814 §2.7): the declaration is the owner's word,
+    # and two launchers for one account is a choice the launch would make for no reason. Of the
+    # agent's own, the first for a home stands, which is the discovered profile.
+    # By home and account, not home alone: profiles that share a home may each spend their own key.
+    # Discovered profiles on one home and account all stand, since each may map other models and a
+    # launch picks the one serving its model (`serving`); a written wrapper is the stand-in for
+    # one, so it steps aside for a declared launcher or a discovered profile there.
+    on = lambda a: (a["where"], a["vendor"], a["account_id"])
+    declared_on: dict[tuple, list[dict]] = {}
+    for a in out:
+        if not a["launcher"].get("synthesized"):
+            declared_on.setdefault(on(a), []).append(a["launcher"])
+    found_on = {on(a) for a in out if a["launcher"].get("discovered")}
+    kept, written = [], set()
+    for a in out:
+        if a["launcher"].get("synthesized"):
+            stands_aside = on(a) in declared_on or (not a["launcher"].get("discovered")
+                                                    and (on(a) in found_on or on(a) in written))
+            if stands_aside:
+                why[a["launcher"]["path"]] = (f"another launcher already placed {a['vendor']} account "
+                                              f"{a['account_id']} in directory {a['where']}")
+                # A declared entry is redundant when a discovered profile would offer the same
+                # account from the same home and the entry says nothing discovery cannot (6814 §3):
+                # an `unrouted` or a `proxy` is the owner's word, an exception that stays.
+                for entry in declared_on.get(on(a), []) if redundant is not None and a["launcher"].get("discovered") else []:
+                    if not entry.get("unrouted") and not entry.get("proxy"):
+                        redundant.setdefault(entry["path"], a["launcher"].get("found_by") or Path(a["launcher"]["path"]).name)
+                continue
+            if not a["launcher"].get("discovered"):
+                written.add(on(a))
+        kept.append(a)
+    return kept
+
+
+def canonical(model: str) -> str:
+    """A model's identity as coordination derives it (`protocol.CanonicalModel`): the last path
+    segment, lower cased, without Claude Code's context suffix (`[1m]`)."""
+    name = model.strip().lower().rpartition("/")[2]
+    return re.sub(r"(?<=.)\[[^\]]*\]$", "", name)
+
+
+def serving(found: list[dict], model: str | None) -> list[dict]:
+    """Of an account's launchers, those a launch for `model` may start (6814 §2.5): first the ones
+    whose profile maps that model, then the ones that map none, whose vendor takes what it is sent.
+    A launcher mapping other models only is not one: its endpoint would answer as another model."""
+    if not model:
+        return found
+    want = canonical(model)
+    named = [a for a in found if want in {canonical(m) for m in a["launcher"].get("models") or ()}]
+    return named + [a for a in found if not a["launcher"].get("models")]
 
 
 def offer(declared_: list[dict], readings: list[dict] | None, log: Callable[[str], None],
@@ -334,11 +417,15 @@ def offer(declared_: list[dict], readings: list[dict] | None, log: Callable[[str
     if readings is None:
         raise Unread("this agent has not read its accounts yet")
     why: dict = {}
-    found = accounts(declared_, readings, run, proxy_label, why, dead)
+    redundant: dict = {}
+    found = accounts(declared_, readings, run, proxy_label, why, dead, redundant)
     for a in found:
         log(f"launcher {Path(a['launcher']['path']).name} offers {a['vendor']} account {a['account_id']}")
     for path, cause in why.items():
         log(f"launcher {Path(path).name} offers no account: {cause}")
+    for path, profile in redundant.items():
+        log(f"launcher entry {Path(path).name} is redundant: profile {profile} offers its account from its home "
+            "by itself, so the entry can be removed")
     return found
 
 
@@ -352,8 +439,14 @@ def census_entries(offered: list[dict]) -> list[dict]:
     never a machine's own name for its command or its path (#6458 §2.6) — two machines whose
     commands for one account are named differently send the same entry, and coordination keys by
     the id both name."""
-    return [{"vendor": a["vendor"], "account_id": a["account_id"],
-             **({"unrouted": True} if a["launcher"].get("unrouted") else {})} for a in offered]
+    # Each account once, as coordination admits it: several launchers may reach one account (two
+    # profiles on one key), and it is routed when any of them is.
+    out: dict[tuple[str, str], bool] = {}
+    for a in offered:
+        key = (a["vendor"], a["account_id"])
+        out[key] = out.get(key, True) and bool(a["launcher"].get("unrouted"))
+    return [{"vendor": v, "account_id": i, **({"unrouted": True} if unrouted else {})}
+            for (v, i), unrouted in out.items()]
 
 
 def census_offer(kept: dict, found: list[dict] | None, declared_paths: set[str],

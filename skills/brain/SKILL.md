@@ -120,6 +120,78 @@ say `from: session <id>` naming the session it is about:
   its whole context. While your keep stands you are not told: the platform gives the session a turn
   that refreshes its cache instead, once per lifetime.
 - **`session-kept-over`**: its keep's until passed and no work reached it.
+- **`directive-unacknowledged`**, a signal: the session has held a directive for 10
+  minutes (`signals.directive_unacked.*`) without acknowledging it, once per directive. `read_since`
+  says whether it was read after the directive opened: read and not taking it, or perhaps gone. A
+  launch's brief is told as `launch-brief-unheard` instead.
+- **`card-unbranched`**, a signal: the session has executed its card for 45 minutes
+  (`signals.card_unbranched.*`) with no branch claimed for it, however busily it writes, once per
+  engagement. Ask what it has, and to claim its branch and push.
+- **`push-quiet`**, a signal: the platform last heard a push to the session's card's branches an hour
+  ago (`signals.push_quiet.*`), once per push heard. Heard is when GitHub's delivery reached it, and it
+  is not proof that nothing was pushed since; a branch whose head the last push heard does not explain
+  reads unknown and is not told. Ask the session to push what it has.
+- **`pass-stranded`**, a signal from `gate <commission>`: a pull request's pass was published on its
+  head 30 minutes ago (`signals.pass_stranded.*`) and it is still read open on that head, once per
+  head. It names who asked for the review or carried it and whether they are still enrolled. Passed
+  and open, not proven mergeable: have the author merge it, merge it, or say why it waits.
+- **`gate-delayed`**, a signal from `gate <commission>`: a gate has waited 15 minutes for a judge
+  (`signals.gate_delayed.*`), counted from its commission across every judge that handed it on, or
+  its judge has run past its offer's deadline. Once per wait and once per offer. No last output says
+  only that nothing was seen. Free room for a judge, look at the machine, or cancel and commission again.
+- **`need-aged`**, a signal: a session's blocked need has stayed open 4 hours, or a placement need 24
+  hours (`signals.need_aged.*`), once per need. It names its question, and a blocked need's session:
+  answer it, unblock it, or dismiss it.
+- **`account-unspent`**, a signal: an account the team spends resets within 60 minutes with more than
+  30% of its scored window left (`signals.account_unspent.*`), once per reset. What is left at the
+  reset is lost: place work on it before then.
+- **`machine-behind`**, a signal: a machine's agent runs another release than its door states, 15
+  minutes after the door began stating it or the machine linked (`signals.machine_behind.*`), once
+  per release. Deploy it there, or see why its follow stopped.
+- **`agent-restarted`**, a signal: a machine's agent came back as another process on the release it
+  already ran, so no deploy restarted it (`signals.agent_restarted.enabled`). It names when, and the
+  work the machine had been given and not settled then, which the restart may have cut off. A restart
+  that switched it between the Go and the Python agent names `from` and `to`: a known cause.
+- **`card-closed`**, a signal: a live card's work landed, or every issue it resolves was closed with no
+  branch or closing pull request, 15 minutes ago (`signals.card_closed.*`), once per closing. It names
+  the card's executor and what it resolves still open. A candidate, never concluded for you: conclude
+  it, or ask its executor what is left.
+
+A workspace may route `directive-unacknowledged`, `card-unbranched`, `push-quiet`, `account-reset`
+and `account-unspent` to the sessions each is about instead of you, or to both; you are told unless
+set. A session is told its
+own `suggested_act`, and is told nothing once it has left; routed to `session`, the kind is not told
+to you at all, so read it from the fleet rather than waiting for its notice.
+A workspace may also space a kind's tells: one told inside the window after another waits until it
+passes, and is then told, never dropped.
+Turning a kind off ends what it still owes you; told notices stand. Turned on again, it tells
+what still holds, once, and nothing from while it was off.
+
+Every 30 minutes by default (the workspace's `signals.fallback.*` settings), whatever else you heard
+and however busy you are, a say `from: signal <id>` gives you a `seat-fallback` snapshot. It is one
+signal whose facts lead with `changed`, what moved since the last snapshot you received in this seat
+generation (or `nothing changed`), then `act_on`, one line per thing waiting on you, then a compact
+inventory, a section each in the order you act on them: fleet, work, capacity, attention, launches,
+gates, machines, sources. Each section is lines, its moments in minutes from `observed_at`; a
+section with nothing to say is left out. Work names only cards someone executes or a gate judges,
+counting the rest by lane; machines and sources appear only when something is off. A section that
+could not be read says why in `unavailable`; one left
+out to fit says where to read it in `omitted`, and the snapshot is then `complete: false`. `absent`
+names what no reading supplies yet. Start from `changed` and `act_on`, then review the inventory for
+what no notice raised: an idle or stuck session, a card nobody executes or that made no visible
+progress, a spent or idle account, a need waiting. Act only where something warrants it. A snapshot
+is the platform's report, never the owner's word, and it is not news to pass on: do not answer it
+with a status report to the owner. The next one comes when you have received this one.
+
+Answer each snapshot once you have reviewed it, by the `episode` it carries:
+
+```
+answer: token @lease <episode> acted because <what you did>
+answer: token @lease <episode> considered because <why nothing needed you>
+```
+
+Choosing not to act is an answer. The platform records who answered and when, never whether the
+judgment was right. An answer to an older snapshot is recorded and answers nothing newer.
 
 A session that finishes is closed, driven with its next piece of work, or kept, and nothing else:
 never idle by neglect. Keep it only with a plan, the work you expect in its territory and when,
@@ -154,8 +226,10 @@ it is stale, its keep and its cache), `null` when nothing has been read:
 delegate by those, and never
 ask a session its level, since it cannot read its own. Its account's verdict is the `fleet` row
 naming it in `sessions`.
-A say `from: account <id>` is a spent account's reset: resume each session it names that stopped
-for that account with `wake:`, and place queued work on it by its rank.
+A say `from: account <id>` is a spent account's reset, told as a signal: one JSON object with its
+`kind`, `subject`, `episode`, `observed_at`, typed `facts` and, when there is one, a
+`suggested_act`. Resume each session its `facts.sessions` names that stopped for that account with
+`wake:`, and place queued work on it by its rank.
 The cards are the board's, which a brain on any machine reads with
 `python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease "/cards?state=live"`, a hundred to
 a page; read on with `&next=<the page's next>`. Delegate to each session a notice frees, each
@@ -553,8 +627,12 @@ LAUNCH
 The daemon keeps it with the launch and hands it to the session the launch starts, under your
 `from:` line, as soon as it has connected, so you relay nothing to it. If it is not
 taken, you are told `launch-brief-unheard`: the launch was refused or lapsed, or the session has
-not acknowledged it after ten minutes. A launch without a brief appears in `/sessions` and you
-delegate to it like any idle session. One launch is in flight per machine, and an agent refuses
+not acknowledged it after ten minutes. A launch without a brief that ends without starting a
+session, refused by its machine or withdrawn for any cause but your own withdrawal, is told to you
+as a `launch-ended` signal naming its cause and what the machine said; `/launches/ended` lists the
+last day's. A launch still waiting for a machine after 15 minutes (`signals.launch_waiting.*`) is
+told to you once as `launch-waiting`, with why it waits and the machines short of room. A launch without a brief that starts appears in `/sessions` and you delegate to it like
+any idle session. One launch is in flight per machine, and an agent refuses
 one past `STEERING_MAX_WORKERS` live workers.
 
 **Name a floor, not a model.** A launch names the least rarity its work needs, `uncommon`, `rare`,

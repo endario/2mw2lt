@@ -27,11 +27,12 @@ HEADER = "X-Steering-Agent-Credential"   # the door's `principal.AGENT_HEADER`
 class NoCredential(Exception):
     """This pair is enrolled and has no usable credential. The request is not sent: sent bare
     it would reach whois and succeed, and the broken renewal would say nothing (doc 85 §3).
-    `status` is the console's, when it answered with a refusal."""
+    `status` is the console's, when it answered with a refusal, and `code` its own name for it."""
 
-    def __init__(self, message: str, status: int | None = None):
+    def __init__(self, message: str, status: int | None = None, code: str = ""):
         super().__init__(message)
         self.status = status
+        self.code = code
 
 
 def home() -> Path:
@@ -294,10 +295,10 @@ def _native_post(origin: str, path: str, body: dict, headers: dict, timeout: flo
             status, got = r.status, json.loads(r.read())
     except urllib.error.HTTPError as e:
         try:
-            code = json.loads(e.read()).get("code") or f"status-{e.code}"
+            named = json.loads(e.read()).get("code") or ""
         except ValueError:
-            code = f"status-{e.code}"
-        raise NoCredential(f"coordination refused {path} ({e.code}): {code}", e.code)
+            named = ""
+        raise NoCredential(f"coordination refused {path} ({e.code}): {named or f'status-{e.code}'}", e.code, named)
     except (urllib.error.URLError, OSError, ValueError) as e:
         raise NoCredential(f"coordination did not answer {path}: {e}")
     if not isinstance(got, dict):
@@ -362,6 +363,12 @@ def _refused(e: NoCredential) -> bool:
     return e.status is not None and e.status < 500
 
 
+def _final(e: NoCredential) -> bool:
+    """A refusal Go named and will give again to the same request: a binding it no longer renews, a
+    revoked one. A timeout or a pace is not, nor a status nothing named."""
+    return _refused(e) and bool(e.code) and e.status not in (408, 429)
+
+
 def _native_report(p: Path, d: dict, why: str) -> None:
     """A renewal that did not renew while the held credential stands, said once per reason on
     stderr, which the agent's log keeps (C5): the caller is handed the credential, not the reason."""
@@ -386,6 +393,12 @@ def _native_current(p: Path, d: dict, clock) -> str:
         d = _held(p)
         if _native_fresh(d, clock):
             return d["credential"]
+        # A renewal Go refused by name is not asked again: the same request has the same answer, and
+        # asking at every backoff only repeated it in the log for days (#6773).
+        if d.get("refused"):
+            if d.get("credential") and d.get("exp", 0) > clock():
+                return d["credential"]
+            raise NoCredential(f"{d['refused']}; its renewal stopped there: enrol this machine on the workspace again")
         holder = _holder()
         if d.get("os_node") and holder["os_node"] != d["os_node"]:
             raise NoCredential(f"this OS user's node is {holder['os_node'] or 'unreadable'}, and the enrolment "
@@ -400,8 +413,16 @@ def _native_current(p: Path, d: dict, clock) -> str:
             status, got = _native_post(d["origin"], path, holder if exchanging else {},
                                        {HEADER: d["secret"] if exchanging else d["credential"], "Idempotency-Key": d["pending"]})
         except NoCredential as e:
-            if d.get("credential") and d.get("exp", 0) > clock():
+            if _final(e):
+                import sys
+                d["refused"] = str(e)
+                d.pop("pending", None)
+                _write(p, d)
+                print(f"credential for {d['workspace']}: {e}; it will not be asked again, so enrol this machine on the "
+                      "workspace again", file=sys.stderr, flush=True)
+            elif d.get("credential") and d.get("exp", 0) > clock():
                 _native_report(p, d, f"not renewed, holding the credential until {d['exp']}: {e}")
+            if d.get("credential") and d.get("exp", 0) > clock():
                 return d["credential"]
             raise
         if status == 202:
@@ -426,6 +447,30 @@ def _native_current(p: Path, d: dict, clock) -> str:
         os.close(lock)
 
 
+def _sweep_superseded(files: list[Path], failures: dict, clock, say) -> None:
+    """Remove an enrolment whose renewal Go refused by name while another, at another door, holds a
+    live credential for the same workspace on the same origin: the copy an alias's door rewrite or
+    a renamed team or workspace left behind, whose binding the live copy's renewal superseded
+    (#6773). One with no live copy is kept: its refusal is the only word that it must enrol again."""
+    held = {p: d for p in files if (d := _read(p))}
+    live = {(d.get("origin"), d.get("workspace")): d.get("door") for d in held.values()
+            if d.get("native") and not d.get("refused") and d.get("credential") and d.get("exp", 0) > clock()}
+    for p, d in held.items():
+        at = live.get((d.get("origin"), d.get("workspace")))
+        if not d.get("refused") or not at or str(at).rstrip("/") == str(d.get("door", "")).rstrip("/"):
+            continue
+        try:
+            p.unlink(missing_ok=True)
+        except OSError as e:
+            if say:
+                say(f"credential for {d.get('workspace')} at {d.get('door')}: refused and superseded by {at}, but not removed: {e}")
+            continue
+        p.with_suffix(".lock").unlink(missing_ok=True)
+        failures.pop(p, None)
+        if say:
+            say(f"credential for {d.get('workspace')} at {d.get('door')} removed: refused, and {at} holds the workspace's live credential")
+
+
 RENEW_POLL = 60.0
 RENEW_BACKOFF = (30.0, 900.0)
 
@@ -437,9 +482,11 @@ def renew_native(failures: dict, clock=time.time, say=None) -> float:
     that did not renew is tried again after a backoff doubling from 30 s to 15 min, kept per
     enrolment in `failures`. The poll is short because a sleeping Mac's timers stop with it."""
     wait = RENEW_POLL
-    for p in sorted(home().glob("*.json")) if home().is_dir() else []:
+    files = sorted(home().glob("*.json")) if home().is_dir() else []
+    _sweep_superseded(files, failures, clock, say)
+    for p in files:
         d = _read(p)
-        if not d or not d.get("native") or not d.get("credential") or _native_fresh(d, clock):
+        if not d or not d.get("native") or not d.get("credential") or _native_fresh(d, clock) or d.get("refused"):
             failures.pop(p, None)
             continue
         tried, retry_at = failures.get(p, (0, 0.0))
@@ -449,7 +496,8 @@ def renew_native(failures: dict, clock=time.time, say=None) -> float:
         try:
             current(p, clock)
         except NoCredential as e:
-            if say:
+            # A refusal by name was told where it was kept.
+            if say and not (_read(p) or {}).get("refused"):
                 say(f"credential for {d.get('workspace')}: not renewed: {e}")
         if _native_fresh(_read(p) or d, clock):
             failures.pop(p, None)

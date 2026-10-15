@@ -363,7 +363,7 @@ def _codex_reachable(psession: str) -> bool:
     """An idle thread remains a queue destination while its rollout is on this machine and an
     app-server is there to drain the queue (#1967)."""
     import codex_probe as codex
-    return _codex_rollout(psession) is not None and codex.app_server()
+    return codex.present(psession, HARNESSES["codex"].config_dir()) and codex.app_server()
 
 
 _SESSION_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)

@@ -25,6 +25,20 @@ class Refused(Exception):
     """Why nothing was delivered. The caller reports it; the envelope stays where it was."""
 
 
+def present(thread: str, home: Path | None = None) -> bool:
+    """Whether the thread has a transcript on this machine, readable or not: Codex compresses a
+    rollout idle long enough to `.jsonl.zst` when `local_thread_store_compression` is on, and a
+    compressed one is still this machine's thread (#6813). Nothing here reads a compressed one."""
+    if rollout(thread, home) is not None:
+        return True
+    root = (home or CODEX_HOME) / "sessions"
+    for p in sorted(root.glob("*/*/*/rollout-*.jsonl.zst")) if root.is_dir() else []:
+        m = _ROLLOUT.match(p.name.removesuffix(".zst"))
+        if m and m["thread"] == thread:
+            return True
+    return False
+
+
 def rollout(thread: str, home: Path | None = None) -> Path | None:
     """The thread's transcript, or None. Searched by the id in the filename rather than by
     date, because the day in the name is the day the thread opened and says nothing about when

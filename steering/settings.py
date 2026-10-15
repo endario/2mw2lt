@@ -71,7 +71,7 @@ def validate(data) -> dict:
     if not isinstance(routing, dict):
         raise ValueError("[routing] is not a table")
     extra = set(routing) - {"judges_exclude", "launches_exclude", "claude_launchers", "worker_forge",
-                            "account_uses", "glm_harness"}
+                            "account_uses", "glm_harness", "claude_profiles_exclude"}
     if extra:
         raise ValueError(f"[routing] has an unknown key ({', '.join(sorted(extra))})")
     if routing.get("glm_harness", "claude-code") not in ("claude-code", "zcode"):
@@ -82,6 +82,9 @@ def validate(data) -> dict:
     if "launches_exclude" in routing and not (isinstance(routing["launches_exclude"], list)
                                               and all(isinstance(v, str) for v in routing["launches_exclude"])):
         raise ValueError("[routing].launches_exclude is not a list of harness names")
+    if "claude_profiles_exclude" in routing and not (isinstance(routing["claude_profiles_exclude"], list)
+                                                     and all(isinstance(v, str) for v in routing["claude_profiles_exclude"])):
+        raise ValueError("[routing].claude_profiles_exclude is not a list of profile names")
     # Only the shape: whether each entry names a launcher is `launchers.declared()`'s to judge, so a
     # missing binary refuses the launch it would serve and not the limits beside it.
     if "claude_launchers" in routing and not (isinstance(routing["claude_launchers"], list)
@@ -282,10 +285,25 @@ def glm_harness(path: Path = DEFAULT_PATH) -> str:
     return capacity(path).get("routing", {}).get("glm_harness", "claude-code")
 
 
+class Rejected(ValueError):
+    """agent.toml is malformed and this process holds no good read of it: what it declares is
+    unknown, which is not declaring nothing."""
+
+
 def claude_launchers(path: Path = DEFAULT_PATH) -> list | None:
     """The declared launchers as the file writes them (doc 121 §2), or None when it declares none
-    and `STEERING_CLAUDE_LAUNCHERS` decides."""
-    return capacity(path).get("routing", {}).get("claude_launchers")
+    and `STEERING_CLAUDE_LAUNCHERS` decides. Raises `Rejected` when the file is malformed with no
+    last good table held."""
+    table, error = _state(path)
+    if error is not None and not table:
+        raise Rejected(f"agent.toml {error}")
+    return table.get("routing", {}).get("claude_launchers")
+
+
+def claude_profiles_exclude(path: Path = DEFAULT_PATH) -> list[str]:
+    """The `claude-<name>` profiles this machine has that are not offered, though they work by hand
+    (6814-profile-discovery/design.md §2.7)."""
+    return capacity(path).get("routing", {}).get("claude_profiles_exclude", [])
 
 
 def worker_forge(path: Path = DEFAULT_PATH) -> str:

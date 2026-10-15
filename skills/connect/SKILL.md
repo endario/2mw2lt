@@ -119,6 +119,9 @@ A `say` from `kick <id>` means you hold a card and your turn ended with nothing 
 Carry on with the work, declare what you wait on with `wait`, or say `done` or `blocked`. Do not
 answer it in words.
 
+A `say` that is a signal (JSON with a `kind`), from `session`, `account` or `signal <id>`, is about you or an
+account you draw on, routed to you by the workspace. Do its `suggested_act`; do not answer it in words.
+
 A `say` from `warm <id>` is the platform refreshing your prompt cache while the brain keeps you.
 End the turn without a word.
 

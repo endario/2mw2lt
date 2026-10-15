@@ -99,9 +99,13 @@ _KEEP = re.compile(r"^keep:\s*token\s+@lease\s+(?P<to>\S+)(?:\s+until\s+(?P<unti
 _UNKEEP = re.compile(r"^unkeep:\s*token\s+@lease\s+(?P<to>\S+)\s*$")
 _KEEP_USAGE = {"keep": "keep: token @lease <session> [until <time or duration>] because <reason>",
                "unkeep": "unkeep: token @lease <session>"}
+# The seat's answer to a snapshot it was told (#6693): it acted on it, or considered it and chose not
+# to, and why. Choosing not to act is an answer.
+_ANSWER = re.compile(r"^answer:\s*token\s+@lease\s+(?P<episode>[0-9a-fA-F-]{36})\s+(?P<verdict>acted|considered)\s+because\s+(?P<why>\S.*?)\s*$", re.S)
+_ANSWER_USAGE = "answer: token @lease <episode> acted because <why>` or `answer: token @lease <episode> considered because <why>"
 # Every lease verb `go_say` sends to Go, so a refusal of another names what this client takes.
 GO_VERBS = tuple(sorted({"authorship", "backlog", "cancel", "dispose", "launch", "lift", "promote", "relay", "roster",
-                         "withdraw", *_ACTION, *_KEEP_USAGE}))
+                         "withdraw", "answer", *_ACTION, *_KEEP_USAGE}))
 # The paths `go_post` takes: each is the seat's own command, translated to the route Go serves.
 POST_TARGETS = ("/steering/seat/read", "/steering/brain/reply", "/steering/brain/attach",
                 "/steering/brain/detach", "/steering/push/raise")
@@ -138,6 +142,8 @@ def go_say(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         return _go_action(rec, verb, line, key)
     if verb in _KEEP_USAGE:
         return _go_keep(rec, verb, line, key)
+    if verb == "answer":
+        return _go_answer(rec, line, key)
     lift = _LIFT.match(line)
     if lift:
         return _go_lift(rec, lift, key)
@@ -362,6 +368,31 @@ def _go_keep(rec: dict, verb: str, line: str, key: str) -> tuple[int, str, bool]
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
             return 1, refusal.use(verb, str(e)), False
+        return 1, refusal.retry(str(e)), True
+    return 0, said, False
+
+
+def _go_answer(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
+    """`answer:` on Go: the brain answers a snapshot by its episode, acted or considered, and why."""
+    import refusal
+    import session_routes
+    m = _ANSWER.match(line)
+    if not m:
+        return 2, refusal.use("answer", f"malformed answer: on Go it is `{_ANSWER_USAGE}`"), False
+    body = {"verdict": m["verdict"], "disposition": " ".join(m["why"].split())}
+    try:
+        said = session_routes.seat_answer(rec["session"], rec["token"], m["episode"].lower(), body, key)
+    except session_routes.NotSeated as why:
+        return 1, GO_NOT_SEATED.format(why=why), False
+    except session_routes.Unsent as e:
+        return 1, refusal.retry(str(e)), True
+    except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale, False
+        if e.code in SEAT_LOST:
+            return 1, GO_NOT_SEATED.format(why=e), False
+        if session_routes.settled(e):
+            return 1, refusal.use("answer", str(e)), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 

@@ -43,6 +43,7 @@ _RAW_FORMS = {
     "park": ["park: token <lease token> <session> [until <time or duration>] because <reason>"],
     "keep": ["keep: token <lease token> <session> [until <time or duration>] because <reason>"],
     "unkeep": ["unkeep: token <lease token> <session>"],
+    "answer": ["answer: token <lease token> <episode> acted because <why>", "answer: token <lease token> <episode> considered because <why>"],
     "roster": ["roster: token <lease token> [with gone]"],
     "gate": ["gate: review <repo> <branch> pr <n> [head <sha>] [tier <tier>] [harness <harness>] [exclude <vendor>[,<vendor>]] [final] token <t>", "gate: critic <repo> <branch> doc <path> [head <sha>] [tier <tier>] [harness <harness>] [exclude <vendor>[,<vendor>]] [final] token <t>", "gate: status <commission> token <t>", "gate: cancel <commission> token <t>", "gate: pr <n> token <t>", "gate: carry <n> head <sha> [equivalent] token <t>"],
     "lift": ["lift: token <lease token> review <repo> pr <n> <reason>", "lift: token <lease token> critic <repo> branch <branch> <reason>", "lift: token <lease token> bench <vendor> <model> <reason>"],
@@ -58,7 +59,7 @@ _RAW_FORMS = {
 
 _AUDIENCE = {
     **{verb: "session" for verb in ("announce", "blocked", "wait", "done", "recommend", "ask", "claim", "taking", "declare", "checkpoint", "holds", "enroll", "bind", "ack", "say", "detach", "gate")},
-    **{verb: "seat" for verb in ("note", "launch", "withdraw", "relay", "retire", "card", "effort", "wake", "control", "rehome", "park", "cancel", "keep", "unkeep", "roster", "lift", "authorship", "dispose", "promote", "backlog", "night")},
+    **{verb: "seat" for verb in ("note", "launch", "withdraw", "relay", "retire", "card", "effort", "wake", "control", "rehome", "park", "cancel", "keep", "unkeep", "answer", "roster", "lift", "authorship", "dispose", "promote", "backlog", "night")},
     "rebind": "operator",
     "supersede": "operator",
 }
@@ -83,7 +84,7 @@ _EXAMPLES = {
     "ack": ["ack: 010101010101010101010101 token <t>"],
     "say": ["say: violet to amber token <t> please review this"],
     "note": ["note: token <lease token> review is waiting"],
-    "launch": ["launch: token <lease token> claude on build vendor anthropic model opus-5.5 effort high because review"],
+    "launch": ["launch: token <lease token> claude on build vendor anthropic model claude-opus-5-5 effort high because review"],
     "withdraw": ["withdraw: token <lease token> 1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00"],  # gitleaks:allow (a placeholder launch id)
     "cancel": ["cancel: token <lease token> 1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00"],  # gitleaks:allow (a placeholder action id)
     "relay": ["relay: token <lease token> to violet@1 review the branch"],
@@ -96,6 +97,8 @@ _EXAMPLES = {
     "park": ["park: token <lease token> violet until 2h because a critic needs its slot"],
     "keep": ["keep: token <lease token> violet until 45m because the review on #5536 lands within the hour"],
     "unkeep": ["unkeep: token <lease token> violet"],
+    "answer": ["answer: token <lease token> <episode from the snapshot> acted because I relaunched the stalled worker",
+               "answer: token <lease token> <episode from the snapshot> considered because nothing in it needed me"],
     "roster": ["roster: token <lease token> with gone"],
     "gate": ["gate: review endario/repo feat/help pr 1 token <t>", "gate: critic endario/repo feat/help doc documentation/plan.md token <t>", "gate: status 010101010101010101010101 token <t>", "gate: cancel 010101010101010101010101 token <t>", "gate: pr 1 token <t>", "gate: carry 1 head abababababababababababababababababababab token <t>"],
     "lift": ["lift: token <lease token> review endario/repo pr 1 needs another round", "lift: token <lease token> critic endario/repo branch feat/help needs another round", "lift: token <lease token> bench anthropic opus-5.5 retry it"],

@@ -156,7 +156,10 @@ def build(part: Path, root: Path, run=subprocess.run, uv: str | None = None) -> 
         raise BuildFailed("the agent needs uv")
     env = {**os.environ, "UV_PYTHON_INSTALL_DIR": str(root / "python"), "UV_CACHE_DIR": str(root / "uv-cache")}
     steering = part / "steering"
-    for argv, what in (([uv, "sync", "--frozen", "--quiet"], "uv sync"),
+    # Built here and renamed after, so the environment must be relocatable: otherwise every
+    # console script's shebang names this `.part` path, gone once renamed (#6788).
+    for argv, what in (([uv, "venv", "--relocatable", "--quiet"], "uv venv"),
+                       ([uv, "sync", "--frozen", "--quiet"], "uv sync"),
                        ([str(steering / ".venv" / "bin" / "python"), "-c", "import agent"], "import agent")):
         done = run(argv, cwd=steering, env=env, capture_output=True, text=True)
         if done.returncode:

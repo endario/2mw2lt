@@ -126,6 +126,7 @@ ListedAccountUsage = typing.TypedDict("ListedAccountUsage", {
     "label": "str | None",
     "manages": "bool",
     "co_owners": "list[AccountCoOwner] | None",
+    "concurrency": "AccountConcurrencyUsage",
     "shared": "AccountShared | None",
 })
 
@@ -265,6 +266,28 @@ AccountResetStated = typing.TypedDict("AccountResetStated", {
     "vendor": "str",
     "account_id": "str",
     "resets_at": "str | None",
+})
+
+# AccountConcurrencyUsage is an account's concurrency limit, null for none, and the places it holds.
+AccountConcurrencyUsage = typing.TypedDict("AccountConcurrencyUsage", {
+    "limit": "int | None",
+    "used": "int",
+})
+
+# AccountConcurrency is the body of POST /accounts/concurrency: how many sessions, gate runs and
+# launches the account may hold at once across the fleet, stated by one who manages it; null states
+# none (#6692).
+AccountConcurrency = typing.TypedDict("AccountConcurrency", {
+    "vendor": "str",
+    "account_id": "str",
+    "limit": "int | None",
+})
+
+# AccountConcurrencyStated is its answer: the account as the team resolves it and the limit now stated.
+AccountConcurrencyStated = typing.TypedDict("AccountConcurrencyStated", {
+    "vendor": "str",
+    "account_id": "str",
+    "limit": "int | None",
 })
 
 # AccountLabel is the body of POST /accounts/label: the caller's own name for an account, or null to
@@ -2693,6 +2716,29 @@ HoldingSession = typing.TypedDict("HoldingSession", {
     "workspace": "str",
 })
 
+# EndedLaunches answers the launches that ended without starting a session, the latest first, a
+# page at a time: Next, when set, is the `before` that reads the page after it (#6687).
+EndedLaunches = typing.TypedDict("EndedLaunches", {
+    "items": "list[EndedLaunch] | None",
+    "next": "typing.NotRequired[int | None]",
+})
+
+# EndedLaunch is one launch that ended without starting a session: what the seat asked for, when
+# and how it ended, and the reason its machine gave when one refused it.
+EndedLaunch = typing.TypedDict("EndedLaunch", {
+    "id": "str",
+    "harness": "str",
+    "model": "str | None",
+    "floor": "str | None",
+    "card": "str | None",
+    "reason": "str",
+    "machine": "str | None",
+    "ended": "str",
+    "cause": "str",
+    "how": "str",
+    "refused": "str | None",
+})
+
 # MachineSample is one independently ordered machine fact. Value contains the validated JSON value.
 MachineSample = typing.TypedDict("MachineSample", {
     "status": "str",
@@ -2745,6 +2791,7 @@ FleetCensus = typing.TypedDict("FleetCensus", {
     "complete": "bool",
     "gaps": "list[str] | None",
     "draining": "typing.NotRequired[bool]",
+    "runtimes": "typing.NotRequired[list[CensusRuntime] | None]",
     "expires_at": "str",
     "historical": "bool",
 })
@@ -3605,6 +3652,7 @@ Setting = typing.TypedDict("Setting", {
     "says": "str",
     "min": "typing.NotRequired[int | None]",
     "max": "typing.NotRequired[int | None]",
+    "options": "typing.NotRequired[list[SettingOption] | None]",
     "value": "typing.Any",
     "default": "typing.Any",
     "source": "str",
@@ -3612,6 +3660,12 @@ Setting = typing.TypedDict("Setting", {
     "changed_by": "typing.NotRequired[str | None]",
     "changed_at": "typing.NotRequired[str | None]",
     "on_machine": "typing.NotRequired[SettingOnMachine | None]",
+})
+
+# SettingOption is one value a choice takes, and its name in the console.
+SettingOption = typing.TypedDict("SettingOption", {
+    "value": "str",
+    "title": "str",
 })
 
 # SettingOnMachine is a machine's answer to its policy for one key (2395-machine-policy design,
@@ -3635,6 +3689,21 @@ SettingList = typing.TypedDict("SettingList", {
 SettingBody = typing.TypedDict("SettingBody", {
     "value": "typing.Any",
     "version": "int",
+})
+
+# SignalAnswerBody is the seat's answer to a snapshot it was told: whether it acted on it or
+# considered it and chose not to, and a short why. Choosing not to act is an answer.
+SignalAnswerBody = typing.TypedDict("SignalAnswerBody", {
+    "verdict": "str",
+    "disposition": "str",
+})
+
+# SignalAnswer is what the answer recorded: applied when it answered the seat's current snapshot,
+# superseded when it answered an older one, which is recorded and changes nothing.
+SignalAnswer = typing.TypedDict("SignalAnswer", {
+    "episode": "str",
+    "status": "str",
+    "replayed": "bool",
 })
 
 # SourceState is what the board is told of a source: when it was last read whole or in part,
@@ -3800,6 +3869,33 @@ WaitCancel = typing.TypedDict("WaitCancel", {})
 WaitCancelAnswer = typing.TypedDict("WaitCancelAnswer", {
     "id": "str",
     "from": "str",
+})
+
+# WakeBody is a member's registration of a routine woken by a collaborator's room
+# (documentation/architecture/go-room-deliveries-design.md, decision 8). Key is the routine's bearer
+# key, sealed and never answered.
+WakeBody = typing.TypedDict("WakeBody", {
+    "room": "str",
+    "url": "str",
+    "key": "str",
+})
+
+# WakeAnswer names the wake a registration made.
+WakeAnswer = typing.TypedDict("WakeAnswer", {
+    "id": "str",
+})
+
+# WakeDTO is a live wake: the room it watches and the host it posts to, never the path or the key.
+WakeDTO = typing.TypedDict("WakeDTO", {
+    "id": "str",
+    "room": "str",
+    "host": "str",
+    "created_at": "str",
+})
+
+# WakeList is a collaborator's live wakes in a workspace.
+WakeList = typing.TypedDict("WakeList", {
+    "wakes": "list[WakeDTO] | None",
 })
 
 IntentCreateBody = typing.TypedDict("IntentCreateBody", {
@@ -4051,6 +4147,7 @@ CardDTO = typing.TypedDict("CardDTO", {
     "id": "str",
     "name": "str",
     "major": "bool",
+    "priority": "str",
     "state": "str",
     "sign": "typing.NotRequired[str]",
     "track": "typing.NotRequired[str]",
@@ -4627,7 +4724,9 @@ WorkRoute = typing.TypedDict("WorkRoute", {
     "answer": "str",
 })
 
-# WorkerCensus is the bounded aggregate worker observation. It carries no worker or session identity.
+# WorkerCensus is the bounded worker observation. From version 2 it names each process by the
+# runtime id an incarnation of it would register, and the config directory whose registry named it,
+# so the account it spends takes its place (census.md); it never names a session.
 WorkerCensus = typing.TypedDict("WorkerCensus", {
     "v": "int",
     "taken_at": "str",
@@ -4636,6 +4735,14 @@ WorkerCensus = typing.TypedDict("WorkerCensus", {
     "complete": "bool",
     "gaps": "list[str] | None",
     "draining": "typing.NotRequired[bool]",
+    "runtimes": "typing.NotRequired[list[CensusRuntime] | None]",
+})
+
+# CensusRuntime is one process a version-2 census names.
+CensusRuntime = typing.TypedDict("CensusRuntime", {
+    "harness": "str",
+    "runtime_id": "str",
+    "directory": "typing.NotRequired[str]",
 })
 
 # WorkerCensusBody is the native census body before admission binds its uplink. Interactive is the
@@ -4716,6 +4823,7 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/accounts",
     "POST /w/{workspace}/api/v1/accounts/co-owners",
     "DELETE /w/{workspace}/api/v1/accounts/co-owners/{id}",
+    "POST /w/{workspace}/api/v1/accounts/concurrency",
     "POST /w/{workspace}/api/v1/accounts/label",
     "POST /w/{workspace}/api/v1/accounts/reset",
     "POST /w/{workspace}/api/v1/accounts/serve",
@@ -4754,6 +4862,9 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/checkpoints",
     "GET /w/{workspace}/api/v1/checkpoints/{checkpoint}",
     "GET /w/{workspace}/api/v1/collaborator",
+    "GET /w/{workspace}/api/v1/collaborators/{collaborator}/wakes",
+    "POST /w/{workspace}/api/v1/collaborators/{collaborator}/wakes",
+    "POST /w/{workspace}/api/v1/collaborators/{collaborator}/wakes/{wake}/revocation",
     "POST /w/{workspace}/api/v1/credentials/{credential}/revocations",
     "POST /w/{workspace}/api/v1/device-approvals",
     "POST /w/{workspace}/api/v1/device-exchanges",
@@ -4797,6 +4908,7 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/ladder",
     "POST /w/{workspace}/api/v1/ladder",
     "POST /w/{workspace}/api/v1/launches",
+    "GET /w/{workspace}/api/v1/launches/ended",
     "GET /w/{workspace}/api/v1/launches/waiting",
     "GET /w/{workspace}/api/v1/launches/{launch}",
     "POST /w/{workspace}/api/v1/launches/{launch}/withdrawal",
@@ -4845,6 +4957,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/handover",
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/release",
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/renewal",
+    "POST /w/{workspace}/api/v1/sessions/{session}/signals/{episode}/answer",
     "POST /w/{workspace}/api/v1/sessions/{session}/status",
     "POST /w/{workspace}/api/v1/sessions/{session}/targeting",
     "POST /w/{workspace}/api/v1/sessions/{session}/unkeep",
@@ -4910,6 +5023,7 @@ QUERY = {
     "GET /w/{workspace}/api/v1/goals/{goal}/register": {"limit": None, "next": None},
     "GET /w/{workspace}/api/v1/intents": {"disposition": frozenset({"open"}), "limit": None, "next": None},
     "GET /w/{workspace}/api/v1/knowledge/brief": {"paths": None, "branch": None},
+    "GET /w/{workspace}/api/v1/launches/ended": {"before": None},
     "GET /w/{workspace}/api/v1/machines": {"limit": None, "cursor": None},
     "GET /w/{workspace}/api/v1/momentum": {"window": frozenset({"30d", "7d", "90d"})},
     "GET /w/{workspace}/api/v1/needs": {"audience": frozenset({"owner", "seat"})},

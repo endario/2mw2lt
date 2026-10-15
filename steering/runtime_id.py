@@ -167,7 +167,15 @@ def started_epoch(pid: int) -> float | None:
         return None
 
 
-def _procargs(data: bytes) -> list[str] | None:
+ENV_ENTRIES = 8192
+ENV_BYTES = 4 << 20
+
+
+def _procargs_split(data: bytes) -> tuple[list[str], list[str] | None] | None:
+    """KERN_PROCARGS2's argv and environment: argc, the executable's path, padding, argv, then the
+    environment up to an empty string, then the kernel's own strings. The environment is None
+    when the buffer ends before that empty string, as it does for a platform binary, whose
+    environment the kernel withholds (`proc.Env` in Go)."""
     if len(data) < ctypes.sizeof(ctypes.c_int):
         return None
     count = ctypes.c_int.from_buffer_copy(data[:4]).value
@@ -182,7 +190,49 @@ def _procargs(data: bytes) -> list[str] | None:
     parts = data[start:].split(b"\0", count)
     if len(parts) <= count:
         return None
-    return [os.fsdecode(part) for part in parts[:count]]
+    argv = [os.fsdecode(part) for part in parts[:count]]
+    env, rest = [], parts[count]
+    while len(env) <= ENV_ENTRIES:
+        word, found, rest = rest.partition(b"\0")
+        if not found:
+            return argv, None
+        if not word:
+            return argv, env
+        env.append(os.fsdecode(word))
+    return argv, None
+
+
+def _procargs(data: bytes) -> list[str] | None:
+    split = _procargs_split(data)
+    return split[0] if split else None
+
+
+def _environ(entries: list[str]) -> dict[str, str] | None:
+    """Entries as a mapping, each name's first winning as getenv(3) reads it; None past the cap,
+    where a truncated environment could name the wrong value."""
+    if len(entries) > ENV_ENTRIES:
+        return None
+    out: dict[str, str] = {}
+    for entry in entries:
+        name, found, value = entry.partition("=")
+        if found and name not in out:
+            out[name] = value
+    return out
+
+
+def _sysctl_procargs(pid: int) -> bytes | None:
+    lib = ctypes.CDLL(ctypes.util.find_library("c"))
+    lib.sysctl.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_uint, ctypes.c_void_p,
+                          ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t]
+    lib.sysctl.restype = ctypes.c_int
+    mib = (ctypes.c_int * 3)(1, 49, pid)
+    size = ctypes.c_size_t()
+    if lib.sysctl(mib, 3, None, ctypes.byref(size), None, 0) or not size.value:
+        return None
+    buf = ctypes.create_string_buffer(size.value)
+    if lib.sysctl(mib, 3, buf, ctypes.byref(size), None, 0):
+        return None
+    return buf.raw[:size.value]
 
 
 def process_argv(pid: int) -> list[str] | None:
@@ -193,19 +243,27 @@ def process_argv(pid: int) -> list[str] | None:
         if sys.platform != "darwin":
             data = Path(f"/proc/{pid}/cmdline").read_bytes()
             return [os.fsdecode(part) for part in data.split(b"\0")[:-1]] if data.endswith(b"\0") else None
-        # KERN_PROCARGS2 carries argc, the executable's path, padding, argv and then env.
-        lib = ctypes.CDLL(ctypes.util.find_library("c"))
-        lib.sysctl.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_uint, ctypes.c_void_p,
-                              ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t]
-        lib.sysctl.restype = ctypes.c_int
-        mib = (ctypes.c_int * 3)(1, 49, pid)
-        size = ctypes.c_size_t()
-        if lib.sysctl(mib, 3, None, ctypes.byref(size), None, 0) or not size.value:
+        data = _sysctl_procargs(pid)
+        return _procargs(data) if data else None
+    except (OSError, AttributeError, ValueError):
+        return None
+
+
+def process_env(pid: int) -> dict[str, str] | None:
+    """The environment pid was started with, or None where it cannot be read: macOS withholds a
+    platform binary's, Linux a process that is not dumpable's (`proc.Env` in Go)."""
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return None
+    try:
+        if sys.platform == "darwin":
+            data = _sysctl_procargs(pid)
+            split = _procargs_split(data) if data else None
+            return _environ(split[1]) if split and split[1] is not None else None
+        with open(f"/proc/{pid}/environ", "rb") as f:
+            data = f.read(ENV_BYTES + 1)
+        if len(data) > ENV_BYTES:
             return None
-        buf = ctypes.create_string_buffer(size.value)
-        if lib.sysctl(mib, 3, buf, ctypes.byref(size), None, 0):
-            return None
-        return _procargs(buf.raw[:size.value])
+        return _environ([os.fsdecode(w) for w in data.split(b"\0") if w])
     except (OSError, AttributeError, ValueError):
         return None
 

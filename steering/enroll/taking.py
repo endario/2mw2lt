@@ -66,9 +66,10 @@ def main(argv: list[str]) -> int:
     ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
     import session_routes
     # The brain's ruling, 2026-10-08: no separate claim primitive on Go. A branch claim is an
-    # announce, whose doing defaults to the executed card's title; an issue claim is a card
-    # declared with resolves:<n>, this session its executor, whose id is the claim's own so a
-    # rerun after a lost answer replays instead of minting a second card.
+    # announce, whose doing defaults to the executed card's title; an issue claim takes the
+    # issue's live card when none presently executes it, else declares a card with resolves:<n>,
+    # this session its executor, whose id is the claim's own so a rerun after a lost answer
+    # replays instead of minting a second card (#6846).
     import refusal as refusal_mod
     try:
         _, token = speaking_as(ws, session, flags)
@@ -100,7 +101,7 @@ def main(argv: list[str]) -> int:
                                                    resolved=candidates[0] if candidates else None)
         else:
             reply = session_routes.claim_issue(session, token, session_routes.card_repo(ws),
-                                               int(what))
+                                               int(what), occurrence())
     except ValueError as e:
         print(f"{e}: declare the work first, or give doing", file=sys.stderr)
         return 1
