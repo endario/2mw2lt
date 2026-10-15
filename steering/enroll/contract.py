@@ -3141,6 +3141,45 @@ PlacementFiltered = typing.TypedDict("PlacementFiltered", {
     "reason": "str",
 })
 
+# PlacementDecisions answers a workspace's recorded placement decisions, newest first (#6655): asked
+# for one launch's, gate round's or session's placement, each run of it; otherwise each placement's
+# newest decision in the last day that was not a wait.
+PlacementDecisions = typing.TypedDict("PlacementDecisions", {
+    "items": "list[PlacementRun] | None",
+})
+
+# PlacementRun is one placement decision, or a run of waiting decisions alike in all but their
+# scores, collapsed into the newest: Count of them, the first at First.
+PlacementRun = typing.TypedDict("PlacementRun", {
+    "id": "str",
+    "work_kind": "str",
+    "work_id": "str",
+    "outcome": "str",
+    "reason": "str | None",
+    "policy": "int",
+    "decided_at": "str",
+    "first": "str",
+    "count": "int",
+    "asked": "PlacementAsk",
+    "candidates": "list[PlacementCandidate] | None",
+    "filtered": "list[PlacementFiltered] | None",
+})
+
+# PlacementAsk is what was asked to be placed: a launch's harness, model or floor, effort and card;
+# a gate round's kind, repository, pull request or branch, and round.
+PlacementAsk = typing.TypedDict("PlacementAsk", {
+    "harness": "typing.NotRequired[str | None]",
+    "model": "typing.NotRequired[str | None]",
+    "floor": "typing.NotRequired[str | None]",
+    "effort": "typing.NotRequired[str | None]",
+    "card": "typing.NotRequired[str | None]",
+    "gate": "typing.NotRequired[str | None]",
+    "repo": "typing.NotRequired[str | None]",
+    "pr": "typing.NotRequired[int | None]",
+    "branch": "typing.NotRequired[str | None]",
+    "round": "typing.NotRequired[int | None]",
+})
+
 # Problem is every refusal's body (RFC 9457), on every route. Code names the check that refused,
 # never a value; Title is a human sentence and never carries a secret or token.
 Problem = typing.TypedDict("Problem", {
@@ -3397,7 +3436,9 @@ SessionList = typing.TypedDict("SessionList", {
 })
 
 # ListedSession is one session on the fleet. Machine is the registration holding it, and
-# MachineName the name its owner knows that machine by in this workspace, nil when it reported none.
+# MachineRegistration its live registration of the session's own login on its host — one the
+# machine fleet also names, empty when none stands. MachineName is the name its owner knows that
+# machine by in this workspace, nil when it reported none.
 # Harness is the provider its incarnation runs. Account is the one its machine reports its
 # directory spends, else the one its bind named, nil when neither names one. Status is
 # what the session last said, at the epoch it said it, or nil when it has said nothing. Observed is
@@ -4767,6 +4808,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/needs",
     "POST /w/{workspace}/api/v1/needs/{need}/transitions",
     "GET /w/{workspace}/api/v1/placement",
+    "GET /w/{workspace}/api/v1/placements",
     "GET /w/{workspace}/api/v1/push/key",
     "POST /w/{workspace}/api/v1/push/key",
     "GET /w/{workspace}/api/v1/push/subscriptions",
@@ -4872,6 +4914,7 @@ QUERY = {
     "GET /w/{workspace}/api/v1/momentum": {"window": frozenset({"30d", "7d", "90d"})},
     "GET /w/{workspace}/api/v1/needs": {"audience": frozenset({"owner", "seat"})},
     "GET /w/{workspace}/api/v1/placement": {"harness": None, "vendor": None, "model": None, "floor": frozenset({"uncommon", "rare", "epic", "legendary"}), "effort": None},
+    "GET /w/{workspace}/api/v1/placements": {"launch": None, "gate": None, "session": None},
     "GET /w/{workspace}/api/v1/rooms/{room}/messages": {"limit": None, "cursor": None, "before": None, "wait": None},
     "GET /w/{workspace}/api/v1/rulings": {"state": frozenset({"unacknowledged"}), "limit": None, "next": None},
     "GET /w/{workspace}/api/v1/sessions": {"gone": frozenset({"1"})},

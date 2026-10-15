@@ -1,4 +1,5 @@
 ---
+name: gate
 description: Commission an independent review of your pull request, or a critique of your design, from steering. In a workspace 2mw2lt steers, this is the review and critic gate, not the personal runner.
 ---
 

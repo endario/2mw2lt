@@ -1,4 +1,5 @@
 ---
+name: install
 description: Install 2mw2lt in this repository - sign in, create its workspace, admit this machine, give the App the repository, start the agent, wire the hooks and draft the lanes. Run it in the repository; run it again to resume or check.
 ---
 
@@ -222,6 +223,20 @@ The workspace works without lanes, and its board says it has none yet. Give it l
 Run `/2mw2lt:connect` in this session. It enrols this session, binds it and holds its stream. That
 proves the door answers on this machine's credential, that a hook reached the platform, and that a
 directive can reach the session. If it refuses, its line names the step to repeat.
+
+## ZCode on this machine
+
+When this machine also runs ZCode, install the plugin there from the marketplace Claude Code
+already cloned, at user scope, so every ZCode session carries its skills, hooks and frames tool as
+every Claude Code session does:
+
+```bash
+zcode plugins marketplace add ~/.claude/plugins/marketplaces/2mw2lt --yes
+zcode plugins install 2mw2lt@2mw2lt --scope user --yes
+```
+
+A plugin skill is not a slash command in ZCode: connect a ZCode session with
+`/skill 2mw2lt:connect`.
 
 ## Uninstall
 

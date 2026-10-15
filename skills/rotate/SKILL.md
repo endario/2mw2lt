@@ -1,4 +1,5 @@
 ---
+name: rotate
 description: Rotate this session's steering enrolment token, for one that has been disclosed.
 ---
 

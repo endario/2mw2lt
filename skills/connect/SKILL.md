@@ -1,4 +1,5 @@
 ---
+name: connect
 description: Connect at session start or restart, and hold the stream where required; use for worker coordination commands.
 ---
 

@@ -1,0 +1,22 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "python3 ${ZCODE_PLUGIN_ROOT}/zcode/hook_glue.py", "timeout": 8 } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "python3 ${ZCODE_PLUGIN_ROOT}/zcode/hook_glue.py", "timeout": 8 } ] }
+    ],
+    "PostToolUse": [
+      { "hooks": [ { "type": "command", "command": "python3 ${ZCODE_PLUGIN_ROOT}/zcode/hook_glue.py", "timeout": 8 } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "python3 ${ZCODE_PLUGIN_ROOT}/zcode/hook_glue.py", "timeout": 8 } ] }
+    ],
+    "PreToolUse": [
+      { "matcher": "Bash", "hooks": [
+        { "type": "command", "command": "python3 ${ZCODE_PLUGIN_ROOT}/steering/enroll/trap_guard.py", "timeout": 5 },
+        { "type": "command", "command": "python3 ${ZCODE_PLUGIN_ROOT}/steering/enroll/delete_guard.py", "timeout": 5 }
+      ] }
+    ]
+  }
+}

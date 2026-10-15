@@ -357,17 +357,39 @@ _NOTIFIED = re.compile(r"<task-notification>\s*<task-id>([^<]+)</task-id>")
 # A subagent's id as its transcript's file name carries it.
 _AGENT_ID = re.compile(r"[A-Za-z0-9._-]{1,128}")
 # By transcript: (inode, bytes read, {task: started, Unix ms}, ended tasks, {teammate: spawned, Unix
-# ms}). A transcript is appended to, so each read takes only what was written since; one replaced is
-# read again from the start.
-_TASKS: dict[str, tuple[int, int, dict[str, int], set[str], dict[str, int]]] = {}
+# ms}, tool calls that hold the session's own stream). A transcript is appended to, so each read
+# takes only what was written since; one replaced is read again from the start.
+_TASKS: dict[str, tuple[int, int, dict[str, int], set[str], dict[str, int], set[str]]] = {}
 _TASKS_LOCK = threading.Lock()
-_MARKS = (b'"backgroundTaskId"', b'"async_launched"', b'"forked"', b'"teammate_spawned"', b'"queue-operation"', b'"task_id"')
+_MARKS = (b'"backgroundTaskId"', b'"async_launched"', b'"forked"', b'"teammate_spawned"', b'"queue-operation"', b'"task_id"',
+          b'"tool_use"')
+
+
+def _is_hold(command: object) -> bool:
+    """Whether a Bash call is the session holding its own stream open: the connect skill's recipe,
+    run as a background shell where the plugin holds no stream. That shell is the session's reach,
+    not its work (#6653), so the count of background tasks leaves it out. The launcher's `exec
+    hold`, or the hold entry it resolves to, however the skill spells the path."""
+    return isinstance(command, str) and (
+        "steering-launch.py" in command and " exec hold" in command
+        or "enroll/hold.py" in command)
+
+
+def _tool_use(message: object) -> str | None:
+    """The id of the tool call a user entry's result answers, where it names one: what ties a
+    background task to the command that started it."""
+    content = message.get("content") if isinstance(message, dict) else None
+    for block in content if isinstance(content, list) else ():
+        if isinstance(block, dict) and isinstance(block.get("tool_use_id"), str) and block["tool_use_id"]:
+            return block["tool_use_id"]
+    return None
 
 
 def background(path: Path, since: int) -> int:
     """How many background tasks the transcript at `path` records starting at or after `since`, in
     Unix milliseconds, and not ending: the tasks of a process that started then and runs them still.
-    A task an earlier process started died with it, whatever its transcript says.
+    A task an earlier process started died with it, whatever its transcript says. The session's own
+    stream hold is not among them (#6653): it is how the session is reached, not work it is running.
 
     A named subagent is a teammate (#5797): spawned `teammate_spawned`, never notified, and its
     idle_notification is not its end, since it may still wait on its own shells. It counts while its
@@ -390,9 +412,10 @@ def _scan(path: Path, since: int) -> tuple[int, list[str]]:
     key = str(path)
     with _TASKS_LOCK, open(path, "rb") as f:
         st = os.fstat(f.fileno())
-        inode, offset, launched, ended, teammates = _TASKS.get(key) or (st.st_ino, 0, {}, set(), {})
+        state = _TASKS.get(key) or (st.st_ino, 0, {}, set(), {}, set())
+        inode, offset, launched, ended, teammates, holds = state
         if inode != st.st_ino or offset > st.st_size:
-            inode, offset, launched, ended, teammates = st.st_ino, 0, {}, set(), {}
+            inode, offset, launched, ended, teammates, holds = st.st_ino, 0, {}, set(), {}, set()
         f.seek(offset)
         blob = f.read()
         whole = blob[:blob.rfind(b"\n") + 1]   # a line being written is read when it is whole
@@ -411,18 +434,25 @@ def _scan(path: Path, since: int) -> tuple[int, list[str]]:
                 agent, status = result.get("agentId"), result.get("status")
                 task = result.get("backgroundTaskId") or (
                     agent if status == "async_launched" or status == "forked" and result.get("background") is True else None)
-                if isinstance(task, str) and task and at is not None:
+                if isinstance(task, str) and task and at is not None and _tool_use(e.get("message")) not in holds:
                     launched[task] = at
                 elif status == "teammate_spawned" and isinstance(agent, str) and _AGENT_ID.fullmatch(agent) and at is not None:
                     teammates[agent] = at
                 stopped = result.get("task_id")
                 if isinstance(stopped, str) and str(result.get("message", "")).startswith("Successfully stopped task"):
                     ended.add(stopped)
+            elif e.get("type") == "assistant" and isinstance(e.get("message"), dict):
+                for block in e["message"].get("content") or ():
+                    if not (isinstance(block, dict) and block.get("type") == "tool_use"):
+                        continue
+                    call, tool = block.get("id"), block.get("input")
+                    if isinstance(call, str) and call and _is_hold(tool.get("command") if isinstance(tool, dict) else None):
+                        holds.add(call)
             elif e.get("type") == "queue-operation" and e.get("operation") == "enqueue" and isinstance(e.get("content"), str):
                 m = _NOTIFIED.match(e["content"])
                 if m:
                     ended.add(m.group(1))
-        _TASKS[key] = (inode, offset + len(whole), launched, ended, teammates)
+        _TASKS[key] = (inode, offset + len(whole), launched, ended, teammates, holds)
         return (sum(1 for task, at in launched.items() if at >= since and task not in ended),
                 [agent for agent, at in teammates.items() if at >= since])
 

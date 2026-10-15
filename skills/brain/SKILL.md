@@ -1,4 +1,5 @@
 ---
+name: brain
 description: Take the steering role for this session, so the owner's console talks to you instead of the daemon's resident brain. Hand it back when you are done.
 ---
 

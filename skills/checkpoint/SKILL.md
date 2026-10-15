@@ -1,4 +1,5 @@
 ---
+name: checkpoint
 description: Write down what this session knows before it forgets — before a compact, a handover or leaving — as a note on the card's pull request or issue, and record it with steering.
 ---
 

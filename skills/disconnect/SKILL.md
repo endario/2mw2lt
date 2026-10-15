@@ -1,4 +1,5 @@
 ---
+name: disconnect
 description: Use when a session finishes or the brain releases it.
 ---
 

@@ -15,6 +15,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -76,18 +77,33 @@ def listening(port: int, run=None) -> tuple[int | None, str]:
 
 
 def _env_word(words: list[str], name: str) -> str:
-    """The last `name=` word, or empty: `ps -E` prints the environment after the arguments, so
-    an argument cannot come after it."""
+    """The last `name=` word, or empty: the environment follows the arguments in one word list,
+    so an argument cannot come after it."""
     got = [w.split("=", 1)[1] for w in words if w.startswith(name + "=")]
     return got[-1] if got else ""
+
+
+def _command_and_env(pid: int, run) -> list[str]:
+    """The words of pid's command line followed by its environment's: `ps -E` prints both on
+    macOS; Linux's ps has no `-E`, answering only `error: unsupported SysV option`, so the
+    environment is read there from `/proc/<pid>/environ`, which one login's processes may read of
+    another's."""
+    ps = _tool("ps")
+    if sys.platform == "darwin":
+        return (run([ps, "-Eww", "-o", "command=", "-p", str(pid)]) if ps else "").split()
+    words = (run([ps, "-o", "command=", "-p", str(pid)]) if ps else "").split()
+    try:
+        raw = Path(f"/proc/{pid}/environ").read_bytes()
+    except OSError:
+        return words
+    return [*words, *(w.decode("utf-8", "replace") for w in raw.split(b"\0") if w)]
 
 
 def proxy_home(pid: int, run=None, home: Path | None = None) -> Path | None:
     """The configuration root of the claude-code-proxy running as `pid`, from its own environment:
     its `XDG_CONFIG_HOME`, else its own `HOME`'s `.config`, else the reader's. None when the
     process is not claude-code-proxy, or names a relative root."""
-    run, ps = run or _run, _tool("ps")
-    words = (run([ps, "-Eww", "-o", "command=", "-p", str(pid)]) if ps else "").split()
+    words = _command_and_env(pid, run or _run)
     if not words or Path(words[0]).name != NAME:
         return None
     xdg, own = _env_word(words[1:], "XDG_CONFIG_HOME"), _env_word(words[1:], "HOME")
