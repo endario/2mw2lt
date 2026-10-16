@@ -1,15 +1,10 @@
 #!/usr/bin/env python3
 """A workspace's observation hook pack and enrollment state (doc 16 §11). A repository is
-installed with `/2mw2lt:install` (doc 129), which calls the hook pack here; what is left as a
-command is the brain machine's own form and the operator's tools:
+installed with `/2mw2lt:install` (doc 129), which calls the hook pack here. The operator's tools:
 
-  python3 steering/enroll/hooks.py install   [workspace] local
-  python3 steering/enroll/hooks.py install-codex [workspace] local
   python3 steering/enroll/hooks.py uninstall [workspace]
   python3 steering/enroll/hooks.py show      [workspace]
 
-`local` wires a workspace to this machine's own daemon. `install-codex` writes the shared
-workspace state without Claude's hooks.
 `uninstall` takes out the hook entries; taking back the door, the recipes and the copied tokens
 needs the ownership manifest (#138).
 """
@@ -22,7 +17,6 @@ import json
 import os
 import re
 import shlex
-import subprocess
 import sys
 from pathlib import Path
 
@@ -32,8 +26,8 @@ import checkout_binding  # noqa: E402
 import spool  # noqa: E402
 import supervision  # noqa: E402
 import verb_help  # noqa: E402
-from local_workspace import (agent_port, common_root, origin_slug, required_workspace_root,  # noqa: E402
-                       workspace_root, write_agent_port)
+from local_workspace import (common_root, origin_slug,  # noqa: E402
+                       workspace_root)
 import door as door_mod  # noqa: E402
 from door import door  # noqa: E402
 import urllib.error  # noqa: E402
@@ -152,7 +146,7 @@ def short(doc: dict, workspace: Path, sender: Path = SENDER) -> set[str]:
     A workspace on the launcher pins no version, so `stale_pins` is empty for it forever. A
     pack that gains a handler would therefore reach every workspace except the ones already
     using it, which is all of them (#1506). A workspace we have not wired at all is nobody's
-    to repair here: `hooks.py install` is what wires one, and answering with the whole pack
+    to repair here: `/2mw2lt:install` is what wires one, and answering with the whole pack
     would turn a repin into an install.
     """
     if not any(has_ours(e, sender) for groups in doc.get("hooks", {}).values() for e in groups):
@@ -585,61 +579,6 @@ def installed_door(workspace: Path) -> str | None:
     return next((l.strip().split("=", 1)[1] for l in lines if l.strip().startswith("STEERING_DOOR=")), None)
 
 
-def local_install(workspace: Path, with_hooks: bool = True) -> dict:
-    """A workspace on the brain's own machine, wired to the loopback daemon."""
-    named = installed_door(workspace)
-    if named:  # a door in .env wins over local mode at hook time, whatever this reports
-        raise SystemExit(f"{workspace} already names {named}: local mode is for a workspace with no door")
-    base = f"http://127.0.0.1:{os.environ.get('STEERING_PORT', '9999')}"
-    bind(workspace)  # from the checkout's own origin, before the daemon is asked anything
-    doc = authorities(base)
-    refuse_unplaced(base, doc, workspace)
-    wid = authority_of(doc, workspace)
-    source = token_source(doc)
-    if wid is None:
-        read_tokens(workspace, source)
-    planned = planned_settings(workspace) if with_hooks else None
-    if not with_hooks:
-        if wid is None:
-            copy_tokens(workspace, source)
-        tokens = tokens_directory(workspace)
-        return {"door": base if wid is None else f"{base}/w/{wid}", "remote": False,
-                "authority": wid, "tokens": str(tokens)}
-    return {"door": base if wid is None else f"{base}/w/{wid}", "remote": False,
-            "authority": wid,
-            "settings": str(hooks_install(workspace, local=True, planned=planned,
-                                          workspace_id=wid, source=source))}
-
-
-LOCAL = "local"
-
-
-def install_agent(workspace: Path, result: dict) -> dict:
-    """Start this workspace's per-machine agent after its door is fully resolved."""
-    # The hook installer also wires arbitrary application workspaces. Only a 2mw2lt checkout
-    # owns the venv and entrypoint a per-machine agent can run.
-    if not (workspace / "steering" / "agent.py").is_file():
-        return result
-    root = common_root(workspace, timeout=5)
-    port = agent_port(root)
-    write_agent_port(root, port)
-    command = [sys.executable, str(HERE.parent / "install-agent.py"), str(root), result["door"]]
-    if not result["remote"]:
-        command.append("--local")
-    subprocess.run(command, check=True, env={**os.environ, "STEERING_AGENT_PORT": port})
-    return result
-
-
-def install(workspace: Path, door_url: str | None = None, with_hooks: bool = True) -> dict:
-    """Wire the workspace's shared state, and its observation hooks when requested."""
-    required_workspace_root(workspace, timeout=5, configured=False)
-    if door_url != LOCAL:
-        verb = "install" if with_hooks else "install-codex"
-        raise SystemExit(f"a workspace is installed with /2mw2lt:install (doc 129); `hooks.py {verb} "
-                         "<workspace> local` wires one to this machine's own daemon")
-    return install_agent(workspace, local_install(workspace, with_hooks))
-
-
 def is_daemon_workspace(workspace: Path) -> bool:
     """The workspace the daemon runs from, whose `.claude` holds the canonical tokens rather than
     a copy. `copy_tokens` will not write there; nothing here may delete from there."""
@@ -658,26 +597,22 @@ def uninstall(workspace: Path) -> Path:
 
 
 def main(argv: list[str]) -> int:
+    if argv and argv[0] in ("install", "install-codex"):
+        print("Install this workspace with /2mw2lt:install.", file=sys.stderr)
+        return 2
     if verb_help.help_requested("hooks", argv):
         print(verb_help.script_help("hooks", topic=argv[0] if len(argv) == 2 else None)); return 0
     if not argv:
         return verb_help.error("hooks", "missing command")
     action = argv[0]
-    if action not in ("install", "install-codex", "uninstall", "show"):
+    if action not in ("uninstall", "show"):
         return verb_help.error("hooks", f"unknown command {action!r}")
     if any(arg.startswith("-") for arg in argv[1:]):
         return verb_help.error("hooks", "options are not accepted")
     rest = argv[1:]
-    if action in ("install", "install-codex"):
-        if len(rest) > 2:
-            return verb_help.error("hooks", "extra argument")
-        if not rest or rest[-1] != LOCAL:
-            return verb_help.error("hooks", "install requires the local mode")
-        workspace = rest[0] if len(rest) == 2 else None
-    else:
-        if len(rest) > 1:
-            return verb_help.error("hooks", "extra argument")
-        workspace = rest[0] if rest else None
+    if len(rest) > 1:
+        return verb_help.error("hooks", "extra argument")
+    workspace = rest[0] if rest else None
     ws = Path(workspace or os.getcwd()).resolve()
     if action == "show":
         doc = load(settings_path(ws))
@@ -688,8 +623,6 @@ def main(argv: list[str]) -> int:
         print(json.dumps({"settings": str(settings_path(ws)), "hooks": wired,
                           "packs": sorted(packs), "workspace": bound_id(ws),
                           "door": door()[0]}, indent=2)); return 0
-    if action in ("install", "install-codex"):
-        print(json.dumps(install(ws, LOCAL, with_hooks=action == "install"), indent=2)); return 0
     print(f"uninstall: {uninstall(ws)}"); return 0
 
 

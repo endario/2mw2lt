@@ -41,6 +41,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import socket
 import subprocess
 import tarfile
@@ -224,10 +225,20 @@ def waited(method: str, url: str, deadline: float, body: dict | None = None,
             delay = min(delay * 2, 60.0)
 
 
+def unopened() -> str | None:
+    """Why this run opens no browser, or None. Over SSH a browser opened here is the far machine's,
+    signed in as whoever uses it, and the console binds the code to the first account that opens it
+    (#6327)."""
+    return "this run is over SSH" if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY") else None
+
+
 def open_page(url: str) -> None:
-    """The browser, where this machine has one to open; the URL is printed either way."""
+    """The browser, where this machine has one to open and `BROWSER` names none other; the URL is
+    printed either way."""
+    if unopened():
+        return
     try:
-        if platform.system() == "Darwin":
+        if platform.system() == "Darwin" and not os.environ.get("BROWSER"):
             subprocess.run(["open", url], capture_output=True, timeout=10)
         else:
             webbrowser.open(url)
@@ -295,15 +306,20 @@ def sign_in(console: str, scope: str, invite: str | None = None, login: str | No
         say("invite", "the approval page says whether it makes your own team or joins you to one")
     # An invitation decides the account; the machine's own login is only a guess at it (#4015).
     who = f"@{login}" if login and (named or not invite) else "the account your invitation is for" if invite else None
-    say("", f"(opened in your browser; sign in to GitHub as {who}; waiting…)" if who else "(opened in your browser; waiting…)")
+    carried = (f"&invite={invite.upper()}" if invite else "") + (f"&login={login}" if login else "") \
+        + ("&named=1" if login and named else "")
+    if why := unopened():
+        # Opened by hand, the page still carries the invitation and the login, never the proof.
+        say("", f"(nothing opened: {why}; open {page}{'#' + carried[1:] if carried else ''} in your own browser"
+                + (f", signed in to GitHub as {who}" if who else "") + "; waiting…)")
+    else:
+        say("", f"(opened in your browser; sign in to GitHub as {who}; waiting…)" if who else "(opened in your browser; waiting…)")
     # Only the browser opened here holds the proof, so only it can end this grant when its sign-in
     # is refused (#3586). It is never printed: a printed proof is as public as the user code.
     # An invitation code rides the same fragment, for the sign-in door to carry to GitHub; like the
     # proof, a fragment reaches no server log. So does the login this machine signs in as (#3954),
     # which lets an invite waiting for that account admit it with no code. A login the person named
     # with --login is marked, so the approval page refuses another account outright (#4015).
-    carried = (f"&invite={invite.upper()}" if invite else "") + (f"&login={login}" if login else "") \
-        + ("&named=1" if login and named else "")
     open_page(f"{page}#refusal={refusal_proof(got['device_code'])}{carried}")
     interval, deadline = float(got.get("interval") or POLL), time.monotonic() + float(got.get("expires_in") or 1800)
     start = told = time.monotonic()
@@ -526,7 +542,8 @@ def wait_for_go_grant(console: str, token: str, team: str, repo: str, owner: boo
         return
     say("github", f"the 2mw2lt App cannot read {repo} yet")
     if owner:
-        say("", f"open {console}/ and choose Connect GitHub in the account menu (opened in your browser; waiting…)")
+        say("", f"open {console}/ and choose Connect GitHub in the account menu "
+                + (f"(nothing opened: {why}; waiting…)" if (why := unopened()) else "(opened in your browser; waiting…)"))
         open_page(f"{console}/")
     else:
         say("", "only the team's owner, signed in with GitHub, connects it: ask them to (waiting…)")
@@ -613,27 +630,54 @@ def machine_port() -> int:
     return int(named) if named.isdecimal() else int(DEFAULT_AGENT_PORT)
 
 
+def go_installer(release: Path) -> Path | None:
+    """The release's own `2mw2lt` when it has `install` (#6919), which installs with no Python
+    environment. It is probed as the Go updater probes a subcommand: run bare, one that has it
+    refuses with its own usage line and exit 2, touching nothing."""
+    binary = agentjob.go_agent(release)
+    if not binary.is_file() or not os.access(binary, os.X_OK):
+        return None
+    try:
+        done = subprocess.run([str(binary), "install"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return binary if done.returncode == 2 and done.stderr.strip().startswith("usage: 2mw2lt install ") else None
+
+
+def _ready(release: Path, sha: str | None = None) -> bool:
+    """Whether `release` is installable as it is: its own Go installer, or a built environment."""
+    try:
+        revision = (release / "REVISION").read_text().strip()
+    except OSError:
+        return False
+    if sha is not None and revision != sha:
+        return False
+    return go_installer(release) is not None or (release / "steering" / ".venv" / "bin" / "python").exists()
+
+
 def release(door: str) -> Path:
     """The agent release the workspace's door states (doc 147 §3–4), fetched with this machine's
-    credential and built when the machine has none. It never re-points the machine's other
-    agents: the one job written below is the only one touched."""
+    credential and, unless it carries its own Go installer, built when the machine has none. It
+    never re-points the machine's other agents: the one job written below is the only one touched."""
+    base = agentjob.root(Path.home())
     try:
-        return agentjob.active_release(Path.home())[0]
-    except RuntimeError:
-        pass
+        active = (base / "current").resolve(strict=True)
+    except OSError:
+        active = None
+    if active is not None and active.parent == (base / "releases").resolve() and _ready(active):
+        return active
     status, target = call("GET", f"{door}/steering/agent/target")
     if status == 404:
         raise Stop("the workspace's door states no agent release; ask its operator to deploy one")
     if status != 200 or not selfupdate.valid(target):
         raise Stop(f"the workspace's door answered {status} for its agent release; run install again, "
                    "or ask the operator if it repeats")
-    base = agentjob.root(Path.home())
-    found = selfupdate.built(base, target["sha"])
-    if found is None:
+    found = base / "releases" / target["sha"]
+    if not _ready(found, target["sha"]):
         say("agent", f"fetching agent release {target['sha'][:12]} from the workspace's door…")
         try:
             part = asyncio.run(selfupdate.fetch(_stream(door), door, target, base))
-            found = selfupdate.build(part, base)
+            found = place(part, found) if go_installer(part) else selfupdate.build(part, base)
         except (selfupdate.Refused, selfupdate.BuildFailed, OSError, urllib.error.URLError, tarfile.TarError) as e:
             raise Stop(f"the agent release could not be installed: {e}") from None
     agentjob.select(found, Path.home())
@@ -669,13 +713,24 @@ def _stream(door: str):
     return stream
 
 
+def place(part: Path, release: Path) -> Path:
+    """A fetched release that carries its own Go installer, renamed into place with nothing built."""
+    if release.exists():  # a hand deploy staging it now: its build is not this one's to remove
+        shutil.rmtree(part, ignore_errors=True)
+        raise selfupdate.BuildFailed(f"{release} is being staged by another activation")
+    part.rename(release)
+    return release
+
+
 def run_installer(installed: Path, root: Path, door: str, port: int) -> None:
-    """The release's own installer, under the release's own interpreter, so the job is written
-    by the closure it will run rather than by this plugin's copy."""
+    """The release's own installer — its `2mw2lt install`, else install-agent.py under its own
+    interpreter — so the job is written by the closure it will run rather than by this plugin's copy."""
     steering = installed / "steering"
+    go = go_installer(installed)
+    argv = ([str(go), "install", str(root), door] if go else
+            [str(steering / ".venv" / "bin" / "python"), str(steering / "install-agent.py"), str(root), door])
     # The machine job's own port, so an install leaves the job as it is when it already runs.
-    done = subprocess.run([str(steering / ".venv" / "bin" / "python"), str(steering / "install-agent.py"),
-                           str(root), door], env={**os.environ, "STEERING_AGENT_PORT": str(port)},
+    done = subprocess.run(argv, env={**os.environ, "STEERING_AGENT_PORT": str(port)},
                           capture_output=True, text=True)
     if done.returncode:
         raise Stop(f"the agent release's installer failed: {(done.stderr or done.stdout).strip()[-400:]}")

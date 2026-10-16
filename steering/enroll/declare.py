@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""`declare.py <session> [--card <ulid>] <name> [<verb>:<n>[,<n>] ...]`: make this session's work a
-card before it shows any other sign (doc 125 §4), on the session's stored token."""
+"""`declare.py <session> [--card <ulid>] <name> [<verb>:<n>[,<n>] ...] [--goal <uuid>
+--goal-why <reason> [--goal-source <source>]]`: make this session's work a card before it shows
+any other sign (doc 125 §4), on the session's stored token, contributing it to a goal at birth
+(#7005) when one is named."""
 from __future__ import annotations
 
 import json
 import os
+import shlex
 import sys
 from pathlib import Path
 
@@ -35,6 +38,8 @@ def main(argv: list[str]) -> int:
         if len(rest) < 3 or not valid_ulid(rest[1]):
             return error("declare", "--card requires a valid card id and name")
         card, rest = rest[1], rest[2:]
+    if rest[0] in ("--goal", "--goal-why", "--goal-source"):
+        return error("declare", "the goal flags follow the name and anchors")
     if rest[0].startswith("-"):
         return error("declare", f"unknown declare option {rest[0]!r}")
     if not " ".join(rest).strip():
@@ -57,14 +62,21 @@ def main(argv: list[str]) -> int:
     try:
         reply = session_routes.declare_card(card, fact["name"], fact.get("anchors") or {}, token,
                                             repo=session_routes.card_repo(ws) if fact.get("anchors") else "",
-                                            triage=fact.get("triage"))
+                                            triage=fact.get("triage"), goal=fact.get("goal"))
     except session_routes.Refused as e:
         reply = refusal.use("declare", f"{card}: {e}")
     except session_routes.Unsent as e:
         reply = refusal.retry(str(e))
     print(reply)
     if not reply.startswith("declared:"):
-        print(f"to retry this declaration under the same card, send it with --card {card}", file=sys.stderr)
+        # The retry repeats the whole birth, goal and all: a resend under the card without it is
+        # another declaration, refused (#7005).
+        retry = f"--card {card}"
+        if goal := fact.get("goal"):
+            retry += f" --goal {goal['id']} --goal-why {shlex.quote(goal['why'])}"
+            if goal.get("source"):
+                retry += f" --goal-source {shlex.quote(goal['source'])}"
+        print(f"to retry this declaration under the same card, send it with {retry}", file=sys.stderr)
         return 1
     return 0
 

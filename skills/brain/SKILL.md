@@ -191,7 +191,9 @@ answer: token @lease <episode> considered because <why nothing needed you>
 ```
 
 Choosing not to act is an answer. The platform records who answered and when, never whether the
-judgment was right. An answer to an older snapshot is recorded and answers nothing newer.
+judgment was right. An answer to an older snapshot is recorded and answers nothing newer. Snapshots
+received and left unanswered space the next ones out, and a run of them raises the owner's phone
+and puts the alarm on their Needs You; answering the current snapshot ends both.
 
 A session that finishes is closed, driven with its next piece of work, or kept, and nothing else:
 never idle by neglect. Keep it only with a plan, the work you expect in its territory and when,
@@ -226,10 +228,6 @@ it is stale, its keep and its cache), `null` when nothing has been read:
 delegate by those, and never
 ask a session its level, since it cannot read its own. Its account's verdict is the `fleet` row
 naming it in `sessions`.
-A say `from: account <id>` is a spent account's reset, told as a signal: one JSON object with its
-`kind`, `subject`, `episode`, `observed_at`, typed `facts` and, when there is one, a
-`suggested_act`. Resume each session its `facts.sessions` names that stopped for that account with
-`wake:`, and place queued work on it by its rank.
 The cards are the board's, which a brain on any machine reads with
 `python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease "/cards?state=live"`, a hundred to
 a page; read on with `&next=<the page's next>`. Delegate to each session a notice frees, each
@@ -267,6 +265,12 @@ below 1x, prefer another of equal rank.
 `unread` is not room. A gate's reviewer is chosen by the same evaluator (#2135). When you
 recommend an account to the owner, name its forecast — `used`, `at_reset`, `resets_at`, runway —
 never a band.
+
+An `account-rate` notice is a vendor price change, not the owner's incentive or a forced
+exclusion. The `fleet` verdict's `rate` and `next_rate` give the account-wide current price and
+next change. Weigh deferring deferrable work and rehoming long sessions whose remaining work
+crosses dear hours; for new work, launch by `floor <rarity>` rather than vendor plus model so
+placement can move work across vendors at peak.
 
 A system reminder from the `observe` hook saying you hold the seat and no stream is held for you
 is the daemon's:
@@ -321,7 +325,10 @@ the owner reads twice.
 
 When the owner asks what the work should achieve, or the Ledger's Explore or Discuss sends you a
 request, follow `/2mw2lt:discover`: bring a sourced position in a room thread, not a questionnaire,
-and record what is agreed through native rulings and goal commands.
+and record what is agreed through native rulings and goal commands. Discovery is the entry for
+exploring the work, catching the owner up or changing direction — not the only door to a goal: a
+direct instruction that names its intent enters the routine below without another conversation
+([Run a goal](#run-a-goal)).
 
 ## Post the bulletin, not a repeated say
 
@@ -512,6 +519,59 @@ opens. When the baseline shows the need is rare or already cheap, retire the car
 scope again with `--card <that id>`, and the door answers from its record instead of minting a
 second card. The card gets its branch from its executor, when that session takes one.
 
+## Run a goal
+
+A direct instruction that names more than one unit of work, a worker's completion on goal work, or
+taking the seat with a goal mid-flight — each enters this routine directly. Do not send the owner
+through discovery again: their instruction is the intent, and `/2mw2lt:discover` is for exploring
+the work, catching up or changing direction. A goal may exist before its plan; the read says the
+plan is missing, and that is the first thing to repair.
+
+**Read before placing.** The execution read is the bounded current working set — one answer, no
+reconstruction from messages:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease "/goals/<goal>/execution"
+```
+
+Each unit carries one `next_act` with its basis: `reconcile-plan`, `inspect-blocker`,
+`inspect-source-gap`, `inspect-placement`, `finish-work`, `inspect-merge` or `gather-or-judge`.
+Inspection guidance, never permission — an eligible-looking unit is an invitation to decide, not a
+launch. Unknown is not readiness: an unread landing names the source gap that limits it, an
+unmapped criterion is `evidence-unmapped`, and `omitted` counts what the bounds left out exactly.
+`stale: []` on the plan says its scope and policy pins hold, not that every execution input is
+unchanged; `inputs_moved` says that separately.
+
+**Choose from live facts, not the last notice.** A passed head may have moved, a source's read may
+be partial, a done note may precede its merge. A notice is a pointer to reread its subject here.
+Have the worker that holds the work finish its merge or handoff; you are not every worker's
+operator. Place against current executor and pending-launch facts — never launch over either.
+
+**Prepare the plan through the goal contract.** The first plan, and every re-adoption after its
+inputs move, goes through the goal commands `/2mw2lt:discover` records: pins from the current
+reading (`expected_goal_revision`, `expected_plan_revision`, `expected_input_digest` from
+`GET /goals/<goal>/reading`), an active priority-policy decision, selections in your intended
+order, and criterion associations. A plan states instruction; it admits, refuses and fences
+nothing.
+
+**Record edges as they are discovered.** When you delegate work that waits on other work, say the
+wait in the same brief:
+the `requires` link belongs to the moment the dependency is known, not to a later reconciliation.
+A worker's discovered prerequisite reaches you in its report; write it or have the worker declare
+it (the connect skill teaches the command), and never let it live only in the conversation.
+
+**Completion, proof and acceptance are three acts.** A card concluded is work declared done; a
+landing of `landed` is what the sources observed; a criterion judgment through the goal contract
+is the only acceptance. A merged pull request is neither a deployment nor an accepted outcome.
+When a unit's work and evidence stand, prepare the judgment — criteria by their effective
+evidence, the goal over its criterion judgments — and judge through the goal commands, never by
+folding the backlog's shape into a conclusion.
+
+**Not everything has a goal.** Standalone fixes stay cards, tracks stay organization, and a
+workspace incident impedes work without becoming a goal; triage and delegate those on their own.
+The routine never hides work without a goal, and work on no goal inherits no membership from the
+session that did it.
+
 ## Direct a session
 
 A directive — an envelope the session acknowledges and answers for — goes on the lease token,
@@ -552,14 +612,12 @@ Start one only when a card fits no session on the board and a machine has room f
 worker, and choose the harness knowing whose quota it spends:
 
 ```bash
-say "launch: token @lease <goose|opencode> on <the machine's machine_id> because <why>"
 say "launch: token @lease opencode on <node> model <provider/model> thinking <level> because <why>"   # the vendor with room
 say "launch: token @lease opencode model <opencode-go|commandcode>/<model> because <why>"   # on the machine whose account ranks first; the reply says which and why
 ```
 
-Name the node for goose, and name the agent's own — normally a session's `machine_id`: which
-account a goose worker spends is its machine's own setting. For opencode, leave it out and name
-an `opencode-go/…` or `commandcode/…` model, and the daemon picks the machine whose account for
+Name the agent's own node — normally a session's `machine_id` — or leave it out: name an
+`opencode-go/…` or `commandcode/…` model, and the daemon picks the machine whose account for
 that vendor ranks first, naming the account and the forecast in its reply; name one only to
 override that. With no model, or another provider's, it refuses: nothing it reads is what that
 worker spends.
@@ -570,8 +628,8 @@ machines and accounts with their verdicts, terms and order, the one the platform
 and each one a check took out. It places nothing. Its `arbiter_first` is the workspace's
 `placement.arbiter_first` setting, inheriting the team's, which the owner turns on in the console:
 
-- **On:** launch unpinned, with no `on` and no `account`, and the platform places it. A goose
-  launch still names its node, since its account is that machine's own. Otherwise name a machine or
+- **On:** launch unpinned, with no `on` and no `account`, and the platform places it. Otherwise
+  name a machine or
   an account only when the owner names one for a reason the platform cannot see, and give that
   reason in `because`. Correct a placement after the launch rather than steering it beforehand:
   `rehome:` the session to another account on its machine, or retire it and launch again. Say on the
@@ -618,7 +676,7 @@ nothing in the brief is expanded by the shell:
 
 ```bash
 say "$(cat <<'LAUNCH'
-launch: token @lease claude floor <rarity> effort <level> resolves <owner>/<name>#<n> because <why>
+launch: token @lease claude floor <rarity> resolves <owner>/<name>#<n> because <why>
 brief: <the handover: the card, its issue, PR and design doc, and what done reports>
 LAUNCH
 )"
@@ -646,17 +704,44 @@ and runs on the harness it names: a `claude` floor is placed only where Claude r
 start and how far above the floor it stands, and passes over `floor-unserved` an account serving no
 model at it.
 
-An interactive Claude Code session, one a person can watch and type into, is a `launch:` too:
+An interactive Claude Code session, one a person can watch and type into, is a `launch:` too.
+Its clauses go in this order:
+
+| clause | left out |
+|---|---|
+| `<harness>` | required: `claude`, `zcode` or `opencode` |
+| `on <node>` | the daemon places it; not with a floor |
+| `vendor <vendor>` | `anthropic` for `claude`; `any` for every vendor; not with a floor |
+| `account <n>` | the best-ranked account; named, that account or a refusal; not with a floor |
+| `model <model>` or `floor <rarity>` | one is required for `claude` and `zcode`; prefer the floor |
+| `thinking <level>` | the model's own; opencode only |
+| `effort <level>` | the placed model's rarity's: legendary `low`, epic `medium`, rare `high`, uncommon `xhigh` |
+| `window` | headless |
+| `card <card>` or `resolves <owner>/<name>#<n>` | no card; either needs a brief |
+| `because <why>` | required; with a model, why that model |
+| `brief: <directive>` (next line) | none; the session waits to be delegated to |
+
+Leave effort out unless the work asks for another level than its rung's. The default gives a rare
+model its depth and a legendary one little, so name `high` or above for a legendary model on hard
+design or a bug that keeps failing, and less than `xhigh` for mechanical work on an uncommon one.
+A model the ladder does not rate has no default, and is refused `launch-effort-unrated` until the
+line names one. ZCode has three levels: it runs `medium` as `high` and `xhigh` as `max`, and the
+decision record names both.
 
 ```bash
-say "launch: token @lease claude floor <rarity> effort <level> [resolves <owner>/<name>#<n>] [window] because <why>"
-say "launch: token @lease claude [on <node>] [vendor <vendor>] [account <n>] model <model> effort <level> [resolves <owner>/<name>#<n>] [window] because <the reason you name the model>"
+# A floor, effort from the placed model's rung: rare starts at high
+say "launch: token @lease claude floor rare because a contained fix"
+# A model named, at an effort above epic's medium, since the design is hard
+say "launch: token @lease claude model opus effort high because the ladder cannot see this design's depth"
+# One account, no other in its place
+say "launch: token @lease claude vendor anthropic account 2 model opus effort medium because account 2 holds this card's cache"
+# ZCode
+say "launch: token @lease zcode floor uncommon because a mechanical rename"
 ```
 
 with its `brief:` line sent as above.
 
-`model` is Claude Code's own (`opus`, `opus[1m]`); a model or a floor, and `effort`, are required,
-so no account default decides the level. The daemon picks the best-ranked account of the vendor named
+`model` is Claude Code's own (`opus`, `opus[1m]`). The daemon picks the best-ranked account of the vendor named
 (`anthropic` when none is; `openai`, `zai`, … or `any`) that some machine has a launcher signed in
 to, and one whose usage it cannot read only after every ranked one, as unknown. `account <n>` starts
 that vendor's account, as the usage frames number it, or refuses; it never falls back to another. On
@@ -732,10 +817,12 @@ If the owner has not dealt with it by then and the session can be rescued direct
 and continue its work. It can be rescued directly when it ran on your own machine and you know
 its session id, working directory and wrapper; without all three, leave it to the owner. Resume
 its own transcript in tmux, from its working directory, through the wrapper it ran under, which
-carries its account's config directory: `claude --resume <session id> /2mw2lt:connect`, or that
-account's wrapper, such as `claude-codex --resume <session id> /2mw2lt:connect`. The prompt is
-that literal command, given on the command line rather than typed into the pane: its connect
-refuses a prose request to connect. Tell the owner to close the dead tab, to avoid two processes driving one session.
+carries its account's config directory: `env -u CLAUDE_CODE_SESSION_ID claude --resume <session id>
+/2mw2lt:connect`, or that account's wrapper, such as `env -u CLAUDE_CODE_SESSION_ID claude-codex
+--resume <session id> /2mw2lt:connect`. Your shell carries your own session's id, which a session
+started under it would inherit (#7069): unset it, and any other harness's session variable you
+carry. The prompt is that literal command, given on the command line rather than typed into the
+pane: its connect refuses a prose request to connect. Tell the owner to close the dead tab, to avoid two processes driving one session.
 This is the one case where you start a harness yourself; everything else is started with
 `launch:`.
 
@@ -1087,7 +1174,7 @@ refuses a launch past its cap and names it; that refusal is authoritative
 
 `/effort` is a command a person types in a session's terminal. A session can neither run it nor
 read its own level back, so asking one to raise itself asks for nothing. That holds for every
-session without a pane you can control, such as OpenCode or Goose; a tmux-hosted Claude Code
+session without a pane you can control, such as OpenCode; a tmux-hosted Claude Code
 session you set with `control:` (above). What you can do is read
 what a session is running at and hand accordingly.
 
@@ -1294,8 +1381,9 @@ brain between holds, and what they send to it is spooled for a session that will
   holds no enrollment for this one. Run `/2mw2lt:connect`.
 - **no daemon answered** — nothing is running to route to.
 - **the stream answers connection refused** — no agent is running on this machine, and nothing
-  starts one for you. Start it, then open the stream again:
-  `STEERING_AGENT_ORCH=<door> STEERING_AGENT_PORT=<port> STEERING_AGENT_WORKSPACE=<workspace> <2mw2lt>/steering/.venv/bin/python <2mw2lt>/steering/agent.py`,
+  starts one for you. Start it, then open the stream again: the machine's agent is the installed
+  release's Go binary, and `2mw2lt install <workspace> <door>` writes its job and starts it
+  (`enroll/install.py`'s `ensure_agent` runs the same for a session that needs one),
   with `<door>` the `STEERING_DOOR` the workspace's `.env` names. The
   workspace is the one whose sessions this agent serves: it records its port there, and says
   it on `/status` and in every refusal it forwards, so a session that reached the wrong

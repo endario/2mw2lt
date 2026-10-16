@@ -111,7 +111,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> <issue>
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> branch [--card <id>]
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" announce <session> as <account> on <branch> doing "<work>"
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" blocked <session> on "<blocker>"
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" wait <session> for checks <pr>  # or merged <pr>, verdict <pr>, comment <pr>, at <UTC time>: told once it holds, instead of polling
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" wait <session> for checks <pr>  # or for merged|verdict|comment <pr>, or for at <YYYY-MM-DDTHH:MMZ>: told once it holds, instead of polling
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" done <session> "<result>"
 ```
 
@@ -140,9 +140,21 @@ or to contribute to a goal, say so; end the edge when it no longer holds. The br
 board's links too, but you know your own card's edges first:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/edge.py" <session> link <card> requires|part-of <card>|<owner>/<name>#<n> "<why>"
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/edge.py" <session> link <card> requires|part-of <card>|<owner>/<name>#<n> [--source <where>] "<why>"
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/edge.py" <session> unlink <card> requires|part-of <target> resolved|withdrawn "<why>"
 ```
+
+A prerequisite you discover while building is yours to declare the moment you know it, on the card
+you execute, with why — never a question for the brain to retype. `--source` names where the edge
+rests, a plan's document and sentence. Only the card you execute is yours to link: after a
+handoff, another session's engagement owns the mutation, and a card you no longer execute is not
+yours to edge. A card that turns out to serve a goal you were not briefed on has no edge command
+of its own — say it in your report and the brain links it.
+
+When your brief names a goal and a plan revision, that is context, not a fence: the plan orders
+work, it does not bind your branch or your review. Report what was done and what was discovered —
+a merge is work concluded, not proof it landed and not the goal's acceptance; `done` says what
+changed and where to see it, not a status line.
 
 Each script's `--help` gives its forms and examples.
 

@@ -21,6 +21,7 @@ python_floor.require()
 
 import json
 import os
+import re
 import shlex
 import time
 import urllib.error
@@ -120,20 +121,18 @@ def harness_of(provider: str | None) -> harness_mod.Harness:
 
 def name_for(psession: str, taken: dict[str, dict] | None = None,
              project: Path | None = None) -> str:
-    """This workspace and eight hex of the session id. Not the identity: the record holds the
-    provider session it was minted for, and that is what `connect` compares.
+    """A fresh workspace name; the enrolment record holds its full provider session.
 
-    Eight hex of a Codex session id is a millisecond clock, its ids being UUIDv7, so two
-    threads started within a minute of each other in one workspace derive the same eight (#895).
-    The name takes four more hex at a time until it names nothing another session holds. A name
-    that does not collide is the same eight it has always been, so nothing enrolled is renamed.
+    UUIDv7's clock prefix can collide (#895), so a colliding suffix grows.
     """
-    flat = psession.replace("-", "")
+    payload = re.search(r"(?:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}|[0-9a-fA-F]{32,})\Z", psession)
+    flat = (payload[0] if payload else psession).replace("-", "")
     base = (project or project_dir()).name
+    occupied = {name.lower() for name, rec in (taken or {}).items()
+                if rec.get("provider_session") and rec["provider_session"] != psession}
     for n in range(8, len(flat), 4):
         name = f"{base}-{flat[:n]}"
-        held = ((taken or {}).get(name) or {}).get("provider_session")
-        if not held or held == psession:
+        if name.lower() not in occupied:
             return name
     return f"{base}-{flat}"
 
@@ -331,6 +330,7 @@ def connect(ws: Path, session: str | None, account: str, doing: str,
             raise Refused(f"{h.provider} could not be observed here: {why}")
         except OSError as why:
             raise Refused(f"the observation for {psession} could not be sent: {why}")
+    import session_routes  # noqa: E402
     known = records(ws)
     if session is None and sum(1 for rec in known.values() if rec.get("provider_session") == psession) > 1:
         # Two records minted for this session — a detached name's can outlive it beside the one
@@ -339,13 +339,13 @@ def connect(ws: Path, session: str | None, account: str, doing: str,
         admitted = reconciled(ws, psession, pid, h)
         if admitted is not None:
             return admitted
-    session = session or minted_name(known, psession) or name_for(psession, known, project)
+    session = (session or minted_name(known, psession) or session_routes.pending_name(ws, psession)
+               or name_for(psession, known, project))
     rec = known.get(session) or {}
     minted_for = rec.get("provider_session")
     if minted_for and minted_for != psession:
         raise Refused(f"{session} is another session's enrollment ({minted_for}): pass a name of your own")
     token = rec.get("token")
-    import session_routes  # noqa: E402
     if session_routes.pending(ws, session):
         # An enrolment sent and not settled, a rotation's among them, is recovered before the
         # standing token is used: that token is the one the enrolment was made to end.

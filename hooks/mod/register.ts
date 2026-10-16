@@ -49,11 +49,20 @@ async function moduleVersion($: EngineInterface): Promise<string> {
   } catch { return '' }
 }
 
+// Every child runs as this session: a process resumed from inside another session's environment
+// inherits that session's CLAUDE_CODE_SESSION_ID, which the engine replaces for the Bash tool and
+// not for a module's children (#7069).
+const own = (ps: string) => ({ CLAUDE_CODE_SESSION_ID: ps })
+
+async function runOwn($: EngineInterface, argv: string[], stdin?: string) {
+  return $.process.run(argv, { cwd: root, env: own(await $.session.id()), ...(stdin !== undefined ? { stdin } : {}) })
+}
+
 // hold.py names where a provider session's claim lives; the path is asked once per id, so the
 // release at `session.end` spends none of its 1.5 s on a child.
 async function claimPath($: EngineInterface, id: string): Promise<string> {
   if (claimed?.id === id) return claimed.path
-  const r = await $.process.run(['python3', script($, 'hold.py'), '--claim-path', id], { cwd: root })
+  const r = await runOwn($, ['python3', script($, 'hold.py'), '--claim-path', id])
   const path = r.exitCode === 0 ? r.stdout.trim() : ''
   if (path) claimed = { id, path }
   return path
@@ -92,7 +101,7 @@ async function startConnected($: EngineInterface, at: number) {
 
 // What the summariser keeps: rebrief.py's line, or the session alone when it gives none.
 async function keepLine($: EngineInterface, session: string): Promise<string> {
-  const r = await $.process.run(['python3', script($, 'rebrief.py'), '--keep', session], { cwd: root }).catch(() => undefined)
+  const r = await runOwn($, ['python3', script($, 'rebrief.py'), '--keep', session]).catch(() => undefined)
   return (r?.exitCode === 0 && r.stdout.trim()) || `Keep verbatim: steering session ${session}.`
 }
 
@@ -212,9 +221,8 @@ function refreshSeat($: EngineInterface, refresh: boolean): Promise<void> {
     // The bulletin reads beside the seat's own run, not after it: the two write independent keys,
     // and a door that is down should cost the chain one retry budget, not two.
     const beside = refresh ? refreshBulletin($) : undefined
-    const r = await $.process.run(
-      ['python3', script($, 'seat_section.py'), '--provider', 'claude', '--provider-session', await $.session.id()],
-      { cwd: root })
+    const r = await runOwn($,
+      ['python3', script($, 'seat_section.py'), '--provider', 'claude', '--provider-session', await $.session.id()])
     if (r.exitCode !== 0 && r.exitCode !== 1) $.ui.log(`2mw2lt: seat_section.py exited ${r.exitCode}: ${r.stderr.trim()}`, { to: 'debug' })
     if (!(await $.state.get(SESSION)).value) return
     const { value: was = '' } = await $.state.get(SEAT)
@@ -230,9 +238,8 @@ async function refreshBulletin($: EngineInterface): Promise<void> {
   // A connected teammate renders no section, so its refresh must not mark one shown either: the
   // mark would keep the changes from every process on this enrolment (plan unit 7b).
   if (teammate) return
-  const r = await $.process.run(
-    ['python3', script($, 'bulletin.py'), '--provider', 'claude', '--provider-session', await $.session.id(), 'section'],
-    { cwd: root })
+  const r = await runOwn($,
+    ['python3', script($, 'bulletin.py'), '--provider', 'claude', '--provider-session', await $.session.id(), 'section'])
   if (r.exitCode !== 0 && r.exitCode !== 1) $.ui.log(`2mw2lt: bulletin.py section exited ${r.exitCode}: ${r.stderr.trim()}`, { to: 'debug' })
   // An answer that arrives after the session disconnected is dropped, as the seat's is; and any
   // exit but 0 and 1 keeps the bytes it had — a door that cannot tell, or a child that broke, is
@@ -254,7 +261,7 @@ async function bulletinRevisions($: EngineInterface): Promise<Map<string, number
   const out = new Map<string, number>()
   const { value: session = '' } = await $.state.get(SESSION)
   if (!root || !session) return out
-  const at = await $.process.run(['python3', script($, 'hold.py'), '--frame-path', session], { cwd: root }).catch(() => undefined)
+  const at = await runOwn($, ['python3', script($, 'hold.py'), '--frame-path', session]).catch(() => undefined)
   if (!at || at.exitCode !== 0) return out
   const recording = String(await $.fs.read(at.stdout.trim()).catch(() => ''))
   for (const raw of recording.split('\n')) {
@@ -293,7 +300,7 @@ async function tellBulletins($: EngineInterface) {
   const { value: session = '' } = await $.state.get(SESSION)
   let recording = ''
   if (session) {
-    const at = await $.process.run(['python3', script($, 'hold.py'), '--frame-path', session], { cwd: root })
+    const at = await runOwn($, ['python3', script($, 'hold.py'), '--frame-path', session])
     if (at.exitCode === 0) recording = String(await $.fs.read(at.stdout.trim()).catch(() => ''))
   }
   const { bulletins, found } = pick(recording, ids)
@@ -319,22 +326,21 @@ async function askHolder($: EngineInterface) {
 // with success is the call's error, in its own words.
 async function runSeatCall($: EngineInterface, call: SeatCall): Promise<{ result: string } | { deny: string }> {
   const speaker = ['--provider', 'claude', '--provider-session', await $.session.id()]
-  const run = (argv: string[], stdin?: string) => $.process.run(argv, { cwd: root, ...(stdin !== undefined ? { stdin } : {}) })
   const answer = (r: { exitCode: number; stdout: string; stderr: string }) => {
     const words = [r.stdout.trim(), r.stderr.trim()].filter(Boolean).join('\n') || `the client exited ${r.exitCode} and said nothing`
     return r.exitCode === 0 ? { result: words } : { deny: words }
   }
-  if (call.client === 'card') return answer(await run(['python3', script($, 'card.py'), '--lease', ...speaker, ...call.argv]))
+  if (call.client === 'card') return answer(await runOwn($, ['python3', script($, 'card.py'), '--lease', ...speaker, ...call.argv]))
   const argv = ['python3', script($, 'lease.py'), ...speaker,
     ...(call.client === 'say' ? ['say'] : call.client === 'reply' ? ['post', '/steering/brain/reply'] : ['post', call.path])]
-  let r = await run(argv, call.stdin)
+  let r = await runOwn($, argv, call.stdin)
   const again = call.client !== 'post' ? resendId(r.stdout) : null
-  if (again) r = await run([...argv, `--retry=${again}`], call.stdin)
+  if (again) r = await runOwn($, [...argv, `--retry=${again}`], call.stdin)
   return answer(r)
 }
 
 async function sessionOf($: EngineInterface, session?: string): Promise<string | null> {
-  const r = await $.process.run(['python3', script($, 'hold.py'), '--session-of', await $.session.id(), ...(session ? [session] : [])], { cwd: root })
+  const r = await runOwn($, ['python3', script($, 'hold.py'), '--session-of', await $.session.id(), ...(session ? [session] : [])])
   if (r.exitCode !== 0) {
     $.ui.log(`2mw2lt: the enrolment lookup exited ${r.exitCode}: ${r.stderr.trim()}`, { to: 'debug' })
     return null
@@ -376,6 +382,7 @@ async function holdOnce($: EngineInterface, ps: string, session: string, gen: nu
   const held = $.process.spawn({
     argv: ['python3', script($, 'hold.py'), '--wake', 'plugin', '--provider', 'claude', '--provider-session', ps, session],
     cwd: root,
+    env: own(ps),
   })
   child = held
   let buffer = ''
@@ -553,7 +560,7 @@ export const register: Register = on => {
     const pending = await locked(async () => (await $.state.get(PENDING)).value ?? [])
     let recording = ''
     if (session && pending.length) {
-      const at = await $.process.run(['python3', script($, 'hold.py'), '--frame-path', session], { cwd: root })
+      const at = await runOwn($, ['python3', script($, 'hold.py'), '--frame-path', session])
       if (at.exitCode === 0) recording = String(await $.fs.read(at.stdout.trim()).catch(() => ''))
     }
     const { text, envelopes, found, read } = pick(recording, pending)
@@ -570,7 +577,7 @@ export const register: Register = on => {
     // proof then remains recoverable even if this local recording later trims it.
     const ackFailures: string[] = []
     for (const ulid of envelopes) {
-      const acked = await $.process.run(['python3', script($, 'ack.py'), session, ulid], { cwd: root })
+      const acked = await runOwn($, ['python3', script($, 'ack.py'), session, ulid])
       if (acked.exitCode !== 0) {
         ackFailures.push(`ack.py ${ulid} exited ${acked.exitCode}${acked.stderr.trim() ? `: ${acked.stderr.trim()}` : ''}`)
       }

@@ -145,8 +145,8 @@ def uv_binary() -> str:
 
 
 def build(part: Path, root: Path, run=subprocess.run, uv: str | None = None) -> Path:
-    """Build the fetched release's environment with the root's shared interpreter and cache, as
-    `activate-agent.sh` does, check it imports the agent, and rename it into `releases/<sha>`."""
+    """Build the fetched release's environment with the root's shared interpreter and cache,
+    check it imports the agent, and rename it into `releases/<sha>`."""
     sha = part.name.removeprefix(".").removesuffix(".part")
     if (done := built(root, sha)) is not None:
         _clear(part)

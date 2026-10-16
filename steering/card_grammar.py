@@ -101,6 +101,12 @@ def validate(fact: dict) -> str | None:
         if tri is not None and not (isinstance(tri, dict) and set(tri) == {"criticality", "size"}
                                     and tri["criticality"] in CRITICALITY and tri["size"] in SIZES):
             return f"triage is triage:<{'|'.join(CRITICALITY)}>,<{'|'.join(SIZES)}>"
+        goal = fact.get("goal")
+        if goal is not None and not (isinstance(goal, dict) and set(goal) <= {"id", "why", "source"}
+                                     and _GOAL_ID.fullmatch(goal.get("id") or "")
+                                     and _text(goal.get("why"), 1000)
+                                     and ("source" not in goal or _text(goal["source"], 300))):
+            return "a goal is --goal <uuid> --goal-why <reason> [--goal-source <where>]"
     elif state in ("card-branch", "card-unbranch"):
         if not _text(fact.get("repo"), 120) or not _text(fact.get("branch"), 200):
             return "repo and branch are required"
@@ -250,14 +256,15 @@ def _edge_refusal(fact: dict) -> str | None:
 
 def scoped(name: str, track: str | None, units: list | None = None, card: str | None = None,
            anchors: dict | None = None, by: str | None = None, major: bool = False,
-           triage: dict | None = None) -> dict:
+           triage: dict | None = None, goal: dict | None = None) -> dict:
     """A card, minted. `card` is the client's id for a new one, or an existing one's to re-scope.
 
     `units` is omitted rather than written empty: a card that has not said what its blocks are
     is not a card that has said it has none, and the fold falls back to the PR's task list for
     the first while the second would erase it. `major` is the brain's declaration (doc 148 §5),
     so it is written only when true: a session's `declare:` never passes it, and absence reads
-    as ordinary.
+    as ordinary. `goal` is the goal the card is born contributing to (#7005), written only when
+    one is named, as the link's `part-of` would carry it.
     """
     fact = {"state": "card-scoped", "card": card or new_ulid(), "name": name}
     if track is not None:
@@ -272,6 +279,8 @@ def scoped(name: str, track: str | None, units: list | None = None, card: str | 
         fact["major"] = True
     if triage is not None:
         fact["triage"] = triage
+    if goal is not None:
+        fact["goal"] = goal
     return {**fact, "ts": now()}
 
 
@@ -294,17 +303,62 @@ def _fact(state: str, card: str, **kw) -> dict:
 
 def declaration(session: str, card: str, words: list[str]) -> tuple[dict | None, str | None]:
     """Build the declaration's first fact without consulting the ledger."""
+    # The goal flags come out first, their values with them: a why or a source may begin with
+    # `triage:` or be `major`, and neither is the older keyword's to take.
+    goal, words, wrong = _goal(words)
+    if wrong:
+        return None, wrong
     tri, words = _triage(words)
     tail = len(words)
     while tail and _ANCHOR_ARG.match(words[tail - 1]):
         tail -= 1
     try:
         first = scoped(" ".join(words[:tail]), None, card=card,
-                       anchors=_anchors(words[tail:]), by=f"session {session}", triage=tri)
+                       anchors=_anchors(words[tail:]), by=f"session {session}", triage=tri, goal=goal)
     except ValueError as e:
         return None, str(e)
     refusal = validate(first)
     return (None, refusal) if refusal else (first, None)
+
+
+# A goal's id, as Go holds it: a UUID.
+_GOAL_ID = __import__("re").compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+# The flags a birth's goal names (#7005): the goal, its reason, and where that reason rests.
+_GOAL_FLAGS = ("--goal", "--goal-why", "--goal-source")
+
+
+def _goal(args: list[str]) -> tuple[dict | None, list[str], str | None]:
+    """The arguments with the goal flags pulled out of them, the goal they name, and the refusal
+    one earned. A goal needs its why — Go refuses one without it, and the client does first — and
+    an orphan why or source names nothing."""
+    said = dict.fromkeys(_GOAL_FLAGS)
+    rest = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in said:
+            if i + 1 == len(args):
+                return None, [], f"{arg} needs a value"
+            if said[arg] is not None:
+                return None, [], f"{arg} twice"
+            said[arg] = args[i + 1]
+            i += 2
+            continue
+        if arg.startswith("--goal"):
+            return None, [], f"unknown goal option {arg!r}"
+        rest.append(arg)
+        i += 1
+    if said["--goal"] is None:
+        if said["--goal-why"] is not None or said["--goal-source"] is not None:
+            return None, [], "--goal-why and --goal-source name a goal: --goal <uuid> is missing"
+        return None, args, None
+    if said["--goal-why"] is None:
+        return None, [], "a goal needs its why: --goal-why <reason>"
+    goal = {"id": said["--goal"], "why": said["--goal-why"]}
+    if said["--goal-source"] is not None:
+        goal["source"] = said["--goal-source"]
+    return goal, rest, None
 
 
 def correction_value_refusal(field: str, after: object) -> str | None:
@@ -336,9 +390,15 @@ def built(verb: str, rest: list[str]) -> tuple[list[dict], str | None]:
         if verb == "scope" and len(rest) >= 4:
             if not valid_ulid(rest[1]):
                 return [], "--card must be a ULID"
-            weight, tail = _weight(rest[4:])
+            # The goal flags come out first, their values with them: a why or a source may be
+            # `major` or begin with `triage:`, and neither is the older keyword's to take.
+            goal, tail, wrong = _goal(rest[4:])
+            if wrong:
+                return [], wrong
+            weight, tail = _weight(tail)
             tri, tail = _triage(tail)
-            made = scoped(rest[2], rest[3], card=rest[1], anchors=_anchors(tail), major=weight, triage=tri)
+            made = scoped(rest[2], rest[3], card=rest[1], anchors=_anchors(tail), major=weight,
+                          triage=tri, goal=goal)
             refusal = validate(made)
             return ([], refusal) if refusal else ([made], None)
         if verb == "rescope" and len(rest) >= 3:

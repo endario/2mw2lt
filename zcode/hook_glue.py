@@ -29,6 +29,18 @@ import zcode_binding  # noqa: E402
 POINTER = ("A steering frame is waiting. Call mcp__plugin_2mw2lt_frames__frames to read it.")
 
 
+def trailer(payload: dict) -> str | None:
+    """The commit trailer naming the model this session runs on, from the SessionStart payload's
+    `model` (`<provider>/<model>`, the only event that carries it). ZCode credits no model itself,
+    so a session copied the Claude trailer it read and a GLM commit named Claude Opus (#7071)."""
+    model = payload.get("model")
+    if not isinstance(model, str) or not model.rpartition("/")[2].strip():
+        return None
+    name = model.rpartition("/")[2].strip().lower()
+    return (f"Credit your commits here with the trailer `Assisted-by: ZCode ({name})` on its own "
+            "line, never a Co-Authored-By naming a model this session is not.")
+
+
 def event_of(payload: dict) -> str | None:
     """The firing event, from either spelling the payload carries (measured: both, always)."""
     named = payload.get("hook_event_name") or payload.get("hookEventName")
@@ -89,6 +101,8 @@ def main() -> int:
             except Exception:
                 pass                        # the observation below stands on its own
         notice = observe(["--provider", "zcode"], payload)
+        if event == "SessionStart" and ws is not None:
+            notice = "\n".join(x for x in (trailer(payload), notice) if x) or None
         if ws is None or event not in ("UserPromptSubmit", "PostToolUse", "Stop"):
             if notice:
                 say({"additionalContext": notice})

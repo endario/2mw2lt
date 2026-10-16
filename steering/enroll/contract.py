@@ -186,11 +186,15 @@ UsageProjection = typing.TypedDict("UsageProjection", {
     "past_windows": "float | None",
 })
 
-# AccountVerdict is what an account's reading says for an hour's work (doc 117 §3): ranked, with
-# its tier, score and rank among its vendor's accounts; excluded, with the reason, the window by
-# which and until when; or unread, with the reason. The figures are the scored window's, where the
-# reading had one.
+# AccountRateChange is the next effective account-wide price, at an absolute UTC instant.
+AccountRateChange = typing.TypedDict("AccountRateChange", {
+    "at": "str",
+    "factor": "float",
+})
+
 AccountVerdict = typing.TypedDict("AccountVerdict", {
+    "rate": "typing.NotRequired[float]",
+    "next_rate": "typing.NotRequired[AccountRateChange | None]",
     "state": "str",
     "reason": "typing.NotRequired[str]",
     "tier": "typing.NotRequired[int | None]",
@@ -554,6 +558,8 @@ AgentReadingBody = typing.TypedDict("AgentReadingBody", {
 # ActiveAt is when the machine last saw the harness write its record, a subagent's included, to the
 # minute; absent from an agent that does not say. Background is how many background tasks the
 # harness's own process started and has not recorded ending; absent from an agent that does not say.
+# Leased is a session its machine launched on the account its launch placed: it names no directory,
+# and forgets any an earlier reading of the epoch named, so the account it spends is the launch's.
 SessionReading = typing.TypedDict("SessionReading", {
     "provider_session": "str",
     "observed_at": "str",
@@ -567,6 +573,7 @@ SessionReading = typing.TypedDict("SessionReading", {
     "tokens": "ReadingTokens",
     "entrypoint": "str",
     "directory": "typing.NotRequired[str]",
+    "leased": "typing.NotRequired[bool]",
     "background": "typing.NotRequired[int | None]",
 })
 
@@ -1084,28 +1091,6 @@ AgentPlacement = typing.TypedDict("AgentPlacement", {
     "workers": "typing.NotRequired[int | None]",
     "vendor_limit": "typing.NotRequired[int | None]",
     "agent_limit": "typing.NotRequired[int | None]",
-})
-
-# AgentWatchBody is the body of POST /steering/agent/watch: one reader's report on its uplink.
-AgentWatchBody = typing.TypedDict("AgentWatchBody", {
-    "uplink": "str",
-    "deploy": "str",
-    "cadence_s": "float",
-    "breaches": "list[WatchBreach] | None",
-})
-
-# WatchReport is what a reader reports each read: the deploy marker it read, its cadence, and the
-# causes the difference from its last read breached; none is a quiet read and still a heartbeat.
-WatchReport = typing.TypedDict("WatchReport", {
-    "deploy": "str",
-    "cadence_s": "float",
-    "breaches": "list[WatchBreach] | None",
-})
-
-# WatchBreach is one cause a reader's report names.
-WatchBreach = typing.TypedDict("WatchBreach", {
-    "signal": "str",
-    "why": "str",
 })
 
 # NeedRaiseBody is a session's need to the owner (EL4 decision 7): an ask, offering options when
@@ -2489,6 +2474,7 @@ KnowledgeUnit = typing.TypedDict("KnowledgeUnit", {
     "superseded_by": "typing.NotRequired[str]",
     "path": "str",
     "title": "typing.NotRequired[str]",
+    "blob": "str | None",
     "at": "str | None",
     "utc": "str | None",
 })
@@ -2810,6 +2796,25 @@ FleetSource = typing.TypedDict("FleetSource", {
     "worker_census": "FleetCensus | None",
     "worker_census_alternatives": "typing.NotRequired[list[FleetCensusAlternative] | None]",
     "checkout": "FleetCheckout | None",
+    "offers": "typing.NotRequired[list[FleetOffer] | None]",
+    "no_account": "typing.NotRequired[list[FleetNoAccount] | None]",
+})
+
+# FleetOffer is one account a machine's launchers can start, and which registration said.
+FleetOffer = typing.TypedDict("FleetOffer", {
+    "vendor": "str",
+    "account_id": "str",
+    "unrouted": "typing.NotRequired[bool]",
+    "registration": "str",
+})
+
+# FleetNoAccount is one launcher a machine's census said offers nothing, its one cause, since
+# when it first did, and which registration said (#6793).
+FleetNoAccount = typing.TypedDict("FleetNoAccount", {
+    "launcher": "str",
+    "cause": "str",
+    "since": "str",
+    "registration": "str",
 })
 
 FleetCheckout = typing.TypedDict("FleetCheckout", {
@@ -2828,6 +2833,19 @@ FleetMachine = typing.TypedDict("FleetMachine", {
     "registrations": "list[str] | None",
     "sources": "list[FleetSource] | None",
     "name": "str | None",
+    "label": "typing.NotRequired[str | None]",
+    "reported_name": "typing.NotRequired[str | None]",
+})
+
+# MachineLabel is the body of POST /machines/{machine}/label: the name a member gives the
+# machine, or null to clear it and return to the reported name.
+MachineLabel = typing.TypedDict("MachineLabel", {
+    "label": "str | None",
+})
+
+# MachineLabelled is its answer: the label now held, null when cleared.
+MachineLabelled = typing.TypedDict("MachineLabelled", {
+    "label": "str | None",
 })
 
 MachineFleetPage = typing.TypedDict("MachineFleetPage", {
@@ -3177,6 +3195,7 @@ PlacementTerms = typing.TypedDict("PlacementTerms", {
     "room": "float",
     "load": "float",
     "spread": "float",
+    "share": "float",
     "dedicated": "float",
 })
 
@@ -3933,6 +3952,15 @@ CardCreateBody = typing.TypedDict("CardCreateBody", {
     "anchors": "typing.NotRequired[list[AnchorBody] | None]",
     "track": "typing.NotRequired[str]",
     "triage": "typing.NotRequired[TriageBody | None]",
+    "goal": "typing.NotRequired[GoalContributionBody | None]",
+})
+
+# GoalContributionBody names the goal a card is born contributing to: its UUID, the caller's
+# reason, and where that reason rests when it names somewhere.
+GoalContributionBody = typing.TypedDict("GoalContributionBody", {
+    "id": "str",
+    "why": "str",
+    "source": "typing.NotRequired[str]",
 })
 
 # CardTriage is a card's latest triage: its answers, the floor each stage is held to (a stage it does
@@ -4538,6 +4566,151 @@ GoalRegister = typing.TypedDict("GoalRegister", {
     "next": "typing.NotRequired[str]",
 })
 
+# GoalExecutionOmitted is what the bounded read left out, exactly counted: the units beyond its
+# cap. Per-unit excerpts carry their own omitted counts. Nothing here reads as complete: an
+# omission is a fact, not an all-clear.
+GoalExecutionOmitted = typing.TypedDict("GoalExecutionOmitted", {
+    "units": "int",
+})
+
+# GoalExecutionValidity is the working plan's pins as they stand: which no longer hold, where its
+# policy is now, and whether the inputs it was adopted under have moved. Stale describes the plan's
+# scope and policy alone; an empty array says nothing of the inputs, which InputsMoved names
+# separately.
+GoalExecutionValidity = typing.TypedDict("GoalExecutionValidity", {
+    "stale": "list[str] | None",
+    "policy_now": "str",
+    "inputs_moved": "bool",
+})
+
+# GoalExecutionCriterion is one criterion of the current revision as the execution reads it: its
+# statement, its effective judgment (null before one), and the cards the working plan's map serves
+# it with, by id. A criterion with no cards is unmapped evidence, never a criterion complete.
+GoalExecutionCriterion = typing.TypedDict("GoalExecutionCriterion", {
+    "id": "str",
+    "statement": "str",
+    "judgment": "EffectiveJudgmentDTO | None",
+    "cards": "list[str] | None",
+})
+
+# GoalExecutionSelection is the working plan's selection of a unit: its place in the plan's adopted
+# order, its role, and the reason the plan stated.
+GoalExecutionSelection = typing.TypedDict("GoalExecutionSelection", {
+    "position": "int",
+    "role": "str",
+    "statement": "str",
+})
+
+# GoalExecutionExecutor is one live engagement on a unit's card, at the epoch its session is
+# enrolled at now.
+GoalExecutionExecutor = typing.TypedDict("GoalExecutionExecutor", {
+    "session": "str",
+    "role": "str",
+    "epoch": "int",
+})
+
+# GoalExecutionLaunch is a launch pending on a unit's card: asked for, nothing started for it yet.
+GoalExecutionLaunch = typing.TypedDict("GoalExecutionLaunch", {
+    "id": "str",
+    "state": "str",
+    "reason": "typing.NotRequired[str]",
+    "since": "str",
+})
+
+# GoalExecutionLanding is what the observed plane says of a unit's work: landed, disputed, unproven
+# or unknown, and when it landed. Unknown is a bound on what the sources read, never an all-clear.
+GoalExecutionLanding = typing.TypedDict("GoalExecutionLanding", {
+    "verdict": "str",
+    "landed_at": "str | None",
+    "limited_by": "typing.NotRequired[str]",
+})
+
+# GoalExecutionDep is one open prerequisite of a unit: what it is on, declared or observed, and the
+# cards that stand for what it is on. Unsourced names an edge whose issue no source has read.
+GoalExecutionDep = typing.TypedDict("GoalExecutionDep", {
+    "on": "str",
+    "provenance": "str",
+    "to": "list[str] | None",
+    "unsourced": "bool",
+})
+
+# GoalExecutionPull is one observed pull request of a unit's live branches: the repository, its
+# number, its state and head as the source last read them, and when it merged.
+GoalExecutionPull = typing.TypedDict("GoalExecutionPull", {
+    "repo": "str",
+    "n": "int",
+    "state": "str",
+    "head": "typing.NotRequired[str]",
+    "merged_at": "str | None",
+})
+
+# GoalExecutionGate is a unit's gate as it stands: how many rounds its series holds, the newest
+# round's phase and verdict, its unresolved findings and review, and how many rounds came before
+# the newest. Absent when the card holds no round.
+GoalExecutionGate = typing.TypedDict("GoalExecutionGate", {
+    "rounds": "int",
+    "omitted_rounds": "typing.NotRequired[int]",
+    "phase": "str",
+    "verdict": "str | None",
+    "findings_open": "int",
+    "review": "str | None",
+})
+
+# GoalExecutionAct is a unit's next act: the deterministic inspection guidance over its assembled
+# facts, and the basis that produced it, one line per fact the conclusion rests on. Basis lines
+# name their facts — an open prerequisite, a source gap, a pending launch — and never paraphrase a
+# state the facts do not hold.
+GoalExecutionAct = typing.TypedDict("GoalExecutionAct", {
+    "act": "str",
+    "basis": "list[str] | None",
+})
+
+# GoalExecutionUnit is one card of the goal's current working set: its identity, the plan's
+# selection of it, its live executors and pending launch, what it waits on, what the observed
+# plane says of it, and its pull and gate excerpts with their omitted counts. A card another
+# workspace holds is named by its id and Workspace alone: this read cannot see its facts.
+GoalExecutionUnit = typing.TypedDict("GoalExecutionUnit", {
+    "card": "str",
+    "name": "typing.NotRequired[str]",
+    "state": "typing.NotRequired[str]",
+    "workspace": "typing.NotRequired[str]",
+    "concluded": "bool",
+    "selection": "typing.NotRequired[GoalExecutionSelection | None]",
+    "executors": "list[GoalExecutionExecutor] | None",
+    "launch": "typing.NotRequired[GoalExecutionLaunch | None]",
+    "landing": "typing.NotRequired[GoalExecutionLanding | None]",
+    "deps": "list[GoalExecutionDep] | None",
+    "omitted_deps": "typing.NotRequired[int]",
+    "pulls": "list[GoalExecutionPull] | None",
+    "omitted_pulls": "typing.NotRequired[int]",
+    "gate": "typing.NotRequired[GoalExecutionGate | None]",
+    "next_act": "GoalExecutionAct",
+})
+
+# GoalExecution is a goal's bounded current working set: the identities it stands at, its criteria
+# with their outstanding judgments, at most a hundred units with their current facts and one next
+# act each, the goal-level reasons, the sources whose coverage bounds its facts, and exactly what
+# was omitted. It is a pure projection of current facts: nothing here accepts, dispatches or
+# fences anything, and an absent fact is never a complete one. The card, criterion, launch and
+# review identities it names are each the detail read's own subject.
+GoalExecution = typing.TypedDict("GoalExecution", {
+    "goal": "str",
+    "criteria_revision": "int",
+    "plan_revision": "int | None",
+    "policy_revision": "str",
+    "plan_inputs": "str",
+    "observed_at": "str",
+    "plan_validity": "GoalExecutionValidity",
+    "purpose": "typing.NotRequired[str]",
+    "cutoff": "typing.NotRequired[str]",
+    "criteria": "list[GoalExecutionCriterion] | None",
+    "units": "list[GoalExecutionUnit] | None",
+    "goal_reasons": "list[str] | None",
+    "sources": "list[SourceState] | None",
+    "omitted": "GoalExecutionOmitted",
+    "elsewhere": "list[CardElsewhereDTO] | None",
+})
+
 # GoalSummaryDTO is a goal as the workspace's list of goals names it: its current revision, how many
 # of that revision's criteria each verdict judges now, whether that revision is accepted, and its
 # newest plan, null before one.
@@ -4757,6 +4930,7 @@ WorkerCensusBody = typing.TypedDict("WorkerCensusBody", {
     "signed_out": "typing.NotRequired[list[LauncherAccount] | None]",
     "spends": "typing.NotRequired[list[HarnessSpend] | None]",
     "launches": "typing.NotRequired[list[str] | None]",
+    "no_account": "typing.NotRequired[list[LauncherNoAccount] | None]",
     "checkout": "typing.NotRequired[CheckoutCensus | None]",
     "machine_name": "typing.NotRequired[str | None]",
 })
@@ -4775,6 +4949,14 @@ LauncherAccount = typing.TypedDict("LauncherAccount", {
     "vendor": "str",
     "account_id": "str",
     "unrouted": "typing.NotRequired[bool]",
+})
+
+# LauncherNoAccount is a launcher of the machine's that offers no account, with its one cause as
+# the machine's probe worded it (#6793): a machine-local fact beside the account-keyed offer,
+# which keys nothing and composes with nothing across machines.
+LauncherNoAccount = typing.TypedDict("LauncherNoAccount", {
+    "launcher": "str",
+    "cause": "str",
 })
 
 # The names a door `/<team>/<workspace>` is read by: a team's slug, at most TEAM_SLUG_MAX long and
@@ -4807,6 +4989,7 @@ ROUTES = frozenset({
     "DELETE /api/v1/teams/{team}/invitations/{invitation}",
     "POST /api/v1/teams/{team}/invitations/{invitation}/redeem",
     "GET /api/v1/teams/{team}/launches/waiting",
+    "POST /api/v1/teams/{team}/machines/{machine}/label",
     "GET /api/v1/teams/{team}/machines/{machine}/settings",
     "POST /api/v1/teams/{team}/machines/{machine}/settings/{key}",
     "GET /api/v1/teams/{team}/members",
@@ -4887,6 +5070,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/goals",
     "GET /w/{workspace}/api/v1/goals/{goal}",
     "POST /w/{workspace}/api/v1/goals/{goal}/criteria/{criterion}/judgments",
+    "GET /w/{workspace}/api/v1/goals/{goal}/execution",
     "POST /w/{workspace}/api/v1/goals/{goal}/imports",
     "POST /w/{workspace}/api/v1/goals/{goal}/judgments",
     "POST /w/{workspace}/api/v1/goals/{goal}/links",
@@ -5001,7 +5185,6 @@ ROUTES = frozenset({
     "GET /w/{workspace}/steering/agent/target",
     "POST /w/{workspace}/steering/agent/undelivered",
     "POST /w/{workspace}/steering/agent/wake",
-    "POST /w/{workspace}/steering/agent/watch",
     "GET /w/{workspace}/steering/authorities",
     "POST /w/{workspace}/steering/door",
     "POST /w/{workspace}/steering/observe",

@@ -141,20 +141,6 @@ def opencode_version() -> str | None:
     return out.strip().splitlines()[0] if out.strip() else None
 
 
-GOOSE_CLI = os.environ.get("STEERING_GOOSE_CLI", "goose")
-
-
-def goose_version() -> str | None:
-    try:
-        binary = shutil.which(GOOSE_CLI, path=_cli_path())
-        if not binary:
-            return None
-        out = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=5)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return out.stdout.strip() or None
-
-
 @dataclass(frozen=True)
 class Harness:
     provider: str
@@ -427,16 +413,6 @@ def _grok_workspace(_fd: int, rel: Path, workspace: str) -> str | None:
     return None
 
 
-def _goose_pid(psession: str) -> int | None:
-    import worker_probe
-    return worker_probe.goose_pid_of(psession)
-
-
-def _goose_loaded(psession: str) -> bool:
-    import worker_probe
-    return worker_probe.goose_loaded(psession)
-
-
 # Why the last binding read inside a zcode session answered nothing, for the caller to report.
 zcode_unbound: str | None = None
 
@@ -519,19 +495,10 @@ def _zcode_process(argv: list[str]) -> str | None:
     return "worker"
 
 
-def _goose_transcript(psession: str):
-    import worker_probe
-    return worker_probe.goose_path_of(psession)
-
-
-def _goose_shape(rel):
+def _acp_shape(rel):
+    """The shape of an ACP harness's .jsonl transcript line, shared by opencode and zcode."""
     import worker_probe
     return worker_probe.shape(rel)
-
-
-def _goose_workspace(fd: int, rel, workspace: str) -> str | None:
-    import worker_probe
-    return worker_probe.goose_workspace_of(fd, rel, workspace)
 
 
 def _opencode_pid(psession: str) -> int | None:
@@ -552,14 +519,6 @@ def _opencode_transcript(psession: str):
 def _opencode_workspace(fd: int, rel, workspace: str) -> str | None:
     import worker_probe
     return worker_probe.opencode_workspace_of(fd, rel, workspace)
-
-
-def _goose_reading(psession: str) -> dict | None:
-    """What the worker's own handshake answered (doc 58 §4). Goose runs no hook, and unlike a
-    Codex rollout there is nothing on disk to read it from, so only the process running the
-    worker can answer and the census asks the agent that launched it."""
-    import worker_probe
-    return worker_probe.goose_reading(psession)
 
 
 CENSUS_REGISTRY_LIMIT = 256
@@ -614,26 +573,6 @@ def _codex_process(argv: list[str]) -> str | None:
     if Path(argv[0]).name in ("node", "nodejs"):
         return "shared-wrapper" if shared else "wrapper"
     return "shared" if shared else "worker"
-
-
-def _goose_command_prefix() -> list[str]:
-    return shlex.split(GOOSE_CLI)
-
-
-def _goose_process_names() -> tuple[str, ...]:
-    prefix = _goose_command_prefix()
-    return ("goose", Path(prefix[0]).name) if prefix else ("goose",)
-
-
-def _goose_process(argv: list[str]) -> str | None:
-    prefix = _goose_command_prefix()
-    if prefix and argv[:len(prefix)] == prefix:
-        args = argv[len(prefix):]
-        if len(prefix) > 1 and not args:
-            return None
-    else:
-        args = _command(argv, "goose")
-    return "worker" if args is not None and (not args or args[0] in ("acp", "session", "run")) else None
 
 
 def _opencode_process_names() -> tuple[str, ...]:
@@ -769,20 +708,11 @@ HARNESSES = {h.provider: h for h in (
             reading=_codex_reading, process_kind=_codex_process),
     Harness("grok", agent="grok", config=".grok", transcript_root="sessions",
             shape=_grok_shape, workspace=_grok_workspace),
-    # A worker rather than a session someone is sitting at: this platform launches it, so it
-    # names neither its session nor its process to anyone but its manager, and both are told
-    # to `connect.py`. Its transcript is the file the manager hands it to hold open.
-    Harness("goose", agent="goose", config=".local/share/goose",
-            transcript_root="steering-workers",
-            harness_pid=_goose_pid, transcript=_goose_transcript, version=goose_version,
-            shape=_goose_shape, workspace=_goose_workspace,
-            delivery="inject", loaded=_goose_loaded, reading=_goose_reading,
-            process_kind=_goose_process, process_names=_goose_process_names),
-    # Launched enrolled and reached as Goose is (docs 83, 89).
+    # Launched enrolled and reached (docs 83, 89).
     Harness("opencode", agent="opencode", config=".local/share/opencode",
             transcript_root="steering-workers",
             harness_pid=_opencode_pid, transcript=_opencode_transcript, version=opencode_version,
-            shape=_goose_shape, workspace=_opencode_workspace,
+            shape=_acp_shape, workspace=_opencode_workspace,
             delivery="inject", loaded=_opencode_loaded, process_kind=_opencode_process,
             process_names=_opencode_process_names),
     # One stream harness, like Claude (the owner's ruling, 2026-10-14, #6257): every zcode
@@ -793,7 +723,7 @@ HARNESSES = {h.provider: h for h in (
     Harness("zcode", agent="zcode", config=".zcode", config_env="ZCODE_DATA_BASE_DIR",
             transcript_root="steering-workers",
             session_id=_zcode_session, harness_pid=_zcode_pid, transcript=_zcode_transcript,
-            version=zcode_version, shape=_goose_shape, workspace=_zcode_workspace, hooks=True,
+            version=zcode_version, shape=_acp_shape, workspace=_zcode_workspace, hooks=True,
             reading=_zcode_reading,
             process_kind=_zcode_process, process_names=_zcode_process_names),
 )}

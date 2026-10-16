@@ -30,7 +30,7 @@ SOURCE = "claude"
 # What may state a reading. A harness with a hook states its own; one without it is read from
 # outside by the agent on its machine (doc 47 §4), and the source names the harness either way
 # because the binding that attributes a reading is keyed on the provider.
-SOURCES = ("claude", "codex", "goose", "zcode")
+SOURCES = ("claude", "codex", "zcode")
 TAIL = 256 * 1024  # bytes read from the end of a transcript; a long session's file is unbounded
 
 _FIELDS = {"v", "source", "source_version", "provider_session", "runtime_id", "observed_at",
@@ -42,8 +42,9 @@ _REQUIRED = {"v", "source", "source_version", "provider_session", "observed_at"}
 _TOKENS = ("input", "output", "thinking", "cache_read", "cache_creation")
 # Claude Code's own permission modes; anything else is a string this does not recognise.
 PERMISSION_MODES = {"acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "plan"}
-# `off` is Goose's, resolved as `thinking_effort` (doc 58 §5). The set refuses garbage rather
-# than naming one harness's levels, and a whole record is refused for a value outside it.
+# `off` was Goose's, resolved as `thinking_effort` (doc 58 §5), and the records that hold it
+# outlive the harness (#6908). The set refuses garbage rather than naming one harness's levels,
+# and a whole record is refused for a value outside it.
 EFFORTS = {"off", "low", "medium", "high", "xhigh", "max"}
 # Where a reading's session stands in its turn, for a harness that posts no turn-end observation of
 # its own (#1795): read from its transcript by the agent that reaches it.

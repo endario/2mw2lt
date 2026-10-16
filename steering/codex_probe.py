@@ -87,7 +87,7 @@ _SERVED_BY: dict[str, tuple[int, str, float]] = {}
 GRACE = 300.0
 
 
-# The rule is `runtime_id`'s, so this and goose agree on what a process is.
+# The rule is `runtime_id`'s, the one every process identity here derives from.
 _ident = runtime_id.started_at
 
 

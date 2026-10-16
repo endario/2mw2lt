@@ -148,7 +148,7 @@ def session_pid(frame: dict) -> int | None:
 
 # The providers whose workers this agent serves as its own processes: their runtime derives from
 # the server's pid, so no process on this machine deriving to it is one that has ended.
-SERVED = ("opencode", "goose")
+SERVED = ("opencode",)
 
 
 def _running(provider: str) -> list[int] | None:

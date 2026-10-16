@@ -339,10 +339,14 @@ def _pick(recording: str, pending: list[str]):
         if frame.get("kind") == "envelope" and isinstance(frame.get("ulid"), str):
             envelopes.append(frame["ulid"])
             directives.append(frame["ulid"])
-        elif frame.get("kind") == "say" and isinstance(frame.get("directive"), str):
-            directives.append(frame["directive"])
-        elif frame.get("kind") == "seat" and isinstance(frame.get("generation"), int):
-            generation = frame["generation"]
+        elif frame.get("kind") == "say":
+            directive = frame.get("directive")
+            directives.append(directive if isinstance(directive, str) else frame["id"])
+        elif frame.get("kind") == "seat":
+            value = frame.get("generation")
+            if (isinstance(value, (int, float)) and not isinstance(value, bool)
+                    and abs(value) <= 9007199254740991 and value == int(value)):
+                generation = int(value)
     return "\n".join(out), envelopes, found, directives, generation
 
 

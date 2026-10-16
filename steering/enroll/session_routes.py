@@ -228,6 +228,24 @@ def pending(ws: Path, session: str) -> bool:
     return _pending_path(ws, session).exists()
 
 
+def pending_name(ws: Path, psession: str) -> str | None:
+    """The name an unsettled enrolment already holds for this provider session."""
+    for path in sorted(_pending_path(ws, "").parent.glob("*.enrolling")):
+        try:
+            request = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if not isinstance(request, dict) or not isinstance(request.get("key"), str) or not request["key"]:
+            continue
+        body = request.get("body")
+        if not isinstance(body, dict) or body.get("provider_session") != psession:
+            continue
+        name = body.get("name")
+        if isinstance(name, str) and name and _pending_path(ws, name) == path:
+            return name
+    return None
+
+
 def _pending_path(ws: Path, session: str) -> Path:
     import ack  # noqa: E402
     p = ack.token_path(ws, session)
@@ -486,17 +504,21 @@ def card_repo(ws: Path | None = None) -> str:
     return url
 
 
-def declare_card(card: str, name: str, anchors: dict, token: str, repo: str = "", triage: dict | None = None) -> str:
+def declare_card(card: str, name: str, anchors: dict, token: str, repo: str = "", triage: dict | None = None,
+                 goal: dict | None = None) -> str:
     """The session declares its own card (`POST /cards`), which engages it as executor; Go answers
     a minted id whose declaration is the same one with that card. The key is the declaration's own,
     so a retry after a lost answer never mints a second card. `repo` names the anchors'
-    repository, as `card_repo` reads it. Raises `Refused` or `Unsent`."""
+    repository, as `card_repo` reads it; `goal`, a birth's `{id, why, source?}`, contributes the
+    card to its goal in the same command (#7005). Raises `Refused` or `Unsent`."""
     body: dict = {"id": card, "name": name}
     if anchors:
         body["anchors"] = [{"verb": verb, "repo": repo, "n": n}
                            for verb, ns in sorted(anchors.items()) for n in ns]
     if triage:
         body["triage"] = triage
+    if goal:
+        body["goal"] = goal
     answer = write("/cards", body, _own_key("declare", card, json.dumps(body, sort_keys=True)),
                   SESSION_CARRIER, token)
     return f"declared: {card}" + (" (replayed)" if answer.get("replayed") else "")
@@ -935,6 +957,8 @@ def _card_write(fact: dict, repo: str) -> tuple[str, dict] | None:
             body["major"] = True
         if fact.get("triage"):
             body["triage"] = fact["triage"]
+        if fact.get("goal"):
+            body["goal"] = fact["goal"]
         return "/cards", body
     if state in ("card-branch", "card-unbranch"):
         # An ending carries the reason every ending records; Go refuses its absence.

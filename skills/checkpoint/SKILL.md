@@ -14,6 +14,10 @@ brain's directive says `checkpoint: <card>`; `context` when the brain asks befor
 
 - Decisions, with the rejected alternatives and one line on why each lost: the design record.
 - The plan: the plan file beside it.
+- Goals and plans: when your card serves a goal, the goal and its plan revision are the live
+  record — point at them, and copy no inventory of cards or links into the note. Keep what they
+  cannot hold: unresolved command receipts (the principal, exact body and key of an uncertain
+  write), decisions not yet written to a ruling, and reasoning the native records do not carry.
 - Follow-ups: issues, by the global rule O5.
 - Measurements: the record, or the issue they decide.
 - Lessons: the `learned` list below.
@@ -38,7 +42,8 @@ Boundary: `<boundary>` — session <your session>.
 - What the brain, the owner or a sibling agreed with this session, restated in words: an
   instruction given only in the conversation does not survive a compact.
 
-**Links.** The record, the plan, the issues filed, and the lessons proposed.
+**Links.** The record, the plan, the goal and plan revision the card serves, the issues filed,
+and the lessons proposed.
 ```
 
 A `handover` note is read by a builder with none of your context, perhaps a smaller model: make

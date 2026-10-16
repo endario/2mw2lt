@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The re-arm: a Claude Code `Stop` hook that refuses a turn ending with no hold armed (#1506).
 
-A Claude Code session is reachable only while it holds its own stream. `goose.py` and
+A Claude Code session is reachable only while it holds its own stream. `opencode.py` and
 `codex.py` each define `deliver`, so the daemon can push into those; `agent.py` has no
 equivalent, and there is no socket, pipe or watch by which anything outside can wake an idle
 one. So a turn that ends without re-arming takes the session off the board silently, and

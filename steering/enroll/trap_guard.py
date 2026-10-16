@@ -13,6 +13,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -182,17 +183,39 @@ def verdict(payload: dict, env: dict | None = None) -> str | None:
         return None
 
 
+def merge_grant(payload, repo: str) -> dict | None:
+    """A project's opt-in grant uses a literal command shape, not shell glob matching."""
+    if not isinstance(payload, dict) or payload.get("tool_name") != "Bash":
+        return None
+    tool = payload.get("tool_input")
+    command = tool.get("command") if isinstance(tool, dict) else None
+    pattern = (r"gh pr merge [1-9][0-9]* -R " + re.escape(repo)
+               + r" --squash --match-head-commit [0-9a-fA-F]{40}")
+    if not isinstance(command, str) or re.fullmatch(pattern, command) is None:
+        return None
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}
+
+
 def main() -> int:
     argv = sys.argv[1:]
-    if argv:
+    granting = (len(argv) == 2 and argv[0] == "--merge-grant"
+                and re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", argv[1]) is not None)
+    if argv and not granting:
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
         import verb_help
         if verb_help.help_requested("trap_guard", argv, bare=False):
             print(verb_help.script_help("trap_guard"))
             return 0
+        if argv[0] == "--merge-grant":
+            print("trap_guard: expected owner/repo for --merge-grant; no command granted", file=sys.stderr)
+            return 0
         return verb_help.error("trap_guard", f"unexpected arguments: {' '.join(argv)}")
     try:
         payload = json.load(sys.stdin)
+        if granting:
+            if grant := merge_grant(payload, argv[1]):
+                print(json.dumps(grant))
+            return 0
         why = verdict(payload) if isinstance(payload, dict) else None
     except Exception:
         return 0

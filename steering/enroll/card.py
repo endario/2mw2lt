@@ -13,6 +13,7 @@ import python_floor  # noqa: E402
 python_floor.require()
 
 import hashlib  # noqa: E402
+import shlex  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -28,6 +29,7 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
     """`local(token, verb, rest, usage)` is the writer a caller holding the ledger passes, for
     `--token -`; it answers None when the ledger is not this machine's."""
     usage = ("usage: card.py --lease scope [--card <ulid>] <name> <track> [<verb>:<n>[,<n>] ...] [major]\n"
+             "              [--goal <uuid> --goal-why <reason> [--goal-source <source>]]\n"
              "       card.py --lease rescope <card> <name> <track> [<verb>:<n>[,<n>] ...] [major]\n"
              "       card.py --lease branch <card> <repo> <branch>\n"
              "       card.py --lease unbranch <card> <repo> <branch> [<why>]  (Go requires the why)\n"
@@ -51,8 +53,9 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
              "\n"
              "       `major` is the brain's declaration that a card's work is major (doc 148 §5): "
              "a major card owes a spec until a critic-passed knowledge record names it.\n"
-             "       `retier` raises a stage's floor (#6499): <floor> is legendary|epic|rare|uncommon, "
-             "and only the executor's own stage, the seat and the owner any stage.\n"
+             "       `retier` sets a stage's floor (#6499): <floor> is legendary|epic|rare|uncommon; "
+             "the executor's own stage only rises, while the seat and the owner re-tier any stage "
+             "either way, each saying why (#7146).\n"
              "       `outcome` is the brain's alone (doc 185): each text field is one quoted argument, and a "
              "brief with a reading has the daemon take its baseline as it is written.")
     usage = usage.replace("card.py", prog)
@@ -144,7 +147,14 @@ def _on_go(held: dict, verb: str, rest: list[str], usage: str, retry: str | None
         if not session_routes.settled(e):
             print(f"if this write may have been made, resend it with --retry={key}", file=sys.stderr)
     if verb == "scope":
-        print(f"to retry this scope under the same card, send it with --card {rest[1]}", file=sys.stderr)
+        # The retry repeats the whole birth: a resend under the card without its goal is another
+        # declaration, refused (#7005).
+        retry = f"--card {rest[1]}"
+        if fact.get("goal"):
+            retry += f" --goal {fact['goal']['id']} --goal-why {shlex.quote(fact['goal']['why'])}"
+            if fact["goal"].get("source"):
+                retry += f" --goal-source {shlex.quote(fact['goal']['source'])}"
+        print(f"to retry this scope under the same card, send it with {retry}", file=sys.stderr)
     return 1
 
 

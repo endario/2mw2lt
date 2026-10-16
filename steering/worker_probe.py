@@ -56,66 +56,9 @@ def workspace_of(fd: int, rel: Path, workspace: str, provider: str) -> str | Non
     return None
 
 
-GOOSE_CONFIG = ".local/share/goose"
 OPENCODE_CONFIG = ".local/share/opencode"
 ZCODE_CONFIG = ".zcode"
 ROOT = "steering-workers"
-
-
-def goose_workers_dir() -> Path:
-    return Path.home() / GOOSE_CONFIG / ROOT
-
-
-def goose_transcript(worker: str) -> Path:
-    return goose_workers_dir() / f"{worker}.jsonl"
-
-
-def goose_path_of(worker: str) -> Path | None:
-    p = goose_transcript(worker)
-    return p if p.exists() else None
-
-
-def goose_launch_record(worker: str) -> Path:
-    return record(goose_workers_dir(), worker)
-
-
-def goose_declared_pid(worker: str) -> int | None:
-    """The process this worker was launched as, or None when nothing in the record still holds.
-
-    Three things have to: the named process is the one named, the manager that wrote the record
-    is still the manager, and the named process is that manager's own child. The last is what a
-    forged record cannot satisfy — `goose acp`'s descendants have the worker or init for a
-    parent, and a process cannot choose who forked it.
-    """
-    rec = read(goose_workers_dir(), worker)
-    if rec is None:
-        return None
-    pid, by = rec.get("pid"), rec.get("by")
-    if not _live(pid, rec.get("since")) or not _live(by, rec.get("by_since")):
-        return None
-    return pid if runtime_id.parent_of(pid) == by else None
-
-
-def goose_pid_of(worker: str) -> int | None:
-    """The Goose process serving this worker, or None when nothing is.
-
-    `pass_fds` clears close-on-exec, so every descendant of `goose acp` inherits the transcript's
-    descriptor: a detached `git fsmonitor--daemon` kept it and outlived the turn, and
-    sole-writership held only while the worker was idle (#870).
-
-    No fallback to that rule when the record names nobody. It would name whichever process holds
-    the transcript, and once the worker exits that is the surviving descendant.
-    """
-    named = goose_declared_pid(worker)
-    return named if named is not None and named in writers(goose_transcript(worker)) else None
-
-
-def goose_loaded(worker: str) -> bool:
-    return goose_pid_of(worker) is not None
-
-
-def goose_workspace_of(fd: int, rel: Path, workspace: str) -> str | None:
-    return workspace_of(fd, rel, workspace, "goose")
 
 
 def opencode_workers_dir() -> Path:
@@ -192,7 +135,7 @@ def zcode_launch_record(worker: str) -> Path:
 
 
 def zcode_declared_pid(worker: str) -> int | None:
-    """The process this worker was launched as, on goose's rule: the record's pid live, its
+    """The process this worker was launched as: the record's pid live, its
     manager live, and the one the other's child — a forged record cannot choose who forked it."""
     rec = read(zcode_workers_dir(), worker)
     if rec is None:
@@ -219,7 +162,7 @@ def zcode_workspace_of(fd: int, rel: Path, workspace: str) -> str | None:
 _live = live
 
 
-# The manager's actual Goose workers; execution and discovery share this mapping.
+# The manager's actual workers; execution and discovery share this mapping.
 RUNNING: dict[str, object] = {}
 
 
@@ -230,15 +173,3 @@ def serving(worker: str) -> object | None:
     if w is not None:
         return w
     return next((w for w in RUNNING.values() if w.session == worker), None)
-
-
-def goose_reading(worker: str) -> dict | None:
-    """What a worker this process is running is running, for `Harness.reading` (doc 58 §4).
-
-    Only a worker in `RUNNING` can answer: the handshake is held on the live session and there
-    is nothing on disk to read it from, so a worker of another process answers nothing rather
-    than a reading built out of this machine's environment.
-    """
-    import vitals
-    w = serving(worker)
-    return vitals.stated("goose", w.reading()) if w is not None else None

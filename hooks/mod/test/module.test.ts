@@ -124,6 +124,11 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
     runs: [] as string[][],
     cwds: [] as (string | undefined)[],
     spawns: [] as string[][],
+    // The environment each child was given over the host process's own, runs and spawns alike.
+    envs: [] as (Record<string, string> | undefined)[],
+    // The session id the host process carries in its environment when it differs from its own
+    // (#7069); a lease client then refuses as the Python one does, unless the child is told otherwise.
+    inherited: undefined as string | undefined,
     claimsAtSpawn: [] as number[],
     submits: [] as string[],
     appends: [] as string[],
@@ -188,10 +193,16 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
   on('process.run', async ($, e) => {
     w.runs.push([...e.argv])
     w.cwds.push(e.init?.cwd)
+    w.envs.push(e.init?.env)
     if (/\/(lease|card)\.py$/.test(String(e.argv[1]))) {
       w.wireStarted?.()
       if (w.wireGate) await w.wireGate
       w.stdins.push(e.init?.stdin)
+      const own = e.init?.env?.CLAUDE_CODE_SESSION_ID ?? w.inherited
+      const named = e.argv[e.argv.indexOf('--provider-session') + 1]
+      if (own && own !== named) {
+        return { value: { exitCode: 1, stdout: '', stderr: `refused: this harness is session ${own}, not ${named}: a session speaks only as itself`, isStdoutTruncated: false, isStderrTruncated: false } }
+      }
       const out = w.leaseOut.shift() ?? 'relayed: 01AB to amber'
       return { value: { exitCode: /^(REJECTED|refused)/.test(out) ? 1 : 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
@@ -221,6 +232,7 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
   })
   on('process.spawn', async function* ($, e) {
     w.spawns.push([...e.argv])
+    w.envs.push(e.env)
     w.claimsAtSpawn.push(w.writes.filter(write => JSON.parse(write.text).at > 0).length)
     w.cwds.push(e.cwd)
     const round = rounds.shift()
@@ -406,6 +418,24 @@ test('the main frames tool proves exactly its returned native frames', async ($,
   await w.clock.settle()
   await $.tool.call({ tool: TOOL } as never)
   expect(w.stdins).toContain(JSON.stringify({ directives: [directive, ordinary], seat_generation: 4 }))
+})
+
+// A session resumed from inside another session's environment inherits its CLAUDE_CODE_SESSION_ID:
+// the engine sets the session's own for the Bash tool, not for a module's children (#7069).
+test('a session resumed inside another session\'s environment reads its own frames', async ($, on) => {
+  const SAID = { kind: 'say', id: 'bb48a465-45e5-4e38-85c8-2223890d4f47', directive: 'edaed9f7-42bd-479a-baa9-ddc2d4fdffba', text: 'answer me' }
+  const w = world(on, {
+    rounds: [{ lines: [line(SAID.id, 'say', true)], code: 0, hold: never }],
+    recording: `data: ${JSON.stringify(SAID)}\n`,
+  })
+  w.inherited = 'ps-seat'
+  await begin($)
+  await w.clock.settle()
+  const answered = await $.tool.call({ tool: TOOL } as never)
+  expect((answered as { result?: unknown }).result).toBe(JSON.stringify(SAID))
+  expect(w.stdins).toContain(JSON.stringify({ directives: [SAID.directive] }))
+  expect(w.envs.length).toBeGreaterThan(0)
+  expect(w.envs.filter(env => env?.CLAUDE_CODE_SESSION_ID !== w.psession)).toEqual([])
 })
 
 test('a stale seat frame is retired without discarding the ordinary frame beside it', async ($, on) => {

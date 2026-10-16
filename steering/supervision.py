@@ -135,7 +135,7 @@ def observe(hook: dict, occurrence: str, observed_at: str, source_version: str, 
     return o
 
 
-_BASIS_RANK = {"claude:Notification": 0, "claude:PermissionRequest": 1, "claude:PreToolUse": 1, "claude:Elicitation": 1}
+_BASIS_RANK = {"Notification": 0, "PermissionRequest": 1, "PreToolUse": 1, "Elicitation": 1}
 
 
 def _boundary(o: dict) -> dict | None:
@@ -189,7 +189,7 @@ def _keep(keyed: dict, key: tuple, b: dict) -> None:
         keyed[key] = b
         return
     cur["observed_at"] = min(cur["observed_at"], b["observed_at"])
-    cur["basis"] = min(cur["basis"], b["basis"], key=lambda x: (_BASIS_RANK.get(x, 9), x))
+    cur["basis"] = min(cur["basis"], b["basis"], key=lambda x: (_BASIS_RANK.get(x.partition(":")[2], 9), x))
     # One of the two sightings carries the ask: `Notification` names no tool, and the
     # `PermissionRequest` for the same prompt does.
     for k in ("tool", "ask", "options", "truncated", "prompt_id"):
@@ -212,7 +212,7 @@ def fold(st: dict, o: dict) -> None:
     b = _boundary(o)
     if b is None:
         return
-    b["basis"] = f"claude:{o['event']}"; b["observed_at"] = o["observed_at"]
+    b["basis"] = f"{o['source']}:{o['event']}"; b["observed_at"] = o["observed_at"]
     if o.get("prompt_id"):
         b["prompt_id"] = o["prompt_id"]
     # What is being asked, where the observation that opened the item carried it (#812): a

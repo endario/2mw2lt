@@ -217,8 +217,8 @@ def _go_launch(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
     m = _LAUNCH.match(line)
     if not m:
         return 2, refusal.use("launch", "malformed launch: its clauses go in the order on, vendor, account, model or floor, thinking, effort, window, card or resolves; on Go, `on` names a machine as /sessions lists it in `machine`, a registration as /machines lists it, or the machine's name"), False
-    if m["harness"] == "claude" and not ((m["model"] or m["floor"]) and m["effort"]):
-        return 2, refusal.use("launch", "a claude launch names its model (as Claude Code takes it) or a floor, and its effort"), False
+    if m["harness"] == "claude" and not (m["model"] or m["floor"]):
+        return 2, refusal.use("launch", "a claude launch names its model (as Claude Code takes it) or a floor; its effort, left out, is the placed model's rarity's: legendary low, epic medium, rare high, uncommon xhigh"), False
     if m["floor"] and (m["machine"] or m["quoted"] or m["machine_name"] or m["vendor"] or m["account"]):
         return 2, refusal.use("launch", "a floor is placed by the platform: leave out on, vendor and account, or name the model"), False
     body = {k: m[k] for k in ("harness", "machine", "machine_name", "vendor", "account", "model", "floor", "thinking", "effort") if m[k]}

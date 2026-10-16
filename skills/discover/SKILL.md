@@ -19,7 +19,9 @@ goal-discovery.md
 - A delegated onboarding or catch-up task, or a material contradiction you meet while steering.
 
 Never on a page load, a timer or a schedule: there is no goal-report ceremony. A repeated request
-joins the conversation already open rather than starting a second.
+joins the conversation already open rather than starting a second. A direct instruction that
+already names its intent is not one of these starts: the brain takes it straight into its goal
+routine, and discovery joins only when the direction itself is in question.
 
 A message opening *"About the goal “…” (goal <id>, revision <n>):"* or *"About plan <n> of the goal
 “…” (goal <id>):"* comes from the Ledger's **Discuss** buttons. It is about that adopted goal or

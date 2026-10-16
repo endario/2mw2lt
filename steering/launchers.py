@@ -245,14 +245,17 @@ def plugin_installed(config_dir: str) -> bool:
 def accounts(launchers: list[dict], readings: list[dict], run: Callable[[list[str]], str] = _run,
              proxy_label: Callable[[str], tuple[tuple[str, str] | None, str]] = None,
              why: dict | None = None, dead: set[str] | None = None,
-             redundant: dict | None = None) -> list[dict]:
+             redundant: dict | None = None, aside: set[str] | None = None) -> list[dict]:
     """`{vendor, account_id, launcher}` for each launcher signed in first-party, the account being
     the usage reading (`readings`, as the agent sends them) labelled by the launcher's usage
     source; with none, its declared vendor and its directory's label, an account with no verdict.
     `why`, when given, takes the one cause for each launcher offering nothing, by its path. `dead`
     takes the paths whose read answered that the launcher is signed out — an answer about the
-    account, not a read that missed (#3046) — by its `auth status` or by its usage reading."""
+    account, not a read that missed (#3046) — by its `auth status` or by its usage reading. `aside`
+    takes the paths another launcher placing their home displaced: not offered by this read's
+    choice, where one offering nothing for want of an answer is a read that missed."""
     why = {} if why is None else why
+    aside = set() if aside is None else aside
     import transcript_proof
     proxy_label = proxy_label or _proxy_label
     # By harness as well as label: Claude's own directory and Codex's are both `default`.
@@ -348,6 +351,7 @@ def accounts(launchers: list[dict], readings: list[dict], run: Callable[[list[st
             names_account = bool(a["launcher"].get("account"))
             if a["where"] in placed and (names_account or a["where"] in placed_by_account):
                 why[a["launcher"]["path"]] = f"another launcher already placed directory {a['where']}"
+                aside.add(a["launcher"]["path"])
                 continue
             placed.add(a["where"])
             if names_account:
@@ -376,6 +380,7 @@ def accounts(launchers: list[dict], readings: list[dict], run: Callable[[list[st
             if stands_aside:
                 why[a["launcher"]["path"]] = (f"another launcher already placed {a['vendor']} account "
                                               f"{a['account_id']} in directory {a['where']}")
+                aside.add(a["launcher"]["path"])
                 # A declared entry is redundant when a discovered profile would offer the same
                 # account from the same home and the entry says nothing discovery cannot (6814 §3):
                 # an `unrouted` or a `proxy` is the owner's word, an exception that stays.
@@ -409,7 +414,7 @@ def serving(found: list[dict], model: str | None) -> list[dict]:
 
 def offer(declared_: list[dict], readings: list[dict] | None, log: Callable[[str], None],
           run: Callable[[list[str]], str] = _run, proxy_label=None,
-          dead: set[str] | None = None) -> list[dict]:
+          dead: set[str] | None = None, aside: set[str] | None = None) -> list[dict]:
     """`accounts()` against the readings the agent sends, each launcher's offer logged, and each
     offering nothing with its cause. Joined only against those: a reading taken here instead races the agent's
     own first one, and the census after a restart offered no Codex launcher because of it
@@ -418,7 +423,7 @@ def offer(declared_: list[dict], readings: list[dict] | None, log: Callable[[str
         raise Unread("this agent has not read its accounts yet")
     why: dict = {}
     redundant: dict = {}
-    found = accounts(declared_, readings, run, proxy_label, why, dead, redundant)
+    found = accounts(declared_, readings, run, proxy_label, why, dead, redundant, aside)
     for a in found:
         log(f"launcher {Path(a['launcher']['path']).name} offers {a['vendor']} account {a['account_id']}")
     for path, cause in why.items():
@@ -625,18 +630,3 @@ def argv(launcher: dict, workspace: str, model: str | None, effort: str | None, 
             "/usr/bin/env", "-i", *[kv for kv in environment(env) if kv.partition("=")[0] not in (forge_env or {})],
             *[f"{k}={v}" for k, v in (forge_env or {}).items()], *bootstrap,
             *_claude(launcher), *settings, *(["--resume", resume] if resume else []), *level, "/2mw2lt:connect"]
-
-
-def _suggest() -> int:
-    """The `suggest` subcommand (#6458 §2.5): this machine's suggestion lines, printed. The
-    logic is `launcher_suggest`'s own, run as its own process — a launch the boundary policy
-    declares — because importing it here would pull the harness stack into the enrollment
-    client's closure (the plan's unit 2 ruling)."""
-    import subprocess
-    script = Path(__file__).parent / "launcher_suggest.py"
-    return subprocess.run([sys.executable, str(script), "suggest"]).returncode
-
-
-if __name__ == "__main__":
-    raise SystemExit(_suggest() if sys.argv[1:] == ["suggest"] else
-                     (print("usage: launchers.py suggest", file=sys.stderr), 2)[1])

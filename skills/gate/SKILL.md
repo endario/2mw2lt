@@ -168,8 +168,13 @@ sweep after the verdict or the carry, and you are told when it lands: a `say` fr
 
 ```bash
 git fetch origin && merged=$(git merge-tree --write-tree origin/main <head sha>) &&
-  .githooks/check-migrations.sh origin/main "$merged" &&
-  gh pr merge <pr number> -R <repo> --squash --match-head-commit <head sha>
+  .githooks/check-migrations.sh origin/main "$merged"
+```
+
+After that call succeeds, issue the merge as a separate Bash tool call with the literal head SHA:
+
+```bash
+gh pr merge <pr number> -R <repo> --squash --match-head-commit <head sha>
 ```
 
 The migration check applies where that script exists. Judge the merged tree: a version collision

@@ -20,7 +20,7 @@ _RAW_FORMS = {
     "ask": ["ask: <session> token <t> <question>", "ask: <session> token <t> json <object>"],
     "claim": ["claim: <resource> as <claimant> token <t>"],
     "taking": ["taking: <issue> token <t>", "taking: branch <name> token <t>"],
-    "declare": ["declare: <session> token <t> card <ulid> <name> [<verb>:<n>[,<n>] …]",
+    "declare": ["declare: <session> token <t> card <ulid> <name> [<verb>:<n>[,<n>] …] [--goal <uuid> --goal-why <reason> [--goal-source <source>]]",
                 "declare: <session> token <t> link <card> requires|part-of <card>|<owner>/<name>#<n> [--source <where>] <why>",
                 "declare: <session> token <t> unlink <card> requires|part-of <card>|<owner>/<name>#<n> resolved|withdrawn <why>"],
     "checkpoint": ["checkpoint: <session> token <t> json {\"id\", \"boundary\", \"note\", \"note_sha256\", \"learned\"?}"],
@@ -30,7 +30,8 @@ _RAW_FORMS = {
     "ack": ["ack: <ulid> token <t>"],
     "say": ["say: <session> [to <target>] token <t> <text>"],
     "note": ["note: token <lease token> <text>"],
-    "launch": ["launch: token <lease token> <harness> [on <node>] [vendor <vendor>] [account <n>] [model <model>|floor <rarity>] [thinking <level>] [effort <level>] [window] [card <card>|resolves <owner>/<name>#<n>] because <reason> [<newline> brief: <directive>]"],
+    "launch": ["launch: token <lease token> <harness> floor <rarity> [thinking <level>] [effort <level>] [window] [card <card>|resolves <owner>/<name>#<n>] because <reason> [<newline> brief: <directive>]",
+               "launch: token <lease token> <harness> [on <node>] [vendor <vendor>] [account <n>] [model <model>] [thinking <level>] [effort <level>] [window] [card <card>|resolves <owner>/<name>#<n>] because <reason> [<newline> brief: <directive>]"],
     "withdraw": ["withdraw: token <lease token> <launch id>"],
     "cancel": ["cancel: token <lease token> <action id>"],
     "relay": ["relay: token <lease token> to <session>[@<epoch>] <text>"],
@@ -84,7 +85,8 @@ _EXAMPLES = {
     "ack": ["ack: 010101010101010101010101 token <t>"],
     "say": ["say: violet to amber token <t> please review this"],
     "note": ["note: token <lease token> review is waiting"],
-    "launch": ["launch: token <lease token> claude on build vendor anthropic model claude-opus-5-5 effort high because review"],
+    "launch": ["launch: token <lease token> claude floor rare because a contained fix",
+               "launch: token <lease token> claude vendor anthropic account 2 model opus effort high because a hard design needs more than epic's medium"],
     "withdraw": ["withdraw: token <lease token> 1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00"],  # gitleaks:allow (a placeholder launch id)
     "cancel": ["cancel: token <lease token> 1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00"],  # gitleaks:allow (a placeholder action id)
     "relay": ["relay: token <lease token> to violet@1 review the branch"],
@@ -155,7 +157,7 @@ TOOLS = {
         {"topic": None, "usage": "[--as <harness/account>] [--doing <text>] [--provider <provider>] [--provider-session <id>] [--pid <pid>] [session]", "example": "connect --current"},
     ]},
     "declare": {"verb": "declare", "forms": [
-        {"topic": None, "usage": "<session> [--card <ulid>] <name> [resolves:<n> advances:<n> ...] [triage:<criticality>,<size>]", "example": "declare violet verb-help triage:minor,S"},
+        {"topic": None, "usage": "<session> [--card <ulid>] <name> [resolves:<n> advances:<n> ...] [triage:<criticality>,<size>] [--goal <uuid> --goal-why <reason> [--goal-source <source>]]", "example": "declare violet verb-help triage:minor,S"},
     ]},
     "edge": {"verb": "declare", "forms": [
         {"topic": "link", "usage": "<session> link <card> requires|part-of <card>|<owner>/<name>#<n> [--source <where>] <why>",
@@ -193,8 +195,6 @@ TOOLS = {
         {"topic": "issue", "usage": _SPEAKER_USAGE + " <session> issue <n>", "example": "holds violet issue 3384"},
     ]},
     "hooks": {"forms": [
-        {"topic": "install", "usage": "install [workspace] local", "example": "hooks install . local"},
-        {"topic": "install-codex", "usage": "install-codex [workspace] local", "example": "hooks install-codex . local"},
         {"topic": "uninstall", "usage": "uninstall [workspace]", "example": "hooks uninstall ."},
         {"topic": "show", "usage": "show [workspace]", "example": "hooks show"},
     ]},
@@ -227,7 +227,9 @@ TOOLS = {
     "verb": {"forms": [
         {"topic": "announce", "usage": "announce <session> as <harness/account> on <branch> doing <what> [--retry=<id>]", "example": "verb announce violet as claude-code/main on feat/help doing add-help"},
         {"topic": "blocked", "usage": "blocked <session> on <what> [--retry=<id>]", "example": "verb blocked violet on waiting"},
-        {"topic": "wait", "usage": "wait <session> for checks <pr>, merged <pr>, verdict <pr>, comment <pr> or at <YYYY-MM-DDTHH:MMZ> [recheck <seconds>], or cancel <wait id>, which ends one of its own open waits [--retry=<id>]", "example": "verb wait violet for checks 4391"},
+        {"topic": "wait", "usage": "wait <session> for checks|merged|verdict|comment <pr> [recheck <seconds>] [--retry=<id>]", "example": "verb wait violet for checks 4391"},
+        {"topic": "wait-at", "usage": "wait <session> for at <YYYY-MM-DDTHH:MMZ> [recheck <seconds>] [--retry=<id>]", "example": "verb wait violet for at 2026-10-17T09:00Z"},
+        {"topic": "wait-cancel", "usage": "wait <session> cancel <wait id>, which ends one of its own open waits [--retry=<id>]", "example": "verb wait violet cancel 323d6c8a-2be5-4685-b088-df6e5fdfbe9f"},
         {"topic": "done", "usage": "done <session> <what> [--retry=<id>]", "example": "verb done violet help"},
         {"topic": "recommend", "usage": "recommend <session> <what> [--retry=<id>]", "example": "verb recommend violet approve"},
         {"topic": "ask", "usage": "ask <session> <question> [--retry=<id>]", "example": "verb ask violet should-we-deploy"},
@@ -244,7 +246,10 @@ TOOLS = {
     "armed": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "armed --help"}]},
     "codex_observe": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "codex_observe --help"}]},
     "delete_guard": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "delete_guard --help"}]},
-    "trap_guard": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "trap_guard --help"}]},
+    "trap_guard": {"bare": False, "forms": [
+        {"topic": None, "usage": "[--help]", "example": "trap_guard --help"},
+        {"topic": "--merge-grant", "usage": "--merge-grant <owner/repo>", "example": "trap_guard --merge-grant example/repo"},
+    ]},
     "ghtoken": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "ghtoken --help"}]},
     "observe": {"bare": False, "forms": [{"topic": None, "usage": "[--provider zcode] [--help]", "example": "observe --help"}]},
     "readout": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "readout --help"}]},

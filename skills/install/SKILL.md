@@ -51,7 +51,8 @@ read its output as it goes; you are told when it exits. In Codex, give the comma
 at least 60 minutes, or poll its running session for output until it exits. The person acts only
 where it pauses:
 
-- **`sign in`**: it prints a console address and a code, and opens the page. The person signs in
+- **`sign in`**: it prints a console address and a code, and opens the page; over SSH it opens
+  nothing and prints the page for the person to open in their own browser. The person signs in
   there and approves. After approving, that browser carries on by itself: it waits for the
   workspace, then opens GitHub's page for the 2mw2lt App.
 - **`github`**: the person installs the App on GitHub's page, which the browser has opened, or
