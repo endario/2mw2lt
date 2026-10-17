@@ -228,9 +228,15 @@ def _outcome_refusal(fact: dict) -> str | None:
 def _edge_refusal(fact: dict) -> str | None:
     if fact.get("kind") not in LINKS:
         return f"kind must be one of {LINKS}"
-    if ("to_card" in fact) == ("to_issue" in fact):
-        return "an edge names exactly one of to_card or to_issue"
-    if "to_card" in fact:
+    if sum(k in fact for k in ("to_card", "to_issue", "to_goal")) != 1:
+        return "an edge names exactly one of to_card, to_issue or to_goal"
+    # Go refuses the other pairings (work/links.go): a card waits on cards and issues, and serves goals.
+    if (fact["kind"] == "part-of") != ("to_goal" in fact):
+        return "part-of names a goal's id; requires names a card or an issue"
+    if "to_goal" in fact:
+        if not (isinstance(fact["to_goal"], str) and _GOAL_ID.fullmatch(fact["to_goal"])):
+            return "to_goal must be a UUID"
+    elif "to_card" in fact:
         if not valid_ulid(fact["to_card"]):
             return "to_card must be a ULID"
         if fact["to_card"] == fact["card"]:
@@ -539,12 +545,14 @@ _OUTCOME_KEYS = ("need", "reading", "target", "window", "uses", "starts", "basel
 
 
 def _to(word: str) -> dict:
-    """An edge's target as its argument names it: a card's id, or `owner/name#n`."""
+    """An edge's target as its argument names it: a card's id, `owner/name#n`, or a goal's id."""
     if valid_ulid(word):
         return {"to_card": word}
+    if _GOAL_ID.fullmatch(word):
+        return {"to_goal": word}
     repo, hash_, n = word.rpartition("#")
     if not hash_ or "/" not in repo or not n.isdigit():
-        raise ValueError(f"a target is a card's id or <owner>/<name>#<n>, not {word!r}")
+        raise ValueError(f"a target is a card's id, <owner>/<name>#<n> or a goal's id, not {word!r}")
     return {"to_issue": {"repo": repo, "n": int(n)}}
 
 

@@ -395,6 +395,24 @@ def go_access(console: str, token: str) -> dict:
     return got
 
 
+def checked_login(access: dict, carried: str | None, named: bool) -> str | None:
+    """The GitHub login the console's access answer names the sign-in as, said in the terminal so a
+    wrong browser profile is announced rather than silently landing the repository in that account's
+    team (#6216). Where the login this run carried was the one to sign in as — not an invitation's
+    account — a mismatch is refused here, before any team or workspace step, because the approval
+    page's own guard never saw a page opened without its fragment. None when the answer names no
+    login, which a release before this one does."""
+    login = access.get("github_login")
+    if not isinstance(login, str) or not LOGIN.fullmatch(login):
+        return None
+    say("signed in", f"@{login}")
+    if named and isinstance(carried, str) and LOGIN.fullmatch(carried) and login.lower() != carried.lower():
+        raise Stop(f"you signed in to the console as @{login}, and this machine's GitHub account is "
+                   f"@{carried}; run install again and approve it as that account, or name the "
+                   "account to install with --login")
+    return login
+
+
 def let_go(prior: tuple[str, str] | None, authority: str, door: str) -> bool:
     """The door this checkout was bound to before, once coordination's admitted it to another: its
     credential and registration on this machine go, and each that went is said. Whether it moved."""
@@ -658,20 +676,26 @@ def _ready(release: Path, sha: str | None = None) -> bool:
 def release(door: str) -> Path:
     """The agent release the workspace's door states (doc 147 §3–4), fetched with this machine's
     credential and, unless it carries its own Go installer, built when the machine has none. It
-    never re-points the machine's other agents: the one job written below is the only one touched."""
+    never re-points the machine's other agents: the one job written below is the only one touched.
+    A release the machine already holds is kept only while it is the one the door states, or the
+    door states none: one left by an earlier install would otherwise run its own, older installer."""
     base = agentjob.root(Path.home())
     try:
         active = (base / "current").resolve(strict=True)
     except OSError:
         active = None
-    if active is not None and active.parent == (base / "releases").resolve() and _ready(active):
-        return active
+    if active is not None and not (active.parent == (base / "releases").resolve() and _ready(active)):
+        active = None
     status, target = call("GET", f"{door}/steering/agent/target")
     if status == 404:
+        if active is not None:
+            return active
         raise Stop("the workspace's door states no agent release; ask its operator to deploy one")
     if status != 200 or not selfupdate.valid(target):
         raise Stop(f"the workspace's door answered {status} for its agent release; run install again, "
                    "or ask the operator if it repeats")
+    if active is not None and _ready(active, target["sha"]):
+        return active
     found = base / "releases" / target["sha"]
     if not _ready(found, target["sha"]):
         say("agent", f"fetching agent release {target['sha'][:12]} from the workspace's door…")
@@ -885,10 +909,12 @@ def install(root: Path, codex: bool = False, team: str | None = None,
         # The workspace's GitHub login is the account the person most likely signs in as (#3954). With no
         # invitation to decide it, the account that signs in decides the team the workspace lands in, so
         # the approval page refuses any other: a team of another account's is chosen with --login.
-        token = sign_in(console, f"install {repo} on {label}", invite, login or name,
-                        named=login is not None or invite is None)
+        named = login is not None or invite is None
+        token = sign_in(console, f"install {repo} on {label}", invite, login or name, named=named)
         try:
-            door, authority, team_id, owner = admit_on_go(console, token, go_access(console, token), repo, team)
+            access = go_access(console, token)
+            checked_login(access, login or name, named)
+            door, authority, team_id, owner = admit_on_go(console, token, access, repo, team)
             record(root, door, authority)
             say("machine", f"this machine is admitted to {authority}")
             wait_for_go_grant(console, token, team_id, repo, owner)

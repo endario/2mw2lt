@@ -20,6 +20,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+# A script a session runs from a stale plugin-cache path hands its turn to the current install
+# before any of its own work (#7185); the launcher already resolves current for the hooks.
+sys.path.append(str(Path(__file__).resolve().parent))
+import current  # noqa: E402
+
+current.take()
+
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):

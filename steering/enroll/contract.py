@@ -10,6 +10,7 @@ AccessDTO = typing.TypedDict("AccessDTO", {
     "teams": "list[TeamDTO] | None",
     "collaborations": "list[CollaborationDTO] | None",
     "subject_binding": "str",
+    "github_login": "str",
     "subject": "str | None",
     "invitations": "list[InvitationDTO] | None",
 })
@@ -272,10 +273,15 @@ AccountResetStated = typing.TypedDict("AccountResetStated", {
     "resets_at": "str | None",
 })
 
-# AccountConcurrencyUsage is an account's concurrency limit, null for none, and the places it holds.
+# AccountConcurrencyUsage is an account's concurrency limit as it binds — the owner's stated cap,
+# or the stop-gap default of 3 while an owned account states none (ruling of 2026-10-17) — and the
+# places it holds. Null is an account no election owns, which no cap binds; Stated says whether
+# the limit is the owner's own word or the default standing beside it.
 AccountConcurrencyUsage = typing.TypedDict("AccountConcurrencyUsage", {
     "limit": "int | None",
+    "stated": "bool",
     "used": "int",
+    "moves_at": "str | None",
 })
 
 # AccountConcurrency is the body of POST /accounts/concurrency: how many sessions, gate runs and
@@ -1267,6 +1273,14 @@ AgentTarget = typing.TypedDict("AgentTarget", {
     "pending": "bool",
 })
 
+# AgentCheckpoint is the machine's read of one session's checkpoint currency: whether the
+# session's epoch holds a checkpoint no directive has been acknowledged since (doc 154 §5), the
+# gate a release pass asks before it stops a launched session for a new plugin (#7185).
+AgentCheckpoint = typing.TypedDict("AgentCheckpoint", {
+    "session": "str",
+    "current": "bool",
+})
+
 # SeatAcquisition is the body of POST /sessions/{session}/seat/acquisition: the vacancy the
 # candidate saw.
 SeatAcquisition = typing.TypedDict("SeatAcquisition", {
@@ -1781,6 +1795,22 @@ CursorClaims = typing.TypedDict("CursorClaims", {
     "direction": "str",
     "recovery": "str",
     "position": "int",
+})
+
+# DeploymentReport is what the seat's deploy says of one unit's deployment (7186-deployments
+# design.md, D4): the sha and environment, and its state, `pending` as it starts, `success` or
+# `failure` as it ends. Deployment is the id an earlier report was answered with; absent, the
+# deployment is created first.
+DeploymentReport = typing.TypedDict("DeploymentReport", {
+    "sha": "str",
+    "environment": "str",
+    "state": "str",
+    "deployment": "typing.NotRequired[int]",
+})
+
+# DeploymentReportAnswer names the GitHub Deployment the report was recorded on, for the next report to carry.
+DeploymentReportAnswer = typing.TypedDict("DeploymentReportAnswer", {
+    "deployment": "int",
 })
 
 # Digest answers GET /brain/digest: the brain's acts, newest first, one row each (doc 54). It is
@@ -2572,6 +2602,7 @@ LaunchBody = typing.TypedDict("LaunchBody", {
     "brief": "typing.NotRequired[str]",
     "card": "typing.NotRequired[str]",
     "resolves": "typing.NotRequired[IssueRef | None]",
+    "notify": "typing.NotRequired[str]",
 })
 
 # LaunchWithdrawal withdraws a launch still waiting. It names nothing: the launch is the route's.
@@ -2836,6 +2867,17 @@ FleetMachine = typing.TypedDict("FleetMachine", {
     "name": "str | None",
     "label": "typing.NotRequired[str | None]",
     "reported_name": "typing.NotRequired[str | None]",
+    "state": "MachineState",
+})
+
+# MachineState is a machine's liveness as coordination reads it from what its agent already sends
+# — its uplink, its renewals and its reports (doc 195 §1). Liveness is online while a sign of it is
+# younger than the uplink's freshness and a credential of it stands, offline once none is, and
+# expired once no credential stands. Since is its newest sign where it is not online, nil where it
+# is or has none.
+MachineState = typing.TypedDict("MachineState", {
+    "liveness": "str",
+    "since": "str | None",
 })
 
 # MachineLabel is the body of POST /machines/{machine}/label: the name a member gives the
@@ -3180,6 +3222,7 @@ PlacementCandidate = typing.TypedDict("PlacementCandidate", {
     "passed": "typing.NotRequired[str]",
     "model": "typing.NotRequired[str]",
     "above": "typing.NotRequired[int]",
+    "draw": "typing.NotRequired[PlacementDraw | None]",
 })
 
 # PlacementVerdict is the account's verdict as placement judged it.
@@ -3206,6 +3249,42 @@ PlacementFiltered = typing.TypedDict("PlacementFiltered", {
     "vendor": "str",
     "account": "typing.NotRequired[str]",
     "reason": "str",
+})
+
+# PlacementDraw is a candidate's measured quota-draw forecast as the decision journal keeps it
+# (#7167, design.md "Journal contract"): version 1, the fleet occupancy the decision read, the
+# team's own allocation count when one paired (absent when none did — a window fitted on the
+# team's basis composes over it, one fitted on the fleet's over the occupancy, each window its
+# own, because the basis travels with the estimate), the meter's age, the calibration applied,
+# the stage, whether the account's draw is measured, the forecast verdict and the per-window
+# fits. Immutable once written.
+PlacementDraw = typing.TypedDict("PlacementDraw", {
+    "version": "int",
+    "occupancy": "int",
+    "team_occupancy": "typing.NotRequired[int | None]",
+    "age_ns": "int",
+    "calibration_percent": "int",
+    "stage": "str",
+    "measured": "bool",
+    "forecast_verdict": "typing.NotRequired[PlacementVerdict | None]",
+    "windows": "list[PlacementDrawWindow] | None",
+})
+
+# PlacementDrawWindow is one window's fitted draw: the current resets_at, the fitted
+# fraction-of-quota per second (absent when unmeasured), where the fit came from, how many
+# retained samples fed it, their reading range, the reset the samples were taken under when a
+# prior supplied the fit, and which count basis the estimate travels with.
+PlacementDrawWindow = typing.TypedDict("PlacementDrawWindow", {
+    "window": "str",
+    "window_minutes": "float",
+    "resets_at": "str",
+    "rate_per_second": "typing.NotRequired[float | None]",
+    "source": "str",
+    "samples": "int",
+    "first_reading": "typing.NotRequired[str | None]",
+    "last_reading": "typing.NotRequired[str | None]",
+    "sample_resets_at": "typing.NotRequired[str | None]",
+    "count_basis": "typing.NotRequired[str]",
 })
 
 # PlacementDecisions answers a workspace's recorded placement decisions, newest first (#6655): asked
@@ -3344,6 +3423,68 @@ RebindAnswer = typing.TypedDict("RebindAnswer", {
     "machine": "str",
     "status": "str",
     "replayed": "bool",
+})
+
+# Releases answers GET /releases (5831-ledger-releases design.md): a page of the workspace's
+# observed releases, newest published first, each with the range of commits it holds over the
+# release before it. The first page also answers each repository's tail, what merged after its
+# newest release, and the pull requests open on its default branch. Next is where the page stopped.
+Releases = typing.TypedDict("Releases", {
+    "releases": "list[ReleaseDTO] | None",
+    "next": "typing.NotRequired[str]",
+    "tails": "list[ReleaseRangeDTO] | None",
+    "open": "list[ReleasePullDTO] | None",
+})
+
+# ReleaseDTO is one published release as its repository's read observed it: Release is GitHub's id,
+# Commit the commit its tag resolved to, and MovedFrom each commit an earlier read found the tag on.
+ReleaseDTO = typing.TypedDict("ReleaseDTO", {
+    "repository": "str",
+    "release": "int",
+    "tag": "str",
+    "name": "str",
+    "url": "str",
+    "prerelease": "bool",
+    "published_at": "str",
+    "commit": "str",
+    "committed_at": "str",
+    "moved_from": "list[str] | None",
+    "range": "ReleaseRangeDTO",
+    "deployed": "list[ReleaseDeploymentDTO] | None",
+})
+
+# ReleaseDeploymentDTO is an environment a release reached: when the first succeeded deployment
+# holding it there succeeded, and the sha it deployed.
+ReleaseDeploymentDTO = typing.TypedDict("ReleaseDeploymentDTO", {
+    "environment": "str",
+    "at": "str",
+    "sha": "str",
+})
+
+# ReleaseRangeDTO is what the mirror proved a release holds: the commits after From's (the
+# predecessor's tag, empty when there is none) up to ToCommit, as the merged pull requests they are.
+# Unmatched counts the commits no observed pull request merged as. State is `known`, `unknown` with
+# its Reason (`no-predecessor`, `not-on-line`, `commit-not-fetched`, `mirror-behind`,
+# `range-too-large`), or `pending` until the mirror has read it. A tail's ToCommit is its default
+# branch's verified commit.
+ReleaseRangeDTO = typing.TypedDict("ReleaseRangeDTO", {
+    "repository": "str",
+    "from": "str",
+    "to_commit": "str",
+    "state": "str",
+    "reason": "typing.NotRequired[str]",
+    "pulls": "list[ReleasePullDTO] | None",
+    "unmatched": "int",
+})
+
+# ReleasePullDTO is a pull request a release range or the open list names, with the card the keeper
+# joined it to when there is one. MergedAt is absent for one still open.
+ReleasePullDTO = typing.TypedDict("ReleasePullDTO", {
+    "repository": "str",
+    "number": "int",
+    "title": "str",
+    "merged_at": "str | None",
+    "card": "typing.NotRequired[str]",
 })
 
 RoomAuthor = typing.TypedDict("RoomAuthor", {
@@ -3513,6 +3654,8 @@ SessionList = typing.TypedDict("SessionList", {
 # epoch, by wire id, first engaged first. Presence is the basis of the hold it stands on,
 # "stream" or "reach", or nil when none stands; DetachedSince is since when no uplink has carried
 # that hold, or nil while one does. Vitals is this epoch's latest reading, nil before its first.
+# MachineState is the liveness of the session's own machine login, apart from its presence: a
+# harness that still holds its stream on a machine whose agent is gone can be spoken to, not woken.
 ListedSession = typing.TypedDict("ListedSession", {
     "name": "str",
     "epoch": "int",
@@ -3520,6 +3663,7 @@ ListedSession = typing.TypedDict("ListedSession", {
     "machine": "str",
     "machine_registration": "str",
     "machine_name": "str | None",
+    "machine_state": "MachineState",
     "harness": "str",
     "presence": "str | None",
     "detached_since": "str | None",
@@ -3547,8 +3691,9 @@ ListedCheckpoint = typing.TypedDict("ListedCheckpoint", {
 
 # SessionStanding is a session's standing as Go reads it (doc 189 §1), so the Fleet draws it rather
 # than deriving its own. It is nil for the seat's holder, and for a session never read that is
-# neither kept nor yet stale. Activity is working, waiting, concluded or idle, nil when the session
-# has not reported one; Since is when its activity began, or its enrolment where it has none. Stale
+# neither kept nor yet stale. Activity is working, waiting, concluded or idle, signed-out where its
+# account's login lapsed, or offline where its machine's agent is gone and it holds no hold of its
+# own (doc 195 §3), nil when the session has not reported one; Since is when its activity began, or its enrolment where it has none. Stale
 # is no sign of life for 30 minutes with no keep, whatever the session is doing; a turn's is its
 # harness's last write, and a turn waiting on a dialog is not stale (#5615).
 SessionStanding = typing.TypedDict("SessionStanding", {
@@ -4124,6 +4269,7 @@ AliasDTO = typing.TypedDict("AliasDTO", {
     "kind": "str",
     "repo": "str",
     "value": "str",
+    "owner": "typing.NotRequired[str]",
 })
 
 ExecutorDTO = typing.TypedDict("ExecutorDTO", {
@@ -5050,6 +5196,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/collaborators/{collaborator}/wakes",
     "POST /w/{workspace}/api/v1/collaborators/{collaborator}/wakes/{wake}/revocation",
     "POST /w/{workspace}/api/v1/credentials/{credential}/revocations",
+    "POST /w/{workspace}/api/v1/deployments",
     "POST /w/{workspace}/api/v1/device-approvals",
     "POST /w/{workspace}/api/v1/device-exchanges",
     "POST /w/{workspace}/api/v1/dispatches",
@@ -5112,6 +5259,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/push/subscriptions",
     "POST /w/{workspace}/api/v1/push/subscriptions/{subscription}/revocation",
     "POST /w/{workspace}/api/v1/push/subscriptions/{subscription}/tests",
+    "GET /w/{workspace}/api/v1/releases",
     "GET /w/{workspace}/api/v1/rooms",
     "POST /w/{workspace}/api/v1/rooms",
     "GET /w/{workspace}/api/v1/rooms/{room}",
@@ -5159,6 +5307,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/workspace/slug",
     "POST /w/{workspace}/steering/agent/accounts",
     "POST /w/{workspace}/steering/agent/census",
+    "GET /w/{workspace}/steering/agent/checkpoint/{session}",
     "POST /w/{workspace}/steering/agent/control",
     "POST /w/{workspace}/steering/agent/facts",
     "POST /w/{workspace}/steering/agent/gate",
@@ -5213,6 +5362,7 @@ QUERY = {
     "GET /w/{workspace}/api/v1/needs": {"audience": frozenset({"owner", "seat"})},
     "GET /w/{workspace}/api/v1/placement": {"harness": None, "vendor": None, "model": None, "floor": frozenset({"uncommon", "rare", "epic", "legendary"}), "effort": None},
     "GET /w/{workspace}/api/v1/placements": {"launch": None, "gate": None, "session": None},
+    "GET /w/{workspace}/api/v1/releases": {"limit": None, "next": None},
     "GET /w/{workspace}/api/v1/rooms/{room}/messages": {"limit": None, "cursor": None, "before": None, "wait": None},
     "GET /w/{workspace}/api/v1/rulings": {"state": frozenset({"unacknowledged"}), "limit": None, "next": None},
     "GET /w/{workspace}/api/v1/sessions": {"gone": frozenset({"1"})},

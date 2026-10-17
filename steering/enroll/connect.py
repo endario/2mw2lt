@@ -541,8 +541,11 @@ def reached(session: str, psession: str, workspace: Path | None = None) -> str:
                 f"or this session receives nothing")
 
 
-# How each harness refreshes this plugin from its marketplace (#1795).
-UPDATE = {"claude": "claude plugin update 2mw2lt@2mw2lt", "codex": "codex plugin add 2mw2lt@2mw2lt"}
+# How each harness refreshes this plugin from its marketplace (#1795): the one map every tell of
+# a behind plugin names its action from, so connect's line and the hook's tell cannot diverge.
+import current as _current_install  # noqa: E402
+
+UPDATE = _current_install.UPDATE
 
 
 def _release(v: str) -> tuple[int, ...] | None:

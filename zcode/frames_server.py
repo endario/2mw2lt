@@ -2,10 +2,12 @@
 """The zcode plugin's frames server (#6257): the one long-lived child a zcode session gives a
 plugin, holding the session's steering stream and serving the `frames` tool.
 
-It is the Claude module's counterpart in a harness with no module API: `hold.py --wake plugin`
-runs as this server's child and speaks the same one-line protocol; the holder claim, the
-pending/read ledger and the ack-after-return rule are the module's, kept in
-`steering-holders/` beside the claim (one holder location). Two things the module does that no
+It is the Claude module's counterpart in a harness with no module API: `hold.py --wake
+plugin-frames` runs as this server's child and speaks the same one-line protocol; the holder
+claim, the pending/read ledger and the ack-after-return rule are the module's, kept in
+`steering-holders/` beside the claim (one holder location). The hold declares that lesser
+capability: a wake into the session is typed as the frames pointer, never refused as one the
+plugin answers itself (#7229). Two things the module does that no
 zcode plugin can: submit a prompt to wake the session (no such channel exists — the hooks point
 at event boundaries instead), and refuse a subagent's tool call (MCP carries no caller identity;
 the pointer is only ever spoken to the session's own context, and the ack still follows the
@@ -19,6 +21,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from pathlib import Path
 
 ROOT = Path(os.environ.get("ZCODE_PLUGIN_ROOT") or Path(__file__).resolve().parents[1])
@@ -35,6 +38,7 @@ SESSION_S = 30.0      # how often a held session is asked it is still the enroll
 REFRESH_S = 60.0      # the module's claim refresh
 WAIT_FIRST, WAIT_MAX = 1.0, 60.0   # the module's backoff for a hold that ended
 READ_KEPT = 256       # ids of read frames kept to recognise a replay by
+LOG_KEPT = 1 << 20    # the server's log is rotated past this many bytes, one old copy kept
 
 TOOLS = [{
     "name": "frames",
@@ -107,6 +111,41 @@ class Server:
         os.replace(tmp, path)
         self._last_claim = self.now()
 
+    def log_path(self) -> Path | None:
+        if self.ws is None or self.psession is None:
+            return None
+        return holder.claim_path(self.ws, self.psession).with_suffix(".log")
+
+    def log(self, text: str) -> None:
+        """A line on stderr and in a file beside the claim, where a person can read it after the
+        session ends (#7303)."""
+        line = f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {text}\n"
+        try:
+            sys.stderr.write(line)
+            sys.stderr.flush()
+        except (OSError, ValueError):
+            pass
+        path = self.log_path()
+        if path is None:
+            return
+        try:
+            if path.stat().st_size > LOG_KEPT:
+                os.replace(path, path.with_suffix(".log.1"))
+        except OSError:
+            pass
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            with open(path, "a") as f:
+                f.write(line)
+        except OSError:
+            pass
+
+    def broke(self, where: str, exc: BaseException) -> str:
+        """Log what raised in `where` with its traceback; the one-line cause, for the claim."""
+        why = f"{where} broke: {type(exc).__name__}: {exc}"
+        self.log(why + "\n" + "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+        return why
+
     def enrolment_name(self) -> str:
         """`hold.py --session-of <psession>`: the enrolment name connect minted, or ''."""
         asked = self.run(["python3", str(ROOT / "steering/enroll/hold.py"), "--session-of",
@@ -121,22 +160,43 @@ class Server:
         return proc, lambda: iter(lambda: proc.stdout.readline(), "")
 
     def start_hold(self, gen: int) -> None:
-        self.hold_state = {"state": "starting"}
-        self.claim()
-        self._write_ledger()
-        argv = ["python3", str(ROOT / "steering/enroll/hold.py"), "--wake", "plugin",
+        argv = ["python3", str(ROOT / "steering/enroll/hold.py"), "--wake", "plugin-frames",
                 "--provider", "zcode", "--provider-session", self.psession]
+        proc = None
         try:
-            proc, lines = self._spawn(argv)
-        except OSError as e:
-            self.hold_state = {"state": "retrying", "attempt": 1,
-                               "refusal": f"the hold child would not start: {e}"}
+            self.hold_state = {"state": "starting"}
             self.claim()
             self._write_ledger()
-            return
-        threading.Thread(target=self._read_hold, args=(proc, lines, gen), daemon=True).start()
+            proc, lines = self._spawn(argv)
+            threading.Thread(target=self._read_hold, args=(proc, lines, gen), daemon=True,
+                             name=f"hold reader {gen}").start()
+        except Exception as e:
+            # a start that raised is retried on the keeper's backoff, never left `starting`
+            # with a child nobody reads or none at all
+            if proc is not None:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            self._note({"state": "retrying", "attempt": 1,
+                        "refusal": self.broke("the hold's start", e)})
 
     def _read_hold(self, proc, lines, gen: int) -> None:
+        """Follow the child; a reader that raises ends it, so the keeper holds the stream again
+        rather than leaving a child nobody reads."""
+        try:
+            self._follow(proc, lines, gen)
+        except Exception as e:
+            why = self.broke("the hold reader", e)
+            if gen != self.child_gen or self.stopping.is_set():
+                return
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            self._note({"state": "retrying", "refusal": why})
+
+    def _follow(self, proc, lines, gen: int) -> None:
         for line in lines():
             if gen != self.child_gen or self.stopping.is_set():
                 break
@@ -167,10 +227,15 @@ class Server:
         self._note({"state": "retrying", "refusal": f"the hold ended ({proc.poll()})"})
 
     def _note(self, hold: dict) -> None:
+        """The keeper acts on the state in memory, so a claim or ledger that cannot be written
+        is logged, never the end of the thread that noted it."""
         with self.lock:
             self.hold_state = hold
-            self.claim()
-            self._write_ledger()
+            try:
+                self.claim()
+                self._write_ledger()
+            except Exception as e:
+                self.broke("writing the claim", e)
 
     def _seat_generation(self, noted: dict) -> None:
         with self.lock:
@@ -192,59 +257,73 @@ class Server:
     def keeper(self) -> None:
         """The module's timing, as a poll: hold the claim, start the hold once connect mints a
         session, end it when the session is gone, retry the curable ends on the module's
-        backoff. A stopped hold stays stopped: the session is told the remedy."""
+        backoff. A stopped hold stays stopped: the session is told the remedy.
+
+        Nothing but stopping ends it (#7303): it alone holds the stream again, so a turn that
+        raises is logged with its cause and the next turn runs. A lookup that raised is no
+        answer, so a held session is not stopped by one."""
         wait = WAIT_FIRST
         while not self.stopping.is_set():
-            now = self.now()
-            if now - self._last_claim >= REFRESH_S:
-                try:
-                    self.claim()
-                except OSError:
-                    pass
-            state = self.hold_state.get("state")
-            if state == "stopped":
+            try:
+                wait = self._keep(wait)
+            except Exception as e:
+                self.broke("the keeper", e)
                 self.stopping.wait(KEEP_S)
-                continue
-            if not self.session:
-                # the connect record changes without a subprocess: connect.py writes it the
-                # moment it binds, and only then is a name worth asking for. A record that
-                # never lands (a connect from before this server started, on a machine whose
-                # holder directory was not there to take it) is still asked for, at the
-                # session cadence, so the hold is late rather than never.
-                at = holder.connected_at(self.ws, self.psession)
-                fresh_record = at is not None and at != self._last_connect_at
+
+    def _keep(self, wait: float) -> float:
+        """One turn of the keeper, its own wait included; the backoff the next turn starts from."""
+        now = self.now()
+        if now - self._last_claim >= REFRESH_S:
+            try:
+                self.claim()
+            except OSError:
+                pass
+        state = self.hold_state.get("state")
+        if state == "stopped":
+            self.stopping.wait(KEEP_S)
+            return wait
+        if not self.session:
+            # the connect record changes without a subprocess: connect.py writes it the
+            # moment it binds, and only then is a name worth asking for. A record that
+            # never lands (a connect from before this server started, on a machine whose
+            # holder directory was not there to take it) is still asked for, at the
+            # session cadence, so the hold is late rather than never. An ask that raised
+            # leaves the record unspent, to be asked for again next turn.
+            at = holder.connected_at(self.ws, self.psession)
+            fresh_record = at is not None and at != self._last_connect_at
+            if fresh_record or (at is None and now - self._last_session_ask >= SESSION_S):
+                self._last_session_ask = now
+                named = self.enrolment_name()
                 if fresh_record:
                     self._last_connect_at = at
-                if fresh_record or (at is None and now - self._last_session_ask >= SESSION_S):
-                    self._last_session_ask = now
-                    named = self.enrolment_name()
-                    if named:
-                        with self.lock:
-                            self.session = named
-                        self.child_gen += 1
-                        self.start_hold(self.child_gen)
-                        wait = WAIT_FIRST
-                self.stopping.wait(KEEP_S)
-                continue
-            if state == "retrying":
-                self.child_gen += 1
-                self.start_hold(self.child_gen)
-                wait = min(wait * 2, WAIT_MAX)
-                self.stopping.wait(wait)
-                continue
-            if now - self._last_session_ask >= SESSION_S:
-                self._last_session_ask = now
-                if self.enrolment_name() == "":
+                if named:
                     with self.lock:
-                        self.session = ""
-                        self.pending, self.read = [], []
-                        self.child_gen += 1        # ends the reader; its lines stop counting
-                        self.hold_state = {"state": "stopped", "refusal": "this session "
-                                                "disconnected", "remedy": "run /skill 2mw2lt:connect"}
-                        self.claim()
-                        self._write_ledger()
-                    continue
+                        self.session = named
+                    self.child_gen += 1
+                    self.start_hold(self.child_gen)
+                    wait = WAIT_FIRST
             self.stopping.wait(KEEP_S)
+            return wait
+        if state == "retrying":
+            self.child_gen += 1
+            self.start_hold(self.child_gen)
+            wait = min(wait * 2, WAIT_MAX)
+            self.stopping.wait(wait)
+            return wait
+        if now - self._last_session_ask >= SESSION_S:
+            self._last_session_ask = now
+            if self.enrolment_name() == "":
+                with self.lock:
+                    self.session = ""
+                    self.pending, self.read = [], []
+                    self.child_gen += 1        # ends the reader; its lines stop counting
+                    self.hold_state = {"state": "stopped", "refusal": "this session "
+                                            "disconnected", "remedy": "run /skill 2mw2lt:connect"}
+                    self.claim()
+                    self._write_ledger()
+                return wait
+        self.stopping.wait(KEEP_S)
+        return wait
 
     # -- the frames tool ---------------------------------------------------------------
 
@@ -317,7 +396,7 @@ class Server:
             return False
         self.psession = binding["psession"]
         self.claim()
-        threading.Thread(target=self.keeper, daemon=True).start()
+        threading.Thread(target=self.keeper, daemon=True, name="keeper").start()
         return True
 
 
@@ -397,15 +476,19 @@ def keep_starting(server: Server) -> None:
         try:
             if server.start():
                 return
-        except OSError as why:
+        except Exception as why:
             server.binding_error = f"the binding could not be read or claimed: {why}"
+            server.broke("the start", why)
         if server.stopping.wait(RETRY_S):
             return
 
 
 def main() -> int:
     server = Server()
-    threading.Thread(target=keep_starting, args=(server,), daemon=True).start()
+    # every thread here is the server's: one that ends on an exception says so, with its cause
+    threading.excepthook = lambda died: server.broke(
+        f"the {died.thread.name if died.thread else 'unnamed'} thread", died.exc_value)
+    threading.Thread(target=keep_starting, args=(server,), daemon=True, name="start").start()
     for line in sys.stdin:
         if not line.strip():
             continue

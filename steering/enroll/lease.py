@@ -64,6 +64,7 @@ _LAUNCH = re.compile(r"^launch:\s*token\s+@lease\s+(?P<harness>[a-z][a-z0-9-]{0,
                      r"(?:\s+(?P<window>window))?(?:\s+card\s+(?P<card>[0-9a-f]{24})"
                      # Or the card by the issue it resolves, which the seat holds as a number.
                      r"|\s+resolves\s+(?P<repo>[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100})#(?P<issue>[1-9][0-9]{0,9}))?"
+                     r"(?:\s+notify\s+(?P<notify>[A-Za-z0-9][A-Za-z0-9._-]{0,119}))?"
                      r"\s+because\s+(?P<reason>\S.*?)"
                      # The launched session's first directive follows on its own line (doc 192).
                      r"(?:\nbrief:[ \t]*(?P<brief>.*?))?\s*$", re.S)
@@ -216,12 +217,12 @@ def _go_launch(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
     import session_routes
     m = _LAUNCH.match(line)
     if not m:
-        return 2, refusal.use("launch", "malformed launch: its clauses go in the order on, vendor, account, model or floor, thinking, effort, window, card or resolves; on Go, `on` names a machine as /sessions lists it in `machine`, a registration as /machines lists it, or the machine's name"), False
+        return 2, refusal.use("launch", "malformed launch: its clauses go in the order on, vendor, account, model or floor, thinking, effort, window, card or resolves, notify; on Go, `on` names a machine as /sessions lists it in `machine`, a registration as /machines lists it, or the machine's name"), False
     if m["harness"] == "claude" and not (m["model"] or m["floor"]):
         return 2, refusal.use("launch", "a claude launch names its model (as Claude Code takes it) or a floor; its effort, left out, is the placed model's rarity's: legendary low, epic medium, rare high, uncommon xhigh"), False
     if m["floor"] and (m["machine"] or m["quoted"] or m["machine_name"] or m["vendor"] or m["account"]):
         return 2, refusal.use("launch", "a floor is placed by the platform: leave out on, vendor and account, or name the model"), False
-    body = {k: m[k] for k in ("harness", "machine", "machine_name", "vendor", "account", "model", "floor", "thinking", "effort") if m[k]}
+    body = {k: m[k] for k in ("harness", "machine", "machine_name", "vendor", "account", "model", "floor", "thinking", "effort", "notify") if m[k]}
     if m["quoted"]:
         body["machine_name"] = m["quoted"]
     body["reason"] = " ".join(m["reason"].split())

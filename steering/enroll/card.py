@@ -19,7 +19,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 import door  # noqa: E402
-from card_grammar import USAGE_REFUSAL, built  # noqa: E402
+from card_grammar import USAGE_REFUSAL, built, validate  # noqa: E402
 from secret_input import read_secret  # noqa: E402
 from ulids import new_ulid  # noqa: E402
 from verb_help import help_requested, script_help  # noqa: E402
@@ -44,8 +44,8 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
              "       card.py --lease reclassify <card> major major|ordinary <why>\n"
              "       card.py --lease reclassify <card> name <new name, one line of at most 80 characters> <why>\n"
              "       card.py --lease reanchor <card> [<verb>:<n>[,<n>] ...] <why>\n"
-             "       card.py --lease link <card> requires|part-of <card>|<owner>/<name>#<n> [--source <where>] <why>\n"
-             "       card.py --lease unlink <card> requires|part-of <card>|<owner>/<name>#<n> resolved|withdrawn <why>\n"
+             "       card.py --lease link <card> requires <card>|requires <owner>/<name>#<n>|part-of <goal> [--source <where>] <why>\n"
+             "       card.py --lease unlink <card> requires <card>|requires <owner>/<name>#<n>|part-of <goal> resolved|withdrawn <why>\n"
              "       card.py --lease outcome <card> need <how it is handled now> "
              "[reading facts <state> [<field>=<value>] per <state> [<field>=<value>]] target <comparison> "
              "window <n>d [uses <n>] starts merge|rollout [baseline stated <value and how measured>|baseline none] "
@@ -126,6 +126,10 @@ def _on_go(held: dict, verb: str, rest: list[str], usage: str, retry: str | None
         print(usage if bad_grammar == USAGE_REFUSAL else f"refused: {bad_grammar}", file=sys.stderr)
         return 2
     fact = facts[0]
+    # An edge's pairing is the grammar's to refuse, before the wire, as edge.py refuses it.
+    if fact["state"] in ("card-link", "card-unlink") and (bad := validate({**fact, "by": "the seat"})):
+        print(f"refused: {bad}", file=sys.stderr)
+        return 2
     print(f"id {key}", file=sys.stderr)
     try:
         anchored = fact.get("anchors") or fact["state"] == "card-reanchored" and fact["after"]

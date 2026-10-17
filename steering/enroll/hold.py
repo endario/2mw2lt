@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`hold.py [--until-event|--service|--wake plugin] [--provider <harness>] [--provider-session <id>] [--pid <pid>] [<session>]`:
+"""`hold.py [--until-event|--service|--wake plugin|plugin-frames] [--provider <harness>] [--provider-session <id>] [--pid <pid>] [<session>]`:
 hold this session's stream at its agent.
 
 `--until-event` exits 0 once it has printed the first frame the session must act on, so a
@@ -11,6 +11,11 @@ watch deadline to re-arm (#231).
 whether it wakes the session: the frame's text stays in the recording, which the module hands the
 model through a tool, so it never reaches a row the person could have typed. It runs only while
 the module's holder claim is fresh.
+
+`--wake plugin-frames` is the same hold for a harness whose plugin cannot start a turn — the
+frames server, which serves the stream to a tool the session must call. The stream declares
+that lesser capability, so the agent types a wake into the session as the frames pointer
+instead of refusing it as one the plugin answers itself (#7229).
 
 Every value the hold needs is read, not carried: the token from the enrollment's own store,
 the runtime id derived from the running process the way `bind:` pinned it, the session name
@@ -208,13 +213,14 @@ def last_seat(frames: Path) -> int | None:
 
 
 def wake_mode(argv: list[str]) -> tuple[str | None, list[str]]:
-    """(`plugin` when `--wake plugin` is given, else None; the arguments without it)."""
+    """(`plugin` when `--wake plugin` is given, `plugin-frames` when `--wake plugin-frames` is;
+    else None; the arguments without it)."""
     if "--wake" not in argv:
         return None, argv
     i = argv.index("--wake")
-    if argv[i + 1:i + 2] != ["plugin"]:
-        raise Refused("--wake takes plugin")
-    return "plugin", argv[:i] + argv[i + 2:]
+    if argv[i + 1:i + 2] not in (["plugin"], ["plugin-frames"]):
+        raise Refused("--wake takes plugin or plugin-frames")
+    return argv[i + 1], argv[:i] + argv[i + 2:]
 
 
 def options(argv: list[str]) -> tuple[str | None, str | None, int | None, str | None]:
@@ -516,7 +522,7 @@ def close_recording(recorded) -> None:
 
 def hold(port: str, session: str, token: str, rid: str, frames: Path, until: bool = False,
          service: bool = False, workspace: Path | None = None,
-         plugin: bool = False,
+         plugin: bool | str = False,
          lapsed: Callable[[], str | None] | None = None, config: Path | None = None,
          rebind: Callable[[], str | None] | None = None) -> int:
     """Open the stream and yield its frames, reopening transport failures.
@@ -525,7 +531,9 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
     (no uplink) and a dead connection clear on their own, so they reopen — said once, when
     the failure begins, and not on every attempt while it lasts.
 
-    `plugin` prints a line per frame in
+    `plugin` is a plugin hold: True for the module's own, or the wake its holder declared
+    (`plugin-frames`, a plugin that cannot start a turn) — the declared value is what the
+    stream's X-Steering-Wake carries. It prints a line per frame in
     place of the frame, returns 3 on a revoked hold, and refuses to hold without a recording.
     `lapsed` is asked on every line read, keepalives included, and a reason it gives ends the
     hold with 4 for the plugin to refresh and restart, otherwise 1. `config` is the session's Claude config directory, which the agent reads the
@@ -536,6 +544,7 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
     refusal, with whether holding again can outlive it.
     """
     url = f"http://127.0.0.1:{port}/steering/session/{session}/stream"
+    declared = plugin if isinstance(plugin, str) else ("plugin" if plugin else None)
     quiet = False    # the standing failure has been named; naming it every attempt is noise
     wait = REOPEN_AFTER
     seen = last_exclusion(frames)
@@ -547,7 +556,7 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
         while True:
             req = urllib.request.Request(url, headers={"X-Steering-Session": token,
                                                        "X-Steering-Runtime": rid,
-                                                       "X-Steering-Wake": ("plugin" if plugin else
+                                                       "X-Steering-Wake": (declared if declared else
                                                                            "service" if service else
                                                                            "event" if until else "monitor"),
                                                        **({"X-Steering-Config-Dir": path_header(config)} if config else {}),
@@ -721,9 +730,9 @@ def main(argv: list[str]) -> int:
         wake, args = wake_mode(args)
     except Refused as why:
         return error("hold", str(why))
-    plugin = wake == "plugin"
-    if sum(("--until-event" in args, "--service" in args, plugin)) > 1:
-        return error("hold", "--until-event, --service and --wake plugin are alternatives")
+    plugin = wake   # a plugin hold: the module's own ("plugin") or the frames server's
+    if sum(("--until-event" in args, "--service" in args, bool(plugin))) > 1:
+        return error("hold", "--until-event, --service and --wake are alternatives")
     try:
         provider, psession, pid, session = options(args)
         h = harness_of(provider)   # the provider named, or the one that says this is its session

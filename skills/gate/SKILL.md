@@ -41,7 +41,10 @@ provider to pass.
 it can take the round; a final round puts a vendor no earlier round used before either. Name `epic` for a large diff, a new mechanism, or a security, concurrency or
 attestation property; the reason is recorded beside the floor, so say why in a sentence. Never name a
 model for depth: the ladder decides which models stand at each rung. Later rounds keep the floor
-unless they name one. A floor no judge meets is refused (`floor-unservable`). `--final` declares this
+unless they name one. When your change proves smaller or less risky than its triage, say so to the
+brain with the evidence, proposing a lower floor: the seat sets it with `card.py --lease retier`, and
+the rounds already judged keep the floor they ran at. A floor no judge meets is refused
+(`floor-unservable`). `--final` declares this
 round the last: it runs deeper than the finding rounds, from a vendor no
 earlier round used where one can take it, and after its verdict steering refuses another round, as
 at the ceiling. The round at the ceiling is final without asking. The review's run details say the
@@ -164,7 +167,8 @@ For GitHub state reads and waiting, follow
 
 Merge it directly once its head holds `2mw2lt/review` and its base is `main`. That status is posted a
 sweep after the verdict or the carry, and you are told when it lands: a `say` frame
-`from: forge #<n>` reading `review status posted on <sha>; merge now`. Merge then, not before:
+`from: forge #<n>` reading `review status posted on <sha>; merge now`. Mark it ready in exactly this
+form, which the workspace allows without a prompt: `gh pr ready <pr number> -R <repo>`. Merge then, not before:
 
 ```bash
 git fetch origin && merged=$(git merge-tree --write-tree origin/main <head sha>) &&

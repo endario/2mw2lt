@@ -239,6 +239,31 @@ zcode plugins install 2mw2lt@2mw2lt --scope user --yes
 A plugin skill is not a slash command in ZCode: connect a ZCode session with
 `/skill 2mw2lt:connect`.
 
+## Another machine, over ssh
+
+When the person asks to make another machine a workstation, run every step there over ssh, as the
+login whose workers it will run; nothing is copied from this machine. Check each step before the
+next, in one pass:
+
+1. **Python.** `python3 -c "import sys, ssl; assert sys.version_info >= (3, 11)"` must succeed.
+   When it fails, as it does where Homebrew belongs to another login on the Mac, run
+   `uv python install 3.13 --default` (uv from `curl -LsSf https://astral.sh/uv/install.sh | sh`
+   when it is missing), put `~/.local/bin` first on `PATH` for the steps below, and check again.
+2. **GitHub.** Run `gh auth login -h github.com -p https -w` in the background. It prints a
+   one-time code for <https://github.com/login/device>; give the person the code and say which
+   account to sign in as. Then `gh auth setup-git`. Over ssh, `gh` cannot reach the macOS keychain
+   and stores the token in plain text; tell the person, and that `gh auth login` again at the
+   machine's own screen moves it into the keychain.
+3. **The plugin**, at user scope:
+   `claude plugin marketplace add endario/2mw2lt`, then
+   `claude plugin install 2mw2lt@2mw2lt --scope user`.
+4. **The checkout**: `git clone https://github.com/<owner/name>` of the workspace's repository.
+5. **The engine**, as in [Run the engine](#1-run-the-engine), from that checkout with the plugin
+   installed there. Its sign-in prints the page for the person's own browser.
+
+On macOS the agent is loaded into the login's background session when nobody of that login is at
+the screen, so it keeps running with nobody logged in.
+
 ## Uninstall
 
 ```bash

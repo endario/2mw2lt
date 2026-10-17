@@ -102,8 +102,9 @@ def observe(hook: dict, occurrence: str, observed_at: str, source_version: str, 
                 o[k] = v if v in NOTIFICATION_TYPES else "unknown"
             elif k == "tool_name":
                 # AskUserQuestion is the name the reducer distinguishes; a permission's tool is
-                # what the owner is being asked to allow (#812). No other event keeps one.
-                if v == "AskUserQuestion" or event == "PermissionRequest":
+                # what the owner is being asked to allow (#812), and a denial's what was refused
+                # (#7039). No other event keeps one.
+                if v == "AskUserQuestion" or event in ("PermissionRequest", "PermissionDenied"):
                     o[k] = v
             else:
                 o[k] = v
@@ -123,7 +124,12 @@ def observe(hook: dict, occurrence: str, observed_at: str, source_version: str, 
     # The two events that open a dialog somebody has to answer. Every other `PreToolUse` is an
     # ordinary tool call, and keeping its arguments would put every command this session runs
     # in the store for good.
-    if event == "PermissionRequest" or (event == "PreToolUse" and hook.get("tool_name") == "AskUserQuestion"):
+    if event == "PermissionDenied":
+        # What was refused and why, so a turn that ends on the refusal can say so (#7039).
+        r = head(hook.get("reason"))
+        if r:
+            o["denied_reason"] = r
+    if event in ("PermissionRequest", "PermissionDenied") or (event == "PreToolUse" and hook.get("tool_name") == "AskUserQuestion"):
         a = ask(hook.get("tool_name"), hook.get("tool_input"))
         if a:
             # The version is the floor this record needs, not the adapter's own: a rollout

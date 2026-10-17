@@ -713,29 +713,38 @@ def _executing(card: dict, session: str | None = None) -> bool:
 
 
 def claim_issue(session: str, token: str, repo: str, n: int, key: str = "") -> str:
-    """An issue claim binds the session to the issue's live card when that card has no present
-    executor, taking it as its executor, and only otherwise declares a card with `resolves:<n>`,
-    named for the issue and the session its executor. Declaring beside the card the seat directed
-    the session to left the seat's card with no executor and the branch on a card of its own
-    (#6846). With several such cards the claim guesses none. The declared card's id and key are
-    the claim's own, so a rerun after a lost answer is answered from the first rather than minting
-    a second permanent card. A take is keyed by its invocation (`key`, the occurrence id), never by
-    the pair: a take, the seat's disengagement and a take again are three commands, and a permanent
-    key would replay the first and report a binding that no longer stands. Raises `Refused` or
-    `Unsent`."""
+    """An issue claim engages the session on the issue's live card, taking it as its executor: the
+    card the session already executes is reported bound, and the one live card resolving the issue
+    is taken when no session executes it — a seat-directed worker joins the card it was sent to
+    rather than minting a duplicate beside it (#6846, #7188). Taking a card from its present
+    executor is the seat's or the owner's, never a claim's (Go's `card-executed`), so a card
+    another session executes is named with its executor for the brain to place, and with several
+    live cards resolving the issue the claim names them and refuses, guessing none. Only when no
+    live card resolves the issue does the claim declare one with `resolves:<n>`, named for the
+    issue and the session its executor; the declared card's id and
+    key are the claim's own, so a rerun after a lost answer is answered from the first rather
+    than minting a second permanent card. A take is keyed by its invocation (`key`, the occurrence
+    id), never by the pair: a take, the seat's disengagement and a take again are three commands,
+    and a permanent key would replay the first and report a binding that no longer stands. Raises
+    `Refused` or `Unsent`."""
     resolving = issue_cards(live_cards(token), repo, n)
     mine = next((c for c in resolving if _executing(c, session)), None)
     if mine:
         return f"bound: {mine['id']}, the live card of {repo}#{n}, which {session} already executes"
-    free = [c for c in resolving if not _executing(c)]
-    if len(free) == 1:
-        card = free[0]["id"]
-        write(f"/cards/{card}/engagements", {"session": session, "role": "executor"},
-              _own_key("claim.take", session, card, key), SESSION_CARRIER, token)
-        return f"bound: {card}, the live card of {repo}#{n}, which had no executor"
-    if free:
-        ids = ", ".join(c["id"] for c in free)
-        return refusal.refuse(f"not taken: {len(free)} live cards of {repo}#{n} have no executor ({ids})",
+    if len(resolving) == 1:
+        card = resolving[0]
+        executors = ", ".join(str(e.get("session")) for e in card.get("executors") or []
+                              if e.get("role") == "executor" and e.get("live") is True)
+        if executors:
+            return refusal.refuse(f"not taken: {card['id']}, the live card of {repo}#{n}, is executed by {executors}",
+                                  hand_to=("the brain", f"say: {session} token <t> the card of {repo}#{n} is {card['id']}, "
+                                                       f"executed by {executors}; place me on it or leave it theirs"))
+        write(f"/cards/{card['id']}/engagements", {"session": session, "role": "executor"},
+              _own_key("claim.take", session, card["id"], key), SESSION_CARRIER, token)
+        return f"bound: {card['id']}, the live card of {repo}#{n}"
+    if resolving:
+        ids = ", ".join(c["id"] for c in resolving)
+        return refusal.refuse(f"not taken: {len(resolving)} live cards resolve {repo}#{n} ({ids})",
                               hand_to=("the brain", f"say: {session} token <t> which of {ids} do I take for {repo}#{n}"))
     card = _own_key("claim.card", session, repo, str(n))[:24]
     body = {"id": card, "name": f"{repo}#{n}",
@@ -873,7 +882,10 @@ def seat_action(session: str, token: str, body: dict, key: str) -> str:
     answer = write("/actions", body, key, SESSION_CARRIER, token)
     doing = {"wake": "waking", "control": "controlling", "retire": "retiring", "rehome": "rehoming", "park": "parking"}[body["kind"]]
     value = f" {body['value']}" if body.get("value") else ""
-    return f"{doing}: {answer['id']} {body['to']}{value}, offered"
+    # A retire whose machine's credential no longer reaches the workspace is ended by the seat's
+    # own command (#7227), not offered to a machine: the answer's state says which happened.
+    state = {"pending": "offered", "retired": "ended: its machine is gone"}.get(answer["state"], answer["state"])
+    return f"{doing}: {answer['id']} {body['to']}{value}, {state}"
 
 
 def seat_keep(session: str, token: str, verb: str, body: dict, key: str) -> str:
@@ -991,7 +1003,7 @@ def _card_write(fact: dict, repo: str) -> tuple[str, dict] | None:
     if state == "card-reclassified" and fact["field"] in ("name", "priority"):
         return f"/cards/{card}/corrections", {"field": fact["field"], "after": fact["after"], "why": fact["why"]}
     if state in ("card-link", "card-unlink"):
-        body = {k: fact[k] for k in ("kind", "to_card", "to_issue", "why", "how", "source") if k in fact}
+        body = {k: fact[k] for k in ("kind", "to_card", "to_issue", "to_goal", "why", "how", "source") if k in fact}
         return f"/cards/{card}/{'links' if state == 'card-link' else 'unlinks'}", body
     return None
 

@@ -104,21 +104,27 @@ passes the stream's frames through. The first line is
 with `ack.py <you> <its directive id>` once you have read it;
 `data: {"kind": "seat", …}` says you hold the seat, at its generation. `data: {"kind": "usage", …}`
 is your own account's verdict. `data: {"kind": "revoked"}` ends a hold another replaced.
-Go sends no kick and no presence frame (#5569): the seat is told what moved by notices, each a
-say `from: session <id>` naming the session it is about:
+Go sends no kick and no presence frame (#5569): the seat is told what moved by signals, each a
+say `from: session <id>` naming the session it is about. Every standing kind has its
+`signals.session_<kind>.*` settings (`signals.launch_brief_unheard.*` for the brief), and a
+threshold there moves the standing itself, on the Fleet and in the snapshot as in the signal; a
+kind turned off is not told, and its standing still reads:
 
 - **`session-concluded`**: the session said done and holds no work. It is free now: delegate to it.
+  `closed_card` names a card whose pull requests all closed unmerged, for you to conclude.
 - **`session-stale`**: no sign of life for 30 minutes and no keep, whether it is idle, concluded,
   waiting on work it holds, never read since it enrolled, or in a turn whose harness has written
-  nothing, which may be hung or gone. Close it, drive it, or keep it with a
-  reason. A stale wait may still be alive: check before you retire it, and keep a wait you trust
-  (a review round, say) with what it waits on.
+  nothing, which may be hung or gone; `activity` and `last_sign` say which. Close it, drive it, or
+  keep it with a reason. A stale wait may still be alive: check before you retire it, and keep a
+  wait you trust (a review round, say) with what it waits on.
 - **`session-quiet`**: a worker holding a card ended its turn without saying done 15 minutes ago,
   with nothing it waits on open, and has written nothing since. Drive it, or keep it with what it
   waits on.
 - **`session-lapsing`**: its prompt cache lapses within 15 minutes. Resumed after that, it re-reads
-  its whole context. While your keep stands you are not told: the platform gives the session a turn
-  that refreshes its cache instead, once per lifetime.
+  its whole context. A kept session is given a turn that refreshes its cache (`session-warm`), once
+  per lifetime. A worker stalled on its card
+  is kicked itself (`session-kick`, after 10 minutes, at most twice an hour apart); neither is told
+  to you.
 - **`session-kept-over`**: its keep's until passed and no work reached it.
 - **`directive-unacknowledged`**, a signal: the session has held a directive for 10
   minutes (`signals.directive_unacked.*`) without acknowledging it, once per directive. `read_since`
@@ -139,6 +145,12 @@ say `from: session <id>` naming the session it is about:
   (`signals.gate_delayed.*`), counted from its commission across every judge that handed it on, or
   its judge has run past its offer's deadline. Once per wait and once per offer. No last output says
   only that nothing was seen. Free room for a judge, look at the machine, or cancel and commission again.
+  One whose facts name a `floor` is told at once: no judge at its card's floor was offered, so retier
+  the card, and the queued round takes the new floor. Its commissioner is told too, by default.
+- **`gate-unheard`**, a signal from `gate <commission>`: a gate round ended after the session that
+  asked for it stopped standing, so nobody heard its ending (`signals.gate_unheard.*`), once per gate.
+  It names the ending's first line, that session, and the card the round was for when it has one.
+  Tell the card's executor, or commission the round again for the card.
 - **`need-aged`**, a signal: a session's blocked need has stayed open 4 hours, or a placement need 24
   hours (`signals.need_aged.*`), once per need. It names its question, and a blocked need's session:
   answer it, unblock it, or dismiss it.
@@ -152,6 +164,11 @@ say `from: session <id>` naming the session it is about:
   already ran, so no deploy restarted it (`signals.agent_restarted.enabled`). It names when, and the
   work the machine had been given and not settled then, which the restart may have cut off. A restart
   that switched it between the Go and the Python agent names `from` and `to`: a known cause.
+- **`machine-offline`**, a signal: a machine with sessions on it has had no agent for 15 minutes
+  (`signals.machine_offline.*`). It names the sessions and cards stranded
+  there, and `partly` when another login on the host still answers. Those sessions are not told to you
+  as stale or quiet, and nothing can wake or kick them: give their cards to sessions on a live
+  machine, then retire them. `/sessions` reads each one's `machine_state`.
 - **`card-closed`**, a signal: a live card's work landed, or every issue it resolves was closed with no
   branch or closing pull request, 15 minutes ago (`signals.card_closed.*`), once per closing. It names
   the card's executor and what it resolves still open. A candidate, never concluded for you: conclude
@@ -220,8 +237,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post "/session
 ```
 
 A session executing a live card reads as waiting, not concluded, even after its branch merged
-(#5588): conclude its card when its unit is done. Each notice is a suggestion; Go closes,
-wakes and keeps nothing for it. Who you can reach is
+(#5588). Once it says done and records a `unit-done` or `exit` checkpoint, the keeper concludes
+the landed card on its next pass; otherwise conclude its card when its unit is done. Each notice is
+a suggestion;
+Go wakes and keeps nothing for it. Who you can reach is
 `python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /sessions`, each row with its
 `machine_name`, `account`, `vitals` (`model`, `effort`) and `standing` (its activity, whether
 it is stale, its keep and its cache), `null` when nothing has been read:
@@ -470,8 +489,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease session <card> <
 ```
 
 Triage every card you scope (#6499): criticality (`critical`, `major`, `minor`, `trivial`) and size
-(`S`, `M`, `L`, `XL`). The team's policy, the `triage.policy` setting, makes those the floor each stage
-is held to, and the tier you launch its builder at should meet the build floor. Re-triage with a
+(`S`, `M`, `L`, `XL`). Be optimistic about what a model at each tier can do: the team's policy, the
+`triage.policy` setting, holds a card's review floor one tier below its build floor, at rare where
+that falls under it, and those two
+are the floor each stage is held to — the tier you launch its builder at should meet the build floor.
+Raise a review floor to the build's tier or above only for a stated reason — security, concurrency,
+attestation, or a new mechanism — and say that reason as the triage's why, recorded beside the floors
+it named. Re-triage with a
 reason through `rest.py --lease --post /cards/<card>/triage --json '{"criticality": "…", "size": "…", "why": "…"}'`;
 lowering a floor is yours or the owner's alone.
 
@@ -487,12 +511,11 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post /ladder -
 ```
 
 Delegating a card is also when you say what it waits on and which goal it serves. A goal is the
-Ledger's own record, and a card joins it with
-`rest.py --lease --post /cards/<card>/links --json '{"kind": "part-of", "to_goal": "<goal>", "why": "…"}' --key <a key of your own for this link>`.
+Ledger's own record, and a card joins it as `part-of <goal>`, by the goal's id.
 Name the plan's sentence as `--source` when an edge comes from one:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease link <card> requires|part-of <card>|<owner>/<name>#<n> [--source <where>] <why>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease link <card> requires <card>|requires <owner>/<name>#<n>|part-of <goal> [--source <where>] <why>
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease unlink <card> requires|part-of <target> resolved|withdrawn <why>
 ```
 
@@ -863,7 +886,9 @@ own transcript at the same epoch, with its conversation intact. A session mid-tu
 The park stands an hour unless `until` says otherwise. When it runs out you are told
 `session-parked-over`, and after that the session reads as any session with no process: stale,
 reclaimable, retired by `retire:`. A wake while its machine is full is refused `resume-host-full`;
-wake it again once there is room.
+wake it again once there is room. A wake or rehome onto an account whose owner's session cap is
+full is refused `account-concurrency-full`, not queued as a launch would be: wake it once a session
+on that account ends, or rehome it to another account.
 
 ## Move a card to another model
 
@@ -878,7 +903,9 @@ card: token <lease token> session <card> <session> executor stage <stage> [<why>
 
 The same form names the next stage for the executor already holding the card. When a stage proves
 harder than its floor, raise it rather than starting over — the executor raises its own stage, and
-you or the owner any stage; lowering is a re-triage:
+you or the owner any stage. A session whose change proves smaller or less risky than its triage
+proposes a lower floor to you with the evidence; set it the same way, for your retier stands below
+the triage too:
 
 ```bash
 card: token <lease token> retier <card> <stage> <floor> <why>   # legendary|epic|rare|uncommon
@@ -896,7 +923,7 @@ subject's `plans/<n>/plan.md`, naming a builder for each task, and passed by the
 (`gate.py <session> critic <plan path>` ending `build it`), since a lesser model needs its
 precision. Launch no builder on a card whose plan has not passed. Each builder takes its tasks by a fresh
 launch on the card in turn, or, where the plan splits into independent pieces, on its own card
-`part-of` the major one.
+that the major one `requires`.
 
 A card planned on a strong model is built on a cheaper model, provider or account in one of two
 ways (#5856). The session holding the
@@ -920,7 +947,9 @@ LAUNCH
 
 In `card`'s place, `resolves <owner>/<name>#<n>` names the card by the issue it resolves: the one
 live card resolving it, refused `card-absent` when none does (scope one first) and `card-ambiguous`
-when several do.
+when several do. A `notify <session>` clause, before `because`, names the session that asked for the
+launch: it is told on its own stream who enrolled for the launch, on which machine and for which
+card, and how the launch ended when nobody did, so you watch for no arrival to relay (#7182).
 
 Launch only once the holder's branch is pushed: the new session starts from the remote, and the
 daemon cannot see a commit left in the old worktree. The answer that starts the session makes it the card's executor, ending the previous one's
@@ -954,9 +983,11 @@ read them in the recording when you want them.
 
 The row also shows what a session has written down:
 `checkpoint` is its last `{boundary, note, at, current}`, current until it next acknowledges a
-directive, and `compacted` its last `{at, trigger, skipped}`. You are told each checkpoint as a say
-`from: checkpoint <id>`. You are told each compaction made with no current checkpoint as a say
-`from: compaction <session>`. After a compaction you ordered with `control:`, the next directive
+directive, and `compacted` its last `{at, trigger, skipped}`. Neither tells you by itself: the
+snapshot's rows carry them (the owner's ruling, 2026-10-17). One telling stands: a compaction no
+checkpoint followed within its grace reaches you as a `compaction-uncovered` signal, `from: session
+<id>`, because its session may have nothing to be re-briefed from. After a compaction you ordered
+with `control:`, the next directive
 re-briefs it with the card's context, as below. An automatic compaction is a notice, not a reason
 to re-brief: give the card's context again only when the session shows it lost some — it asks what
 it was doing, repeats finished work, or acts against a ruling it was given (the owner's ruling,

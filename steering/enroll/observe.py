@@ -34,6 +34,7 @@ import supervision  # noqa: E402
 import verb_help  # noqa: E402
 from local_workspace import workspace_root  # noqa: E402
 from door import door_url, failure, record, remote, brain_route, send  # noqa: E402
+import current  # noqa: E402
 
 
 BUDGET = 4.0  # seconds, end to end
@@ -171,7 +172,9 @@ def main() -> int:
                 claimed = spool.claim(path)
                 if claimed:
                     claimed.unlink()
-                notice = received_notice(ws, o, notice_in(r), time.time())
+                said, release = answer_in(r)
+                keep_release(ws, release)
+                notice = received_notice(ws, o, said, time.time())
     except Exception as e:  # the sweep owns whatever stays; the hook log keeps why
         record("observe", f"send to {base} failed after {time.monotonic() - sent_at:.2f}s: {failure(e)}", ws)
         try:
@@ -190,6 +193,7 @@ def main() -> int:
         except Exception as e:  # a reading is worth one attempt; the next window brings another
             record("readout", f"mid-turn post failed: {failure(e)}", ws)
     notice = plugin_notice(ws, o, notice)
+    notice = behind_notice(ws, o, notice)
     return finish(o["event"], notice) if notice else finish()
 
 
@@ -259,13 +263,91 @@ def plugin_notice(ws: Path, o: dict, notice: str | None) -> str | None:
     return "\n".join(x for x in (line, notice) if x) or None
 
 
-def notice_in(r) -> str | None:
-    """What the daemon told this session about itself in the answer (doc 71), or None."""
+def answer_in(r) -> tuple[str | None, str | None]:
+    """What the daemon told this session about itself in the answer (doc 71), and the release
+    the orchestrator runs, as the authorities state it: the release rides the observe answer so
+    a hook never spends its budget on a second read for it (#7185). The release is None when the
+    answer could not be read at all, and "" when a readable one names none — this orchestrator
+    states no release, and no cached one is kept to tell against."""
     try:
-        n = json.loads(r.read() or b"{}").get("notice")
+        doc = json.loads(r.read() or b"{}")
     except (ValueError, AttributeError, OSError):
-        return None
-    return n if isinstance(n, str) and n else None
+        return None, None
+    n = doc.get("notice")
+    release = doc.get("release")
+    return (n if isinstance(n, str) and n else None,
+            release if isinstance(release, str) else "")
+
+
+def keep_release(ws: Path, release: str | None) -> None:
+    """The spool's copy of the release the door last stated: written when an answer names one,
+    dropped when a readable answer names none, so a build that stamps no release leaves nothing
+    stale behind to tell against (#7185). An answer that could not be read keeps what is there."""
+    try:
+        cache = spool.spool_dir(ws) / ".release"
+        if release:
+            cache.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            spool.write_atomic(cache, release)
+        elif release == "":
+            cache.unlink()
+    except OSError:
+        pass  # a stale cached release names a release still ahead of this pack
+
+
+def behind_notice(ws: Path, o: dict, notice: str | None) -> str | None:
+    """A session the agent cannot restart is told, once, its plugin is behind (#7185). The
+    harness pinned the pack it loaded at start, so however current the scripts a release
+    forwards to, the session's own module and skill text stay the version it began on until it
+    is resumed on a newer install. This hook is invoked from that pack, so it is the one that
+    knows the version; a session the machine's launch record holds is the agent's to restart —
+    parked and woken at its next idle moment — and is not this tell's. Once per the version the
+    session runs: it is told again only once it has updated and still trails the release."""
+    if o.get("event") not in ("UserPromptSubmit", "PostToolUse"):
+        return notice
+    fix = current.UPDATE.get(str(o.get("source") or ""))
+    mine = None if os.environ.get("STEERING_PLUGIN_PIN") else current.invoked()
+    if not fix or not mine:
+        return notice
+    try:
+        release = (spool.spool_dir(ws) / ".release").read_text().strip()
+    except OSError:
+        return notice
+    if not current.newer(release, mine):
+        return notice
+    psession = str(o.get("session") or "")
+    try:
+        from ack import records
+        enrolled = [name for name, rec in records(ws).items()
+                    if rec.get("provider_session") == psession]
+    except Exception:
+        enrolled = []
+    try:
+        launched = json.loads((ws / ".claude" / "steering-launched.json").read_text())
+    except (OSError, ValueError):
+        launched = {}
+    for name in enrolled:
+        # A row keyed by the session's own name is a launch that enrolled; a key that is the
+        # tmux name (its row's own tmux) is still starting, and no session's to restart yet.
+        row = launched.get(name)
+        if isinstance(row, dict) and name != row.get("tmux"):
+            return notice
+    mark = spool.spool_dir(ws) / (".plugin-told-" + hashlib.sha256(
+        json.dumps([o.get("source"), psession, o.get("runtime_id")]).encode()).hexdigest())
+    try:
+        told = mark.read_text().strip()
+    except OSError:
+        told = None  # no mark yet: this is the first tell at this version
+    if told == mine:
+        return notice
+    try:
+        mark.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        spool.write_atomic(mark, mine)
+    except OSError:
+        pass  # a missed mark costs a repeat, never a silence
+    line = (f"This session's plugin is behind: it runs {mine} while the release is {release}. "
+            f"One action takes it — {fix} — then resume this session; until it does, its skill "
+            f"text and module stay {mine}.")
+    return "\n".join(x for x in (notice, line) if x) or None
 
 
 def finish(event: str | None = None, notice: str | None = None) -> int:

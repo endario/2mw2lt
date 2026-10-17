@@ -31,6 +31,8 @@ FOLLOW = ("refused: starting 2mw2lt-follow deploys untested main to production, 
           "policy (doc 08, doc 138 §1). Production moves by a deploy the brain makes.")
 AUTO = ("refused: an auto-merge (the gate skill: \"Not --auto\"). Merge with `gh pr merge -R <repo> "
         "--squash --match-head-commit <sha>` once the head holds 2mw2lt/review.")
+ADMIN = ("refused: an admin merge bypasses main's ruleset, which admits only a head holding "
+         "2mw2lt/review. Merge with `gh pr merge <n> -R <repo> --squash --match-head-commit <sha>`.")
 
 FOLLOW_UNITS = ("2mw2lt-follow", "2mw2lt-follow.service", "2mw2lt-follow.timer")
 STARTS = {"start", "restart", "enable", "reenable", "try-restart", "reload-or-restart", "try-reload-or-restart"}
@@ -87,8 +89,12 @@ def _gh(args: list[str], _env: Known, _ground: list[str]) -> str | None:
     i = 0
     while i < len(args) and args[i].startswith("-"):
         i += 2 if args[i] in ("-R", "--repo", "--hostname") else 1
-    auto = any(a == "--auto" or a.startswith("--auto=") for a in args[i:])
-    return AUTO if args[i:i + 2] == ["pr", "merge"] and auto else None
+    if args[i:i + 2] != ["pr", "merge"]:
+        return None
+    if any(a == "--auto" or a.startswith("--auto=") for a in args[i:]):
+        return AUTO
+    # The workspace's merge allow rule ends in a glob, so a flag after the head reaches here (#7039).
+    return ADMIN if any(a == "--admin" or a.startswith("--admin=") for a in args[i:]) else None
 
 
 RULES = {"pkill": _pkill, "systemctl": _systemctl, "gh": _gh}

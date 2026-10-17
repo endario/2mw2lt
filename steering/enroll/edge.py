@@ -47,7 +47,7 @@ def main(argv: list[str]) -> int:
     import refusal
     import session_routes
     fact = built[0]
-    to = {key: fact[key] for key in ("to_card", "to_issue") if key in fact}
+    to = {key: fact[key] for key in ("to_card", "to_issue", "to_goal") if key in fact}
     try:
         reply = session_routes.edge_card(fact["card"], verb == "unlink", fact["kind"], to,
                                          fact["why"], token, how=fact.get("how", ""),

@@ -21,8 +21,8 @@ _RAW_FORMS = {
     "claim": ["claim: <resource> as <claimant> token <t>"],
     "taking": ["taking: <issue> token <t>", "taking: branch <name> token <t>"],
     "declare": ["declare: <session> token <t> card <ulid> <name> [<verb>:<n>[,<n>] …] [--goal <uuid> --goal-why <reason> [--goal-source <source>]]",
-                "declare: <session> token <t> link <card> requires|part-of <card>|<owner>/<name>#<n> [--source <where>] <why>",
-                "declare: <session> token <t> unlink <card> requires|part-of <card>|<owner>/<name>#<n> resolved|withdrawn <why>"],
+                "declare: <session> token <t> link <card> requires <card>|requires <owner>/<name>#<n>|part-of <goal> [--source <where>] <why>",
+                "declare: <session> token <t> unlink <card> requires <card>|requires <owner>/<name>#<n>|part-of <goal> resolved|withdrawn <why>"],
     "checkpoint": ["checkpoint: <session> token <t> json {\"id\", \"boundary\", \"note\", \"note_sha256\", \"learned\"?}"],
     "holds": ["holds: <branch> token <t>", "holds: issue <n> token <t>"],
     "enroll": ["enroll: <session> as <harness>/<account> workspace <abs path> transcript <abs path or -> [on <branch>] [doing <text>]"],
@@ -30,8 +30,8 @@ _RAW_FORMS = {
     "ack": ["ack: <ulid> token <t>"],
     "say": ["say: <session> [to <target>] token <t> <text>"],
     "note": ["note: token <lease token> <text>"],
-    "launch": ["launch: token <lease token> <harness> floor <rarity> [thinking <level>] [effort <level>] [window] [card <card>|resolves <owner>/<name>#<n>] because <reason> [<newline> brief: <directive>]",
-               "launch: token <lease token> <harness> [on <node>] [vendor <vendor>] [account <n>] [model <model>] [thinking <level>] [effort <level>] [window] [card <card>|resolves <owner>/<name>#<n>] because <reason> [<newline> brief: <directive>]"],
+    "launch": ["launch: token <lease token> <harness> floor <rarity> [thinking <level>] [effort <level>] [window] [card <card>|resolves <owner>/<name>#<n>] [notify <session>] because <reason> [<newline> brief: <directive>]",
+               "launch: token <lease token> <harness> [on <node>] [vendor <vendor>] [account <n>] [model <model>] [thinking <level>] [effort <level>] [window] [card <card>|resolves <owner>/<name>#<n>] [notify <session>] because <reason> [<newline> brief: <directive>]"],
     "withdraw": ["withdraw: token <lease token> <launch id>"],
     "cancel": ["cancel: token <lease token> <action id>"],
     "relay": ["relay: token <lease token> to <session>[@<epoch>] <text>"],
@@ -87,8 +87,8 @@ _EXAMPLES = {
     "note": ["note: token <lease token> review is waiting"],
     "launch": ["launch: token <lease token> claude floor rare because a contained fix",
                "launch: token <lease token> claude vendor anthropic account 2 model opus effort high because a hard design needs more than epic's medium"],
-    "withdraw": ["withdraw: token <lease token> 1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00"],  # gitleaks:allow (a placeholder launch id)
-    "cancel": ["cancel: token <lease token> 1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00"],  # gitleaks:allow (a placeholder action id)
+    "withdraw": ["withdraw: token <lease token> 00000000-0000-4000-8000-000000000001"],
+    "cancel": ["cancel: token <lease token> 00000000-0000-4000-8000-000000000001"],
     "relay": ["relay: token <lease token> to violet@1 review the branch"],
     "retire": ["retire: token <lease token> worker-1 on build"],
     "card": ["card: token <lease token> reclassify 010101010101010101010101 state live"],
@@ -160,9 +160,9 @@ TOOLS = {
         {"topic": None, "usage": "<session> [--card <ulid>] <name> [resolves:<n> advances:<n> ...] [triage:<criticality>,<size>] [--goal <uuid> --goal-why <reason> [--goal-source <source>]]", "example": "declare violet verb-help triage:minor,S"},
     ]},
     "edge": {"verb": "declare", "forms": [
-        {"topic": "link", "usage": "<session> link <card> requires|part-of <card>|<owner>/<name>#<n> [--source <where>] <why>",
+        {"topic": "link", "usage": "<session> link <card> requires <card>|requires <owner>/<name>#<n>|part-of <goal> [--source <where>] <why>",
          "example": "edge violet link 010101010101010101010101 requires endario/repo#3384 the schema lands first"},
-        {"topic": "unlink", "usage": "<session> unlink <card> requires|part-of <card>|<owner>/<name>#<n> resolved|withdrawn <why>",
+        {"topic": "unlink", "usage": "<session> unlink <card> requires <card>|requires <owner>/<name>#<n>|part-of <goal> resolved|withdrawn <why>",
          "example": "edge violet unlink 010101010101010101010101 requires endario/repo#3384 resolved it landed"},
     ]},
     "disconnect": {"verb": "detach", "current": True, "forms": [
@@ -188,7 +188,7 @@ TOOLS = {
         {"topic": "--claim-path", "usage": "--claim-path <provider-session>", "example": "hold --claim-path 0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"},
         {"topic": "--session-of", "usage": "--session-of <provider-session> [session]", "example": "hold --session-of 0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0 violet"},
         {"topic": "--plugin-state", "usage": "--plugin-state <provider-session>", "example": "hold --plugin-state 0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"},
-        {"topic": "stream", "usage": "[--until-event|--service|--wake plugin] [--provider <provider>] [--provider-session <id>] [--pid <pid>] [session]", "example": "hold --current"},
+        {"topic": "stream", "usage": "[--until-event|--service|--wake plugin|plugin-frames] [--provider <provider>] [--provider-session <id>] [--pid <pid>] [session]", "example": "hold --current"},
     ]},
     "holds": {"verb": "holds", "forms": [
         {"topic": "branch", "usage": _SPEAKER_USAGE + " <session> <branch>", "example": "holds violet feat/help"},
@@ -206,6 +206,9 @@ TOOLS = {
     ]},
     "rest": {"forms": [
         {"topic": None, "usage": _SPEAKER_USAGE + " [--lease] [--post [--json <body>] [--key <key>]] <api-v1-path> [--all]", "example": "rest /openapi.json"},
+    ]},
+    "deployment": {"bare": False, "forms": [
+        {"topic": None, "usage": _SPEAKER_USAGE + " <sha> <environment> pending|success|failure [<deployment id>]", "example": "deployment 3f9a2c1e0b7d4a5f6e8c9b0a1d2e3f4a5b6c7d8e cloud-1/coordination success 42"},
     ]},
     "lease": {"forms": [
         {"topic": "say", "usage": "say " + _SPEAKER_USAGE + " [--retry=<id>]", "example": "lease say < line.txt"},

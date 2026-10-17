@@ -5,7 +5,8 @@ description: Connect at session start or restart, and hold the stream where requ
 
 ## Connect
 
-Run from the wired repository or its worktree:
+Run this now, before anything else, from the wired repository or its worktree; nothing is
+connected until it has run:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/connect.py" --current
@@ -117,7 +118,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" wait <session> for check
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" done <session> "<result>"
 ```
 
-A `say` from `kick <id>` means you hold a card and your turn ended with nothing you wait on open.
+A `say` from `kick <id>`, a `session-kick` signal naming the card you hold, means your turn ended
+with nothing you wait on open.
 Carry on with the work, declare what you wait on with `wait`, or say `done` or `blocked`. Do not
 answer it in words.
 
@@ -134,15 +136,20 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/declare.py" <session> "<work>" re
 ```
 
 Triage says how much breaks if the work is wrong (`critical`, `major`, `minor`, `trivial`) and how
-large it is (`S`, `M`, `L`, `XL`). The team's policy turns those into the least tier each stage is
-held to, and your reviews take that floor unless you raise it (`gate.py --floor`, with why).
+large it is (`S`, `M`, `L`, `XL`). Triage optimistically: a model at each tier can do more than the
+last tier could, and the team's policy turns your answers into the least tier each stage is held to,
+a review floor one tier below the build floor, at rare where that falls under it. Your reviews take
+that floor unless you raise it
+(`gate.py --floor`, with why). When your change proves smaller or less risky than its triage, say so
+to the brain with the evidence, proposing a lower floor: the seat sets it with
+`card.py --lease retier`, and the triage record stands as it was made.
 
 When you take work, and whenever the card you execute turns out to wait on another card or issue
 or to contribute to a goal, say so; end the edge when it no longer holds. The brain reviews the
 board's links too, but you know your own card's edges first:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/edge.py" <session> link <card> requires|part-of <card>|<owner>/<name>#<n> [--source <where>] "<why>"
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/edge.py" <session> link <card> requires <card>|requires <owner>/<name>#<n>|part-of <goal> [--source <where>] "<why>"
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/edge.py" <session> unlink <card> requires|part-of <target> resolved|withdrawn "<why>"
 ```
 
@@ -150,8 +157,8 @@ A prerequisite you discover while building is yours to declare the moment you kn
 you execute, with why — never a question for the brain to retype. `--source` names where the edge
 rests, a plan's document and sentence. Only the card you execute is yours to link: after a
 handoff, another session's engagement owns the mutation, and a card you no longer execute is not
-yours to edge. A card that turns out to serve a goal you were not briefed on has no edge command
-of its own — say it in your report and the brain links it.
+yours to edge. Your card joins the goal your brief names as `part-of <goal>`, by the goal's id; a goal you were not
+briefed on is the brain's to link, so say it in your report.
 
 When your brief names a goal and a plan revision, that is context, not a fence: the plan orders
 work, it does not bind your branch or your review. Report what was done and what was discovered —
