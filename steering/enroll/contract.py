@@ -575,6 +575,7 @@ SessionReading = typing.TypedDict("SessionReading", {
     "directory": "typing.NotRequired[str]",
     "leased": "typing.NotRequired[bool]",
     "background": "typing.NotRequired[int | None]",
+    "pending_frames": "list[str] | None",
 })
 
 # ReadingTokens is the tokens a reading counts: its call's whole input, and the parts of it read

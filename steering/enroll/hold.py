@@ -428,7 +428,22 @@ def recording(frames: Path):
 
 
 def say_read(port: int, session: str, raw: bytes) -> None:
-    """Tell the agent this say is read, so the orchestrator's spool lets it go (#1550).
+    """Tell the agent a say this stream line carries is read, as `read_say` does (#1550)."""
+    if not raw.startswith(b"data: "):
+        return
+    try:
+        e = json.loads(raw[6:].decode(errors="replace"))
+    except ValueError:
+        return
+    fid = spool.owed_id(e)
+    if fid is None:
+        return
+    read_say(port, session, fid)
+
+
+def read_say(port: int, session: str, fid: str) -> bool:
+    """Tell the agent this say is read, so the orchestrator's spool lets it go (#1550), answering
+    whether the report arrived.
 
     Only the reader can attest a read. The agent used to post the receipt when it yielded the
     frame, which is when the ASGI server took it, not when anything read it — so a say handed to
@@ -440,15 +455,6 @@ def say_read(port: int, session: str, raw: bytes) -> None:
     check can pass while its forwarded report to the orchestrator fails (#1723), and a `200`
     with `"received": false` is that failure — silent to a caller that only watches for a raised
     exception, exactly as invisible as the timeout this same line already prints for."""
-    if not raw.startswith(b"data: "):
-        return
-    try:
-        e = json.loads(raw[6:].decode(errors="replace"))
-    except ValueError:
-        return
-    fid = spool.owed_id(e)
-    if fid is None:
-        return
     body = json.dumps({"session": session, "id": fid}).encode()
     req = urllib.request.Request(f"http://127.0.0.1:{port}/steering/read", data=body,
                                  headers={"Content-Type": "application/json"})
@@ -457,9 +463,11 @@ def say_read(port: int, session: str, raw: bytes) -> None:
             reply = json.loads(resp.read())
     except Exception as ex:
         print(f"the read of {fid} was not reported: {type(ex).__name__}", file=sys.stderr)
-        return
+        return False
     if not isinstance(reply, dict) or not reply.get("received"):
         print(f"the read of {fid} was not reported: {reply}", file=sys.stderr)
+        return False
+    return True
 
 
 def record(recorded, frames: Path, raw: bytes):
@@ -559,8 +567,13 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                             if recorded is None and (lost := recording_lost(plugin)):
                                 return lost
                             # After the record, so a receipt is never sent for a say this
-                            # machine did not keep.
-                            say_read(port, session, raw)
+                            # machine did not keep. A plugin hold does not receipt at all: the
+                            # recording is the plugin's hands, not the session's, and the frames
+                            # tool receipts a say when it returns it (#7136) — until then the
+                            # say stays spooled, which is what tells the platform the session
+                            # has not read it.
+                            if not plugin:
+                                say_read(port, session, raw)
                         if line.startswith(": keepalive") or not line.strip():
                             continue
                         if plugin and line.startswith(": connected "):
@@ -693,6 +706,17 @@ def main(argv: list[str]) -> int:
                                ("--plugin-state", "provider session", holder.describe)):
         if args[:1] == [flag]:
             return workspace_answer(args, what, answer)
+    if args[:1] == ["--read-say"]:
+        # The frames tool's receipt of a say it returned, on a stream a plugin holds (#7136). A
+        # report that does not arrive exits nonzero, so the tool returns the say again.
+        if len(args) != 3 or args[1].startswith("-") or args[2].startswith("-"):
+            return error("hold", "--read-say takes a session name and a say's id")
+        try:
+            required_workspace_root(project_dir(), timeout=2.0)
+        except Refused as why:
+            print(str(why), file=sys.stderr)
+            return 1
+        return 0 if read_say(agent_port(project_dir()), args[1], args[2]) else 1
     try:
         wake, args = wake_mode(args)
     except Refused as why:

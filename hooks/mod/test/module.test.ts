@@ -27,9 +27,10 @@ const RECORDING = [USAGE, SAY, ENVELOPE, SEAT, '{"kind":"say","id":"f2","text":"
   .map(f => `data: ${f}`).join('\n') + '\n'
 
 test('pick returns the pending frames verbatim, in recording order', async () => {
-  const { text, envelopes } = pick(RECORDING, ['s9', 'e1', 'f1'])
+  const { text, envelopes, says } = pick(RECORDING, ['s9', 'e1', 'f1'])
   expect(text).toBe([SAY, ENVELOPE, SEAT].join('\n'))
   expect(envelopes).toEqual(['01JENV'])
+  expect(says).toEqual(['f1'])                       // a say without a directive settles under its frame id
   expect(pick(RECORDING, ['s9', 'e1', 'gone']).found).toEqual(['e1', 's9'])
 })
 
@@ -54,8 +55,11 @@ test('pick records only returned frames as foreground semantic identities', asyn
     JSON.stringify({ kind: 'unknown', id: 'unknown-frame' }),
   ].map(frame => `data: ${frame}`).join('\n')
   const got = pick(raw, [request, ordinary, 'envelope-frame', 'seat:4', 'unknown-frame'])
-  expect(got.read).toEqual({ directives: [directive, ordinary, envelope], seatGeneration: 4, seatFrameId: 'seat:4' })
-  expect(pick(`data: ${JSON.stringify({kind:'say', id:request, directive, text:'answer me'})}\n`, [request]).read.directives).toEqual([directive])
+  expect(got.read).toEqual({ directives: [directive, envelope], seatGeneration: 4, seatFrameId: 'seat:4' })
+  expect(got.says).toEqual([ordinary])   // a plain say alone settles under its frame id, by the tool's receipt (#7136)
+  const relay = pick(`data: ${JSON.stringify({kind:'say', id:request, directive, text:'answer me'})}\n`, [request])
+  expect(relay.says).toEqual([])                     // a request relay stays the seat read's, never --read-say's
+  expect(relay.read.directives).toEqual([directive])
   expect(pick(raw, []).read).toEqual({ directives: [] })
 })
 
@@ -112,7 +116,7 @@ const ROOT = '/ws/checkout'
 const line = (id: string | null, kind: string, wakes: boolean) => JSON.stringify({ id, kind, wakes }) + '\n'
 
 function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording = '', keep = 'Keep verbatim: steering session s1; branch b; checkpoint https://github.com/example-org/example-repo/pull/1.\n',
-                         enrolled = true, submitRejects = false, ackFails = false,
+                         enrolled = true, submitRejects = false, ackFails = false, readFails = false,
                          // The engine's own answer to `$.session.usage({ breakdown })`: the window it measures
                          // against, the token count it auto-compacts at, and who settled the window.
                          context = { point: 167_000 as number | undefined, raw: 200_000, source: 'auto', model: 'claude-test' } } = {}) {
@@ -227,7 +231,8 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
       await gate
     }
     const exitCode = e.argv.includes('--session-of') ? w.sessionLookupCode
-      : (e.argv.includes('--claim-path') && w.claimFails) || (e.argv.some(a => a.endsWith('/ack.py')) && ackFails) ? 1 : 0
+      : (e.argv.includes('--claim-path') && w.claimFails) || (e.argv.some(a => a.endsWith('/ack.py')) && ackFails)
+        || (e.argv.includes('--read-say') && readFails) ? 1 : 0
     return { value: { exitCode, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('process.spawn', async function* ($, e) {
@@ -417,7 +422,8 @@ test('the main frames tool proves exactly its returned native frames', async ($,
   await begin($)
   await w.clock.settle()
   await $.tool.call({ tool: TOOL } as never)
-  expect(w.stdins).toContain(JSON.stringify({ directives: [directive, ordinary], seat_generation: 4 }))
+  expect(w.stdins).toContain(JSON.stringify({ directives: [directive], seat_generation: 4 }))
+  expect(w.runs).toContainEqual(['python3', `${w.root}/steering/enroll/hold.py`, '--read-say', 's1', ordinary])
 })
 
 // A session resumed from inside another session's environment inherits its CLAUDE_CODE_SESSION_ID:
@@ -458,10 +464,8 @@ test('a stale seat frame is retired without discarding the ordinary frame beside
   expect(w.appends).toEqual([POINTER])
   const second = await $.tool.call({ tool: TOOL } as never)
   expect((second as { result?: string }).result).toBe(JSON.stringify({ kind: 'say', id: ordinary, text: 'ordinary' }))
-  expect(w.stdins).toEqual([
-    JSON.stringify({ directives: [ordinary], seat_generation: 4 }),
-    JSON.stringify({ directives: [ordinary] }),
-  ])
+  expect(w.stdins).toEqual([JSON.stringify({ directives: [], seat_generation: 4 })])
+  expect(w.runs).toContainEqual(['python3', `${w.root}/steering/enroll/hold.py`, '--read-say', 's1', ordinary])
   expect(w.state.get('pending')).toEqual([])
 })
 
@@ -482,23 +486,39 @@ test('a lapsed seat frame is retired without claiming a replacement seat', async
   expect(w.state.get('pending')).toEqual([ordinary])
   const second = await $.tool.call({ tool: TOOL } as never)
   expect((second as { result?: string }).result).toBe(JSON.stringify({ kind: 'say', id: ordinary, text: 'ordinary' }))
-  expect(w.stdins).toEqual([
-    JSON.stringify({ directives: [ordinary], seat_generation: 4 }),
-    JSON.stringify({ directives: [ordinary] }),
-  ])
+  expect(w.stdins).toEqual([JSON.stringify({ directives: [], seat_generation: 4 })])
+  expect(w.runs).toContainEqual(['python3', `${w.root}/steering/enroll/hold.py`, '--read-say', 's1', ordinary])
 })
 
 test('a failed foreground proof keeps returned frames pending', async ($, on) => {
   const id = 'bb48a465-45e5-4e38-85c8-2223890d4f47'
+  const directive = 'edaed9f7-42bd-479a-baa9-ddc2d4fdffba'
   const w = world(on, {
     rounds: [{ lines: [line(id, 'say', true)], code: 0, hold: never }],
-    recording: `data: ${JSON.stringify({ kind: 'say', id, text: 'ordinary' })}\n`,
+    recording: `data: ${JSON.stringify({ kind: 'say', id, directive, text: 'answer me' })}\n`,
   })
   w.leaseOut.push('refused: seat-generation-stale')
   await begin($)
   await w.clock.settle()
   const got = await $.tool.call({ tool: TOOL } as never)
   expect((got as { deny?: string }).deny).toContain('seat-generation-stale')
+  expect(w.state.get('pending')).toEqual([id])
+})
+
+// A plain say settles by the tool's own receipt under its frame id, not the seat read (#7136):
+// a refused receipt leaves it pending, to be returned — and receipted — again.
+test('a refused say receipt keeps the say pending', async ($, on) => {
+  const id = 'bb48a465-45e5-4e38-85c8-2223890d4f47'
+  const w = world(on, {
+    readFails: true,
+    rounds: [{ lines: [line(id, 'say', true)], code: 0, hold: never }],
+    recording: `data: ${JSON.stringify({ kind: 'say', id, text: 'ordinary' })}\n`,
+  })
+  await begin($)
+  await w.clock.settle()
+  const got = await $.tool.call({ tool: TOOL } as never)
+  expect((got as { deny?: string }).deny).toContain('hold.py --read-say')
+  expect(w.runs).toContainEqual(['python3', `${w.root}/steering/enroll/hold.py`, '--read-say', 's1', id])
   expect(w.state.get('pending')).toEqual([id])
 })
 
@@ -511,7 +531,7 @@ async function refusalLeavesRoomForTheNextPointer($: any, on: On, kind: 'say' | 
     rounds: [{ lines: [line(id, kind, true), new Promise<void>(resolve => { arrive = resolve }), line(next, 'say', true)], code: 0, hold: never }],
     recording: kind === 'envelope'
       ? `data: ${JSON.stringify({ kind, id, ulid: '86340b22-765e-4b5c-93b2-ddc8653052b2' })}\n`
-      : `data: ${JSON.stringify({ kind, id, text: 'ordinary' })}\n`,
+      : `data: ${JSON.stringify({ kind: 'say', id, directive: 'edaed9f7-42bd-479a-baa9-ddc2d4fdffba', text: 'answer me' })}\n`,
   })
   if (kind === 'say') w.leaseOut.push('refused: seat-generation-stale')
   await begin($)
@@ -548,7 +568,7 @@ async function arrivalDuringRefusal($: any, on: On, kind: 'say' | 'envelope') {
     rounds: [{ lines: [line(id, kind, true), new Promise<void>(resolve => { arrive = resolve }), line(next, 'say', true)], code: 0, hold: never }],
     recording: kind === 'envelope'
       ? `data: ${JSON.stringify({ kind, id, ulid: '86340b22-765e-4b5c-93b2-ddc8653052b2' })}\n`
-      : `data: ${JSON.stringify({ kind, id, text: 'ordinary' })}\n`,
+      : `data: ${JSON.stringify({ kind: 'say', id, directive: 'edaed9f7-42bd-479a-baa9-ddc2d4fdffba', text: 'answer me' })}\n`,
   })
   if (kind === 'say') w.leaseOut.push('refused: unavailable')
   w.wireGate = new Promise<void>(resolve => { release = resolve })

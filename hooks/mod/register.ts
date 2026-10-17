@@ -563,7 +563,7 @@ export const register: Register = on => {
       const at = await runOwn($, ['python3', script($, 'hold.py'), '--frame-path', session])
       if (at.exitCode === 0) recording = String(await $.fs.read(at.stdout.trim()).catch(() => ''))
     }
-    const { text, envelopes, found, read } = pick(recording, pending)
+    const { text, envelopes, says, found, read } = pick(recording, pending)
     if (read.directives.length || read.seatGeneration !== undefined) {
       const proof = await runSeatCall($, { client: 'post', path: '/steering/seat/read',
         stdin: JSON.stringify({ directives: read.directives, ...(read.seatGeneration !== undefined ? { seat_generation: read.seatGeneration } : {}) }) })
@@ -582,6 +582,15 @@ export const register: Register = on => {
         ackFailures.push(`ack.py ${ulid} exited ${acked.exitCode}${acked.stderr.trim() ? `: ${acked.stderr.trim()}` : ''}`)
       }
       if (acked.exitCode !== 0) $.ui.log(`2mw2lt: ack.py ${ulid} exited ${acked.exitCode}: ${acked.stderr.trim()}`, { to: 'debug' })
+    }
+    // A say settles when this tool returns it, not when the hold recorded it (#7136): the recording
+    // is the plugin's hands, and a say still unsettled is what the platform wakes the session for.
+    for (const sid of says) {
+      const receipt = await runOwn($, ['python3', script($, 'hold.py'), '--read-say', session, sid])
+      if (receipt.exitCode !== 0) {
+        ackFailures.push(`hold.py --read-say ${sid} exited ${receipt.exitCode}${receipt.stderr.trim() ? `: ${receipt.stderr.trim()}` : ''}`)
+        $.ui.log(`2mw2lt: hold.py --read-say ${sid} exited ${receipt.exitCode}: ${receipt.stderr.trim()}`, { to: 'debug' })
+      }
     }
     if (ackFailures.length) {
       await refuseFrames($, pending)

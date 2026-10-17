@@ -53,9 +53,11 @@ peer's or the brain's words arrive as `steering say <key>`: read them, and ackno
 
 **ZCode:** connect with no flags, as Claude does: the session is named by the binding the
 plugin's hooks publish. The plugin's frames server holds the stream, so arm no hold. A waiting
-frame starts or joins a turn as `Call mcp__plugin_2mw2lt_frames__frames`; that tool returns each
-frame with its `from:` line and acknowledges what it returned. If the `plugin:` line says the
-frames server holds no stream yet, restart the session so the plugin loads.
+frame starts no turn of its own: the plugin points at pending frames only at event boundaries
+(mid-turn, a turn's end, a person's next prompt), and a session whose turn has ended is woken
+by the platform, whose wake turn says `Call mcp__plugin_2mw2lt_frames__frames`. That tool
+returns each frame with its `from:` line and acknowledges what it returned. If the `plugin:`
+line says the frames server holds no stream yet, restart the session so the plugin loads.
 
 **Claude Code with the plugin's module:** when connect's `plugin:` line ends
 `the plugin holds this session's stream, so arm no hold`, arm nothing. A waiting frame starts a

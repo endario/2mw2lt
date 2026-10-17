@@ -54,14 +54,16 @@ export function atLeast(version: string, floor: readonly number[] = FLOOR): bool
 }
 
 // The recording holds `data: {json}` lines. Every frame carries the daemon's `id`, which hold.py
-// prints; return the pending ones verbatim and in order, with each envelope's ulid for ack.py. A
+// prints; return the pending ones verbatim and in order, with each envelope's ulid for ack.py and
+// each say's id for hold.py --read-say, which settles it as this tool returns it (#7136). A
 // `bulletin` frame's text is collected separately: it reaches the model as one appended message
 // at a turn's start, never as the `frames` tool's result.
-export function pick(recording: string, pending: readonly string[]): { text: string; envelopes: string[]; envelopeIds: string[]; bulletins: string[]; found: string[]; read: { directives: string[]; seatGeneration?: number; seatFrameId?: string } } {
+export function pick(recording: string, pending: readonly string[]): { text: string; envelopes: string[]; envelopeIds: string[]; says: string[]; bulletins: string[]; found: string[]; read: { directives: string[]; seatGeneration?: number; seatFrameId?: string } } {
   const want = new Set(pending)
   const out: string[] = []
   const envelopes: string[] = []
   const envelopeIds: string[] = []
+  const says: string[] = []
   const bulletins: string[] = []
   const found: string[] = []
   const directives: string[] = []
@@ -76,14 +78,18 @@ export function pick(recording: string, pending: readonly string[]): { text: str
     found.push(f.id)
     out.push(raw.slice(6))
     if (f.kind === 'envelope' && typeof f.ulid === 'string') { envelopes.push(f.ulid); envelopeIds.push(f.id); directives.push(f.ulid) }
-    if (f.kind === 'say') directives.push(typeof f.directive === 'string' ? f.directive : f.id)
+    // A seat relay of a member's request carries its own directive id and stays the seat read's,
+    // as it always was; a plain say settles under its frame id, which is its directive row's, when
+    // this tool returns it (#7136).
+    if (f.kind === 'say' && typeof f.directive === 'string') directives.push(f.directive)
+    if (f.kind === 'say' && typeof f.directive !== 'string') says.push(f.id)
     if (f.kind === 'bulletin' && typeof f.text === 'string') bulletins.push(f.text)
     if (f.kind === 'seat' && typeof f.generation === 'number' && Number.isSafeInteger(f.generation)) {
       seatGeneration = f.generation
       seatFrameId = f.id
     }
   }
-  return { text: out.join('\n'), envelopes, envelopeIds, bulletins, found, read: { directives, ...(seatGeneration !== undefined ? { seatGeneration, seatFrameId } : {}) } }
+  return { text: out.join('\n'), envelopes, envelopeIds, says, bulletins, found, read: { directives, ...(seatGeneration !== undefined ? { seatGeneration, seatFrameId } : {}) } }
 }
 
 // The bulletin changes one turn appends stay within the same 1024-byte budget a change frame is

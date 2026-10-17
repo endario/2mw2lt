@@ -251,7 +251,9 @@ class Server:
     def frames(self) -> str:
         """The module's `tool.call` for frames: the pending frames' text, their envelopes
         acked only once the text is on its way back, a refused ack leaving every frame
-        pending to be returned — and acked — again."""
+        pending to be returned — and acked — again. A say is settled the same way, by the
+        receipt this tool sends as it returns it (#7136): the hold recorded it into this
+        plugin's hands, and only this return says the session read it."""
         with self.lock:
             pending, session = list(self.pending), self.session
         if not session or not pending:
@@ -264,12 +266,17 @@ class Server:
                 recording = Path(asked.stdout.strip()).read_text()
             except OSError:
                 recording = ""
-        text, envelopes, found, directives, generation = _pick(recording, pending)
+        text, envelopes, says, found, directives, generation = _pick(recording, pending)
         failures = []
         for ulid in envelopes:
             acked = self.run(["python3", str(ROOT / "steering/enroll/ack.py"), session, ulid])
             if acked.returncode != 0:
                 failures.append(f"ack.py {ulid} exited {acked.returncode}")
+        for sid in says:
+            read = self.run(["python3", str(ROOT / "steering/enroll/hold.py"),
+                             "--read-say", session, sid])
+            if read.returncode != 0:
+                failures.append(f"hold.py --read-say {sid} exited {read.returncode}")
         with self.lock:
             if not failures:
                 self.pending = [i for i in self.pending if i not in found]
@@ -315,14 +322,14 @@ class Server:
 
 
 def _pick(recording: str, pending: list[str]):
-    """The recording's pending frames: their text, envelope ulids, found ids, the directives
-    and seat generation the seat read carries.
+    """The recording's pending frames: their text, envelope ulids, the ids of the says to
+    receipt, found ids, the directives and seat generation the seat read carries.
 
     The twin of the module's `frames.ts pick` — the same recording fixtures fail both. The
     recording holds `data: {json}` lines, every frame carrying the daemon's `id`; an envelope
-    contributes its ulid, a say its directive id, a seat its generation."""
+    contributes its ulid, a say the id its receipt settles (#7136), a seat its generation."""
     want = set(pending)
-    out, envelopes, found, directives = [], [], [], []
+    out, envelopes, says, found, directives = [], [], [], [], []
     generation = None
     for raw in recording.splitlines():
         if not raw.startswith("data: "):
@@ -339,15 +346,20 @@ def _pick(recording: str, pending: list[str]):
         if frame.get("kind") == "envelope" and isinstance(frame.get("ulid"), str):
             envelopes.append(frame["ulid"])
             directives.append(frame["ulid"])
+        elif frame.get("kind") == "say" and isinstance(frame.get("directive"), str):
+            # A seat relay of a member's request carries its own directive id and stays the seat
+            # read's, as it always was.
+            directives.append(frame["directive"])
         elif frame.get("kind") == "say":
-            directive = frame.get("directive")
-            directives.append(directive if isinstance(directive, str) else frame["id"])
+            # A plain say settles under its frame id, which is its directive row's, when this tool
+            # returns it (#7136).
+            says.append(frame["id"])
         elif frame.get("kind") == "seat":
             value = frame.get("generation")
             if (isinstance(value, (int, float)) and not isinstance(value, bool)
                     and abs(value) <= 9007199254740991 and value == int(value)):
                 generation = int(value)
-    return "\n".join(out), envelopes, found, directives, generation
+    return "\n".join(out), envelopes, says, found, directives, generation
 
 
 def handle(method: str, params: dict, server: Server) -> dict:
