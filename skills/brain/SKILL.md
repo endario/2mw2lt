@@ -280,7 +280,7 @@ work. The rank spends quota that would otherwise expire: an account near its res
 left ranks first however high its use, and one projected to run out before its reset ranks last.
 `incentive` is the owner's own steering of the account, not the vendor's word: a multiplier above
 1x asks for spend there — among ranked accounts, prefer it and worry less as its windows fill;
-below 1x, prefer another of equal rank.
+below 1x lowers the account's numeric score proportionally, symmetrically with above 1x.
 `unread` is not room. A gate's reviewer is chosen by the same evaluator (#2135). When you
 recommend an account to the owner, name its forecast — `used`, `at_reset`, `resets_at`, runway —
 never a band.

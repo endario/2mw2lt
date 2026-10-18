@@ -3243,12 +3243,15 @@ PlacementTerms = typing.TypedDict("PlacementTerms", {
     "dedicated": "float",
 })
 
-# PlacementFiltered is a candidate a check took out before judging, and the check.
+# PlacementFiltered is a candidate a check took out before judging, and the check. NoAccount is
+# the launchers this machine's census said offer nothing, each with its one cause (#6793), on the
+# entries the launcher's absence filtered: what the entry's own machine could have said.
 PlacementFiltered = typing.TypedDict("PlacementFiltered", {
     "machine": "str",
     "vendor": "str",
     "account": "typing.NotRequired[str]",
     "reason": "str",
+    "no_account": "typing.NotRequired[list[FleetNoAccount] | None]",
 })
 
 # PlacementDraw is a candidate's measured quota-draw forecast as the decision journal keeps it

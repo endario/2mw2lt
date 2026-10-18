@@ -20,7 +20,8 @@ _REQUIRED = ("steering/enroll/observe.py", "steering/enroll/readout.py")
 
 # How each harness refreshes this plugin from its marketplace (#1795): the action a session is
 # told when the release outruns the pack it runs.
-UPDATE = {"claude": "claude plugin update 2mw2lt@2mw2lt", "codex": "codex plugin add 2mw2lt@2mw2lt"}
+UPDATE = {"claude": "claude plugin update 2mw2lt@2mw2lt", "codex": "codex plugin add 2mw2lt@2mw2lt",
+          "zcode": "zcode plugins marketplace update 2mw2lt && zcode plugins update 2mw2lt@2mw2lt"}
 
 
 def _key(name: str) -> tuple:

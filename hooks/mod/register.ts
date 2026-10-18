@@ -129,7 +129,9 @@ async function point($: EngineInterface) {
 // once the session is idle.
 async function repoint($: EngineInterface) {
   await locked(async () => {
-    if (!(await $.state.get(APPENDED)).value) return
+    const appended = (await $.state.get(APPENDED)).value
+    const pointed = (await $.state.get(POINTED)).value
+    if (!appended && !pointed) return
     if ((await $.state.get(BUSY)).value) return            // the next turn's end asks again
     await unpoint($)
     // Nothing is owed a pointer once the module no longer holds the stream.
@@ -400,6 +402,11 @@ async function holdOnce($: EngineInterface, ps: string, session: string, gen: nu
         named = l.session && l.session !== session ? l.session : named
         hold = { state: 'holding', hold: l.hold ?? null, since: (await $.clock.now()) / 1000 }
         await claim($, true, ps).catch(() => undefined)
+        // A hold replacement can follow a pointer submission that never became a turn: the
+        // engine then emits no `turn.complete`, so the normal repoint timer never runs. Reconcile
+        // the pending pointer when the replacement is admitted; a busy turn still defers to its
+        // completion, while an idle session gets the one prompt it missed.
+        await repoint($)
         continue
       }
       if (l.kind === 'refused') { refused = l; continue }

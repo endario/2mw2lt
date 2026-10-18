@@ -1262,6 +1262,19 @@ test('a session that disconnects is held no more, and a later refusal adds no ro
   expect(w.writes.map(x => JSON.parse(x.text).at).every(at => at > 0)).toBe(true)   // the claim stays live
 })
 
+test('a replacement hold re-points a frame whose submitted turn never started', async ($, on) => {
+  const w = world(on, { rounds: [
+    { lines: [line('f1', 'say', true)], code: 0 },
+    { lines: [line(null, 'held', false)], code: 0, hold: never },
+  ] })
+  await begin($)
+  await w.clock.settle()
+  expect(w.submits).toEqual([POINTER])
+  await w.clock.advance(1_000)
+  expect(w.spawns.length).toBe(2)
+  expect(w.submits).toEqual([POINTER, POINTER])
+})
+
 test('a sleep-expired claim is refreshed before the replacement hold delivers its replay', async ($, on) => {
   const w = world(on, { recording: RECORDING, rounds: [
     { lines: [], code: 4 },

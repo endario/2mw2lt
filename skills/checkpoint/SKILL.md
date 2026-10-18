@@ -8,7 +8,8 @@ The note is not a second copy of the work.
 
 **When.** At each boundary: `spec-settled` once your critic converges; `unit-done` when the
 brain's directive says `checkpoint: <card>`; `context` when the brain asks before a compact;
-`handover` on `pack up:`; `exit` before `/2mw2lt:disconnect`.
+`handover` on `pack up:`; `exit` before `/2mw2lt:disconnect` when you leave work unfinished; a card that merged and
+concluded leaves nothing to hand over, and needs none.
 
 **1. Put the work where it lives.**
 

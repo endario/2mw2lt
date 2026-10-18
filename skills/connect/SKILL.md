@@ -307,7 +307,8 @@ or account, propose the move: write a `handover` checkpoint, then `say` to the b
 (vendor, model, effort), the way you prefer, fresh or rehome, and why. The brain decides.
 
 Use `spec-settled` after the critic converges, `context` before compacting and `unit-done`
-when the brain requests it. Before leaving, record `exit` against the note, then disconnect:
+when the brain requests it. If you leave work unfinished, record `exit` against the note, then
+disconnect:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <session> exit <note-url>

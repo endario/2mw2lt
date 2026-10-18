@@ -236,6 +236,11 @@ zcode plugins marketplace add ~/.claude/plugins/marketplaces/2mw2lt --yes
 zcode plugins install 2mw2lt@2mw2lt --scope user --yes
 ```
 
+A release does not reach an installed ZCode plugin by itself. Refresh and move it with
+`zcode plugins marketplace update 2mw2lt && zcode plugins update 2mw2lt@2mw2lt` — the command a
+behind session's `plugin:` line names; an agent host's vendor update runs the same move on its
+timer.
+
 A plugin skill is not a slash command in ZCode: connect a ZCode session with
 `/skill 2mw2lt:connect`.
 
