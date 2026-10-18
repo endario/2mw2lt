@@ -251,6 +251,30 @@ def _claude_pid(psession: str) -> int | None:
     return runtime_id.claude_pid(psession)
 
 
+def _claude_session() -> str | None:
+    """The session the Claude process above this one serves, read from Claude's own registry
+    under the home this process carries. A session started inside another inherits that
+    session's `CLAUDE_CODE_SESSION_ID` (doc 08), which the engine replaces only for the Bash
+    tool, so the variable alone cannot say whose process this is — a nested session's hooks,
+    module children and MCP servers all carried the parent's (#6500, #7069). The registry row of
+    the nearest Claude process in this process's own parentage can, and it wins. Where no
+    ancestor answers — no Claude above this process, or a home that holds no vouched row for one
+    — the variable stands, as it always did."""
+    named = _env("CLAUDE_CODE_SESSION_ID")()
+    if named is None:
+        return None
+    import runtime_id
+    sessions = HARNESSES["claude"].config_dir() / "sessions"
+    for pid in runtime_id.ancestor_pids():
+        sid = runtime_id.serving_session(pid, sessions)
+        if sid is not None:
+            return sid
+    return named
+
+
+_claude_session.names = ("CLAUDE_CODE_SESSION_ID",)
+
+
 def _codex_rollout(psession: str):
     # The directory is resolved here and handed over on every call. `codex` reads its own home
     # once at import, so a caller that moves `CODEX_HOME` afterwards would be answered about
@@ -695,7 +719,7 @@ def _claude_live_workers(config: Path, *, deadline: float | None = None) -> tupl
 HARNESSES = {h.provider: h for h in (
     Harness("claude", agent="claude-code", config=".claude", config_env="CLAUDE_CONFIG_DIR",
             transcript_root="projects",
-            session_id=_env("CLAUDE_CODE_SESSION_ID"), harness_pid=_claude_pid,
+            session_id=_claude_session, harness_pid=_claude_pid,
             transcript=_claude_transcript, version=_cli_version("claude", "--version"),
             shape=_claude_shape, workspace=_claude_workspace, hooks=True,
             reading=_claude_reading, process_kind=_claude_process, live_workers=_claude_live_workers),
@@ -748,7 +772,10 @@ def provider_of(agent: str) -> str | None:
 def here() -> list[Harness]:
     """The harnesses that say this process is one of their sessions. More than one answers when
     a session of one harness was started from inside another, and then nothing here can tell
-    whose enrolment is being asked for — the caller has to name it."""
+    whose enrolment is being asked for — the caller has to name it. A Claude session started
+    inside another Claude session answers as its own wherever an ancestor answers: its harness
+    resolves the session from the registry row of the Claude process above it (#6500), and the
+    inherited variable names it only where none does."""
     return [h for h in HARNESSES.values() if h.exports and h.session_id() is not None]
 
 

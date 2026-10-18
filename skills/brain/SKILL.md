@@ -561,9 +561,17 @@ Each unit carries one `next_act` with its basis: `reconcile-plan`, `inspect-bloc
 `inspect-source-gap`, `inspect-placement`, `finish-work`, `inspect-merge` or `gather-or-judge`.
 Inspection guidance, never permission — an eligible-looking unit is an invitation to decide, not a
 launch. Unknown is not readiness: an unread landing names the source gap that limits it, an
-unmapped criterion is `evidence-unmapped`, and `omitted` counts what the bounds left out exactly.
-`stale: []` on the plan says its scope and policy pins hold, not that every execution input is
-unchanged; `inputs_moved` says that separately.
+unmapped criterion is an `evidence-unmapped:<id>:<name>` reason that names it — its id alone before
+anyone named it — so you can place its work without a second read, and `omitted` counts what the
+bounds left out exactly. A name may itself hold a colon, so read a reason by splitting on the first
+two: prefix, id, and the name as the rest. `stale: []` on the plan says its scope and policy pins
+hold, not that every execution input is unchanged; `inputs_moved` says that separately.
+
+**Name what you steer by.** Every criterion you create or reword carries a short name beside its
+statement — one line, forty characters at most — and a live goal's unnamed criteria are yours to
+name as you meet them, through `POST /goals/<goal>/criteria/<criterion>/names` with
+`{"name": "…"}`. A name is presentation of the criterion's identity: it writes no revision and
+reopens no judgment, and it never replaces the criterion id in a command.
 
 **Choose from live facts, not the last notice.** A passed head may have moved, a source's read may
 be partial, a done note may precede its merge. A notice is a pointer to reread its subject here.
@@ -632,9 +640,11 @@ once; sending the line again yourself is a second directive.
 ## Start a worker
 
 Start one only when a card fits no session on the board and a machine has room for another
-worker, and choose the harness knowing whose quota it spends:
+worker. Name its floor and let placement choose the account and harness:
 
 ```bash
+say "launch: token @lease floor <rarity> because <why>"
+# Name a harness and model only for a reason the floor cannot express.
 say "launch: token @lease opencode on <node> model <provider/model> thinking <level> because <why>"   # the vendor with room
 say "launch: token @lease opencode model <opencode-go|commandcode>/<model> because <why>"   # on the machine whose account ranks first; the reply says which and why
 ```
@@ -646,7 +656,8 @@ override that. With no model, or another provider's, it refuses: nothing it read
 worker spends.
 
 **Where a launch goes.** Before every launch, read
-`rest.py '/placement?harness=<harness>&vendor=<vendor>&model=<model>&effort=<level>'`: the ranked
+`rest.py '/placement?floor=<rarity>&effort=<level>'`, or
+`rest.py '/placement?harness=<harness>&vendor=<vendor>&model=<model>&effort=<level>'` for a named model: the ranked
 machines and accounts with their verdicts, terms and order, the one the platform would choose first,
 and each one a check took out. It places nothing. Its `arbiter_first` is the workspace's
 `placement.arbiter_first` setting, inheriting the team's, which the owner turns on in the console:
@@ -672,7 +683,10 @@ machine of your own to default to. `loopback` is the orchestrator's node, not yo
 only to target an agent running there, and a launch on a node holding no uplink is refused.
 
 An opencode worker runs confined, in a clone of its own, and its branch is pushed by its agent.
-`launching: <id> <harness> on <node>` means the agent there was handed it. Read how it went with
+A launched Claude Code session is trusted and self-sufficient for the routine forge writes its SOP
+requires: its launch allows `git push`, a pull request's comment, ready and merge, and an issue's
+comment and create, reaching only what the launch's pinned credential already could. Do not do those for a worker; a refusal of one is a launch defect to fix (#7383).
+`launching: <id> …` means an agent was handed it. Read how it went with
 `rest.py "/launches/<id>"`: its state, each machine it was offered to and what that machine
 answered, why each vendor's route was passed over while it waits, and the session it started. Go waits a launch with no room rather than
 refusing it (`worker-full`, `host-full`), and the waiting line names the sessions it could
@@ -699,7 +713,7 @@ nothing in the brief is expanded by the shell:
 
 ```bash
 say "$(cat <<'LAUNCH'
-launch: token @lease claude floor <rarity> resolves <owner>/<name>#<n> because <why>
+launch: token @lease floor <rarity> resolves <owner>/<name>#<n> because <why>
 brief: <the handover: the card, its issue, PR and design doc, and what done reports>
 LAUNCH
 )"
@@ -721,9 +735,11 @@ one past `STEERING_MAX_WORKERS` live workers.
 on the ladder, or one rung above when nothing at it has room. Judge the floor for the stage the
 session begins as triage does. Name a model only for a reason the
 ladder cannot see, and give that reason in `because`: the launch is recorded as yours, not the
-platform's. A floor takes no `on`, `vendor` or `account`, since naming the place is naming the model,
-and runs on the harness it names: a `claude` floor is placed only where Claude reaches the account.
-`rest.py '/placement?harness=claude&floor=<rarity>&effort=<level>'` shows the model each account would
+platform's. A floor takes no `on`, `vendor` or `account`, since naming the place is naming the model.
+Leave the harness out too: placement chooses a usable harness for the winning account, preferring
+that machine's stated harness for its vendor. Name a harness only to constrain the launch to it:
+a `claude` floor is placed only where Claude reaches the account.
+`rest.py '/placement?floor=<rarity>&effort=<level>'` shows the model each account would
 start and how far above the floor it stands, and passes over `floor-unserved` an account serving no
 model at it.
 
@@ -732,7 +748,7 @@ Its clauses go in this order:
 
 | clause | left out |
 |---|---|
-| `<harness>` | required: `claude`, `zcode` or `opencode` |
+| `<harness>` | placement chooses with a floor; otherwise required: `claude`, `zcode` or `opencode` |
 | `on <node>` | the daemon places it; not with a floor |
 | `vendor <vendor>` | `anthropic` for `claude`; `any` for every vendor; not with a floor |
 | `account <n>` | the best-ranked account; named, that account or a refusal; not with a floor |
@@ -753,13 +769,13 @@ decision record names both.
 
 ```bash
 # A floor, effort from the placed model's rung: rare starts at high
-say "launch: token @lease claude floor rare because a contained fix"
+say "launch: token @lease floor rare because a contained fix"
 # A model named, at an effort above epic's medium, since the design is hard
 say "launch: token @lease claude model opus effort high because the ladder cannot see this design's depth"
 # One account, no other in its place
 say "launch: token @lease claude vendor anthropic account 2 model opus effort medium because account 2 holds this card's cache"
-# ZCode
-say "launch: token @lease zcode floor uncommon because a mechanical rename"
+# An intentional harness constraint
+say "launch: token @lease zcode floor uncommon because this work needs ZCode"
 ```
 
 with its `brief:` line sent as above.
@@ -1385,8 +1401,10 @@ that are not there already, so they survive this session.
   tidying up alone leaves it enrolled.
 - **Run `promote.py` once.**
 - **Ask the owner only what is theirs.** Business, trust boundaries, retiring something built:
-  at most a few questions, each with your recommendation. Decide the rest and say so. Post a
-  ruling the owner gives, with its words and date, as a comment on the issue it decides, since
+  at most a few questions, each with your recommendation. Decide the rest and say so. A ruling is
+  recorded for audit; none needs the owner's acknowledgement, and neither you nor the owner is
+  prompted for one — escalate only what is the owner's to settle, through the structured ask. Post
+  a ruling the owner gives, with its words and date, as a comment on the issue it decides, since
   a ruling that lives only in one transcript cannot be cited. The brain decides minor security
   matters on the owner's behalf; record each on its PR or issue as a brain ruling under the owner's
   delegation, naming the decision, cost accepted and date. Minor means contained to one mechanism

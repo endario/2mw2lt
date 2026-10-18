@@ -37,7 +37,11 @@ def main(argv: list[str]) -> int:
         return error("disconnect", "one session name at most")
     ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
     known = records(ws)
-    psession = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    # The harness's own answer, never the inherited variable: a session started inside another
+    # carries the parent's `CLAUDE_CODE_SESSION_ID`, and disconnect ended the parent's enrolment
+    # (#6500). Where the harness cannot resolve, nothing is named, as before.
+    import machine_harness
+    psession = (machine_harness.of("claude").session_id() or "").strip()
     if args:
         session = args[0]
     else:  # only an enrollment minted for this session, never whichever one happens to be stored

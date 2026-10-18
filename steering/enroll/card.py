@@ -110,7 +110,7 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
 def _on_go(held: dict, verb: str, rest: list[str], usage: str, retry: str | None = None) -> int:
     """The seat's card verb on a Go workspace: the work route it maps to, on the session's own
     carrier, which Go runs as the seat while this session holds it. Each invocation is its own
-    write, named by the id it prints; `--retry=<id>` sends that write again."""
+    write, named by the command id it prints; `--retry=<id>` sends that write again."""
     import refusal
     import session_routes
     ruled = session_routes.ruled_out(f"card {verb} {rest[1]}" if verb == "reclassify" and len(rest) > 1 else f"card {verb}")
@@ -130,7 +130,8 @@ def _on_go(held: dict, verb: str, rest: list[str], usage: str, retry: str | None
     if fact["state"] in ("card-link", "card-unlink") and (bad := validate({**fact, "by": "the seat"})):
         print(f"refused: {bad}", file=sys.stderr)
         return 2
-    print(f"id {key}", file=sys.stderr)
+    # Labelled as the command's, so it is never taken for the card's id (2026-10-18).
+    print(f"command id {key}", file=sys.stderr)
     try:
         anchored = fact.get("anchors") or fact["state"] == "card-reanchored" and fact["after"]
         repo = session_routes.card_repo(held["ws"]) if anchored else ""

@@ -812,16 +812,17 @@ def seat_launch(session: str, token: str, body: dict, key: str) -> str:
     seat_generation(session, token)
     answer = write("/launches", body, key, SESSION_CARRIER, token)
     account = answer.get("account")
+    harness = f" {body['harness']}" if body.get("harness") else ""
     on = f" on {account['vendor']} account {account['number']} ({account['account_id']}, brought by {account['brought_by']})" if account else ""
     if answer.get("outcome") == "refused":
-        return f"launch refused: {answer['id']} {body['harness']}{on}: {answer.get('refused')}"
+        return f"launch refused: {answer['id']}{harness}{on}: {answer.get('refused')}"
     if answer.get("outcome") == "session":
-        return f"launched: {answer['id']} {body['harness']}{on}{_overloaded(answer.get('host_overloaded'))}"
+        return f"launched: {answer['id']}{harness}{on}{_overloaded(answer.get('host_overloaded'))}"
     if answer.get("state") == "admitted":
-        return f"launching: {answer['id']} {body['harness']}{on}{_overloaded(answer.get('host_overloaded'))}"
+        return f"launching: {answer['id']}{harness}{on}{_overloaded(answer.get('host_overloaded'))}"
     if answer.get("state") == "withdrawn":
         # Ended at its publish, a pinned account barred or off, its pinned machine gone: not waiting.
-        return f"launch withdrawn: {answer['id']} {body['harness']}{on}: {answer.get('reason')}"
+        return f"launch withdrawn: {answer['id']}{harness}{on}: {answer.get('reason')}"
     return f"launch waiting: {answer['id']} {answer.get('reason') or answer.get('state')}{on}{_reclaimable(answer.get('reclaimable'))}"
 
 
@@ -1040,7 +1041,7 @@ def seat_card(session: str, token: str, verb: str, fact: dict, repo: str, key: s
     seat_generation(session, token)
     path, body = planned
     write(path, body, _own_key("seat.card", session, key), SESSION_CARRIER, token)
-    return f"carded: {verb} {fact['card']}"
+    return f"carded: card {fact['card']}"
 
 
 def over_branches(token: str, card: str, rest: list[str]) -> str:
@@ -1080,7 +1081,7 @@ def seat_reanchor(session: str, token: str, fact: dict, repo: str) -> str:
     for verb, in_repo, n in sorted(wanted - live):
         post(f"/cards/{card}/associations", {"anchor": {"verb": verb, "repo": in_repo, "n": n}},
              uuid.uuid4().hex, SESSION_CARRIER, token)
-    return f"carded: reanchor {card}"
+    return f"carded: card {card}"
 
 
 def _need_line(audience: str, need: dict) -> str:

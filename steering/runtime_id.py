@@ -382,6 +382,46 @@ def registered_session(pid: int) -> str | None:
     return None
 
 
+def ancestor_pids(limit: int = 16) -> list[int]:
+    """This process and its forebears, nearest first, along the kernel's own parentage
+    (`parent_of`). The first Claude process among them — the one a registry row names — is the
+    session this process hangs off, where the environment it inherited cannot say (#6500)."""
+    out = [os.getpid()]
+    for _ in range(limit):
+        parent = parent_of(out[-1])
+        if parent is None or parent <= 1 or parent in out:
+            break
+        out.append(parent)
+    return out
+
+
+def serving_session(pid: int, sessions: Path) -> str | None:
+    """The session Claude's own registry says `pid` serves, under the one home `sessions` names,
+    when the live process at that pid started when the row says it did — a `procStart` that does
+    not match is a pid the kernel reused, and it names no live session. None where that home
+    holds no vouched row.
+
+    One home, where `registered_session` spans them all: this answers whose process this is, and
+    another account's row must not answer for it. The row's two `procStart` forms are read as the
+    census reads them (`_claude_live_workers`)."""
+    try:
+        row = json.loads((sessions / f"{pid}.json").read_text())
+    except (OSError, ValueError):
+        return None
+    sid, start = row.get("sessionId"), row.get("procStart")
+    if not isinstance(sid, str) or not sid or not isinstance(start, str) or not start:
+        return None
+    if start.isascii() and start.isdigit():
+        return sid if boot_ticks(pid) == start else None
+    try:
+        from datetime import datetime, timezone
+        when = datetime.strptime(start, "%a %b %d %H:%M:%S %Y").replace(tzinfo=timezone.utc).timestamp()
+        epoch = started_epoch(pid)
+    except (ValueError, OverflowError, OSError):
+        return None
+    return sid if epoch is not None and int(epoch) == int(when) else None
+
+
 def claude_pid(psession: str | None = None, timeout: float = 1.0) -> int | None:
     """The pid Claude exports, unless it is another session's. A Claude started from inside a
     session's Bash tool inherits that session's `CLAUDE_PID` (doc 08), and a runtime derived from

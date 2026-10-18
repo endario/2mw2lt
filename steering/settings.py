@@ -71,11 +71,20 @@ def validate(data) -> dict:
     if not isinstance(routing, dict):
         raise ValueError("[routing] is not a table")
     extra = set(routing) - {"judges_exclude", "launches_exclude", "claude_launchers", "worker_forge",
-                            "account_uses", "glm_harness", "claude_profiles_exclude"}
+                            "account_uses", "glm_harness", "harnesses", "claude_profiles_exclude"}
     if extra:
         raise ValueError(f"[routing] has an unknown key ({', '.join(sorted(extra))})")
     if routing.get("glm_harness", "claude-code") not in ("claude-code", "zcode"):
         raise ValueError(f"[routing].glm_harness={routing['glm_harness']!r} is not claude-code or zcode")
+    if "harnesses" in routing:
+        preferences = routing["harnesses"]
+        if (not isinstance(preferences, dict) or len(preferences) > 64
+                or len(preferences) == 64 and "glm_harness" in routing and "zai" not in preferences):
+            raise ValueError("[routing].harnesses is not a table of at most 64 effective vendor preferences")
+        for vendor, harness in preferences.items():
+            if (not isinstance(vendor, str) or not _PREFERENCE_NAME.fullmatch(vendor)
+                    or not isinstance(harness, str) or not _PREFERENCE_NAME.fullmatch(harness)):
+                raise ValueError(f"[routing].harnesses gives {vendor!r} {harness!r}, not a vendor and harness identifier")
     if "judges_exclude" in routing and not (isinstance(routing["judges_exclude"], list)
                                             and all(isinstance(v, str) for v in routing["judges_exclude"])):
         raise ValueError("[routing].judges_exclude is not a list of vendor names")
@@ -112,6 +121,7 @@ def validate(data) -> dict:
 # What an account can be declared for, as the daemon reads it (go-account-purposes-design.md §1).
 PURPOSES = ("seat", "work", "gate")
 _TARGET = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}(/[^\x00-\x1f\x7f]{1,200})?$")
+_PREFERENCE_NAME = re.compile(r"[a-z][a-z0-9-]{0,31}")
 
 
 def account_uses_problem(value: object) -> str | None:
@@ -283,6 +293,16 @@ def glm_harness(path: Path = DEFAULT_PATH) -> str:
     knob, no env twin — a deliberate divergence from judges_exclude (plans/
     2026-10-13-zcode-glm-judge-design.md §The flag)."""
     return capacity(path).get("routing", {}).get("glm_harness", "claude-code")
+
+
+def harness_preferences(path: Path = DEFAULT_PATH) -> dict[str, str]:
+    """What builders prefer per vendor; the judge default is not a declaration."""
+    routing = capacity(path).get("routing", {})
+    preferences = {}
+    if "glm_harness" in routing:
+        legacy = routing["glm_harness"]
+        preferences["zai"] = "claude" if legacy == "claude-code" else legacy
+    return {**preferences, **routing.get("harnesses", {})}
 
 
 class Rejected(ValueError):

@@ -472,15 +472,17 @@ AgentInjectedAnswer = typing.TypedDict("AgentInjectedAnswer", {
 })
 
 # AgentUndeliveredBody is the body of POST /steering/agent/undelivered: the machine held no local
-# stream for a frame it was written under hold.
+# stream for a frame it was written under hold. ULID names a directive, ID a bulletin telling.
 AgentUndeliveredBody = typing.TypedDict("AgentUndeliveredBody", {
     "session": "str",
     "hold": "typing.NotRequired[str]",
     "ulid": "typing.NotRequired[str]",
+    "id": "typing.NotRequired[str]",
 })
 
-# AgentUndeliveredAnswer says whether the frame was the directive that hold was handed, which the
-# session's next hold is then written.
+# AgentUndeliveredAnswer says whether the frame was requeued — the directive that hold was handed,
+# or the bulletin telling whose mark the report rewound — each told again to the session's next
+# hold.
 AgentUndeliveredAnswer = typing.TypedDict("AgentUndeliveredAnswer", {
     "session": "str",
     "ulid": "str | None",
@@ -489,11 +491,15 @@ AgentUndeliveredAnswer = typing.TypedDict("AgentUndeliveredAnswer", {
 
 # AgentHoldBody is the body of POST /steering/agent/hold: a session on this machine holds its stream
 # over the machine's uplink, on the session's own token, in the incarnation the machine observed.
+# Wake is how the stream declared its X-Steering-Wake — plugin, plugin-frames, event, service or
+# monitor — carried on the hold so the platform knows which sessions it must wake itself (#7356);
+# absent from a machine that predates it.
 AgentHoldBody = typing.TypedDict("AgentHoldBody", {
     "session": "str",
     "token": "str",
     "runtime": "str",
     "uplink": "str",
+    "wake": "typing.NotRequired[str]",
 })
 
 # AgentReachBody is the body of POST /steering/agent/reach: the machine's delivery to a session that
@@ -759,9 +765,12 @@ FleetLabel = typing.TypedDict("FleetLabel", {
 # StreamBulletin tells a hold what the workspace's bulletin says: a fresh snapshot when the session
 # reads as an audience it was not shown for, or the lines added, replaced or retracted since the
 # revision it was last shown (the bulletin design, §4). Information, never direction: the frame
-# wakes nobody, and Revision is the head the text was rendered at.
+# wakes nobody, and Revision is the head the text was rendered at. ID is the telling's own, which
+# names it in an undelivered report: a frame the machine dropped after accepting is told again to
+# the session's next hold (#6590).
 StreamBulletin = typing.TypedDict("StreamBulletin", {
     "kind": "str",
+    "id": "str",
     "to": "str",
     "hold": "str",
     "revision": "int",
@@ -2585,10 +2594,10 @@ KnowledgeBriefRecord = typing.TypedDict("KnowledgeBriefRecord", {
     "track": "str",
 })
 
-# LaunchBody is the seat's launch: the harness to start and how, where when it names a machine or
-# an account, and why. Go bounds each field and requires what the agent cannot start without.
+# LaunchBody is the seat's launch: a floor to place, or the harness to start and how, where when it
+# names a machine or an account, and why. Go bounds each field and requires what the agent cannot start without.
 LaunchBody = typing.TypedDict("LaunchBody", {
-    "harness": "str",
+    "harness": "typing.NotRequired[str]",
     "machine": "typing.NotRequired[str | None]",
     "machine_name": "typing.NotRequired[str]",
     "vendor": "typing.NotRequired[str]",
@@ -4437,10 +4446,12 @@ CardAnswer = typing.TypedDict("CardAnswer", {
 })
 
 # CriterionBody is one criterion of a goal's revision, in its order: a criterion of the goal's
-# current revision by its id, kept with its statement, or a new statement.
+# current revision by its id, kept with its statement, or a new statement, which may carry the
+# name its new identity is given. A name beside a retained criterion is refused.
 CriterionBody = typing.TypedDict("CriterionBody", {
     "criterion": "typing.NotRequired[str]",
     "statement": "typing.NotRequired[str]",
+    "name": "typing.NotRequired[str | None]",
 })
 
 # GoalCreateBody makes a goal at its first revision, whose criteria may be empty.
@@ -4459,9 +4470,13 @@ GoalRevisionBody = typing.TypedDict("GoalRevisionBody", {
     "why": "str",
 })
 
+# CriterionDTO is one member of a revision, in its adopted order. Name is the criterion's current
+# name, joined at read: it belongs to the identity, not to the revision or its digest, and is
+# omitted while the criterion has none.
 CriterionDTO = typing.TypedDict("CriterionDTO", {
     "id": "str",
     "statement": "str",
+    "name": "typing.NotRequired[str | None]",
 })
 
 # GoalRevisionDTO is one immutable revision of a goal. CriteriaDigest pins its title, context and
@@ -4504,6 +4519,12 @@ CriterionJudgmentBody = typing.TypedDict("CriterionJudgmentBody", {
     "verdict": "str",
     "rationale": "str",
     "evidence": "list[EvidenceBody] | None",
+})
+
+# CriterionNameBody names or renames one criterion of the goal's current revision. Naming is
+# presentation: it expects no revision, writes none and reopens no judgment.
+CriterionNameBody = typing.TypedDict("CriterionNameBody", {
+    "name": "str",
 })
 
 # GoalJudgmentBody judges the goal in the revision it expects, over the criterion judgments it names:
@@ -4646,10 +4667,12 @@ EffectiveJudgmentDTO = typing.TypedDict("EffectiveJudgmentDTO", {
 })
 
 # CriterionReadingDTO is a criterion of the goal's current revision, in its order, as the reading
-# shows it: its effective judgment, null before one, and the cards the plan's map names under it.
+# shows it: its effective judgment, null before one, the cards the plan's map names under it, and
+# its current name, omitted while it has none.
 CriterionReadingDTO = typing.TypedDict("CriterionReadingDTO", {
     "id": "str",
     "statement": "str",
+    "name": "typing.NotRequired[str | None]",
     "judgment": "EffectiveJudgmentDTO | None",
     "cards": "list[str] | None",
 })
@@ -4734,11 +4757,13 @@ GoalExecutionValidity = typing.TypedDict("GoalExecutionValidity", {
 })
 
 # GoalExecutionCriterion is one criterion of the current revision as the execution reads it: its
-# statement, its effective judgment (null before one), and the cards the working plan's map serves
-# it with, by id. A criterion with no cards is unmapped evidence, never a criterion complete.
+# statement, its current name (omitted while it has none, as the reading omits it), its effective
+# judgment (null before one), and the cards the working plan's map serves it with, by id. A
+# criterion with no cards is unmapped evidence, never a criterion complete.
 GoalExecutionCriterion = typing.TypedDict("GoalExecutionCriterion", {
     "id": "str",
     "statement": "str",
+    "name": "typing.NotRequired[str | None]",
     "judgment": "EffectiveJudgmentDTO | None",
     "cards": "list[str] | None",
 })
@@ -5080,6 +5105,7 @@ WorkerCensusBody = typing.TypedDict("WorkerCensusBody", {
     "signed_out": "typing.NotRequired[list[LauncherAccount] | None]",
     "spends": "typing.NotRequired[list[HarnessSpend] | None]",
     "launches": "typing.NotRequired[list[str] | None]",
+    "harness_preferences": "typing.NotRequired[dict[str, str] | None]",
     "no_account": "typing.NotRequired[list[LauncherNoAccount] | None]",
     "checkout": "typing.NotRequired[CheckoutCensus | None]",
     "machine_name": "typing.NotRequired[str | None]",
@@ -5221,6 +5247,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/goals",
     "GET /w/{workspace}/api/v1/goals/{goal}",
     "POST /w/{workspace}/api/v1/goals/{goal}/criteria/{criterion}/judgments",
+    "POST /w/{workspace}/api/v1/goals/{goal}/criteria/{criterion}/names",
     "GET /w/{workspace}/api/v1/goals/{goal}/execution",
     "POST /w/{workspace}/api/v1/goals/{goal}/imports",
     "POST /w/{workspace}/api/v1/goals/{goal}/judgments",

@@ -43,7 +43,7 @@ Read admitted sources, keeping each one's revision or time:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /goals
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease "/rulings?state=unacknowledged"
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /rulings
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease "/cards?state=live"
 ```
 
@@ -105,11 +105,17 @@ is your proposed next work, not evidence the goal is met. Before a revision, sho
 say that it reopens the whole goal's judgment, retained criteria included; never rewrite criteria
 for prose alone.
 
+Name every outcome as you draft it: a short name — one line, forty characters at most, plain enough
+to say aloud — rides beside each new statement, and a reworded one is prefilled from the wording it
+replaces. A name is presentation of the criterion's identity: it reopens no judgment, and a retained
+outcome's name is the name command's to change, never a revision's.
+
 A conversation does not write the goal. Once the owner agrees or corrects, read the current goal and
 policy, then send each as its own command, each on the seat's enrolment and its own key:
 
 1. **The ruling**, with its source and reason. Tell the owner it was **recorded by the brain on
-   your behalf**, not an action they took; they can acknowledge or correct it.
+   your behalf** for audit, not an action they took: none needs their acknowledgement, they can
+   correct it in their own words, and only what is theirs to settle is escalated to them.
 2. **The goal**: `POST /goals`, judgment pending. Report its id and revision with the ruling.
 3. **Its contributions**: `POST /cards/<card>/links` with `{"kind": "part-of", "to_goal": "<goal>",
    "why": "…"}` for each piece of existing work. No duplicate cards.
@@ -124,7 +130,7 @@ policy, then send each as its own command, each on the seat's enrolment and its 
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post /rulings \
   --json '{"text": "<the decision>", "reason": "<source and why>"}' --key <key>
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post /goals \
-  --json '{"title": "…", "context": "…", "criteria": [{"statement": "…"}]}' --key <key>
+  --json '{"title": "…", "context": "…", "criteria": [{"statement": "…", "name": "…"}]}' --key <key>
 ```
 
 **Write the principal, the exact body, the key and every known id into your checkpoint before

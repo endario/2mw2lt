@@ -38,6 +38,7 @@ SESSION_S = 30.0      # how often a held session is asked it is still the enroll
 REFRESH_S = 60.0      # the module's claim refresh
 WAIT_FIRST, WAIT_MAX = 1.0, 60.0   # the module's backoff for a hold that ended
 READ_KEPT = 256       # ids of read frames kept to recognise a replay by
+RECEIPT_TRIES = 3     # the module's: frames calls a receipt that did not arrive is sent again on
 LOG_KEPT = 1 << 20    # the server's log is rotated past this many bytes, one old copy kept
 
 TOOLS = [{
@@ -77,6 +78,7 @@ class Server:
         self.session = ""                    # the enrolment name, once connect mints one
         self.pending: list[str] = []
         self.read: list[str] = []
+        self.unsettled: list[tuple[list[str], int]] = []   # receipts that did not arrive, and tries
         self.hold_state: dict = {"state": "starting"}
         self.child_gen = 0
         self.stopping = threading.Event()
@@ -329,13 +331,14 @@ class Server:
 
     def frames(self) -> str:
         """The module's `tool.call` for frames: the pending frames' text, their envelopes
-        acked only once the text is on its way back, a refused ack leaving every frame
-        pending to be returned — and acked — again. A say is settled the same way, by the
+        acked only once the text is on its way back. A say is settled the same way, by the
         receipt this tool sends as it returns it (#7136): the hold recorded it into this
-        plugin's hands, and only this return says the session read it."""
+        plugin's hands, and only this return says the session read it. A receipt that does not
+        arrive withholds nothing: the text is returned, and the receipt is sent again on the
+        next call, where a refused call left the session reading nothing (#7396)."""
         with self.lock:
-            pending, session = list(self.pending), self.session
-        if not session or not pending:
+            pending, session, owing = list(self.pending), self.session, list(self.unsettled)
+        if not session or not (pending or owing):
             return "No steering frame is waiting."
         asked = self.run(["python3", str(ROOT / "steering/enroll/hold.py"),
                           "--frame-path", session])
@@ -346,23 +349,23 @@ class Server:
             except OSError:
                 recording = ""
         text, envelopes, says, found, directives, generation = _pick(recording, pending)
-        failures = []
-        for ulid in envelopes:
-            acked = self.run(["python3", str(ROOT / "steering/enroll/ack.py"), session, ulid])
-            if acked.returncode != 0:
-                failures.append(f"ack.py {ulid} exited {acked.returncode}")
-        for sid in says:
-            read = self.run(["python3", str(ROOT / "steering/enroll/hold.py"),
-                             "--read-say", session, sid])
-            if read.returncode != 0:
-                failures.append(f"hold.py --read-say {sid} exited {read.returncode}")
+        fresh = [["ack.py", session, ulid] for ulid in envelopes] + \
+            [["hold.py", "--read-say", session, sid] for sid in says]
+        failures, unsettled = [], []
+        for argv, tries in [o for o in owing if o[0] not in fresh] + [(f, 0) for f in fresh]:
+            done = self.run(["python3", str(ROOT / "steering/enroll" / argv[0]), *argv[1:]])
+            if done.returncode != 0:
+                failures.append(f"{' '.join([argv[0], *argv[1:-2], argv[-1]])} exited {done.returncode}")
+                if tries + 1 < RECEIPT_TRIES:
+                    unsettled.append((argv, tries + 1))
         with self.lock:
-            if not failures:
-                self.pending = [i for i in self.pending if i not in found]
-                self.read = (self.read + found)[-READ_KEPT:]
+            self.unsettled = unsettled
+            self.pending = [i for i in self.pending if i not in found]
+            self.read = (self.read + found)[-READ_KEPT:]
             self._write_ledger()
         if failures:
-            return f"refused: foreground frame acknowledgement: {'; '.join(failures)}"
+            text = (text + "\n\n" if text else "") + \
+                f"(the read was not reported, and is sent again on the next frames call: {'; '.join(failures)})"
         if directives or generation is not None:
             body = json.dumps({"directives": directives,
                                **({"seat_generation": generation} if generation is not None

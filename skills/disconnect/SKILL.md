@@ -17,7 +17,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/disconnect.py" <session>
 ```
 
 Keep the reach armed until `detached:` confirms the exit. Removing a worktree or stopping a
-hold does not end the enrollment. Bare invocation and `--help` show usage rather than leave:
+hold does not end the enrollment. Remove your worktree only after `detached:`, and from a shell
+outside it: a shell whose directory was removed cannot run `disconnect.py`. Bare invocation and `--help` show usage rather than leave:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/disconnect.py" --help

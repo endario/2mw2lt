@@ -122,6 +122,8 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
                          context = { point: 167_000 as number | undefined, raw: 200_000, source: 'auto', model: 'claude-test' } } = {}) {
   const w = {
     clock: mock.clock(on, { now: 1_000_000 }),
+    ackFails,
+    readFails,
     root: '',
     writes: [] as { path: string; text: string }[],
     tools: [] as string[],
@@ -231,8 +233,8 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
       await gate
     }
     const exitCode = e.argv.includes('--session-of') ? w.sessionLookupCode
-      : (e.argv.includes('--claim-path') && w.claimFails) || (e.argv.some(a => a.endsWith('/ack.py')) && ackFails)
-        || (e.argv.includes('--read-say') && readFails) ? 1 : 0
+      : (e.argv.includes('--claim-path') && w.claimFails) || (e.argv.some(a => a.endsWith('/ack.py')) && w.ackFails)
+        || (e.argv.includes('--read-say') && w.readFails) ? 1 : 0
     return { value: { exitCode, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('process.spawn', async function* ($, e) {
@@ -348,13 +350,18 @@ test('a frame replayed after the model read it submits no pointer', async ($, on
   expect(w.state.get('pending')).toEqual([])
 })
 
-test('an envelope whose ack failed stays pending without a second pointer loop', async ($, on) => {
-  const { w } = await replays($, on, 'envelope', { ackFails: true })
+test('an envelope whose ack failed is read, and its replay submits no pointer', async ($, on) => {
+  const { w, read } = await replays($, on, 'envelope', { ackFails: true })
+  expect(read).toContain('{"kind":"envelope","id":"f1","ulid":"U1"}')
   expect(w.submits).toEqual([POINTER])
-  expect(w.state.get('pending')).toEqual(['f1'])
+  expect(w.state.get('pending')).toEqual([])
+  expect(w.state.get('unsettled')).toEqual([{ ulid: 'U1', tries: 1 }])
 })
 
-test('a failed envelope acknowledgement is refused and stays pending', async ($, on) => {
+// A receipt that does not arrive withholds nothing: the session reads the frame, and the receipt
+// goes again on the next call, where a refused call left it reading nothing while the daemon was
+// slow to take receipts (#7396).
+test('a failed envelope acknowledgement still returns the envelope, and is sent again', async ($, on) => {
   const w = world(on, {
     ackFails: true,
     rounds: [{ lines: [line('e1', 'envelope', true)], code: 0, hold: never }],
@@ -363,9 +370,29 @@ test('a failed envelope acknowledgement is refused and stays pending', async ($,
   await begin($)
   await w.clock.settle()
   const got = await $.tool.call({ tool: TOOL } as never)
-  expect((got as { deny?: string }).deny).toContain('foreground frame acknowledgement')
-  expect(w.state.get('pending')).toEqual(['e1'])
+  expect((got as { result?: string }).result).toContain('{"kind":"envelope","id":"e1","ulid":"01JENV"}')
+  expect((got as { result?: string }).result).toContain('ack.py 01JENV exited 1')
+  expect(w.state.get('pending')).toEqual([])
   expect(w.stdins).toEqual([JSON.stringify({ directives: ['01JENV'] })])
+  w.ackFails = false
+  const again = await $.tool.call({ tool: TOOL } as never)
+  expect((again as { result?: string }).result).toBe('Nothing is waiting.')
+  expect(w.runs.filter(argv => String(argv[1]).endsWith('/ack.py'))).toEqual([
+    ['python3', `${w.root}/steering/enroll/ack.py`, 's1', '01JENV'], ['python3', `${w.root}/steering/enroll/ack.py`, 's1', '01JENV']])
+  expect(w.state.get('unsettled')).toEqual([])
+})
+
+test('a receipt that never arrives is let go after its tries', async ($, on) => {
+  const w = world(on, {
+    ackFails: true,
+    rounds: [{ lines: [line('e1', 'envelope', true)], code: 0, hold: never }],
+    recording: 'data: {"kind":"envelope","id":"e1","ulid":"01JENV"}\n',
+  })
+  await begin($)
+  await w.clock.settle()
+  for (let i = 0; i < 4; i++) await $.tool.call({ tool: TOOL } as never)
+  expect(w.runs.filter(argv => String(argv[1]).endsWith('/ack.py')).length).toBe(3)
+  expect(w.state.get('unsettled')).toEqual([])
 })
 
 test('an envelope replayed after its ack landed submits no pointer', async ($, on) => {
@@ -506,8 +533,8 @@ test('a failed foreground proof keeps returned frames pending', async ($, on) =>
 })
 
 // A plain say settles by the tool's own receipt under its frame id, not the seat read (#7136):
-// a refused receipt leaves it pending, to be returned — and receipted — again.
-test('a refused say receipt keeps the say pending', async ($, on) => {
+// a refused receipt still returns the say, and the receipt alone goes again.
+test('a refused say receipt still returns the say, and is sent again', async ($, on) => {
   const id = 'bb48a465-45e5-4e38-85c8-2223890d4f47'
   const w = world(on, {
     readFails: true,
@@ -517,9 +544,15 @@ test('a refused say receipt keeps the say pending', async ($, on) => {
   await begin($)
   await w.clock.settle()
   const got = await $.tool.call({ tool: TOOL } as never)
-  expect((got as { deny?: string }).deny).toContain('hold.py --read-say')
-  expect(w.runs).toContainEqual(['python3', `${w.root}/steering/enroll/hold.py`, '--read-say', 's1', id])
-  expect(w.state.get('pending')).toEqual([id])
+  expect((got as { result?: string }).result).toContain('ordinary')
+  expect((got as { result?: string }).result).toContain(`hold.py --read-say ${id} exited 1`)
+  expect(w.state.get('pending')).toEqual([])
+  w.readFails = false
+  const again = await $.tool.call({ tool: TOOL } as never)
+  expect((again as { result?: string }).result).toBe('Nothing is waiting.')
+  expect(w.runs.filter(argv => argv.includes('--read-say'))).toEqual([
+    ['python3', `${w.root}/steering/enroll/hold.py`, '--read-say', 's1', id], ['python3', `${w.root}/steering/enroll/hold.py`, '--read-say', 's1', id]])
+  expect(w.state.get('unsettled')).toEqual([])
 })
 
 async function refusalLeavesRoomForTheNextPointer($: any, on: On, kind: 'say' | 'envelope') {
@@ -549,10 +582,10 @@ test('a proof refusal clears its outstanding pointer for a new arrival', async (
   expect(w.submits).toEqual([POINTER, POINTER])
 })
 
-test('an acknowledgement refusal clears its outstanding pointer for a new arrival', async ($, on) => {
+test('a failed acknowledgement clears its outstanding pointer for a new arrival', async ($, on) => {
   const { w, result } = await refusalLeavesRoomForTheNextPointer($, on, 'envelope')
-  expect((result as { deny?: string }).deny).toContain('foreground frame acknowledgement')
-  expect(w.state.get('pending')).toEqual(['e1', 'cc48a465-45e5-4e38-85c8-2223890d4f47'])
+  expect((result as { result?: string }).result).toContain('was not reported')
+  expect(w.state.get('pending')).toEqual(['cc48a465-45e5-4e38-85c8-2223890d4f47'])
   expect(w.submits).toEqual([POINTER, POINTER])
 })
 
@@ -593,10 +626,10 @@ test('a proof refusal re-wakes for an arrival during its client call', async ($,
   expect(w.appends).toEqual([POINTER])
 })
 
-test('an acknowledgement refusal re-wakes for an arrival during its client call', async ($, on) => {
-  const { w, result, id, next } = await arrivalDuringRefusal($, on, 'envelope')
-  expect((result as { deny?: string }).deny).toContain('foreground frame acknowledgement')
-  expect(w.state.get('pending')).toEqual([id, next])
+test('a failed acknowledgement re-wakes for an arrival during its client call', async ($, on) => {
+  const { w, result, next } = await arrivalDuringRefusal($, on, 'envelope')
+  expect((result as { result?: string }).result).toContain('was not reported')
+  expect(w.state.get('pending')).toEqual([next])
   expect(w.submits).toEqual([POINTER])
   expect(w.appends).toEqual([POINTER])
 })

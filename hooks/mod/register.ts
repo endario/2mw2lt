@@ -19,12 +19,16 @@ const SESSION = { plugin: '2mw2lt', key: 'session' } as const
 const SEAT = { plugin: '2mw2lt', key: 'seat' } as const
 const BULLETIN = { plugin: '2mw2lt', key: 'bulletin' } as const
 const BULLETINS = { plugin: '2mw2lt', key: 'bulletins' } as const
+const UNSETTLED = { plugin: '2mw2lt', key: 'unsettled' } as const
 
 const TOOL = 'mcp__2mw2lt__frames'
 const SEAT_TOOL = new RegExp(`^mcp__2mw2lt__(${Object.keys(SEAT_TOOLS).join('|')})$`)
 const REFRESH_MS = 60_000
 const REPOINT_MS = 1500
 const STDERR_TAIL = 2000
+// How many frames calls a receipt that did not arrive is sent again on before it is let go: the
+// daemon keeps an unread frame and wakes the session for it, so a lost one is never silent.
+const RECEIPT_TRIES = 3
 
 // Always this plugin version's own clients, never the launcher: it resolves the recorded install,
 // which may be an older hold.py that refuses `--wake plugin`.
@@ -581,28 +585,28 @@ export const register: Register = on => {
       }
     }
     // Prove the selected envelope before its receipt lets the daemon stop replaying it: a refused
-    // proof then remains recoverable even if this local recording later trims it.
+    // proof then remains recoverable even if this local recording later trims it. A say settles
+    // when this tool returns it, not when the hold recorded it (#7136): the recording is the
+    // plugin's hands, and a say still unsettled is what the platform wakes the session for.
+    // A receipt that does not arrive withholds nothing: the frames are returned, and the receipt
+    // is sent again on the next call. Refusing the call over it left the session reading nothing
+    // while the daemon was slow to take receipts (#7396).
+    const { value: owing = [] } = await $.state.get(UNSETTLED)
+    const receipts = [...owing.filter(r => !envelopes.includes(r.ulid ?? '') && !says.includes(r.say ?? '')),
+      ...envelopes.map(ulid => ({ ulid, tries: 0 })), ...says.map(say => ({ say, tries: 0 }))]
     const ackFailures: string[] = []
-    for (const ulid of envelopes) {
-      const acked = await runOwn($, ['python3', script($, 'ack.py'), session, ulid])
-      if (acked.exitCode !== 0) {
-        ackFailures.push(`ack.py ${ulid} exited ${acked.exitCode}${acked.stderr.trim() ? `: ${acked.stderr.trim()}` : ''}`)
-      }
-      if (acked.exitCode !== 0) $.ui.log(`2mw2lt: ack.py ${ulid} exited ${acked.exitCode}: ${acked.stderr.trim()}`, { to: 'debug' })
+    const unsettled: typeof owing = []
+    for (const r of receipts) {
+      const run = r.ulid !== undefined
+        ? await runOwn($, ['python3', script($, 'ack.py'), session, r.ulid])
+        : await runOwn($, ['python3', script($, 'hold.py'), '--read-say', session, r.say ?? ''])
+      if (run.exitCode === 0) continue
+      const what = r.ulid !== undefined ? `ack.py ${r.ulid}` : `hold.py --read-say ${r.say}`
+      ackFailures.push(`${what} exited ${run.exitCode}${run.stderr.trim() ? `: ${run.stderr.trim()}` : ''}`)
+      $.ui.log(`2mw2lt: ${what} exited ${run.exitCode}: ${run.stderr.trim()}`, { to: 'debug' })
+      if (r.tries + 1 < RECEIPT_TRIES) unsettled.push({ ...r, tries: r.tries + 1 })
     }
-    // A say settles when this tool returns it, not when the hold recorded it (#7136): the recording
-    // is the plugin's hands, and a say still unsettled is what the platform wakes the session for.
-    for (const sid of says) {
-      const receipt = await runOwn($, ['python3', script($, 'hold.py'), '--read-say', session, sid])
-      if (receipt.exitCode !== 0) {
-        ackFailures.push(`hold.py --read-say ${sid} exited ${receipt.exitCode}${receipt.stderr.trim() ? `: ${receipt.stderr.trim()}` : ''}`)
-        $.ui.log(`2mw2lt: hold.py --read-say ${sid} exited ${receipt.exitCode}: ${receipt.stderr.trim()}`, { to: 'debug' })
-      }
-    }
-    if (ackFailures.length) {
-      await refuseFrames($, pending)
-      return { deny: `refused: foreground frame acknowledgement: ${ackFailures.join('; ')}` }
-    }
+    if (owing.length || unsettled.length) await $.state.set(UNSETTLED, unsettled)
     // Only what was returned leaves PENDING: an id the recording does not hold yet stays, and does
     // not wake the session again. A frame that arrived while this ran gets its own pointer.
     await locked(async () => {
@@ -615,7 +619,8 @@ export const register: Register = on => {
       await unpoint($)
       if (left.some(id => !pending.includes(id))) await point($)
     })
-    return { result: text || 'Nothing is waiting.' }
+    const unreported = ackFailures.length ? `\n2mw2lt: the read was not reported, and is sent again on the next frames call: ${ackFailures.join('; ')}` : ''
+    return { result: (text || 'Nothing is waiting.') + unreported }
   })
 
   // A subagent presents its parent's credential: the harness hands its provider session id down,

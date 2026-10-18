@@ -54,7 +54,7 @@ _NEED = re.compile(r"^(?P<verb>dispose|promote):\s*token\s+@lease\s+(?P<item>\S+
 # A launch on Go: the machine is the `machine` `GET /sessions` lists, a registration `GET /machines`
 # lists (`m-<id>`), or the name a machine's census reports (quoted when it has a space), and the account the number its team gave
 # it or the vendor's own id, never one machine's launcher.
-_LAUNCH = re.compile(r"^launch:\s*token\s+@lease\s+(?P<harness>[a-z][a-z0-9-]{0,31})"
+_LAUNCH = re.compile(r"^launch:\s*token\s+@lease(?:\s+(?P<harness>[a-z][a-z0-9-]{0,31}))?"
                      r"(?:\s+on\s+(?:(?:m-)?(?P<machine>[0-9a-f-]{36})|\"(?P<quoted>[^\"\n]{1,64})\"|(?P<machine_name>[^\s\"]{1,64})))?"
                      r"(?:\s+vendor\s+(?P<vendor>[a-z0-9][a-z0-9-]{0,31}))?"
                      r"(?:\s+account\s+(?P<account>\S{1,256}))?"
@@ -218,6 +218,8 @@ def _go_launch(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
     m = _LAUNCH.match(line)
     if not m:
         return 2, refusal.use("launch", "malformed launch: its clauses go in the order on, vendor, account, model or floor, thinking, effort, window, card or resolves, notify; on Go, `on` names a machine as /sessions lists it in `machine`, a registration as /machines lists it, or the machine's name"), False
+    if not m["harness"] and not m["floor"]:
+        return 2, refusal.use("launch", "a launch names its harness unless it names a floor"), False
     if m["harness"] == "claude" and not (m["model"] or m["floor"]):
         return 2, refusal.use("launch", "a claude launch names its model (as Claude Code takes it) or a floor; its effort, left out, is the placed model's rarity's: legendary low, epic medium, rare high, uncommon xhigh"), False
     if m["floor"] and (m["machine"] or m["quoted"] or m["machine_name"] or m["vendor"] or m["account"]):

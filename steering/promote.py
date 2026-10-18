@@ -44,7 +44,10 @@ def enrollment(ws: Path) -> dict:
     for the same reason: a stored token that does not say which session it was minted for
     could belong to any of them, and attaching under it is #193 exactly.
     """
-    psession = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    # The harness's own answer, never the inherited variable: a session started inside another
+    # carries the parent's `CLAUDE_CODE_SESSION_ID` and must not attach under it (#6500).
+    import machine_harness
+    psession = (machine_harness.of("claude").session_id() or "").strip()
     known = records(ws)
     if not known:
         refuse(f"{ws} holds no enrollment. The role is taken by a session steering knows: "
