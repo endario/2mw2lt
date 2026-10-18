@@ -98,7 +98,17 @@ AccountReportAnswer = typing.TypedDict("AccountReportAnswer", {
 # directories a machine read whose credential names no account.
 AccountList = typing.TypedDict("AccountList", {
     "items": "list[ListedAccountUsage] | None",
+    "vendor_models": "dict[str, list[AccountModel] | None] | None",
     "unnamed": "list[UnnamedDirectory] | None",
+})
+
+# AccountModel is one model a provider offers the team: its id as the accounts' vocabulary holds
+# it, the vendor whose model it is, and the rung the rarity ladder gives it, nil where the ladder
+# does not rate it (#7375).
+AccountModel = typing.TypedDict("AccountModel", {
+    "id": "str",
+    "maker": "str",
+    "rarity": "str | None",
 })
 
 # ListedAccountUsage is one account. Provider is the harness its folded reading came from, Reading
@@ -121,6 +131,8 @@ ListedAccountUsage = typing.TypedDict("ListedAccountUsage", {
     "owner": "str | None",
     "serves": "bool",
     "serves_for": "list[str] | None",
+    "serves_models": "list[str] | None",
+    "routes": "list[str] | None",
     "resets_by": "str | None",
     "stopped_by_login": "str | None",
     "owner_login": "str | None",
@@ -241,20 +253,26 @@ UnnamedDirectory = typing.TypedDict("UnnamedDirectory", {
 })
 
 # AccountServe is the body of POST /accounts/serve: whether the account serves the team, set by its
-# owner from inside the team (#5996).
+# owner from inside the team (#5996). For keeps a serving account to these purposes
+# (AccountPurposes) and Models to these model ids (#7375); each is a nullable list left absent to
+# preserve what is stored, null to clear it, and a list to state it. A stopped account serves
+# nothing, so it takes no list, and a stop clears both.
 AccountServe = typing.TypedDict("AccountServe", {
     "vendor": "str",
     "account_id": "str",
     "serves": "bool",
     "for": "typing.NotRequired[list[str] | None]",
+    "models": "typing.NotRequired[list[str] | None]",
 })
 
-# AccountServed is its answer: the account as the team resolves it, whether it serves, and its owner.
+# AccountServed is its answer: the account as the team resolves it, whether it serves, its owner,
+# and the restrictions the team now stores, whether or not this write carried them.
 AccountServed = typing.TypedDict("AccountServed", {
     "vendor": "str",
     "account_id": "str",
     "serves": "bool",
     "for": "typing.NotRequired[list[str] | None]",
+    "models": "typing.NotRequired[list[str] | None]",
     "owner": "str",
 })
 
@@ -753,6 +771,7 @@ FleetAccount = typing.TypedDict("FleetAccount", {
     "owner": "str | None",
     "serves": "bool",
     "serves_for": "list[str] | None",
+    "serves_models": "list[str] | None",
     "labels": "list[FleetLabel] | None",
 })
 
