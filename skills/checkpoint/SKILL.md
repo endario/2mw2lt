@@ -24,7 +24,8 @@ concluded leaves nothing to hand over, and needs none.
 - Lessons: the `learned` list below.
 
 **2. Post the note** as a comment on the card's draft pull request, or on its issue when there is
-no pull request yet:
+no pull request yet, written to a file and passed with `gh pr comment <n> -R <repo> --body-file <file>`
+(or `gh issue comment <n> -R <repo> --body-file <file>`):
 
 ```markdown
 ## Checkpoint

@@ -99,6 +99,8 @@ AccountReportAnswer = typing.TypedDict("AccountReportAnswer", {
 AccountList = typing.TypedDict("AccountList", {
     "items": "list[ListedAccountUsage] | None",
     "vendor_models": "dict[str, list[AccountModel] | None] | None",
+    "vendor_serves_models": "dict[str, list[str] | None] | None",
+    "manages_providers": "bool",
     "unnamed": "list[UnnamedDirectory] | None",
 })
 
@@ -133,6 +135,7 @@ ListedAccountUsage = typing.TypedDict("ListedAccountUsage", {
     "serves_for": "list[str] | None",
     "serves_models": "list[str] | None",
     "routes": "list[str] | None",
+    "peak_windows": "typing.NotRequired[list[PeakWindowRead] | None]",
     "resets_by": "str | None",
     "stopped_by_login": "str | None",
     "owner_login": "str | None",
@@ -274,6 +277,20 @@ AccountServed = typing.TypedDict("AccountServed", {
     "for": "typing.NotRequired[list[str] | None]",
     "models": "typing.NotRequired[list[str] | None]",
     "owner": "str",
+})
+
+# ProviderModels is the body of POST /providers/models: the model ids the team keeps a provider to,
+# stated by the team's owner (#7522). Every account of the provider whose own owner has stated no
+# models inherits it; null clears it, so the provider serves every model again.
+ProviderModels = typing.TypedDict("ProviderModels", {
+    "vendor": "str",
+    "models": "list[str] | None",
+})
+
+# ProviderModelsStated is its answer: the provider and the models the team now keeps it to.
+ProviderModelsStated = typing.TypedDict("ProviderModelsStated", {
+    "vendor": "str",
+    "models": "list[str] | None",
 })
 
 # AccountReset is the body of POST /accounts/reset: the time by which the account's windows reset,
@@ -473,7 +490,10 @@ AgentInjectionAnswer = typing.TypedDict("AgentInjectionAnswer", {
 })
 
 # AgentInjectedBody is the body of POST /steering/agent/injected: what the session's harness did
-# with a carried directive, queued, already or refused, and why when it refused.
+# with a carried directive, and why when it was not queued. The outcome is queued, already (with
+# where an earlier hand-over stands as the reason: queued, prompted, carried or claimed), refused
+# (a definite no, nothing was handed over) or unresolved (the harness may have taken it, and the
+# machine keeps the claim rather than send it again).
 AgentInjectedBody = typing.TypedDict("AgentInjectedBody", {
     "session": "str",
     "ulid": "str",
@@ -482,11 +502,23 @@ AgentInjectedBody = typing.TypedDict("AgentInjectedBody", {
     "reason": "typing.NotRequired[str]",
 })
 
-# AgentInjectedAnswer acknowledges the report.
+# AgentInjectedAnswer acknowledges the report with the delivery phase that stands after it:
+# Recorded is whether this report moved it, false for a repeat or a report of less evidence.
 AgentInjectedAnswer = typing.TypedDict("AgentInjectedAnswer", {
     "session": "str",
     "ulid": "str",
+    "phase": "str",
     "recorded": "bool",
+})
+
+# DirectiveDelivery is the reading of a directive's hand-over to a session that holds no stream: the
+# phase its adapter's reports have reached (refused, unresolved, queued or consumed) and the reason
+# that report gave. A directive nothing has been reported on has none.
+DirectiveDelivery = typing.TypedDict("DirectiveDelivery", {
+    "directive": "str",
+    "phase": "str",
+    "reason": "typing.NotRequired[str]",
+    "at": "str",
 })
 
 # AgentUndeliveredBody is the body of POST /steering/agent/undelivered: the machine held no local
@@ -600,12 +632,23 @@ SessionReading = typing.TypedDict("SessionReading", {
     "stop_reason": "str",
     "effort": "str",
     "context_window": "int | None",
+    "context_share": "int | None",
     "tokens": "ReadingTokens",
     "entrypoint": "str",
     "directory": "typing.NotRequired[str]",
     "leased": "typing.NotRequired[bool]",
     "background": "typing.NotRequired[int | None]",
     "pending_frames": "list[str] | None",
+    "flight": "typing.NotRequired[ReadingFlight | None]",
+})
+
+# ReadingFlight is the step a reading says is in flight: the tool and when it began, or the model
+# holding the turn with no tool between. At is the instant the machine took the sight, the
+# ordering guard against the tool hooks' own writes.
+ReadingFlight = typing.TypedDict("ReadingFlight", {
+    "tool": "str",
+    "since": "typing.NotRequired[str]",
+    "at": "str",
 })
 
 # ReadingTokens is the tokens a reading counts: its call's whole input, and the parts of it read
@@ -1141,13 +1184,16 @@ NeedRaiseBody = typing.TypedDict("NeedRaiseBody", {
 })
 
 # NeedTransitionBody moves or closes a need (EL4 decision 7): promote, return, dispose or dismiss
-# with a reason, or answer an ask with the labels it offered that were chosen and the owner's own
-# words where the ask allows them.
+# with a reason, answer an ask with the labels it offered that were chosen and the owner's own
+# words where the ask allows them, or close one of the owner's rows with the answer the owner gave
+# somewhere else (out-of-band, #6325): the owner's words as the seat received them, and where.
 NeedTransitionBody = typing.TypedDict("NeedTransitionBody", {
     "kind": "str",
     "reason": "typing.NotRequired[str]",
     "choices": "typing.NotRequired[list[str] | None]",
     "text": "typing.NotRequired[str]",
+    "words": "typing.NotRequired[str]",
+    "channel": "typing.NotRequired[str]",
 })
 
 # RulingBody records a ruling: the owner's own, or the seat's on their behalf, which says why.
@@ -2649,6 +2695,16 @@ LaunchAnswer = typing.TypedDict("LaunchAnswer", {
     "replayed": "bool",
     "reclaimable": "typing.NotRequired[list[ReclaimableSession] | None]",
     "host_overloaded": "typing.NotRequired[HostOverloaded | None]",
+    "preferred_harness": "typing.NotRequired[LaunchPreferred | None]",
+})
+
+# LaunchPreferred is a placed machine's stated harness for the winning account's vendor, which a
+# launch that named another one still runs: the brain hears it so it can leave the harness out next
+# time and let placement choose.
+LaunchPreferred = typing.TypedDict("LaunchPreferred", {
+    "harness": "str",
+    "machine": "str",
+    "vendor": "str",
 })
 
 # LaunchRead is one launch as the brain reads it: its answer, why each vendor was passed over at its
@@ -2664,6 +2720,7 @@ LaunchRead = typing.TypedDict("LaunchRead", {
     "replayed": "bool",
     "reclaimable": "typing.NotRequired[list[ReclaimableSession] | None]",
     "host_overloaded": "typing.NotRequired[HostOverloaded | None]",
+    "preferred_harness": "typing.NotRequired[LaunchPreferred | None]",
     "passed_over": "dict[str, list[str] | None] | None",
     "attempts": "list[LaunchAttempt] | None",
     "session": "str | None",
@@ -3220,6 +3277,23 @@ InstallationHeld = typing.TypedDict("InstallationHeld", {
     "repository": "typing.NotRequired[str]",
 })
 
+# PeakWindowRead describes one binding's offering, not an account-wide quota verdict.
+PeakWindowRead = typing.TypedDict("PeakWindowRead", {
+    "state": "str",
+    "binding": "str",
+    "vendor": "str",
+    "account": "str",
+    "offering": "typing.NotRequired[str]",
+    "from": "typing.NotRequired[str | None]",
+    "to": "typing.NotRequired[str | None]",
+    "buffer_start": "typing.NotRequired[str | None]",
+    "factor": "typing.NotRequired[float]",
+    "source": "typing.NotRequired[str]",
+    "source_taken_at": "typing.NotRequired[str | None]",
+    "frozen": "bool",
+    "reason": "typing.NotRequired[str]",
+})
+
 # PlacementRead is where the arbiter would place a launch, read without placing it: each judged
 # candidate, the chosen one first and the rest by the order they were ranked by, then the ones a
 # check took out before judging. Reason is why none would be chosen, empty when one would.
@@ -3250,7 +3324,36 @@ PlacementCandidate = typing.TypedDict("PlacementCandidate", {
     "passed": "typing.NotRequired[str]",
     "model": "typing.NotRequired[str]",
     "above": "typing.NotRequired[int]",
+    "rung": "typing.NotRequired[str]",
+    "harness": "typing.NotRequired[str]",
+    "harness_from": "typing.NotRequired[str]",
+    "preferred_harness": "typing.NotRequired[str]",
+    "effort": "typing.NotRequired[str]",
+    "thinking": "typing.NotRequired[str]",
+    "multiplier": "typing.NotRequired[float | None]",
+    "launcher_command": "typing.NotRequired[str]",
     "draw": "typing.NotRequired[PlacementDraw | None]",
+    "binding": "typing.NotRequired[str]",
+    "peak": "typing.NotRequired[PlacementPeak | None]",
+    "peak_exception": "typing.NotRequired[str]",
+})
+
+# PlacementPeak is a candidate's retained peak evidence as its placement reads answer it (#7503):
+# the reading's wire as capacity_state returned it and when it was taken, the models and offering
+# it read, and the work, buffer and reading-age bound the peak was judged against.
+PlacementPeak = typing.TypedDict("PlacementPeak", {
+    "reading": "typing.NotRequired[PlacementReading | None]",
+    "models": "list[str] | None",
+    "offering": "str",
+    "work_ns": "int",
+    "buffer_ns": "int",
+    "max_reading_age_ns": "int",
+})
+
+# PlacementReading is a reading's wire and when it was taken.
+PlacementReading = typing.TypedDict("PlacementReading", {
+    "wire": "typing.Any",
+    "taken_at": "str",
 })
 
 # PlacementVerdict is the account's verdict as placement judged it.
@@ -3454,6 +3557,44 @@ RebindAnswer = typing.TypedDict("RebindAnswer", {
     "machine": "str",
     "status": "str",
     "replayed": "bool",
+})
+
+# RegroupBody is a regroup asked for by hand, by the seat or from the desk: why, and the request id
+# that names this invocation, so a resend returns the regroup the first one raised or joined.
+RegroupBody = typing.TypedDict("RegroupBody", {
+    "reason": "str",
+    "request_id": "str",
+})
+
+# RegroupAnswer is the regroup a request raised or joined, and the episode the brain answers it by.
+RegroupAnswer = typing.TypedDict("RegroupAnswer", {
+    "regroup": "str",
+    "episode": "str",
+    "status": "str",
+    "replayed": "bool",
+})
+
+# RegroupReasonDTO is one occurrence a regroup carries.
+RegroupReasonDTO = typing.TypedDict("RegroupReasonDTO", {
+    "producer": "str",
+    "reason": "str",
+    "at": "str",
+})
+
+# RegroupDTO is a pending regroup with every reason it carries.
+RegroupDTO = typing.TypedDict("RegroupDTO", {
+    "id": "str",
+    "episode": "str",
+    "day": "str",
+    "created_by": "str",
+    "at": "str",
+    "reasons": "list[RegroupReasonDTO] | None",
+})
+
+# RegroupList is the workspace's pending regroups, oldest first, and how many more are pending.
+RegroupList = typing.TypedDict("RegroupList", {
+    "regroups": "list[RegroupDTO] | None",
+    "omitted": "int",
 })
 
 # Releases answers GET /releases (5831-ledger-releases design.md): a page of the workspace's
@@ -3722,7 +3863,8 @@ ListedCheckpoint = typing.TypedDict("ListedCheckpoint", {
 
 # SessionStanding is a session's standing as Go reads it (doc 189 §1), so the Fleet draws it rather
 # than deriving its own. It is nil for the seat's holder, and for a session never read that is
-# neither kept nor yet stale. Activity is working, waiting, concluded or idle, signed-out where its
+# neither kept nor yet stale. Activity is working, waiting, concluded, idle or dialog — a dialog
+# somebody must answer holding the turn — signed-out where its
 # account's login lapsed, or offline where its machine's agent is gone and it holds no hold of its
 # own (doc 195 §3), nil when the session has not reported one; Since is when its activity began, or its enrolment where it has none. Stale
 # is no sign of life for 30 minutes with no keep, whatever the session is doing; a turn's is its
@@ -3736,9 +3878,10 @@ SessionStanding = typing.TypedDict("SessionStanding", {
     "cache": "StandingCache | None",
 })
 
-# StandingPark is the seat's park on a session: its process stopped, its enrolment kept, until when,
-# and Over once that has passed with no wake (#5907 slice 5).
+# StandingPark is the seat's park on a session: its process stopped, its enrolment kept, why — its
+# action's reason — until when, and Over once that has passed with no wake (#5907 slice 5).
 StandingPark = typing.TypedDict("StandingPark", {
+    "reason": "str",
     "until": "str",
     "over": "bool",
 })
@@ -3789,7 +3932,10 @@ OriginVSCode = typing.TypedDict("OriginVSCode", {
 # SessionVitals is what a session epoch's latest reading says of it (#4756). ObservedAt is when its
 # harness took it, and ActiveAt when the machine last saw that harness write; Turn is open, ended
 # or aborted, and TurnSince when the reading that first said so was taken. Each is nil when no
-# reading stated it, which a client draws as unreported, never idle.
+# reading stated it, which a client draws as unreported, never idle. Tool and ToolSince name the
+# tool in flight and when it began, and ThinkingSince when the model took the turn with no tool
+# between (#7465): stated by Claude Code's tool hooks and by a ZCode reading's pane, each nil
+# when neither said.
 SessionVitals = typing.TypedDict("SessionVitals", {
     "observed_at": "str | None",
     "active_at": "str | None",
@@ -3800,13 +3946,20 @@ SessionVitals = typing.TypedDict("SessionVitals", {
     "context": "SessionContext",
     "entrypoint": "str | None",
     "background": "int | None",
+    "tool": "str | None",
+    "tool_since": "str | None",
+    "thinking_since": "str | None",
 })
 
 # SessionContext is the tokens a session's context holds, against the window its harness states;
-# Window is nil when the harness states none, as Claude Code does not.
+# Window is nil when the harness states none, as Claude Code does not. Share is the share of its
+# window the harness itself states the context holds, a whole percent (#7489): ZCode's pane states
+# one, and it is drawn over a share derived from Used, into which a ZCode provider counts the
+# cache; nil when the harness states none.
 SessionContext = typing.TypedDict("SessionContext", {
     "used": "int | None",
     "window": "int | None",
+    "share": "int | None",
 })
 
 # ListedAccount is the account a session's last bind said it spends from, nil when it named none.
@@ -5123,6 +5276,7 @@ WorkerCensusBody = typing.TypedDict("WorkerCensusBody", {
     "interactive": "typing.NotRequired[list[LauncherAccount] | None]",
     "signed_out": "typing.NotRequired[list[LauncherAccount] | None]",
     "spends": "typing.NotRequired[list[HarnessSpend] | None]",
+    "harness_commands": "typing.NotRequired[dict[str, str] | None]",
     "launches": "typing.NotRequired[list[str] | None]",
     "harness_preferences": "typing.NotRequired[dict[str, str] | None]",
     "no_account": "typing.NotRequired[list[LauncherNoAccount] | None]",
@@ -5143,6 +5297,7 @@ HarnessSpend = typing.TypedDict("HarnessSpend", {
 LauncherAccount = typing.TypedDict("LauncherAccount", {
     "vendor": "str",
     "account_id": "str",
+    "command": "typing.NotRequired[str]",
     "unrouted": "typing.NotRequired[bool]",
 })
 
@@ -5247,6 +5402,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/deployments",
     "POST /w/{workspace}/api/v1/device-approvals",
     "POST /w/{workspace}/api/v1/device-exchanges",
+    "GET /w/{workspace}/api/v1/directives/{directive}/delivery",
     "POST /w/{workspace}/api/v1/dispatches",
     "GET /w/{workspace}/api/v1/events",
     "GET /w/{workspace}/api/v1/facts",
@@ -5302,6 +5458,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/needs/{need}/transitions",
     "GET /w/{workspace}/api/v1/placement",
     "GET /w/{workspace}/api/v1/placements",
+    "POST /w/{workspace}/api/v1/providers/models",
     "GET /w/{workspace}/api/v1/push/key",
     "POST /w/{workspace}/api/v1/push/key",
     "GET /w/{workspace}/api/v1/push/subscriptions",
@@ -5334,6 +5491,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/sessions/{session}/keep",
     "POST /w/{workspace}/api/v1/sessions/{session}/push/raises",
     "POST /w/{workspace}/api/v1/sessions/{session}/rebind",
+    "POST /w/{workspace}/api/v1/sessions/{session}/regroups",
     "POST /w/{workspace}/api/v1/sessions/{session}/says",
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/acquisition",
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/handover",
@@ -5352,6 +5510,8 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/stamps",
     "GET /w/{workspace}/api/v1/tracks",
     "POST /w/{workspace}/api/v1/tracks",
+    "GET /w/{workspace}/api/v1/work/regroups",
+    "POST /w/{workspace}/api/v1/work/regroups",
     "POST /w/{workspace}/api/v1/workspace/retirement",
     "POST /w/{workspace}/api/v1/workspace/slug",
     "POST /w/{workspace}/steering/agent/accounts",
@@ -5389,6 +5549,21 @@ ROUTES = frozenset({
     "POST /w/{workspace}/steering/observe",
 })
 
+PAGINATION = {
+    "GET /w/{workspace}/api/v1/brain/transcript": {"parameter":"cursor","collection":"items","stop":"head"},
+    "GET /w/{workspace}/api/v1/cards": {"parameter":"next","collection":"cards","if_query":"state"},
+    "GET /w/{workspace}/api/v1/facts": {"parameter":"cursor","collection":"items","stop":"exhausted","drop_query":["before","latest"]},
+    "GET /w/{workspace}/api/v1/gates": {"parameter":"next","collection":"items"},
+    "GET /w/{workspace}/api/v1/goals": {"parameter":"next","collection":"goals"},
+    "GET /w/{workspace}/api/v1/goals/{goal}/register": {"parameter":"next","collection":"rows"},
+    "GET /w/{workspace}/api/v1/intents": {"parameter":"next","collection":"intents"},
+    "GET /w/{workspace}/api/v1/launches/ended": {"parameter":"before","collection":"items"},
+    "GET /w/{workspace}/api/v1/machines": {"parameter":"cursor","collection":"items"},
+    "GET /w/{workspace}/api/v1/releases": {"parameter":"next","collection":"releases","first":["tails","open"]},
+    "GET /w/{workspace}/api/v1/rooms/{room}/messages": {"parameter":"cursor","collection":"items","stop":"head","drop_query":["before"]},
+    "GET /w/{workspace}/api/v1/rulings": {"parameter":"next","collection":"rulings"},
+}
+
 # Every query parameter a route reads, by its pattern: the values it takes, or None for any.
 QUERY = {
     "GET /api/v1/teams/{team}/installations": {"repository": None},
@@ -5417,6 +5592,7 @@ QUERY = {
     "GET /w/{workspace}/api/v1/sessions": {"gone": frozenset({"1"})},
     "GET /w/{workspace}/api/v1/sessions/{session}/checkpoints": {"epoch": frozenset({"current"}), "limit": None},
     "GET /w/{workspace}/api/v1/snapshot": {"feed": None},
+    "GET /w/{workspace}/api/v1/work/regroups": {"state": frozenset({"pending"}), "limit": None},
     "GET /w/{workspace}/steering/agent/stream": {"accepts": frozenset({"policy"})},
 }
 

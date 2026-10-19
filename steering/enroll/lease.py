@@ -51,6 +51,12 @@ GO_NOT_SEATED = "refused: this session does not hold the seat ({why})"
 # Go's refusals of a holder whose seat moved between its read of the seat and its command.
 SEAT_LOST = frozenset({"seat-not-holder", "seat-generation-stale"})
 _NEED = re.compile(r"^(?P<verb>dispose|promote):\s*token\s+@lease\s+(?P<item>\S+)\s+(?P<reason>.+)$", re.S)
+# An owner's row the owner answered somewhere else (#6325): where they gave it, and their decision
+# as the seat received it.
+# The first ": " separates where the answer was given from the answer itself: a channel's own
+# times ("13:20Z") hold a colon but no colon-space, and the owner's words, which the ruling keeps
+# for good, read whole whatever prose they carry.
+_OUT_OF_BAND = re.compile(r"^out-of-band:\s*token\s+@lease\s+(?P<item>\S+)\s+via\s+(?P<rest>.+)$", re.S)
 # A launch on Go: the machine is the `machine` `GET /sessions` lists, a registration `GET /machines`
 # lists (`m-<id>`), or the name a machine's census reports (quoted when it has a space), and the account the number its team gave
 # it or the vendor's own id, never one machine's launcher.
@@ -65,6 +71,9 @@ _LAUNCH = re.compile(r"^launch:\s*token\s+@lease(?:\s+(?P<harness>[a-z][a-z0-9-]
                      # Or the card by the issue it resolves, which the seat holds as a number.
                      r"|\s+resolves\s+(?P<repo>[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100})#(?P<issue>[1-9][0-9]{0,9}))?"
                      r"(?:\s+notify\s+(?P<notify>[A-Za-z0-9][A-Za-z0-9._-]{0,119}))?"
+                     # The harness, named after the clauses, constrains the launch to it; a floor
+                     # left without one is placed by the platform (the owner's direction, 2026-10-18).
+                     r"(?:\s+harness\s+(?P<named_harness>[a-z][a-z0-9-]{0,31}))?"
                      r"\s+because\s+(?P<reason>\S.*?)"
                      # The launched session's first directive follows on its own line (doc 192).
                      r"(?:\nbrief:[ \t]*(?P<brief>.*?))?\s*$", re.S)
@@ -104,9 +113,13 @@ _KEEP_USAGE = {"keep": "keep: token @lease <session> [until <time or duration>] 
 # to, and why. Choosing not to act is an answer.
 _ANSWER = re.compile(r"^answer:\s*token\s+@lease\s+(?P<episode>[0-9a-fA-F-]{36})\s+(?P<verdict>acted|considered)\s+because\s+(?P<why>\S.*?)\s*$", re.S)
 _ANSWER_USAGE = "answer: token @lease <episode> acted because <why>` or `answer: token @lease <episode> considered because <why>"
+# The seat asking for a regroup by hand (work-orchestration-design.md §4): the line's occurrence is
+# the request id, so `say --retry=<id>` returns the regroup the first send raised or joined.
+_REGROUP = re.compile(r"^regroup:\s*token\s+@lease\s+because\s+(?P<reason>\S.*?)\s*$", re.S)
+_REGROUP_USAGE = "regroup: token @lease because <why reconsider now>"
 # Every lease verb `go_say` sends to Go, so a refusal of another names what this client takes.
-GO_VERBS = tuple(sorted({"authorship", "backlog", "cancel", "dispose", "launch", "lift", "promote", "relay", "roster",
-                         "withdraw", "answer", *_ACTION, *_KEEP_USAGE}))
+GO_VERBS = tuple(sorted({"authorship", "backlog", "cancel", "dispose", "launch", "lift", "out-of-band", "promote", "relay", "roster",
+                         "withdraw", "answer", "regroup", *_ACTION, *_KEEP_USAGE}))
 # The paths `go_post` takes: each is the seat's own command, translated to the route Go serves.
 POST_TARGETS = ("/steering/seat/read", "/steering/brain/reply", "/steering/brain/attach",
                 "/steering/brain/detach", "/steering/push/raise")
@@ -133,6 +146,8 @@ def go_say(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
     verb = line.partition(":")[0]
     if verb in ("dispose", "promote"):
         return _go_need(rec, verb, line)
+    if verb == "out-of-band":
+        return _go_out_of_band(rec, line)
     if verb == "launch":
         return _go_launch(rec, line, key)
     if verb == "withdraw":
@@ -145,6 +160,8 @@ def go_say(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         return _go_keep(rec, verb, line, key)
     if verb == "answer":
         return _go_answer(rec, line, key)
+    if verb == "regroup":
+        return _go_regroup(rec, line, key)
     lift = _LIFT.match(line)
     if lift:
         return _go_lift(rec, lift, key)
@@ -183,6 +200,37 @@ def go_say(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
     return 0, said, False
 
 
+def _go_out_of_band(rec: dict, line: str) -> tuple[int, str, bool]:
+    """`out-of-band:` on Go: one of the owner's rows closed with the answer the owner gave
+    somewhere else (#6325), recorded as a ruling on their behalf."""
+    import refusal
+    import session_routes
+    m = _OUT_OF_BAND.match(line)
+    channel, sep, words = (m["rest"].partition(": ") if m else ("", "", ""))
+    if not sep or not words.strip() or not channel.strip():
+        return 2, refusal.use("out-of-band", "malformed out-of-band: invocation"), False
+    try:
+        need = str(uuid.UUID(m["item"]))
+    except ValueError:
+        return 2, refusal.use("out-of-band", f"{m['item']} is not a Needs You row's id"), False
+    try:
+        said = session_routes.seat_need(rec["session"], rec["token"], "out-of-band", need,
+                                        words=" ".join(words.split()), channel=" ".join(channel.split()))
+    except session_routes.NotSeated as why:
+        return 1, GO_NOT_SEATED.format(why=why), False
+    except session_routes.Unsent as e:
+        return 1, refusal.retry(str(e)), True
+    except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale, False
+        if e.code in SEAT_LOST:
+            return 1, GO_NOT_SEATED.format(why=e), False
+        if session_routes.settled(e):
+            return 1, refusal.use("out-of-band", str(e)), False
+        return 1, refusal.retry(str(e)), True
+    return 0, said, False
+
+
 def _go_need(rec: dict, verb: str, line: str) -> tuple[int, str, bool]:
     """`dispose:` or `promote:` on Go: a transition of the brain's Needs You row, as the seat."""
     import refusal
@@ -217,21 +265,26 @@ def _go_launch(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
     import session_routes
     m = _LAUNCH.match(line)
     if not m:
-        return 2, refusal.use("launch", "malformed launch: its clauses go in the order on, vendor, account, model or floor, thinking, effort, window, card or resolves, notify; on Go, `on` names a machine as /sessions lists it in `machine`, a registration as /machines lists it, or the machine's name"), False
-    if not m["harness"] and not m["floor"]:
+        return 2, refusal.use("launch", "malformed launch: its clauses go in the order on, vendor, account, model or floor, thinking, effort, window, card or resolves, notify, harness; on Go, `on` names a machine as /sessions lists it in `machine`, a registration as /machines lists it, or the machine's name"), False
+    if m["harness"] and m["named_harness"] and m["harness"] != m["named_harness"]:
+        return 2, refusal.use("launch", "a launch names its harness once: bare before its clauses, or as `harness <harness>` after them"), False
+    harness = m["named_harness"] or m["harness"]
+    if not harness and not m["floor"]:
         return 2, refusal.use("launch", "a launch names its harness unless it names a floor"), False
-    if m["harness"] == "claude" and not (m["model"] or m["floor"]):
-        return 2, refusal.use("launch", "a claude launch names its model (as Claude Code takes it) or a floor; its effort, left out, is the placed model's rarity's: legendary low, epic medium, rare high, uncommon xhigh"), False
+    if harness == "claude" and not (m["model"] or m["floor"]):
+        return 2, refusal.use("launch", "a claude launch names its model (as Claude Code takes it) or a floor; its effort, left out, is the placed model's rarity's: legendary low, epic medium, rare high, uncommon max"), False
     if m["floor"] and (m["machine"] or m["quoted"] or m["machine_name"] or m["vendor"] or m["account"]):
         return 2, refusal.use("launch", "a floor is placed by the platform: leave out on, vendor and account, or name the model"), False
-    body = {k: m[k] for k in ("harness", "machine", "machine_name", "vendor", "account", "model", "floor", "thinking", "effort", "notify") if m[k]}
+    body = {k: m[k] for k in ("machine", "machine_name", "vendor", "account", "model", "floor", "thinking", "effort", "notify") if m[k]}
+    if harness:
+        body["harness"] = harness
     if m["quoted"]:
         body["machine_name"] = m["quoted"]
     body["reason"] = " ".join(m["reason"].split())
     if m["brief"] is not None:
         if not m["brief"].strip():
             return 2, refusal.use("launch", "an empty brief: write the launched session's first directive after `brief:`, or leave the line out"), False
-        if m["harness"] == "claude-brain":
+        if harness == "claude-brain":
             return 2, refusal.use("launch", "a seat brain is briefed by its host, not by a launch"), False
         body["brief"] = m["brief"]
     if m["window"]:
@@ -396,6 +449,30 @@ def _go_answer(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
             return 1, refusal.use("answer", str(e)), False
+        return 1, refusal.retry(str(e)), True
+    return 0, said, False
+
+
+def _go_regroup(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
+    """`regroup:` on Go: the brain asks to reconsider work now, why, under the line's occurrence."""
+    import refusal
+    import session_routes
+    m = _REGROUP.match(line)
+    if not m:
+        return 2, refusal.use("regroup", f"malformed regroup: on Go it is `{_REGROUP_USAGE}`"), False
+    try:
+        said = session_routes.seat_regroup(rec["session"], rec["token"], " ".join(m["reason"].split()), key, key)
+    except session_routes.NotSeated as why:
+        return 1, GO_NOT_SEATED.format(why=why), False
+    except session_routes.Unsent as e:
+        return 1, refusal.retry(str(e)), True
+    except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale, False
+        if e.code in SEAT_LOST:
+            return 1, GO_NOT_SEATED.format(why=e), False
+        if session_routes.settled(e):
+            return 1, refusal.use("regroup", str(e)), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 

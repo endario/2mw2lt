@@ -663,7 +663,9 @@ def go_installer(release: Path) -> Path | None:
 
 
 def _ready(release: Path, sha: str | None = None) -> bool:
-    """Whether `release` is installable as it is: its own Go installer, or a built environment."""
+    """Whether `release` is the sha the door stated and can be installed as it is: its own Go
+    installer, which is what `run_installer` requires. A built Python environment also passes,
+    a layout older activations wrote; `run_installer` refuses one, so `release` re-fetches."""
     try:
         revision = (release / "REVISION").read_text().strip()
     except OSError:
@@ -675,10 +677,11 @@ def _ready(release: Path, sha: str | None = None) -> bool:
 
 def release(door: str) -> Path:
     """The agent release the workspace's door states (doc 147 §3–4), fetched with this machine's
-    credential and, unless it carries its own Go installer, built when the machine has none. It
-    never re-points the machine's other agents: the one job written below is the only one touched.
-    A release the machine already holds is kept only while it is the one the door states, or the
-    door states none: one left by an earlier install would otherwise run its own, older installer."""
+    credential. A fetched part without its own Go installer is refused before it is placed —
+    there is nothing else to install it with. It never re-points the machine's other agents:
+    the one job written below is the only one touched. A release the machine already holds is
+    kept only while it is the one the door states, or the door states none: one left by an
+    earlier install would otherwise run its own, older installer."""
     base = agentjob.root(Path.home())
     try:
         active = (base / "current").resolve(strict=True)
@@ -701,7 +704,8 @@ def release(door: str) -> Path:
         say("agent", f"fetching agent release {target['sha'][:12]} from the workspace's door…")
         try:
             part = asyncio.run(selfupdate.fetch(_stream(door), door, target, base))
-            found = place(part, found) if go_installer(part) else selfupdate.build(part, base)
+            require_installer(part)
+            found = place(part, found)
         except (selfupdate.Refused, selfupdate.BuildFailed, OSError, urllib.error.URLError, tarfile.TarError) as e:
             raise Stop(f"the agent release could not be installed: {e}") from None
     agentjob.select(found, Path.home())
@@ -746,16 +750,29 @@ def place(part: Path, release: Path) -> Path:
     return release
 
 
-def run_installer(installed: Path, root: Path, door: str, port: int) -> None:
-    """The release's own installer — its `2mw2lt install`, else install-agent.py under its own
-    interpreter — so the job is written by the closure it will run rather than by this plugin's copy."""
-    steering = installed / "steering"
+def require_installer(installed: Path) -> Path:
+    """The release's own `2mw2lt install`, or a Stop naming the probe that found none: a release
+    without one has no installer, since releases carry no steering/ to fall back to (#6922)."""
     go = go_installer(installed)
-    argv = ([str(go), "install", str(root), door] if go else
-            [str(steering / ".venv" / "bin" / "python"), str(steering / "install-agent.py"), str(root), door])
-    # The machine job's own port, so an install leaves the job as it is when it already runs.
-    done = subprocess.run(argv, env={**os.environ, "STEERING_AGENT_PORT": str(port)},
-                          capture_output=True, text=True)
+    if go is None:
+        raise Stop(f"the agent release at {installed} is not installable: its `2mw2lt` does not answer "
+                   "`install` with its own usage line, so the release has no Go installer (#6919); "
+                   "ask the workspace's operator to deploy a current release")
+    return go
+
+
+def run_installer(installed: Path, root: Path, door: str, port: int) -> None:
+    """The release's own installer — its `2mw2lt install` — so the job is written by the closure
+    it will run rather than by this plugin's copy."""
+    go = require_installer(installed)
+    try:
+        # The machine job's own port, so an install leaves the job as it is when it already runs.
+        done = subprocess.run([str(go), "install", str(root), door],
+                              env={**os.environ, "STEERING_AGENT_PORT": str(port)},
+                              capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        raise Stop(f"the agent release's installer did not answer within 120s; its log is under "
+                   f"{log_directory()}") from None
     if done.returncode:
         raise Stop(f"the agent release's installer failed: {(done.stderr or done.stdout).strip()[-400:]}")
 

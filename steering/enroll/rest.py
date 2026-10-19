@@ -6,8 +6,7 @@ The path is relative to `/api/v1`, as `/knowledge/units` or `/cards?state=live`.
 to the door this workspace names. A session's enrolment token on stdin goes with the current
 machine credential on Go's paired session carriers. It stays out of the process table; `--lease`
 sends the seat holder's own enrolment, which Go judges at each call. With nothing on stdin, this
-session's own enrolment token goes, found as `say.py` finds it (#3551). `--all` follows a page's
-`next` until the head. `--post` sends the path a POST with no body, or with `--json`'s body and
+session's own enrolment token goes, found as `say.py` finds it (#3551). `--post` sends the path a POST with no body, or with `--json`'s body and
 `--key` as its `Idempotency-Key`, as a room's messages take (doc 156).
 
 Exits 0 with the JSON on stdout; otherwise 1, with the problem's title and remedy on stderr.
@@ -31,6 +30,7 @@ import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import connect  # noqa: E402
+import contract  # noqa: E402
 import door  # noqa: E402
 import session_routes  # noqa: E402
 from verb_help import error, help_requested, script_help  # noqa: E402
@@ -104,6 +104,22 @@ def own_bearer(flags: dict[str, str]) -> tuple[str | None, str | None]:
         return None, str(why)
 
 
+def page_contract(path: str) -> dict | None:
+    parts = ("/w/_/api/v1" + urllib.parse.urlsplit(path).path).split("/")
+    for route in sorted(contract.ROUTES, key=lambda r: (r.count("{"), r)):
+        method, template = route.split(" ", 1)
+        segments = template.split("/")
+        if method == "GET" and len(segments) == len(parts) and all(
+                expected == actual or expected.startswith("{") and expected.endswith("}")
+                for expected, actual in zip(segments, parts)):
+            page = contract.PAGINATION.get(route)
+            if page and page.get("if_query") and page["if_query"] not in dict(
+                    urllib.parse.parse_qsl(urllib.parse.urlsplit(path).query, keep_blank_values=True)):
+                return None
+            return page
+    return None
+
+
 def main(argv: list[str], stdin) -> int:
     if help_requested("rest", argv):
         print(script_help("rest", topic=argv[0] if len(argv) == 2 else None))
@@ -158,7 +174,9 @@ def main(argv: list[str], stdin) -> int:
     if token is None:
         token, why_none = own_bearer(speaker)
     url = f"{base}/api/v1{args[0]}"
-    pages, out = [], None
+    page = page_contract(args[0]) if "--all" in rest else None
+    collected, first = [], None
+    out = None
     while True:
         try:
             status, answer = fetch(url, token, method, body, valued.get("--key"))
@@ -179,14 +197,29 @@ def main(argv: list[str], stdin) -> int:
             if why_none and status in (401, 403):
                 print(f"no credential was sent: {why_none}", file=sys.stderr)
             return 1
-        # The facts page says when it is exhausted; the machines page ends with no `next`.
-        if "--all" not in argv or answer.get("exhausted") is True or not answer.get("next"):
-            out = answer if not pages else {**answer, "items": [i for p in pages for i in p] + answer.get("items", [])}
+        if "--all" not in rest:
+            out = answer
             break
-        pages.append(answer.get("items", []))
+        if page is None:
+            if answer.get("next"):
+                print("the route has no paging contract; update the plugin before collecting its pages", file=sys.stderr)
+                return 1
+            out = answer
+            break
+        field = page["collection"]
+        if not isinstance(answer.get(field), list):
+            print(f"the door's paged answer has no {field} list", file=sys.stderr)
+            return 1
+        if first is None:
+            first = {k: answer[k] for k in page.get("first", []) if k in answer}
+        collected.extend(answer[field])
+        if not answer.get("next") or answer.get(page.get("stop")) is True:
+            out = {**answer, **first, field: collected}
+            break
         parts = urllib.parse.urlsplit(url)
-        query = [(k, v) for k, v in urllib.parse.parse_qsl(parts.query) if k != "cursor"]
-        url = urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(query + [("cursor", answer["next"])])))
+        replaced = {page["parameter"], *page.get("drop_query", [])}
+        query = [(k, v) for k, v in urllib.parse.parse_qsl(parts.query, keep_blank_values=True) if k not in replaced]
+        url = urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(query + [(page["parameter"], answer["next"])])))
     print(json.dumps(out, indent=2))
     return 0
 

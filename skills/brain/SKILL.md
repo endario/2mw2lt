@@ -133,6 +133,10 @@ kind turned off is not told, and its standing still reads:
 - **`card-unbranched`**, a signal: the session has executed its card for 45 minutes
   (`signals.card_unbranched.*`) with no branch claimed for it, however busily it writes, once per
   engagement. Ask what it has, and to claim its branch and push.
+- **`session-unannounced`**, a signal: the session has worked on its card for 10 minutes
+  (`signals.session_unannounced.*`) without ever announcing what it is doing at this epoch, however
+  busily it writes, once per engagement. Ask it what it is doing; the brief that never asked it to
+  announce is the one to fix.
 - **`push-quiet`**, a signal: the platform last heard a push to the session's card's branches an hour
   ago (`signals.push_quiet.*`), once per push heard. Heard is when GitHub's delivery reached it, and it
   is not proof that nothing was pushed since; a branch whose head the last push heard does not explain
@@ -174,7 +178,8 @@ kind turned off is not told, and its standing still reads:
   the card's executor and what it resolves still open. A candidate, never concluded for you: conclude
   it, or ask its executor what is left.
 
-A workspace may route `directive-unacknowledged`, `card-unbranched`, `push-quiet`, `account-reset`
+A workspace may route `directive-unacknowledged`, `card-unbranched`, `session-unannounced`,
+`push-quiet`, `account-reset`
 and `account-unspent` to the sessions each is about instead of you, or to both; you are told unless
 set. A session is told its
 own `suggested_act`, and is told nothing once it has left; routed to `session`, the kind is not told
@@ -211,6 +216,11 @@ Choosing not to act is an answer. The platform records who answered and when, ne
 judgment was right. An answer to an older snapshot is recorded and answers nothing newer. Snapshots
 received and left unanswered space the next ones out, and a run of them raises the owner's phone
 and puts the alarm on their Needs You; answering the current snapshot ends both.
+
+A `work-regroup` signal asks you to choose the next work again: once a day, ahead of each known
+peak window, or when you asked for one. Run it with `/2mw2lt:regroup` and answer its episode the
+same way. A regroup still pending shows in each snapshot's `act_on` until you answer it, a
+successor's included.
 
 A session that finishes is closed, driven with its next piece of work, or kept, and nothing else:
 never idle by neglect. Keep it only with a plan, the work you expect in its territory and when,
@@ -684,7 +694,7 @@ only to target an agent running there, and a launch on a node holding no uplink 
 
 An opencode worker runs confined, in a clone of its own, and its branch is pushed by its agent.
 A launched Claude Code session is trusted and self-sufficient for the routine forge writes its SOP
-requires: its launch allows `git push`, a pull request's comment, ready and merge, and an issue's
+requires: its launch allows `git push`, a pull request's create, comment, ready and merge, and an issue's
 comment and create, reaching only what the launch's pinned credential already could. Do not do those for a worker; a refusal of one is a launch defect to fix (#7383).
 `launching: <id> …` means an agent was handed it. Read how it went with
 `rest.py "/launches/<id>"`: its state, each machine it was offered to and what that machine
@@ -737,32 +747,36 @@ session begins as triage does. Name a model only for a reason the
 ladder cannot see, and give that reason in `because`: the launch is recorded as yours, not the
 platform's. A floor takes no `on`, `vendor` or `account`, since naming the place is naming the model.
 Leave the harness out too: placement chooses a usable harness for the winning account, preferring
-that machine's stated harness for its vendor. Name a harness only to constrain the launch to it:
-a `claude` floor is placed only where Claude reaches the account.
+that machine's stated harness for its vendor, and where it states none the vendor's own harness —
+ZCode for Z.ai — before Claude Code (the owner's direction, 2026-10-18). Naming a harness pins the
+launch to it even where the machine prefers another for that vendor, so name `claude` only when the
+work needs Claude Code itself, and say why in `because`. When you name one anyway and the winning
+machine prefers another, the launch's answer says so, as a line to heed next time.
 `rest.py '/placement?floor=<rarity>&effort=<level>'` shows the model each account would
-start and how far above the floor it stands, and passes over `floor-unserved` an account serving no
-model at it.
+start and how far above the floor it stands, the harness it would start, how that was chosen and
+the command it would run, and passes over `floor-unserved` an account serving no model at it.
 
 An interactive Claude Code session, one a person can watch and type into, is a `launch:` too.
 Its clauses go in this order:
 
 | clause | left out |
 |---|---|
-| `<harness>` | placement chooses with a floor; otherwise required: `claude`, `zcode` or `opencode` |
+| `<harness>` | placement chooses with a floor; otherwise required: `claude`, `zcode` or `opencode`. A named one pins the launch even where the machine prefers another for that vendor |
 | `on <node>` | the daemon places it; not with a floor |
 | `vendor <vendor>` | `anthropic` for `claude`; `any` for every vendor; not with a floor |
 | `account <n>` | the best-ranked account; named, that account or a refusal; not with a floor |
 | `model <model>` or `floor <rarity>` | one is required for `claude` and `zcode`; prefer the floor |
 | `thinking <level>` | the model's own; opencode only |
-| `effort <level>` | the placed model's rarity's: legendary `low`, epic `medium`, rare `high`, uncommon `xhigh` |
+| `effort <level>` | the placed model's rarity's: legendary `low`, epic `medium`, rare `high`, uncommon `max` |
 | `window` | headless |
 | `card <card>` or `resolves <owner>/<name>#<n>` | no card; either needs a brief |
 | `because <why>` | required; with a model, why that model |
 | `brief: <directive>` (next line) | none; the session waits to be delegated to |
 
-Leave effort out unless the work asks for another level than its rung's. The default gives a rare
-model its depth and a legendary one little, so name `high` or above for a legendary model on hard
-design or a bug that keeps failing, and less than `xhigh` for mechanical work on an uncommon one.
+Leave effort out unless the work asks for another level than its rung's. The default gives an
+uncommon model its full depth (the owner's ruling, 2026-10-19: uncommon launches at `max`, whatever
+the model) and a legendary one little, so name `high` or above for a legendary model on hard
+design or a bug that keeps failing.
 A model the ladder does not rate has no default, and is refused `launch-effort-unrated` until the
 line names one. ZCode has three levels: it runs `medium` as `high` and `xhigh` as `max`, and the
 decision record names both.
@@ -1171,6 +1185,15 @@ dispose the row once you have answered what needs it.
 Every write names why. Ask a live session before overturning what it declared, as you would
 before withdrawing its conclusion.
 
+## Delegate the work, keep the conclusion
+
+The seat's own context is the fleet's scarcest resource. Delegate any investigation, spike, fix
+or edit a session can carry rather than tending everything here, and keep the conclusion, not
+the file dump. An in-session subagent serves a bounded lookup or spike whose conclusion is
+needed now; a standalone session serves work that ships, runs long, or needs a branch and a
+gate. By hand, only what only the seat can do: rulings, placements, deploys, approvals and
+answers to the owner.
+
 ## Put throughput first
 
 The owner's ruling, 2026-10-07
@@ -1227,21 +1250,23 @@ what a session is running at and hand accordingly.
 
 The level is on the registry's row for each session, folded from the harness's own transcript.
 
-**Model routing: launch on what the work needs, not at `high` by default** (owner's ruling, 2026-09-30).
-Today's models are strong enough that `high` everywhere buys little and spends a budget fast:
+**Model routing: launch on what the work needs** (owner's ruling, 2026-09-30). The table names the
+model or its rung and leaves effort out, so the rung's default applies: uncommon `max`, rare `high`,
+epic `medium`, legendary `low` (owner's ruling, 2026-10-19). Name an effort only for a stated
+departure, as the design row does:
 
 | The work | Launch |
 |---|---|
-| An exceptionally groundbreaking feature, beyond anything the platform has done | Fable 5.1 (`claude-fable-5-1`) or the latest GPT Astra at `medium`, and only then (owner's ruling, 2026-10-12) |
-| Any other design, a large epic's or a demanding visual surface's included | Opus 5.5 at `high` |
-| Standard engineering, from the start or once its spec settles | Opus 5.5 at `medium`, or `low` where the work is simple; or an equal such as the latest GPT Sol |
-| Standard engineering that is well scoped and low-risk | Sonnet 5.5 at `high` or `xhigh`, or an equal |
-| Small, routine work | GLM 5.3 Flash at `high` (its `high` is about a frontier model's `low`), or an equal such as the latest GPT Luna |
+| An exceptionally groundbreaking feature, beyond anything the platform has done | Fable 5.1 (`claude-fable-5-1`) or the latest GPT Astra, and only then (owner's ruling, 2026-10-12) |
+| Any other design, a large epic's or a demanding visual surface's included | Opus 5.5 at `high`, above epic's `medium` for the design |
+| Standard engineering, from the start or once its spec settles | Opus 5.5, at `low` where the work is simple; or an equal such as the latest GPT Sol |
+| Standard engineering that is well scoped and low-risk | Sonnet 5.5, or an equal |
+| Small, routine work | GLM 5.3 Flash, or an equal such as the latest GPT Luna |
 
 **Spend the cheapest model that can do the work well** (owner's ruling, 2026-10-10: the budget is
 tight). Choose the provider, model and effort per card, not per habit. GLM 5.3 Flash is the
 default for less complicated pieces: mechanical fixes, guard backfills, doc edits, small ports,
-dependency bumps. Sonnet 5.5 at `high` takes well-scoped engineering, which is most follow-through
+dependency bumps. Sonnet 5.5 takes well-scoped engineering, which is most follow-through
 once a spec settles. Opus 5.5 is reserved for design, hard debugging and cross-cutting or
 security-shaped work, and runs at `medium` or below once that phase ends. When a card could go to
 either of two rows of the table above, take the cheaper one. Escalate only on evidence: a gate
@@ -1262,8 +1287,8 @@ already running.
   Which model is strongest is your judgement: the registry holds names, not an ordering. An Opus
   session at `medium` takes this work too (owner's ruling, 2026-09-19, repeated 2026-09-22): delegate
   it, send no `effort: … high` for it, and never ask the owner to raise it.
-- Mechanical fixes, doc edits and guard backfills at `medium`, and on a frontier model at
-  `low`: Opus and the latest GPT Sol at `low` are at least a lesser model's `high` (the
+- Mechanical fixes, doc edits and guard backfills on an uncommon model at its rung's `max`, and on
+  a frontier model at `low`: Opus and the latest GPT Sol at `low` are at least a lesser model's `high` (the
   owner's ruling, 2026-09-20). A level is a
   dial on one model, not a rank across them, and that includes GPT Sol against GPT Luna: no
   session-hand-out tie-break singles either out (the short-lived Luna-first rule was withdrawn
@@ -1348,7 +1373,11 @@ that are not there already, so they survive this session.
   timeline. A stale one is closed the same way, naming what settled it. One you cannot decide
   goes to the owner with `promote: token @lease <id> <reason>`; if they dismiss it, it
   comes back to you (a waiting dialog is closed instead, and you are told), and you promote it again only with a fresh reason. The owner's rows
-  (questions, rulings) are not yours to close.
+  (questions, rulings) are not yours to close — with one exception: an answer the owner gave you somewhere else, which you
+  record with `out-of-band: token @lease <id> via <where and when>: <their words>` (#6325). The row
+  closes as the owner's answer relayed by you — a ruling on their behalf, theirs to acknowledge or
+  correct — and the session that raised it is told the answer, so it does not wait on a row nobody
+  will answer. An ask is refused: the owner answers it in the desk.
 - **Check the issue is still open before you brief it.** Search merged pull requests for it
   first. A brief for work that has already landed wastes a session's turn.
 - **Brief a pull request to stay a draft until `ship it`.** The suite runs locally between

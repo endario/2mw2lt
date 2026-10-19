@@ -7,6 +7,10 @@ and names where it is written: `pkill -f` by a pattern that names neither the wo
 temporary directory, starting `2mw2lt-follow`, and an auto-merge (`gh pr merge -R <repo> --auto`).
 A command it cannot read, and its own failure, let the call through: these stop a reflex, they are
 not a control.
+
+It also answers `allow`, and only that, for two grants: a project's exact SOP merge, and a launched
+session's forge writes on its own repository and its enrolment clients (#7528). Either one reads a
+command exactly or gives no answer.
 """
 from __future__ import annotations
 
@@ -160,19 +164,64 @@ def refusal(command: str, env: Known, ground: list[str], depth: int = 0) -> str 
     return None
 
 
+_top: dict[str | None, str | None] = {}
+
+
+def toplevel(cwd: str | None) -> str | None:
+    """The git worktree cwd stands in, once per process: the guard's scoping and the grant's lookup
+    read it alike, and one subprocess answers both inside the hook's budget."""
+    if cwd not in _top:
+        try:
+            found = subprocess.run(["git", "-C", cwd or os.getcwd(), "rev-parse", "--show-toplevel"],
+                                   capture_output=True, text=True, timeout=2).stdout.strip()
+            _top[cwd] = found or None
+        except (OSError, subprocess.SubprocessError):
+            _top[cwd] = None
+    return _top[cwd]
+
+
 def ground(cwd: str | None) -> list[str]:
     """What a `pkill -f` pattern may name to be scoped: the worktree it runs in, and the temporary
     directories a test daemon runs from."""
     roots = ["/tmp/", "/private/tmp/", "/private/var/folders/",
              os.path.join(os.path.realpath(tempfile.gettempdir()), "")]
-    try:
-        top = subprocess.run(["git", "-C", cwd or os.getcwd(), "rev-parse", "--show-toplevel"],
-                             capture_output=True, text=True, timeout=2).stdout.strip()
-        if top:
-            roots.append(os.path.join(top, ""))
-    except (OSError, subprocess.SubprocessError):
-        pass
+    if top := toplevel(cwd):
+        roots.append(os.path.join(top, ""))
     return roots
+
+
+GRANT_FILE = os.path.join(".claude", "merge-grant")
+GRANT_SHAPE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+# Only the SOP merge's own shape pays for the grant file's read.
+MERGE_SHAPED = re.compile(r"\bgh pr merge [1-9][0-9]* -R ")
+
+
+def granted_repo(payload) -> str | None:
+    """The repo this tree grants the SOP merge for, read from a grant file instead of a flag the
+    invoking settings carried (#7467): a host checkout older than the settings that name a script's
+    arguments refused every shell call, while data an older script ignores only loses the grant.
+    The tree the command works in carries the grant, then the project dir; a file that is absent or
+    not one owner/repo line grants nothing."""
+    command = None
+    if isinstance(payload, dict):
+        tool = payload.get("tool_input")
+        command = tool.get("command") if isinstance(tool, dict) else None
+    if not isinstance(command, str) or not MERGE_SHAPED.search(command):
+        return None
+    roots = []
+    if isinstance(payload.get("cwd"), str):
+        if top := toplevel(payload["cwd"]):
+            roots.append(top)
+    if project := os.environ.get("CLAUDE_PROJECT_DIR"):
+        roots.append(project)
+    for root in roots:
+        try:
+            first = Path(root, GRANT_FILE).read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        if len(first) >= 1 and GRANT_SHAPE.fullmatch(first[0].strip()):
+            return first[0].strip()
+    return None
 
 
 def verdict(payload: dict, env: dict | None = None) -> str | None:
@@ -202,6 +251,134 @@ def merge_grant(payload, repo: str) -> dict | None:
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}
 
 
+# The launch's forge grant (#7528, documentation/steering/plans/2026-10-19-launch-forge-approval-design.md).
+# A launched Claude Code session is granted its SOP's forge writes as prefix rules
+# (machine/internal/interactive/start.go claudeSettings), and Claude Code matches none against a
+# quoted body holding a line that starts with `#`: an OpenAI-backed launch's classifier then
+# refused the write. The launch names its repository in FORGE_GRANT_ENV, which only it sets; an
+# older script ignores the variable and only loses the grant (#7467).
+FORGE_GRANT_ENV = "STEERING_FORGE_GRANT"
+# Each verb of that grant: the options it may carry, those taking a value and those not, and
+# whether it names its pull request or issue by number. An option not here gets no answer: the
+# `--auto` and `--admin` merges, and the editor and browser forms, on purpose.
+FORGE_VERBS = {
+    ("pr", "create"): ({"-R", "--repo", "-a", "--assignee", "-B", "--base", "-b", "--body", "-F", "--body-file", "-H", "--head",
+                        "-l", "--label", "-m", "--milestone", "-p", "--project", "-r", "--reviewer", "-t", "--title",
+                        "-T", "--template", "--recover"},
+                       {"-d", "--draft", "-f", "--fill", "--fill-first", "--fill-verbose", "--no-maintainer-edit", "--dry-run"}, False),
+    ("pr", "comment"): ({"-R", "--repo", "-b", "--body", "-F", "--body-file"},
+                        {"--edit-last", "--create-if-none", "--delete-last", "--yes"}, True),
+    ("pr", "ready"): ({"-R", "--repo"}, {"--undo"}, True),
+    ("pr", "merge"): ({"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject", "-A", "--author-email",
+                       "--match-head-commit"},
+                      {"-s", "--squash", "-m", "--merge", "-r", "--rebase", "-d", "--delete-branch", "--disable-auto"}, True),
+    ("issue", "comment"): ({"-R", "--repo", "-b", "--body", "-F", "--body-file"},
+                           {"--edit-last", "--create-if-none", "--delete-last", "--yes"}, True),
+    ("issue", "create"): ({"-R", "--repo", "-a", "--assignee", "-b", "--body", "-F", "--body-file", "-l", "--label",
+                           "-m", "--milestone", "-p", "--project", "-t", "--title", "-T", "--template", "--recover"}, set(), False),
+}
+# The enrolment clients the connect, gate and checkpoint skills have a worker run; ghtoken.py,
+# which prints a credential, and the seat's own are not among them.
+FORGE_CLIENTS = {"ack", "bulletin", "checkpoint", "connect", "declare", "disconnect", "edge", "gate", "rest", "say",
+                 "taking", "verb"}
+# The one command shape the grant reads: words of literal text, separated by spaces, with nothing
+# a shell expands. Unquoted text holds no glob, brace, tilde, comment or separator; a single-quoted
+# run is literal; a double-quoted run holds no `$` or backquote and only the escapes the shell
+# removes there. Quoted runs may span lines, so a body passes whatever its headings. Anything else
+# (a second command, a pipe, a redirect or here-doc, an assignment prefix, a substitution) does not
+# match and gets no answer.
+# Possessive throughout: a word is read once, so a command that does not match fails in linear time.
+_PART = r"[A-Za-z0-9_./:@+,=-]++|'[^']*+'|" + r'"(?:[^"\\$`]++|\\[\\"$`])*+"'
+_WORD = re.compile(rf"(?:{_PART})++", re.S)
+_CALL = re.compile(rf"[ \t]*+(?:{_PART})++(?:[ \t]++(?:{_PART})++)*+[ \t]*+", re.S)
+
+
+def literal_words(command: str) -> list[str] | None:
+    """The words of a command in the grant's one shape, as the shell would pass them, or None."""
+    if not _CALL.fullmatch(command):
+        return None
+    words = []
+    for match in _WORD.finditer(command):
+        word = match.group(0)
+        # zsh expands a word that starts with an unquoted `=` to a command's path.
+        if word.startswith("="):
+            return None
+        out = []
+        for part in re.finditer(_PART, word, re.S):
+            text = part.group(0)
+            if text.startswith("'"):
+                out.append(text[1:-1])
+            elif text.startswith('"'):
+                out.append(re.sub(r'\\([\\"$`])', r"\1", text[1:-1]))
+            else:
+                out.append(text)
+        words.append("".join(out))
+    return words
+
+
+def _gh_granted(args: list[str], repo: str) -> bool:
+    spec = FORGE_VERBS.get(tuple(args[:2]))
+    if spec is None:
+        return False
+    values, bools, positional = spec
+    named, numbers, i = False, 0, 2
+    while i < len(args):
+        arg = args[i]
+        flag, glued, value = arg.partition("=")
+        if not arg.startswith("-"):
+            if not positional or not arg.isdigit():
+                return False
+            numbers += 1
+        elif arg in bools:
+            pass
+        elif flag in values and (glued and flag.startswith("--") or not glued and i + 1 < len(args)):
+            if not glued:
+                i, value = i + 1, args[i + 1]
+            if flag in ("-R", "--repo"):
+                if value.lower() != repo.lower():
+                    return False
+                named = True
+        else:
+            return False
+        i += 1
+    return named and numbers <= 1
+
+
+def _client_granted(path: str) -> bool:
+    """A client of the list, a regular file directly in this plugin's own enroll directory or the
+    same directory of another version in its cache, read through every link."""
+    script = Path(path)
+    if not script.is_absolute() or script.suffix != ".py" or script.stem not in FORGE_CLIENTS:
+        return False
+    try:
+        real = script.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return False
+    if real.name != script.name or not real.is_file():
+        return False
+    own = Path(__file__).resolve().parent
+    if real.parent == own:
+        return True
+    cache = own.parent.parent.parent
+    return (cache.parts[-3:] == ("cache", "2mw2lt", "2mw2lt") and real.parent.name == "enroll"
+            and real.parent.parent.name == "steering" and real.parent.parent.parent.parent == cache)
+
+
+def forge_grant(payload, environ=None) -> dict | None:
+    """Allow for a literal call of a forge verb the launch grants, on its repository, or of an
+    enrolment client; None for anything else."""
+    repo = (os.environ if environ is None else environ).get(FORGE_GRANT_ENV, "")
+    if not GRANT_SHAPE.fullmatch(repo) or not isinstance(payload, dict) or payload.get("tool_name") != "Bash":
+        return None
+    tool = payload.get("tool_input")
+    command = tool.get("command") if isinstance(tool, dict) else None
+    words = literal_words(command) if isinstance(command, str) else None
+    if not words or len(words) < 2:
+        return None
+    granted = (words[0] == "gh" and _gh_granted(words[1:], repo)) or (words[0] == "python3" and _client_granted(words[1]))
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}} if granted else None
+
+
 def main() -> int:
     argv = sys.argv[1:]
     granting = (len(argv) == 2 and argv[0] == "--merge-grant"
@@ -222,10 +399,18 @@ def main() -> int:
             if grant := merge_grant(payload, argv[1]):
                 print(json.dumps(grant))
             return 0
+        # A tree's grant file is read by the script itself, so the grant rides the release of the
+        # script that knows it (#7467): an older script beside newer settings ignores the file and
+        # only loses the grant, where the flag it did not know refused every call.
+        if (repo := granted_repo(payload)) and (grant := merge_grant(payload, repo)):
+            print(json.dumps(grant))
+            return 0
         why = verdict(payload) if isinstance(payload, dict) else None
+        if why is None:
+            if grant := forge_grant(payload):
+                print(json.dumps(grant))
+            return 0
     except Exception:
-        return 0
-    if why is None:
         return 0
     print(why, file=sys.stderr)
     return 2

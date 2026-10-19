@@ -20,6 +20,7 @@ import json
 import os
 import subprocess
 import time
+import urllib.error
 import urllib.request
 import uuid
 
@@ -27,6 +28,7 @@ HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 import holder  # noqa: E402
 import hooks  # noqa: E402
+import local_workspace  # noqa: E402
 import readout  # noqa: E402
 import runtime_id  # noqa: E402
 import spool  # noqa: E402
@@ -155,6 +157,74 @@ def main() -> int:
         record("observe", f"admitted, no time left to send ({left:.2f}s of {BUDGET})", ws)
         return finish()  # admitted; the sweep delivers it
     seated = brain_route("observe")
+    notice = None
+    # This machine's agent relays an enrolled session's observation to the door on its warm
+    # pooled connection (#7491): the hook stops paying startup, DNS, TCP and a fresh TLS handshake
+    # inside its budget. No agent answering — none installed, between releases, or refusing —
+    # falls through to the door exactly as this hook always sent.
+    ride = None
+    if seated is None:
+        try:
+            ride = agent_send(ws, o, left)
+        except Exception as e:  # no HTTP answer at all: the door is the fallback it always was
+            record("observe", f"agent relay not taken: {failure(e)}", ws)
+    if ride == AGENT_REFUSED:
+        notice = None  # an answering agent is final; the spool and its drain own a refusal
+    elif ride is not None:
+        said, release = ride
+        claimed = spool.claim(path)
+        if claimed:
+            claimed.unlink()
+        keep_release(ws, release)
+        notice = received_notice(ws, o, said, time.time())
+    else:
+        notice = door_send(seated, ws, o, path, left)
+    # A turn that runs long reaches no Stop, so its tool calls carry the reading (#1159).
+    left = deadline - time.monotonic()
+    if source == "claude" and o["event"] == "PostToolUse" and left > 0.3:
+        try:
+            if readout.due(ws, hook, time.time()):
+                readout.midturn(hook, ws, o.get("runtime_id"), min(1.5, left))
+        except Exception as e:  # a reading is worth one attempt; the next window brings another
+            record("readout", f"mid-turn post failed: {failure(e)}", ws)
+    notice = plugin_notice(ws, o, notice)
+    notice = behind_notice(ws, o, notice)
+    return finish(o["event"], notice) if notice else finish()
+
+
+# An answering agent's non-2xx: its status is the door's, relayed verbatim, and posting the same
+# occurrence again through the door would duplicate a refusal the ledger already keeps. The
+# observation stays spooled, and the drain owns refusals as it always has.
+AGENT_REFUSED = "agent-relay-refused"
+
+
+def agent_send(ws: Path, o: dict, left: float):
+    """The observation through this machine's agent, admitted by its key and naming its
+    workspace, as the reach and turn routes are; None when no agent answered at all, so the
+    caller sends to the door as it always has — an agent that answered is final, its 2xx carrying
+    the door's answer and anything else AGENT_REFUSED. The loopback is cheap to fail, so an agent
+    that is absent costs the hook milliseconds of its budget, not the send."""
+    port = local_workspace.agent_port(ws, timeout=1.0)
+    key = local_workspace.agent_key(ws, port)
+    if not key:
+        return None
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/steering/observe", data=json.dumps(o).encode(),
+        headers={"Content-Type": "application/json",
+                 local_workspace.KEY_HEADER: key,
+                 **local_workspace.workspace_header(str(ws))},
+        method="POST")
+    try:
+        with send(req, timeout=min(2.0, left)) as r:
+            return answer_in(r)
+    except urllib.error.HTTPError as e:
+        record("observe", f"the agent relayed the door's refusal: {failure(e)}", ws)
+        return AGENT_REFUSED
+
+
+def door_send(seated, ws: Path, o: dict, path, left: float) -> str | None:
+    """The observation to the door itself, as this hook always sent it: a caged brain's own
+    loopback route, else the door on the workspace's observe token or the machine's credential."""
     base = seated[0] if seated else f"{door_url()}/steering/observe"
     sent_at = time.monotonic(); notice = None
     try:
@@ -164,7 +234,7 @@ def main() -> int:
         elif not remote():
             token = (ws / ".claude" / "steering-observe-token").read_text().strip()
             if not token:
-                return finish()
+                return None
             headers["X-Steering-Observe"] = token
         req = urllib.request.Request(base, data=json.dumps(o).encode(), headers=headers, method="POST")
         with send(req, timeout=min(2.0, left)) as r:
@@ -184,17 +254,7 @@ def main() -> int:
                 notice = received_notice(ws, o, f"The observation send to steering failed for this session ({type(e).__name__}); it remains spooled for retry.", time.time())
         except Exception:
             pass  # The observation stays spooled even when its local enrolment cannot be read.
-    # A turn that runs long reaches no Stop, so its tool calls carry the reading (#1159).
-    left = deadline - time.monotonic()
-    if source == "claude" and o["event"] == "PostToolUse" and left > 0.3:
-        try:
-            if readout.due(ws, hook, time.time()):
-                readout.midturn(hook, ws, o.get("runtime_id"), min(1.5, left))
-        except Exception as e:  # a reading is worth one attempt; the next window brings another
-            record("readout", f"mid-turn post failed: {failure(e)}", ws)
-    notice = plugin_notice(ws, o, notice)
-    notice = behind_notice(ws, o, notice)
-    return finish(o["event"], notice) if notice else finish()
+    return notice
 
 
 def received_notice(ws: Path, o: dict, notice: str | None, now: float) -> str | None:

@@ -266,6 +266,9 @@ optional. Capture its stdout in `GH_TOKEN`, never print it; request a fresh toke
 
 ## Gate your work
 
+Write a pull request's, comment's or issue's body to a file and pass it with `--body-file <file>`:
+a body inline whose line starts with `#` is refused before it runs on some launches (#7528).
+
 Push first, keep the pull request draft, and before each round run the focused guards for what
 changed locally, and the full suite locally when the change warrants one. Dispatch no CI for it.
 From the branch's worktree:

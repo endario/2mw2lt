@@ -110,10 +110,18 @@ async function keepLine($: EngineInterface, session: string): Promise<string> {
 }
 
 // PENDING and POINTED are read and then written by the hold loop and by the `frames` tool, each
-// across awaits; every such change runs in turn through this one chain.
+// across awaits; every such change runs in turn through this one chain. The engine answers a
+// dispatch's $.state.get from what it held at that dispatch's first read, renewed only by that
+// dispatch's own writes, so each section first renews it: a set whose ifVersion cannot match writes
+// nothing and renews it, as update() reads again after losing a race. Without it a frames call
+// wrote back a pending list without the frame the hold loop had added meanwhile (#7516).
 let chain: Promise<unknown> = Promise.resolve()
-function locked<T>(work: () => Promise<T>): Promise<T> {
-  const run = chain.then(work, work)
+function locked<T>($: EngineInterface, work: () => Promise<T>): Promise<T> {
+  const section = async () => {
+    await $.state.set(PENDING, [], { ifVersion: Number.MAX_SAFE_INTEGER })
+    return work()
+  }
+  const run = chain.then(section, section)
   chain = run.catch(() => undefined)
   return run
 }
@@ -132,7 +140,7 @@ async function point($: EngineInterface) {
 // again. So a turn that ended with its pointer unanswered gets one as a prompt of its own,
 // once the session is idle.
 async function repoint($: EngineInterface) {
-  await locked(async () => {
+  await locked($, async () => {
     const appended = (await $.state.get(APPENDED)).value
     const pointed = (await $.state.get(POINTED)).value
     if (!appended && !pointed) return
@@ -152,7 +160,7 @@ async function unpoint($: EngineInterface) {
 // A frame arriving while a client call is outstanding was added to PENDING while its prior pointer
 // still stood. A refusal keeps the original batch untouched, but re-points that genuinely new row.
 async function refuseFrames($: EngineInterface, pending: readonly string[]) {
-  await locked(async () => {
+  await locked($, async () => {
     await unpoint($)
     const { value: now = [] } = await $.state.get(PENDING)
     if (now.some(id => !pending.includes(id))) await point($)
@@ -162,7 +170,7 @@ async function refuseFrames($: EngineInterface, pending: readonly string[]) {
 // A returned seat notice identifies one generation. When that exact generation has gone stale,
 // remembering its id as read prevents its replay from blocking the ordinary frames beside it.
 async function retireStaleSeatFrame($: EngineInterface, seatFrameId: string) {
-  await locked(async () => {
+  await locked($, async () => {
     const { value: now = [] } = await $.state.get(PENDING)
     const left = now.filter(id => id !== seatFrameId)
     await $.state.set(PENDING, left)
@@ -206,7 +214,7 @@ async function checkpointIfDue($: EngineInterface, tokens: number | undefined, f
   // A step is one model request: an unconnected or already-warned session leaves before the lock.
   const owed = async () => (await $.state.get(WARNED)).value !== true && !!(await $.state.get(SESSION)).value
   if (!root || tokens === undefined || !(await owed())) return
-  await locked(async () => {
+  await locked($, async () => {
     if (!(await owed())) return
     const point = (fresh ? undefined : (await $.state.get(POINT)).value) ?? await compactionPoint($)
     if (!due(tokens, point)) return
@@ -282,7 +290,7 @@ async function bulletinRevisions($: EngineInterface): Promise<Map<string, number
 }
 
 async function dropHeldBulletins($: EngineInterface, rendered: number) {
-  await locked(async () => {
+  await locked($, async () => {
     const { value: ids = [] } = await $.state.get(BULLETINS)
     if (!ids.length) return
     const revisions = await bulletinRevisions($)
@@ -311,7 +319,7 @@ async function tellBulletins($: EngineInterface) {
   }
   const { bulletins, found } = pick(recording, ids)
   if (bulletins.length) await append($, capBulletin(bulletins))
-  await locked(async () => {
+  await locked($, async () => {
     const { value: now = [] } = await $.state.get(BULLETINS)
     const left = now.filter(id => !found.includes(id))
     await $.state.set(BULLETINS, left)
@@ -419,7 +427,7 @@ async function holdOnce($: EngineInterface, ps: string, session: string, gen: nu
       if (l.kind === 'bulletin' && l.id) {
         // Recorded for the turn that next starts; it wakes nobody, so no pointer either.
         const fid = l.id
-        await locked(async () => {
+        await locked($, async () => {
           const { value: ids = [] } = await $.state.get(BULLETINS)
           const { value: read = [] } = await $.state.get(READ)
           if (!ids.includes(fid) && !read.includes(fid)) await $.state.set(BULLETINS, [...ids, fid])
@@ -428,7 +436,7 @@ async function holdOnce($: EngineInterface, ps: string, session: string, gen: nu
       }
       if (!l.wakes || l.kind === 'closed') continue
       woke = true
-      await locked(async () => {
+      await locked($, async () => {
         const { value: pending = [] } = await $.state.get(PENDING)
         const { value: read = [] } = await $.state.get(READ)
         if (!owed(l.id, pending, read)) {
@@ -568,7 +576,7 @@ export const register: Register = on => {
     const { agentId } = e as unknown as { agentId?: string }
     if (!framesEntry(agentId, next.origin.plugin)) return { result: 'Nothing is waiting.' }
     const { value: session = '' } = await $.state.get(SESSION)
-    const pending = await locked(async () => (await $.state.get(PENDING)).value ?? [])
+    const pending = await locked($, async () => (await $.state.get(PENDING)).value ?? [])
     let recording = ''
     if (session && pending.length) {
       const at = await runOwn($, ['python3', script($, 'hold.py'), '--frame-path', session])
@@ -609,7 +617,7 @@ export const register: Register = on => {
     if (owing.length || unsettled.length) await $.state.set(UNSETTLED, unsettled)
     // Only what was returned leaves PENDING: an id the recording does not hold yet stays, and does
     // not wake the session again. A frame that arrived while this ran gets its own pointer.
-    await locked(async () => {
+    await locked($, async () => {
       const { value: now = [] } = await $.state.get(PENDING)
       const readNow = found
       const left = now.filter(id => !readNow.includes(id))
@@ -683,7 +691,7 @@ export const register: Register = on => {
       // same refusal would only be refused again. The frames stay pending, and the next one to
       // arrive is pointed afresh, which a pointer left outstanding would have blocked for good.
       if (e.reason === 'error') {
-        await locked(() => unpoint($))
+        await locked($, () => unpoint($))
         return next(e)
       }
       if ((await $.state.get(APPENDED)).value) $.clock.after(REPOINT_MS, () => { void repoint($).catch(() => undefined) })
@@ -710,7 +718,7 @@ export const register: Register = on => {
   on('session.compact', async ($, e, next) => {
     if (!root || e.trigger === 'precompute' || e.agentId !== undefined) return next(e)
     const { value: session = '' } = await $.state.get(SESSION)
-    await locked(() => $.state.set(WARNED, false))   // ordered with a check still in flight
+    await locked($, () => $.state.set(WARNED, false))   // ordered with a check still in flight
     if (!session) return next(e)
     // The conversation's cache is spent here anyway: the new text is in place before the next request.
     await refreshSeat($, true).catch(err => $.ui.log(`2mw2lt: the seat check broke: ${String(err)}`, { to: 'debug' }))
@@ -722,7 +730,7 @@ export const register: Register = on => {
   // id, and the new id gets its claim here. rebrief.py sends the model to connect again.
   on('classic.SessionStart', async ($, e, next) => {
     if (root && e.source === 'clear') {
-      await locked(async () => {
+      await locked($, async () => {
         await $.state.set(PENDING, [])
         await $.state.set(READ, [])                  // a fresh context has read nothing
         await $.state.set(WARNED, false)             // a fresh context is owed its own prompt

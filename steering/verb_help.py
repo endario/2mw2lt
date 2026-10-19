@@ -30,7 +30,7 @@ _RAW_FORMS = {
     "ack": ["ack: <ulid> token <t>"],
     "say": ["say: <session> [to <target>] token <t> <text>"],
     "note": ["note: token <lease token> <text>"],
-    "launch": ["launch: token <lease token> [<harness>] floor <rarity> [thinking <level>] [effort <level>] [window] [card <card>|resolves <owner>/<name>#<n>] [notify <session>] because <reason> [<newline> brief: <directive>]",
+    "launch": ["launch: token <lease token> floor <rarity> [thinking <level>] [effort <level>] [window] [card <card>|resolves <owner>/<name>#<n>] [notify <session>] [harness <harness>] because <reason> [<newline> brief: <directive>]",
                "launch: token <lease token> <harness> [on <node>] [vendor <vendor>] [account <n>] [model <model>] [thinking <level>] [effort <level>] [window] [card <card>|resolves <owner>/<name>#<n>] [notify <session>] because <reason> [<newline> brief: <directive>]"],
     "withdraw": ["withdraw: token <lease token> <launch id>"],
     "cancel": ["cancel: token <lease token> <action id>"],
@@ -45,12 +45,14 @@ _RAW_FORMS = {
     "keep": ["keep: token <lease token> <session> [until <time or duration>] because <reason>"],
     "unkeep": ["unkeep: token <lease token> <session>"],
     "answer": ["answer: token <lease token> <episode> acted because <why>", "answer: token <lease token> <episode> considered because <why>"],
+    "regroup": ["regroup: token <lease token> because <why reconsider now>"],
     "roster": ["roster: token <lease token> [with gone]"],
     "gate": ["gate: review <repo> <branch> pr <n> [head <sha>] [tier <tier>] [harness <harness>] [exclude <vendor>[,<vendor>]] [final] token <t>", "gate: critic <repo> <branch> doc <path> [head <sha>] [tier <tier>] [harness <harness>] [exclude <vendor>[,<vendor>]] [final] token <t>", "gate: status <commission> token <t>", "gate: cancel <commission> token <t>", "gate: pr <n> token <t>", "gate: carry <n> head <sha> [equivalent] token <t>"],
     "lift": ["lift: token <lease token> review <repo> pr <n> <reason>", "lift: token <lease token> critic <repo> branch <branch> <reason>", "lift: token <lease token> bench <vendor> <model> <reason>"],
     "authorship": ["authorship: token <lease token> establish <session> epoch <n> model <model> because <evidence>", "authorship: token <lease token> abandon <session> epoch <n> because <reason>"],
     "dispose": ["dispose: token <lease token> <item id> <reason>"],
     "promote": ["promote: token <lease token> <item id> <reason>"],
+    "out-of-band": ["out-of-band: token <lease token> <item id> via <channel>: <the owner's words>"],
     "night": ["night: token <lease token> promote <route> <work class> <reason>", "night: token <lease token> demote <route> <work class> <reason>", "night: token <lease token> draft <issue> <route> <account> <reason>"],
     "backlog": ["backlog: token <lease token>"],
     "detach": ["detach: <session> token <t> [handover <url> or abandon <reason>]"],
@@ -60,7 +62,7 @@ _RAW_FORMS = {
 
 _AUDIENCE = {
     **{verb: "session" for verb in ("announce", "blocked", "wait", "done", "recommend", "ask", "claim", "taking", "declare", "checkpoint", "holds", "enroll", "bind", "ack", "say", "detach", "gate")},
-    **{verb: "seat" for verb in ("note", "launch", "withdraw", "relay", "retire", "card", "effort", "wake", "control", "rehome", "park", "cancel", "keep", "unkeep", "answer", "roster", "lift", "authorship", "dispose", "promote", "backlog", "night")},
+    **{verb: "seat" for verb in ("note", "launch", "withdraw", "relay", "retire", "card", "effort", "wake", "control", "rehome", "park", "cancel", "keep", "unkeep", "answer", "regroup", "roster", "lift", "authorship", "dispose", "promote", "out-of-band", "backlog", "night")},
     "rebind": "operator",
     "supersede": "operator",
 }
@@ -101,12 +103,14 @@ _EXAMPLES = {
     "unkeep": ["unkeep: token <lease token> violet"],
     "answer": ["answer: token <lease token> <episode from the snapshot> acted because I relaunched the stalled worker",
                "answer: token <lease token> <episode from the snapshot> considered because nothing in it needed me"],
+    "regroup": ["regroup: token <lease token> because the owner moved the release to Friday"],
     "roster": ["roster: token <lease token> with gone"],
     "gate": ["gate: review endario/repo feat/help pr 1 token <t>", "gate: critic endario/repo feat/help doc documentation/plan.md token <t>", "gate: status 010101010101010101010101 token <t>", "gate: cancel 010101010101010101010101 token <t>", "gate: pr 1 token <t>", "gate: carry 1 head abababababababababababababababababababab token <t>"],
     "lift": ["lift: token <lease token> review endario/repo pr 1 needs another round", "lift: token <lease token> critic endario/repo branch feat/help needs another round", "lift: token <lease token> bench anthropic opus-5.5 retry it"],
     "authorship": ["authorship: token <lease token> establish violet epoch 1 model opus-5.5 because its transcript names the model", "authorship: token <lease token> abandon violet epoch 1 because no transcript or launch record names its model"],
     "dispose": ["dispose: token <lease token> 010101010101010101010101 handled"],
     "promote": ["promote: token <lease token> 010101010101010101010101 owner decision needed"],
+    "out-of-band": ["out-of-band: token <lease token> 010101010101010101010101 via the owner's chat: ship it Friday, watched"],
     "night": ["night: token <lease token> promote opencode-go/glm-5.3 review clears the spoof probe", "night: token <lease token> demote opencode-go/glm-5.3 triage agreed with a spoof two passes running", "night: token <lease token> draft 4612 opencode-go/glm-5.3 acct-2 its band cleared and the queue is starving"],
     "backlog": ["backlog: token <lease token>"],
     "detach": ["detach: violet token <t> handover https://github.com/example/repo/pull/1"],
@@ -129,10 +133,6 @@ TOOLS = {
     "ack": {"verb": "ack", "forms": [
         {"topic": "send", "usage": "<session> <directive id>", "example": "ack violet 1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00"},
         {"topic": "store", "usage": "--store <session> [--provider-session <id>] < <token-file>", "example": "ack --store violet < token.txt"},
-    ]},
-    "agent_secret": {"forms": [
-        {"topic": "secret", "usage": "<console> < <secret-file>", "example": "agent_secret https://console.example < secret.txt"},
-        {"topic": "--review-host", "usage": "--review-host <console> <door-base> < <secret-file>", "example": "agent_secret --review-host https://console.example https://door.example < secret.txt"},
     ]},
     "bind": {"verb": "bind", "current": True, "forms": [
         {"topic": None, "usage": "[--provider <provider>] [--provider-session <id>] [--pid <pid>] [session]", "example": "bind --current"},
@@ -224,11 +224,11 @@ TOOLS = {
         {"topic": None, "usage": "[--to <peer>] " + _SPEAKER_USAGE + " <session> <text|-> [--retry=<id>]", "example": "say --to amber violet please-review"},
     ]},
     "taking": {"verb": "taking", "forms": [
-        {"topic": "issue", "usage": _SPEAKER_USAGE + " <session> <issue>", "example": "taking violet 3384"},
-        {"topic": "branch", "usage": _SPEAKER_USAGE + " <session> branch [name]", "example": "taking violet branch feat/help"},
+        {"topic": "issue", "usage": _SPEAKER_USAGE + " <session> <issue>|<owner>/<name>#<issue>", "example": "taking violet 3384"},
+        {"topic": "branch", "usage": _SPEAKER_USAGE + " <session> branch [name [in <owner>/<name>]]", "example": "taking violet branch feat/help"},
     ]},
     "verb": {"forms": [
-        {"topic": "announce", "usage": "announce <session> as <harness/account> on <branch> doing <what> [--retry=<id>]", "example": "verb announce violet as claude-code/main on feat/help doing add-help"},
+        {"topic": "announce", "usage": "announce <session> as <harness/account> on <branch> [in <owner>/<name>] doing <what> [--retry=<id>]", "example": "verb announce violet as claude-code/main on feat/help doing add-help"},
         {"topic": "blocked", "usage": "blocked <session> on <what> [--retry=<id>]", "example": "verb blocked violet on waiting"},
         {"topic": "wait", "usage": "wait <session> for checks|merged|verdict|comment <pr> [recheck <seconds>] [--retry=<id>]", "example": "verb wait violet for checks 4391"},
         {"topic": "wait-at", "usage": "wait <session> for at <YYYY-MM-DDTHH:MMZ> [recheck <seconds>] [--retry=<id>]", "example": "verb wait violet for at 2026-10-17T09:00Z"},

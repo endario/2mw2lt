@@ -116,7 +116,7 @@ const ROOT = '/ws/checkout'
 const line = (id: string | null, kind: string, wakes: boolean) => JSON.stringify({ id, kind, wakes }) + '\n'
 
 function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording = '', keep = 'Keep verbatim: steering session s1; branch b; checkpoint https://github.com/example-org/example-repo/pull/1.\n',
-                         enrolled = true, submitRejects = false, ackFails = false, readFails = false,
+                         enrolled = true, submitRejects = false, ackFails = false, readFails = false, engineState = false,
                          // The engine's own answer to `$.session.usage({ breakdown })`: the window it measures
                          // against, the token count it auto-compacts at, and who settled the window.
                          context = { point: 167_000 as number | undefined, raw: 200_000, source: 'auto', model: 'claude-test' } } = {}) {
@@ -172,13 +172,22 @@ function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording 
     leaseOut: [] as string[],
     check: { decision: 'allow' } as { decision: 'allow' | 'ask' | 'deny'; reason?: string },
   }
-  on('state.get', async ($, e) => {
+  const versions = new Map<string, number>()
+  if (!engineState) on('state.get', async ($, e) => {
     const value = w.state.get(e.key)
+    const version = versions.get(e.key) ?? 0
     const held = w.holdNextGet
     if (held?.key === e.key) { w.holdNextGet = undefined; await held.release }
-    return { value: { value, version: 0 } } as never
+    return { value: { value, version } } as never
   })
-  on('state.set', async ($, e) => { w.state.set(e.key, e.value); return { value: { isSet: true, version: 0 } } as never })
+  // A set whose ifVersion is not the key's version writes nothing, as the engine's does.
+  if (!engineState) on('state.set', async ($, e) => {
+    const version = versions.get(e.key) ?? 0
+    if (e.ifVersion !== undefined && e.ifVersion !== version) return { value: { isSet: false, version } } as never
+    w.state.set(e.key, e.value)
+    versions.set(e.key, version + 1)
+    return { value: { isSet: true, version: version + 1 } } as never
+  })
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
   on('session.version', async () => ({ value: { version } }))
   on('session.root', async () => ({ value: ROOT }))
@@ -1006,6 +1015,37 @@ test('a frame delivered while the tool runs is acked once, never re-added', asyn
   await $.tool.call({ tool: TOOL } as never)
   expect(ack(w).filter(u => u === 'U1')).toEqual(['U1'])
   expect(ack(w).filter(u => u === 'U2')).toEqual(['U2'])
+})
+
+// The engine's own state, not the stand-in: a dispatch reads what it held at its first read until
+// it writes (#7516). The frames call and the hold loop are two dispatches, so a frame the loop adds
+// while a call runs must survive the call's write-back with a pointer of its own, and a frame a
+// call returned must not come back with the loop's next one.
+test('under the engine state, a frame that arrives mid-call is pointed and returned once', async ($, on) => {
+  let second: () => void = () => {}
+  let third: () => void = () => {}
+  const w = world(on, {
+    engineState: true,
+    rounds: [{ lines: [line('f1', 'say', true), new Promise<void>(r => { second = r }), line('f2', 'say', true),
+      new Promise<void>(r => { third = r }), line('f3', 'say', true)], code: 0, hold: never }],
+    recording: ['f1', 'f2', 'f3'].map(id => `data: {"kind":"say","id":"${id}"}\n`).join(''),
+  })
+  await begin($)
+  await w.clock.settle()
+  await $.turn.start({ text: 'the pointer', turnId: 't-1' } as never)
+  let open: () => void = () => {}
+  w.readGate = new Promise<void>(r => { open = r })
+  const reading = $.tool.call({ tool: TOOL } as never)
+  await w.clock.settle()
+  second()
+  await w.clock.settle()
+  open()
+  expect(await reading).toEqual({ result: '{"kind":"say","id":"f1"}' })
+  await w.clock.settle()
+  expect(w.appends).toEqual([POINTER])                // f2 is owed a pointer of its own
+  third()
+  await w.clock.settle()
+  expect(await $.tool.call({ tool: TOOL } as never)).toEqual({ result: '{"kind":"say","id":"f2"}\n{"kind":"say","id":"f3"}' })
 })
 
 test('a frame that arrives while the tool runs gets its own pointer', async ($, on) => {
@@ -1885,6 +1925,14 @@ test('seatCall: word fields are one word, enums hold, and unknown fields are ref
   expect(seatCall('card_scope', { name: 'The work', track: 'rt', criticality: 'major', size: 'L' })).toEqual(
     { client: 'card', argv: ['scope', 'The work', 'rt', 'triage:major,L'] })
   expect(resendId('done')).toBeNull()
+})
+
+test('seatCall: an out-of-band answer names the row, where it was given, and the words', async () => {
+  expect(seatCall('out-of-band', { item: 'i1', channel: "the owner's chat, 13:20Z", words: 'ship it Friday' }))
+    .toEqual({ client: 'say', stdin: `out-of-band: token @lease i1 via the owner's chat, 13:20Z: ship it Friday` })
+  expect(seatCall('out-of-band', { item: 'i1', channel: 'chat' })).toEqual({ refused: 'words is required' })
+  expect(seatCall('out-of-band', { item: 'i1', words: 'ship it Friday' })).toEqual({ refused: 'channel is required' })
+  expect(seatCall('out-of-band', { channel: 'chat', words: 'ship it Friday' })).toEqual({ refused: 'item is required' })
 })
 
 test('seatCall: a park names its until only when given, and needs a reason', async () => {

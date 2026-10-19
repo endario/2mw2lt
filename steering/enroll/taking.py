@@ -5,6 +5,10 @@
 checkout is on. A session in a linked worktree needs it: what it is observed to hold is the
 project checkout's branch, and a gate is commissioned only on a branch its session holds
 (doc 68 §11).
+
+Work in another of the team's repositories names it: the issue as `<owner>/<name>#<n>`, the branch
+as `branch <name> in <owner>/<name>` (#7517). The daemon binds nothing in a repository the team
+does not hold.
 """
 from __future__ import annotations
 
@@ -30,6 +34,9 @@ from local_workspace import required_workspace_root  # noqa: E402
 
 from verb_help import error, help_requested, script_help  # noqa: E402
 
+REPOSITORY = re.compile(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}")
+ISSUE = re.compile(r"(?P<repo>[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100})#(?P<n>[0-9]{1,9})")
+
 
 def main(argv: list[str]) -> int:
     if help_requested("taking", argv):
@@ -39,7 +46,7 @@ def main(argv: list[str]) -> int:
     if parsed is None:
         return error("taking", "malformed speaker flags")
     flags, args = parsed
-    card = ""
+    card, repo = "", ""
     if "--card" in args:
         i = args.index("--card")
         if i + 1 >= len(args) or not re.fullmatch(r"[0-9a-f]{24}", args[i + 1]):
@@ -47,6 +54,10 @@ def main(argv: list[str]) -> int:
         card, args = args[i + 1], args[:i] + args[i + 2:]
     if not args or not args[0] or args[0].startswith("-") or any(c.isspace() for c in args[0]):
         return error("taking", "taking requires a session name")
+    if len(args) == 5 and args[1] == "branch" and args[3] == "in":
+        if not REPOSITORY.fullmatch(args[4]):
+            return error("taking", "taking branch <name> in names a repository as <owner>/<name>")
+        repo, args = args[4], args[:3]
     if len(args) in (2, 3) and args[1] == "branch":
         if len(args) == 3 and (not args[2] or args[2].startswith("-") or
                               any(c.isspace() for c in args[2]) or len(args[2]) > 200):
@@ -58,6 +69,8 @@ def main(argv: list[str]) -> int:
         what = f"branch {name}"
     elif len(args) == 2 and args[1].removeprefix("#").isascii() and args[1].removeprefix("#").isdigit():
         what = args[1].removeprefix("#")
+    elif len(args) == 2 and (issue := ISSUE.fullmatch(args[1])):
+        repo, what = issue["repo"], issue["n"]
     else:
         return error("taking", "taking requires an issue number or branch")
     if card and not what.startswith("branch "):
@@ -99,12 +112,12 @@ def main(argv: list[str]) -> int:
                 return 1
             reply = session_routes.announce_branch(session, token, what.removeprefix("branch ").strip(),
                                                    ws, occurrence(), card=named,
-                                                   resolved=candidates[0] if candidates else None)
+                                                   resolved=candidates[0] if candidates else None, repo=repo)
         else:
-            reply = session_routes.claim_issue(session, token, session_routes.card_repo(ws),
+            reply = session_routes.claim_issue(session, token, repo or session_routes.card_repo(ws),
                                                int(what), occurrence())
     except ValueError as e:
-        print(f"{e}: declare the work first, or give doing", file=sys.stderr)
+        print(e if isinstance(e, session_routes.ConcludedClaim) else f"{e}: declare the work first, or give doing", file=sys.stderr)
         return 1
     except session_routes.Refused as e:
         said = session_routes.outdated(e) or (refusal_mod.use("taking", str(e)) if session_routes.settled(e)

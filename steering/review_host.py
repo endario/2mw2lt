@@ -1,7 +1,7 @@
 """A review host's side of doc 136 §5: the team's clusters it serves for gates, with no install.
 
 `~/.config/2mw2lt/review-host.json`, mode 0600, holds the console, the door base and the review
-host's secret, written by `agent_secret.py --review-host`. The team's clusters are listed at most
+host's secret. The team's clusters are listed at most
 every `LIST_EVERY` seconds, and each one gets a credential of its own on first sight, stored as any
 enrolment is (`credential.enrol` with its cluster named). A door this machine already holds an
 enrolment for is left to that enrolment: an installed workspace takes precedence.

@@ -68,6 +68,10 @@ def _workspace() -> Path | None:
 
 from verb_help import _invocation as help_invocation, error, help_requested, script_help  # noqa: E402
 
+# An announce on Go: a branch in another of the team's repositories names it (#7517).
+ANNOUNCE = re.compile(r"as (?P<agent>\S+/\S+)(?: on (?P<branch>\S+)(?: in (?P<repo>[^/\s]+/[^/\s]+))?)?"
+                      r"(?: doing (?P<work>.+))?")
+
 
 def _on_go(ws: Path, verb: str, session: str, text: str, retry_id: str | None) -> int:
     """A board verb on a Go workspace: the fields its route names, on the session's carrier, under
@@ -101,10 +105,13 @@ def _on_go(ws: Path, verb: str, session: str, text: str, retry_id: str | None) -
 
     body: dict = {}
     if verb == "announce":
-        m = re.fullmatch(r"as (?P<agent>\S+/\S+)(?: on (?P<branch>\S+))?(?: doing (?P<work>.+))?", text)
+        m = ANNOUNCE.fullmatch(text)
         if m is None:
-            print("malformed announce: as <harness>/<account> [on <branch>] [doing <text>]", file=sys.stderr)
+            print("malformed announce: as <harness>/<account> [on <branch> [in <owner>/<name>]] [doing <text>]",
+                  file=sys.stderr)
             return 1
+        # A branch in another of the team's repositories names it; the checkout's origin otherwise.
+        repo = m["repo"] or (session_routes.card_repo(ws) if m["branch"] else "")
         harness, _, account = m["agent"].partition("/")
         doing = (m["work"] or "").strip()
         if m["branch"] and not doing:
@@ -113,9 +120,9 @@ def _on_go(ws: Path, verb: str, session: str, text: str, retry_id: str | None) -
             print(f"id {key}", file=sys.stderr)
             try:
                 answer = said(lambda: session_routes.announce_branch(
-                    session, token, m["branch"], ws, key, harness=harness, account=account), key)
+                    session, token, m["branch"], ws, key, harness=harness, account=account, repo=repo), key)
             except ValueError as e:
-                print(f"{e}: declare the work first, or give doing", file=sys.stderr)
+                print(e if isinstance(e, session_routes.ConcludedClaim) else f"{e}: declare the work first, or give doing", file=sys.stderr)
                 return 1
             if answer is False:
                 return 1
@@ -124,7 +131,7 @@ def _on_go(ws: Path, verb: str, session: str, text: str, retry_id: str | None) -
         body = {"state": "announce", "harness": harness, "account": account}
         if m["branch"]:
             body["branch"] = m["branch"]
-            body["repo"] = session_routes.card_repo(ws)
+            body["repo"] = repo
         if not doing:
             card = said(lambda: session_routes.executing_card(session, token))
             if card is False:
@@ -245,8 +252,7 @@ def main(argv: list[str]) -> int:
         import verb_grammar
         unparsed = verb_grammar.parse_status(line(verb, session, text)) is None and not (
             verb == "wait" and WAIT_CANCEL.fullmatch(text))
-        go_shape = (verb == "announce"
-                    and re.fullmatch(r"as \S+/\S+(?: on \S+)?(?: doing .+)?", text) is not None)
+        go_shape = verb == "announce" and ANNOUNCE.fullmatch(text) is not None
         if unparsed and not go_shape:
             return error("verb", f"malformed {verb}")
     if verb == "ask" and text.startswith("json {"):

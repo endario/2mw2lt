@@ -191,7 +191,7 @@ The workspace works without lanes, and its board says it has none yet. Give it l
    ```
 
 6. Commit it all on a branch `2mw2lt/tracks`, push it, and open a pull request with
-   `gh pr create -R <repo>`. The person accepting the lanes was the review, so offer to merge it
+   `gh pr create -R <repo> --body-file <file>`, its body the lanes accepted, written to that file first. The person accepting the lanes was the review, so offer to merge it
    now. Ask the engine how it would merge:
 
    ```bash

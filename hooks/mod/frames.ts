@@ -202,6 +202,12 @@ export const SEAT_TOOLS: Record<string, SeatTool> = {
     required: ['item', 'reason'],
     build: a => ({ client: 'say', stdin: `dispose: token @lease ${str(a, 'item')} ${str(a, 'reason')}` }),
   },
+  'out-of-band': {
+    description: 'Seat only: record on one of the owner\'s Needs You rows the answer the owner gave somewhere else (#6325). The row closes as the owner\'s answer relayed by you — a ruling on their behalf, theirs to acknowledge or correct, never a seat dismissal — and the session that raised it is told, so it does not wait on a row nobody will answer. An ask is refused: the owner answers it in the desk.',
+    fields: { item: word('The row\'s id.'), channel: text('Where the owner gave the answer, and when: such as "the owner\'s chat, 2026-10-13T13:20Z".'), words: text('The owner\'s decision as they gave it.') },
+    required: ['item', 'channel', 'words'],
+    build: a => ({ client: 'say', stdin: `out-of-band: token @lease ${str(a, 'item')} via ${str(a, 'channel')}: ${str(a, 'words')}` }),
+  },
   retire: {
     description: 'Seat only: retire a session, ending its process and its enrolment. Refused while it has unpublished work. A Go workspace takes the reason; the incumbent takes the node.',
     fields: { worker: word('The worker\'s session.'), node: word('The machine it runs on, on the incumbent.'), reason: text('Why, on a Go workspace.') },

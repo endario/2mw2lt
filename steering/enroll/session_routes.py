@@ -592,15 +592,19 @@ def machines_here(token: str) -> str:
     return f"machines here: {', '.join(named)}" if named else "no machine reaches this workspace"
 
 
-def live_cards(token: str):
-    """Every live card, page by page: a hundred to a page, and the cards route has no filter for a
-    session's own. A read that stops at the first page misses every card past it."""
-    page = "/cards?state=live"
+def cards_in(state: str, token: str):
+    """Every card of a state, page by page: a hundred to a page, and the cards route has no filter
+    for a session's own. A read that stops at the first page misses every card past it."""
+    page = f"/cards?state={state}"
     while page:
         listed = get(page, token)
         yield from listed.get("cards") or []
         nxt = listed.get("next")
-        page = "/cards?state=live&next=" + urllib.parse.quote(nxt, safe="") if nxt else ""
+        page = f"/cards?state={state}&next=" + urllib.parse.quote(nxt, safe="") if nxt else ""
+
+
+def live_cards(token: str):
+    return cards_in("live", token)
 
 
 def executing_cards(session: str, token: str) -> list[dict]:
@@ -614,6 +618,20 @@ def executing_cards(session: str, token: str) -> list[dict]:
                for e in card.get("executors") or []):
             out.append(card)
     return out
+
+
+class ConcludedClaim(ValueError):
+    """A claim found no live card because the card its session executes is concluded; the message
+    already says what to do."""
+
+
+def concluded_executing(session: str, token: str) -> list[dict]:
+    """The concluded cards a session still holds a live executor engagement on: the cards read
+    behind a claim leaves a concluded card out, and it is the only reason a session that executes
+    a card can find none to claim on."""
+    return [c for c in cards_in("concluded", token)
+            if any(e.get("session") == session and e.get("role") == "executor" and e.get("live") is True
+                   for e in c.get("executors") or [])]
 
 
 def executing_card(session: str, token: str) -> dict | None:
@@ -652,20 +670,26 @@ def raise_need(token: str, key: str, body: dict) -> dict:
 
 def announce_branch(session: str, token: str, branch: str, ws: Path, key: str,
                     harness: str = "", account: str = "", card: dict | None = None,
-                    resolved: dict | None = None) -> str:
+                    resolved: dict | None = None, repo: str = "") -> str:
     """A branch claim is an announce (the brain's ruling, 2026-10-08): the doing defaults to the
     executed card's title, and the repository names the branch, which binds it to the card. A card
     given (`card`, one this session executes as the cards read answers) is named to the claim,
     which binds the branch to it over the card the session engaged last (#5352); `resolved` is the
-    same read's answer handed in so the cards are read once, naming no card to the claim. There
+    same read's answer handed in so the cards are read once, naming no card to the claim. `repo`
+    names a branch in another of the team's repositories, the checkout's origin otherwise. There
     is no separate claim primitive on the wire. Answers the card it bound and the branch it
     displaced, or `REJECTED` with why nothing bound (#5084). Raises `ValueError` when no card names
     doing, `Refused` or `Unsent` as a write does."""
     named = card is not None
     card = card or resolved or executing_card(session, token)
     if card is None:
+        concluded = concluded_executing(session, token)
+        if concluded:
+            raise ConcludedClaim("; ".join(
+                f"{c.get('id')} ({c.get('name')}) is concluded, so a branch cannot be claimed on it" for c in concluded)
+                + ": the seat can unconclude it, or declare a new card")
         raise ValueError(f"no live card of {session}'s names doing to announce")
-    body: dict = {"state": "announce", "doing": card["name"], "branch": branch, "repo": card_repo(ws)}
+    body: dict = {"state": "announce", "doing": card["name"], "branch": branch, "repo": repo or card_repo(ws)}
     if named:
         body["card"] = card["id"]
     if harness:
@@ -697,6 +721,8 @@ UNBOUND = {
                       "with a card id as the cards read answers it, for no card holds the one named")],
     "card-not-executed": [("taking: branch <name> --card <id> token <t>",
                            "with a card this session executes, declaring the card first if it should execute another")],
+    "repository-unheld": [("taking: branch <name> in <owner>/<name> token <t>",
+                           "naming a repository one of the team's workspaces serves or its sources read")],
 }
 
 
@@ -795,14 +821,19 @@ def relay(session: str, token: str, to: str, epoch: int | None, text: str, key: 
     return f"relayed: {answer.get('id', directive)} to {to}@{epoch}"
 
 
-def seat_need(session: str, token: str, kind: str, need: str, reason: str) -> str:
-    """The holder promotes one of the brain's Needs You rows to the owner, or disposes of it, with
-    a reason the owner can read (`POST /needs/{need}/transitions`). The key is the transition's
-    own, so a rerun after a lost answer is answered from the first. Raises `NotSeated`, `Refused`
-    or `Unsent`."""
+def seat_need(session: str, token: str, kind: str, need: str, reason: str = "", words: str = "", channel: str = "") -> str:
+    """The holder promotes one of the brain's Needs You rows to the owner, disposes of it with a
+    reason the owner can read, or records on one of the owner's rows the answer the owner gave
+    somewhere else, as `words` given `channel` (#6325) (`POST /needs/{need}/transitions`). The key
+    is the transition's own, so a rerun after a lost answer is answered from the first. Raises
+    `NotSeated`, `Refused` or `Unsent`."""
     seat_generation(session, token)
     body = {"kind": kind, "reason": reason}
-    write(f"/needs/{need}/transitions", body, _own_key("seat.need", session, need, kind, reason), SESSION_CARRIER, token)
+    if kind == "out-of-band":
+        body = {"kind": kind, "words": words, "channel": channel}
+    write(f"/needs/{need}/transitions", body, _own_key("seat.need", session, need, kind, reason, words, channel), SESSION_CARRIER, token)
+    if kind == "out-of-band":
+        return f"answered out of band: {need}"
     return f"{kind}d: {need}"
 
 
@@ -814,12 +845,15 @@ def seat_launch(session: str, token: str, body: dict, key: str) -> str:
     account = answer.get("account")
     harness = f" {body['harness']}" if body.get("harness") else ""
     on = f" on {account['vendor']} account {account['number']} ({account['account_id']}, brought by {account['brought_by']})" if account else ""
+    preferred = answer.get("preferred_harness")
+    nudge = (f" — {preferred['machine']} prefers {preferred['harness']} for {preferred['vendor']}"
+             "; leave the harness out to let placement choose") if preferred else ""
     if answer.get("outcome") == "refused":
         return f"launch refused: {answer['id']}{harness}{on}: {answer.get('refused')}"
     if answer.get("outcome") == "session":
-        return f"launched: {answer['id']}{harness}{on}{_overloaded(answer.get('host_overloaded'))}"
+        return f"launched: {answer['id']}{harness}{on}{_overloaded(answer.get('host_overloaded'))}{nudge}"
     if answer.get("state") == "admitted":
-        return f"launching: {answer['id']}{harness}{on}{_overloaded(answer.get('host_overloaded'))}"
+        return f"launching: {answer['id']}{harness}{on}{_overloaded(answer.get('host_overloaded'))}{nudge}"
     if answer.get("state") == "withdrawn":
         # Ended at its publish, a pinned account barred or off, its pinned machine gone: not waiting.
         return f"launch withdrawn: {answer['id']}{harness}{on}: {answer.get('reason')}"
@@ -898,6 +932,17 @@ def seat_keep(session: str, token: str, verb: str, body: dict, key: str) -> str:
     if verb == "unkeep":
         return f"unkept: {answer['session']}, kept for {answer['reason']}"
     return f"kept: {answer['session']} until {answer['until']} because {answer['reason']}"
+
+
+def seat_regroup(session: str, token: str, reason: str, request: str, key: str) -> str:
+    """The holder asks for a regroup by hand (`POST /sessions/{session}/regroups`). `request` names
+    the invocation, so a resend under it returns the regroup the first raised or joined. Raises
+    `NotSeated`, `Refused` or `Unsent`."""
+    seat_generation(session, token)
+    answer = write(f"/sessions/{session}/regroups", {"reason": reason, "request_id": request}, key, SESSION_CARRIER, token)
+    how = "raised" if answer["status"] == "created" else "joined the day's pending"
+    return (f"regroup: {how} regroup {answer['regroup']}; run the regroup, then "
+            f"`answer: token @lease {answer['episode']} acted|considered because <why>`")
 
 
 def seat_answer(session: str, token: str, episode: str, body: dict, key: str) -> str:

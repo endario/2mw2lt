@@ -18,10 +18,10 @@ AUDIENCE = {verb: entry["audience"] for verb, entry in VERBS.items()}
 # The first form remains the legacy grammar view; multi-form callers use VERBS directly.
 GRAMMAR = {verb: entry["forms"][0]["grammar"] for verb, entry in VERBS.items()}
 # A skill a remedy may point at, and who may run it.
-SKILLS = {"connect": "session", "install": "session", "disconnect": "session", "rotate": "session",
+SKILLS = {"connect": "session", "install": "session", "disconnect": "session", "rotate": "session", "regroup": "seat",
           "gate": "session", "checkpoint": "session", "brain": "seat", "discover": "seat", "tracks": "seat"}
 _RANK = {"session": 0, "seat": 1, "operator": 2}
-_VERB = re.compile(r"^([a-z]+):")
+_VERB = re.compile(r"^([a-z][a-z-]*):")
 _AGAIN = "send the same line again, "
 _STUCK = "blocked: <session> on the door not answering"
 _FORMS = ("send `", "wait until ", "only ", _AGAIN)
