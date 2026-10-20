@@ -123,7 +123,7 @@ def _rule(line: str) -> bool:
 def _ghost(raw: list[str], top: int, cursor: tuple[int, int] | None) -> bool:
     """That the text after the prompt is a suggestion, in a pane that draws no attributes.
 
-    A session launched with no `TERM` (`env -i` in `launchers.py` keeps none the agent lacks) draws
+    A session launched with no `TERM` (the agent's `env -i` launch keeps none it lacks) draws
     no colour and no dim, so its suggestion reads as typed text and every wake after a turn was
     refused as a draft (#3020). What still tells them apart is the cursor: Claude Code parks it at
     the start of the input under a suggestion (measured on idle launched panes, 2026-09-29: column

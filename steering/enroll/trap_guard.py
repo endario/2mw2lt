@@ -193,7 +193,7 @@ def ground(cwd: str | None) -> list[str]:
 GRANT_FILE = os.path.join(".claude", "merge-grant")
 GRANT_SHAPE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 # Only the SOP merge's own shape pays for the grant file's read.
-MERGE_SHAPED = re.compile(r"\bgh pr merge [1-9][0-9]* -R ")
+MERGE_SHAPED = re.compile(r"\bgh pr merge (?:[1-9][0-9]* )?-R ")
 
 
 def granted_repo(payload) -> str | None:
@@ -244,7 +244,8 @@ def merge_grant(payload, repo: str) -> dict | None:
         return None
     tool = payload.get("tool_input")
     command = tool.get("command") if isinstance(tool, dict) else None
-    pattern = (r"gh pr merge [1-9][0-9]* -R " + re.escape(repo)
+    scoped = re.escape(repo)
+    pattern = (r"gh pr merge (?:[1-9][0-9]* -R " + scoped + r"|-R " + scoped + r" [1-9][0-9]*)"
                + r" --squash --match-head-commit [0-9a-fA-F]{40}")
     if not isinstance(command, str) or re.fullmatch(pattern, command) is None:
         return None
@@ -268,6 +269,7 @@ FORGE_VERBS = {
                        {"-d", "--draft", "-f", "--fill", "--fill-first", "--fill-verbose", "--no-maintainer-edit", "--dry-run"}, False),
     ("pr", "comment"): ({"-R", "--repo", "-b", "--body", "-F", "--body-file"},
                         {"--edit-last", "--create-if-none", "--delete-last", "--yes"}, True),
+    ("pr", "edit"): ({"-R", "--repo", "-t", "--title", "-b", "--body", "-F", "--body-file"}, set(), True),
     ("pr", "ready"): ({"-R", "--repo"}, {"--undo"}, True),
     ("pr", "merge"): ({"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject", "-A", "--author-email",
                        "--match-head-commit"},
@@ -277,6 +279,11 @@ FORGE_VERBS = {
     ("issue", "create"): ({"-R", "--repo", "-a", "--assignee", "-b", "--body", "-F", "--body-file", "-l", "--label",
                            "-m", "--milestone", "-p", "--project", "-t", "--title", "-T", "--template", "--recover"}, set(), False),
 }
+# A verb that passes only with one of these options: a worker opens its pull request as a draft (the
+# owner's ruling, documentation/knowledge/decisions/workers-open-their-own-pull-requests.md).
+FORGE_REQUIRED = {("pr", "create"): {"-d", "--draft"}}
+# A verb that passes only on the session's own pull request, one whose head is the checkout's branch.
+FORGE_OWN = {("pr", "edit")}
 # The enrolment clients the connect, gate and checkpoint skills have a worker run; ghtoken.py,
 # which prints a credential, and the seat's own are not among them.
 FORGE_CLIENTS = {"ack", "bulletin", "checkpoint", "connect", "declare", "disconnect", "edge", "gate", "rest", "say",
@@ -316,21 +323,24 @@ def literal_words(command: str) -> list[str] | None:
     return words
 
 
-def _gh_granted(args: list[str], repo: str) -> bool:
-    spec = FORGE_VERBS.get(tuple(args[:2]))
+def _gh_granted(args: list[str], repo: str, own=None) -> bool:
+    """Whether the gh words pass the grant on repo; own(number) answers whether a pull request is
+    the session's own, for a verb FORGE_OWN holds."""
+    verb = tuple(args[:2])
+    spec = FORGE_VERBS.get(verb)
     if spec is None:
         return False
     values, bools, positional = spec
-    named, numbers, i = False, 0, 2
+    named, numbers, i, seen, number = False, 0, 2, set(), None
     while i < len(args):
         arg = args[i]
         flag, glued, value = arg.partition("=")
         if not arg.startswith("-"):
             if not positional or not arg.isdigit():
                 return False
-            numbers += 1
+            numbers, number = numbers + 1, arg
         elif arg in bools:
-            pass
+            seen.add(arg)
         elif flag in values and (glued and flag.startswith("--") or not glued and i + 1 < len(args)):
             if not glued:
                 i, value = i + 1, args[i + 1]
@@ -341,7 +351,49 @@ def _gh_granted(args: list[str], repo: str) -> bool:
         else:
             return False
         i += 1
-    return named and numbers <= 1
+    if not named or numbers > 1 or verb in FORGE_REQUIRED and not seen & FORGE_REQUIRED[verb]:
+        return False
+    return verb not in FORGE_OWN or number is not None and own is not None and own(number)
+
+
+def own_pull(number: str, repo: str, cwd: str | None) -> bool:
+    """Whether the pull request's head is the branch the checkout at cwd is on, as GitHub answers it
+    within the hook's budget; a lookup that fails or is slow is not the session's own."""
+    try:
+        branch = subprocess.run(["git", "-C", cwd or os.getcwd(), "branch", "--show-current"],
+                                capture_output=True, text=True, timeout=2).stdout.strip()
+        if not branch:
+            return False
+        head = subprocess.run(["gh", "pr", "view", number, "-R", repo, "--json", "headRefName", "-q", ".headRefName"],
+                              capture_output=True, text=True, timeout=3)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return head.returncode == 0 and head.stdout.strip() == branch
+
+
+BINDING = os.path.join(".claude", "steering-workspace")
+
+
+def grant_repo(payload: dict, environ) -> str | None:
+    """The repository the forge grant covers: the launch's, else that of a checkout bound to a
+    workspace, whose binding install writes only when the workspace serves its `origin` (#2618).
+    It only reads; anything it cannot read grants nothing."""
+    repo = environ.get(FORGE_GRANT_ENV, "")
+    if repo:
+        return repo if GRANT_SHAPE.fullmatch(repo) else None
+    cwd = payload.get("cwd") if isinstance(payload.get("cwd"), str) else None
+    try:
+        common = subprocess.run(["git", "-C", cwd or os.getcwd(), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                                capture_output=True, text=True, timeout=2).stdout.strip()
+        if not common or not Path(common).parent.joinpath(BINDING).is_file():
+            return None
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        import local_workspace
+        remote = local_workspace.origin_url(Path(common).parent, timeout=2)
+        slug = local_workspace.github_slug(remote, timeout=2) if remote else None
+    except (OSError, subprocess.SubprocessError, ImportError):
+        return None
+    return slug if slug and GRANT_SHAPE.fullmatch(slug) else None
 
 
 def _client_granted(path: str) -> bool:
@@ -365,17 +417,21 @@ def _client_granted(path: str) -> bool:
 
 
 def forge_grant(payload, environ=None) -> dict | None:
-    """Allow for a literal call of a forge verb the launch grants, on its repository, or of an
+    """Allow for a literal call of a forge verb the grant covers, on its repository, or of an
     enrolment client; None for anything else."""
-    repo = (os.environ if environ is None else environ).get(FORGE_GRANT_ENV, "")
-    if not GRANT_SHAPE.fullmatch(repo) or not isinstance(payload, dict) or payload.get("tool_name") != "Bash":
+    if not isinstance(payload, dict) or payload.get("tool_name") != "Bash":
         return None
     tool = payload.get("tool_input")
     command = tool.get("command") if isinstance(tool, dict) else None
     words = literal_words(command) if isinstance(command, str) else None
-    if not words or len(words) < 2:
+    if not words or len(words) < 2 or words[0] not in ("gh", "python3"):
         return None
-    granted = (words[0] == "gh" and _gh_granted(words[1:], repo)) or (words[0] == "python3" and _client_granted(words[1]))
+    repo = grant_repo(payload, os.environ if environ is None else environ)
+    if repo is None:
+        return None
+    cwd = payload.get("cwd") if isinstance(payload.get("cwd"), str) else None
+    granted = ((words[0] == "gh" and _gh_granted(words[1:], repo, lambda n: own_pull(n, repo, cwd)))
+               or (words[0] == "python3" and _client_granted(words[1])))
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}} if granted else None
 
 

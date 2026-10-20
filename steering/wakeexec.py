@@ -1056,6 +1056,7 @@ def _read_back(t) -> str | None:
 
 
 TMUX_BIN = ("/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux")
+SOCKET = "2mw2lt-launch"          # tmux -L: the platform's own server, apart from the login's
 
 
 def tmux_bin() -> str | None:
@@ -1066,14 +1067,13 @@ def tmux_bin() -> str | None:
 def pane_of(pid: int, *, run=subprocess.run, socket: str | None = None) -> tuple[str, str] | None:
     """(socket, pane) of the pane whose process is `pid` or an ancestor of it, or None. For a
     harness that does not hand `TMUX` down to what it runs. Without `socket`, the login's default
-    server and then the platform's own (`launchers.SOCKET`), where every session the agent
+    server and then the platform's own (`SOCKET`), where every session the agent
     launches runs (#2267); a server on any other socket is not searched."""
-    import launchers
     b = tmux_bin()
     if not b:
         return None
     chain = set(runtime_id._ancestors(pid))
-    for server in ([["-S", socket]] if socket else [[], ["-L", launchers.SOCKET]]):
+    for server in ([["-S", socket]] if socket else [[], ["-L", SOCKET]]):
         try:
             r = run([b, *server, "list-panes", "-a", "-F", "#{pane_pid} #{pane_id} #{socket_path}"],
                     capture_output=True, text=True, timeout=5)

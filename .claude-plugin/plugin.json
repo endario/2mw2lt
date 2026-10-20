@@ -1,7 +1,7 @@
 {
   "name": "2mw2lt",
   "description": "Connect your Claude Code and Codex sessions to a 2mw2lt workspace: one steering partner that coordinates them, gates their work with independent review, and keeps what they learn.",
-  "version": "0.8.73",
+  "version": "0.8.74",
   "hooks": "./mods.json",
   "types": "./hooks/mod/types/index.d.ts",
   "author": {
@@ -20,13 +20,5 @@
     "claude-code",
     "codex",
     "multi-agent"
-  ],
-  "interface": {
-    "displayName": "2mw2lt Steering",
-    "shortDescription": "Connect this session to your 2mw2lt workspace",
-    "developerName": "2mw2lt",
-    "composerIcon": "./chatgpt/plugins/2mw2lt/assets/icon.png",
-    "logo": "./chatgpt/plugins/2mw2lt/assets/logo.png",
-    "brandColor": "#084DDD"
-  }
+  ]
 }

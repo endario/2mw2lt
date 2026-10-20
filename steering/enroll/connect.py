@@ -15,10 +15,6 @@ import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
-import python_floor  # noqa: E402
-
-python_floor.require()
-
 import json
 import os
 import re
@@ -768,6 +764,7 @@ def main(argv: list[str]) -> int:
         print(why, file=sys.stderr)
     if psession and holder.fresh(ws, psession):
         holder.mark_connected(ws, psession)
+    holder.sweep(ws, keep=psession)
     line = plugin_line(h.provider)
     if line:
         out, warn = plugin_out(line, holder_note(ws, psession, h.provider))
@@ -775,6 +772,10 @@ def main(argv: list[str]) -> int:
             print(warn, file=sys.stderr)
         if out:
             print(out)
+    if h.provider == "codex":
+        import codex_hooks
+        trust, warn = codex_hooks.report(Path.cwd(), UPDATE["codex"])
+        print(trust, file=sys.stderr if warn else sys.stdout)
     try:
         import ghmeter
         blind = ghmeter.shadowed(os.environ.get("PATH", ""))

@@ -200,10 +200,6 @@ class Harness:
     # stream needs none of this: the stream ending is what says the session went. Hookless
     # harnesses also use it when proving which process supplies the runtime identity.
     loaded: Callable[[str], bool] | None = None
-    # Whether an admitted injection destination remains valid. Usually that is the same as a
-    # loaded process. Codex is different: its queue accepts an idle thread after the writer
-    # closes; its process discovery separately asks for the current writer.
-    reachable: Callable[[str], bool] | None = None
     # Census callbacks keep exact command and provider registry interpretation at this seam.
     process_kind: Callable[[list[str]], str | None] | None = None
     process_names: Callable[[], tuple[str, ...]] | None = None
@@ -379,13 +375,6 @@ def _codex_loaded(psession: str) -> bool:
     import codex_probe as codex
     path = _codex_rollout(psession)
     return path is not None and codex.still_served(path, psession)
-
-
-def _codex_reachable(psession: str) -> bool:
-    """An idle thread remains a queue destination while its rollout is on this machine and an
-    app-server is there to drain the queue (#1967)."""
-    import codex_probe as codex
-    return codex.present(psession, HARNESSES["codex"].config_dir()) and codex.app_server()
 
 
 _SESSION_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
@@ -744,7 +733,7 @@ HARNESSES = {h.provider: h for h in (
             session_id=_session_of("codex"), harness_pid=_codex_pid,
             transcript=_codex_transcript, version=_cli_version("codex", "--version"),
             shape=_codex_shape, workspace=_codex_workspace,
-            delivery="inject", loaded=_codex_loaded, reachable=_codex_reachable,
+            delivery="inject", loaded=_codex_loaded,
             reading=_codex_reading, process_kind=_codex_process),
     Harness("grok", agent="grok", config=".grok", config_env="GROK_HOME", transcript_root="sessions",
             shape=_grok_shape, workspace=_grok_workspace),

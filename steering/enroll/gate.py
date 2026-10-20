@@ -11,10 +11,6 @@ import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
-import python_floor  # noqa: E402
-
-python_floor.require()
-
 import os
 import re
 import subprocess
@@ -42,12 +38,13 @@ RUNGS = ("uncommon", "rare", "epic", "legendary")
 
 
 def gate_flags(argv: list[str]) -> tuple[list[str], str] | None:
-    """The arguments without `--floor`, `--why`, `--exclude`, `--judge` and `--final`, and what they
-    add to a commission's line (doc 127): the least rarity the round's judge may have and why it was
-    asked for (#6499), vendors that wrote the branch though no session held it (doc 161 §6), a judge
-    the owner or the brain asked for (5907 slice-2 D3), and a round declared final. A floor needs its
-    reason, and a reason its floor."""
-    rest, floor, why, exclude, judge, final = [], "", "", "", "", ""
+    """The arguments without `--floor`, `--why`, `--exclude`, `--judge`, `--effort` and `--final`, and
+    what they add to a commission's line (doc 127): the least rarity the round's judge may have and why
+    it was asked for (#6499), vendors that wrote the branch though no session held it (doc 161 §6), a
+    judge the owner or the brain asked for (5907 slice-2 D3), the effort the round runs at in place of
+    its floor's (#7851), and a round declared final. A floor needs its reason, and a reason its floor;
+    an effort is named once, by `--effort` or a pin's `@effort`, or both agree."""
+    rest, floor, why, exclude, judge, effort, final = [], "", "", "", "", "", ""
     it = iter(argv)
     for a in it:
         if a == "--final":
@@ -77,11 +74,19 @@ def gate_flags(argv: list[str]) -> tuple[list[str], str] | None:
             if judge or parse_judge(named) is None:
                 return None
             judge = f" judge {named}"
+        elif a == "--effort" or a.startswith("--effort="):
+            named = a.split("=", 1)[1] if "=" in a else next(it, "")
+            if effort or not re.fullmatch(r"[a-z]{1,32}", named):
+                return None
+            effort = f" effort {named}"
         else:
             rest.append(a)
     if bool(floor) != bool(why):
         return None
-    return rest, floor + why + exclude + judge + final
+    pinned = (parse_judge(judge[len(" judge "):]) or {}).get("effort") if judge else None
+    if effort and pinned and pinned != effort[len(" effort "):]:
+        return None
+    return rest, floor + why + exclude + judge + effort + final
 
 
 # A judge pin is `<vendor>[/<model>][@<effort>]`: no empty field, no whitespace, nothing past the
@@ -195,12 +200,13 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
     floor = re.search(r" floor (\S+)", extra)
     why = re.search(r" why (\S+)", extra)
     judge = re.search(r" judge (\S+)", extra)
+    effort = re.search(r" effort (\S+)", extra)
     final = " final" in extra
     rest = extra
-    for piece in (floor[0] if floor else "", why[0] if why else "", f" judge {judge[1]}" if judge else "", " final" if final else ""):
+    for piece in (floor[0] if floor else "", why[0] if why else "", f" judge {judge[1]}" if judge else "", effort[0] if effort else "", " final" if final else ""):
         rest = rest.replace(piece, "", 1)
     if rest.strip():
-        print(f"a {kind} on a Go workspace takes --floor, --why, --judge and --final only, so far", file=sys.stderr)
+        print(f"a {kind} on a Go workspace takes --floor, --why, --judge, --effort and --final only, so far", file=sys.stderr)
         return 1
     here = Path.cwd()
     repo = origin_slug(here, timeout=5)
@@ -231,6 +237,8 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
         body["floor"], body["why"] = floor[1], unquote(why[1])
     if judge:
         body["judge"] = parse_judge(judge[1])
+    if effort:
+        body["judge"] = {**body.get("judge", {}), "effort": effort[1]}
     if final:
         body["final"] = True
     this = retry_id or occurrence()
@@ -242,7 +250,11 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
         if answer.get("id") and answer.get("state"):
             why = f" ({answer['reason']})" if answer.get("reason") else ""
             round_ = f" round {answer['round']}" if answer.get("round") else ""
-            reply = f"commissioned: {answer['id']} {kind}{round_}, {answer['state']}{why}"
+            state = answer["state"]
+            if state == "queued" and answer.get("priority") is not None:
+                # The queue's face: where it stands and how many wait ahead (#6850).
+                state = f"queued: {answer['priority']}, {answer.get('ahead', 0)} ahead"
+            reply = f"commissioned: {answer['id']} {kind}{round_}, {state}{why}"
         else:
             uncertain, reply = True, refusal.retry("Go answered the commission without naming it")
     except session_routes.Refused as e:
@@ -318,8 +330,12 @@ def go_read(ws: Path, session: str, flags, kind: str, what: str) -> int:
 
 
 def gate_row(r: dict) -> str:
-    """One commission as a line: where it stands, its round and the head it judged."""
-    said = f"{r.get('phase')}: {r.get('id')} {r.get('kind')} round {r.get('round')}/{r.get('cap')} at {str(r.get('sha') or '')[:12]}"
+    """One commission as a line: where it stands, its round and the head it judged. A queued one
+    answers the queue's face first: its priority and how many wait ahead (#6850)."""
+    place = ""
+    if r.get("phase") == "queued" and r.get("priority"):
+        place = f" {r['priority']}, {r.get('ahead', 0)} ahead —"
+    said = f"{r.get('phase')}: {r.get('id')}{place} {r.get('kind')} round {r.get('round')}/{r.get('cap')} at {str(r.get('sha') or '')[:12]}"
     if r.get("verdict"):
         said += f", {r['verdict']}"
     if r.get("why"):

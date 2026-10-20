@@ -65,6 +65,42 @@ def state(ws: Path, psession: str, now: float | None = None) -> dict | None:
     return hold if isinstance(hold, dict) else None
 
 
+# A live module rewrites its claim every 60 s, idle or not, and a suspended process's rewrites
+# it on waking; one untouched this long names a process that is gone.
+ABANDONED_S = 24 * 3600
+
+
+def sweep(ws: Path, keep: str | None, now: float | None = None) -> None:
+    """Remove the claims, and connect's records beside them, of sessions that are over: released
+    (`at: 0`, the module having no delete) or abandoned. Never `keep`'s, never a fresh one; best
+    effort, so a file that vanishes or refuses is left to the next connect (#7829)."""
+    now = time.time() if now is None else now
+    try:
+        paths = list((Path(ws) / ".claude" / "steering-holders").glob("*.json"))
+    except OSError:
+        return
+    for path in paths:
+        if path.stem == keep or not SAFE.fullmatch(path.stem):   # ledgers and bindings carry a dot
+            continue
+        try:
+            seen = path.stat()
+            try:
+                at = float(json.loads(path.read_text())["at"])
+            except (ValueError, KeyError, TypeError):
+                at = seen.st_mtime   # unreadable may be mid-write: judged by when it was written
+            if at != 0 and now - at < ABANDONED_S:
+                continue
+            # A module that rewrote the claim since it was read is alive: leave its write alone.
+            now_st = path.stat()
+            if (now_st.st_ino, now_st.st_mtime_ns) != (seen.st_ino, seen.st_mtime_ns):
+                continue
+            # The record first: a sweep cut short leaves the claim, which the next one finds.
+            connect_path(ws, path.stem).unlink(missing_ok=True)
+            path.unlink()
+        except OSError:
+            pass
+
+
 def _at(t: object) -> str:
     try:
         return time.strftime("%H:%M:%SZ", time.gmtime(float(t)))   # type: ignore[arg-type]

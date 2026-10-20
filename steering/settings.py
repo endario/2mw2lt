@@ -94,8 +94,8 @@ def validate(data) -> dict:
     if "claude_profiles_exclude" in routing and not (isinstance(routing["claude_profiles_exclude"], list)
                                                      and all(isinstance(v, str) for v in routing["claude_profiles_exclude"])):
         raise ValueError("[routing].claude_profiles_exclude is not a list of profile names")
-    # Only the shape: whether each entry names a launcher is `launchers.declared()`'s to judge, so a
-    # missing binary refuses the launch it would serve and not the limits beside it.
+    # Only the shape: whether each entry names a launcher is the agent's to judge, so a missing
+    # binary refuses the launch it would serve and not the limits beside it.
     if "claude_launchers" in routing and not (isinstance(routing["claude_launchers"], list)
                                               and routing["claude_launchers"]):
         raise ValueError("[routing].claude_launchers is not a non-empty list")
@@ -213,11 +213,6 @@ def _positive(name: str, default: int) -> int:
     return value
 
 
-def gate_vendor_limit(path: Path = DEFAULT_PATH) -> int:
-    table = capacity(path)
-    return table["vendor_limit"] if "vendor_limit" in table else _positive("STEERING_GATE_VENDOR_LIMIT", 2)
-
-
 def gate_agent_limit(path: Path = DEFAULT_PATH) -> int:
     table = capacity(path)
     return table["agent_limit"] if "agent_limit" in table else _positive("STEERING_GATE_AGENT_LIMIT", 3)
@@ -245,8 +240,7 @@ def max_workers(path: Path = DEFAULT_PATH) -> int:
 
 def gate_drain(path: Path = DEFAULT_PATH) -> str | None:
     """Why this machine takes no new gate run, or None: a gate limit at 0. A running one finishes."""
-    for key, limit in (("vendor_limit", gate_vendor_limit), ("agent_limit", gate_agent_limit),
-                       ("host_limit", gate_host_limit)):
+    for key, limit in (("agent_limit", gate_agent_limit), ("host_limit", gate_host_limit)):
         if limit(path) == 0:
             return f"drained: [capacity].{key} is 0"
     return None
@@ -259,8 +253,8 @@ def launch_drain(path: Path = DEFAULT_PATH) -> str | None:
 
 def placement(path: Path = DEFAULT_PATH, review_host: bool | None = None) -> dict:
     """What this machine tells the orchestrator it is for (doc 146 §2.1): its role, its threshold,
-    `host_limit`, `max_workers`, and the gate runs it takes on one account and in all (`vendor_limit`,
-    `agent_limit`), which the orchestrator counts per machine. A declared review host is dedicated unless its file says
+    `host_limit`, `max_workers`, and the gate runs it takes in all (`agent_limit`), which the
+    orchestrator counts per machine. A declared review host is dedicated unless its file says
     otherwise."""
     if review_host is None:
         import review_host as review_host_mod
@@ -268,8 +262,7 @@ def placement(path: Path = DEFAULT_PATH, review_host: bool | None = None) -> dic
     table = capacity(path).get("placement", {})
     return {"role": table.get("role", "dedicated" if review_host else "workstation"),
             "soft": float(table.get("soft", 0.75)), "capacity": gate_host_limit(path),
-            "workers": max_workers(path), "vendor_limit": gate_vendor_limit(path),
-            "agent_limit": gate_agent_limit(path)}
+            "workers": max_workers(path), "agent_limit": gate_agent_limit(path)}
 
 
 def judges_exclude(path: Path = DEFAULT_PATH) -> set[str] | None:
@@ -303,21 +296,6 @@ def harness_preferences(path: Path = DEFAULT_PATH) -> dict[str, str]:
         legacy = routing["glm_harness"]
         preferences["zai"] = "claude" if legacy == "claude-code" else legacy
     return {**preferences, **routing.get("harnesses", {})}
-
-
-class Rejected(ValueError):
-    """agent.toml is malformed and this process holds no good read of it: what it declares is
-    unknown, which is not declaring nothing."""
-
-
-def claude_launchers(path: Path = DEFAULT_PATH) -> list | None:
-    """The declared launchers as the file writes them (doc 121 §2), or None when it declares none
-    and `STEERING_CLAUDE_LAUNCHERS` decides. Raises `Rejected` when the file is malformed with no
-    last good table held."""
-    table, error = _state(path)
-    if error is not None and not table:
-        raise Rejected(f"agent.toml {error}")
-    return table.get("routing", {}).get("claude_launchers")
 
 
 def claude_profiles_exclude(path: Path = DEFAULT_PATH) -> list[str]:

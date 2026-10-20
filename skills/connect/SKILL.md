@@ -51,6 +51,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/connect.py" --help
 
 **Codex:** delivery is injected into your thread; connect asserts that reach. Skip the hold. A
 peer's or the brain's words arrive as `steering say <key>`: read them, and acknowledge nothing.
+Connect's `hooks:` line is Codex's own answer on whether it runs the plugin's hooks. When it names
+hooks awaiting review, tell the person: only they can trust a hook, in Codex's `/hooks`.
 
 **ZCode:** connect with no flags, as Claude does: the session is named by the binding the
 plugin's hooks publish. The plugin's frames server holds the stream, so arm no hold. A waiting
@@ -117,8 +119,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> branch [--ca
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" announce <session> as <account> on <branch> doing "<work>"
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" blocked <session> on "<blocker>"
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" wait <session> for merged <pr>  # or for verdict <pr>, or for at <YYYY-MM-DDTHH:MMZ>: told once it holds, instead of polling
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" done <session> "<result>"
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" done <session> [--card <id>] "<result>"
 ```
+
+`done` is one card's: say it for each card when its part is finished, never because a branch
+merged, and name the card with `--card` when you hold more than one. Until you do, you hold the card
+and read busy; a done that names no card while you hold several is refused, naming them. A done said
+again for the same card is answered as the first.
 
 A `say` from `kick <id>`, a `session-kick` signal naming the card you hold, means your turn ended
 with nothing you wait on open.
@@ -276,6 +283,12 @@ For repository-scoped App credentials, `${CLAUDE_PLUGIN_ROOT}/steering/enroll/gh
 optional. Capture its stdout in `GH_TOKEN`, never print it; request a fresh token when it expires.
 
 ## Gate your work
+
+The owner's standing authorization: open your card's draft pull request, and edit or comment on
+your own pull requests, without asking anyone. It covers your own branch in this workspace's
+repository: `gh pr create -R <repo> --draft`, `gh pr edit -R <repo> <n>` on a pull request whose head
+is your branch, and `gh pr comment -R <repo> <n>`. Never an auto or admin merge, and never
+a push to `main`.
 
 Write a pull request's, comment's or issue's body to a file and pass it with `--body-file <file>`:
 a body inline whose line starts with `#` is refused before it runs on some launches (#7528).

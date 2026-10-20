@@ -103,8 +103,9 @@ def observe(hook: dict, occurrence: str, observed_at: str, source_version: str, 
             elif k == "tool_name":
                 # AskUserQuestion is the name the reducer distinguishes; a permission's tool is
                 # what the owner is being asked to allow (#812), and a denial's what was refused
-                # (#7039). No other event keeps one.
-                if v == "AskUserQuestion" or event in ("PermissionRequest", "PermissionDenied"):
+                # (#7039). A tool call's own is the step the desk says runs now: without it the
+                # daemon reads every tool as the model thinking (63f10771). Its arguments stay out.
+                if event in ("PreToolUse", "PermissionRequest", "PermissionDenied"):
                     o[k] = v
             else:
                 o[k] = v

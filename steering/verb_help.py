@@ -126,7 +126,7 @@ VERBS = {
 
 # Runnable entrypoints own client syntax once; wire forms reference these by script and topic.
 _SPEAKER_USAGE = "[--provider <harness>] [--provider-session <id>]"
-_COMMISSION_USAGE = "[--floor uncommon|rare|epic|legendary --why <reason>] [--exclude <vendors>] [--final] [--retry=<id>]"
+_COMMISSION_USAGE = "[--floor uncommon|rare|epic|legendary --why <reason>] [--exclude <vendors>] [--judge <vendor>[/<model>][@<effort>]] [--effort <effort>] [--final] [--retry=<id>]"
 TOOLS = {
     "ack": {"verb": "ack", "forms": [
         {"topic": "send", "usage": "<session> <directive id>", "example": "ack violet 1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00"},
@@ -186,6 +186,11 @@ TOOLS = {
         {"topic": "status", "usage": _SPEAKER_USAGE + " <session> status <run>", "example": "ci violet status 39384922516"},
         {"topic": "log", "usage": _SPEAKER_USAGE + " <session> log <run> [--guard <label>]", "example": "ci violet log 39384922516 --guard lint_test"},
     ]},
+    "goal": {"bare": False, "forms": [
+        {"topic": "prepare", "usage": "--lease prepare plan <goal> --policy <unit> --decision <file> | prepare judge <goal> <criterion>|goal <verdict> [--evidence card:<id>|pull:<owner>/<name>#<n>]... because <why> | prepare import <goal> --source <source> --revision <revision> --rows <file>",
+         "example": "goal --lease prepare judge 6600d79c-9e3e-4ebc-99ad-e383e40446c7 0f620e92-9564-43a0-90bb-bd35d4d888ef accepted --evidence pull:example-org/example-repo#12 because the merged change logs every refusal"},
+        {"topic": "submit", "usage": "--lease submit <prepared file>", "example": "goal --lease submit .claude/goal-commands/5f0c6a1e2b3d4c5e6f7a8b9c0d1e2f3a.json"},
+    ]},
     "hold": {"current": True, "forms": [
         {"topic": "--frame-path", "usage": "--frame-path <session>", "example": "hold --frame-path violet"},
         {"topic": "--claim-path", "usage": "--claim-path <provider-session>", "example": "hold --claim-path 0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"},
@@ -236,7 +241,7 @@ TOOLS = {
         {"topic": "wait", "usage": "wait <session> for merged|verdict <pr> [recheck <seconds>] [--retry=<id>]", "example": "verb wait violet for merged 4391"},
         {"topic": "wait-at", "usage": "wait <session> for at <YYYY-MM-DDTHH:MMZ> [recheck <seconds>] [--retry=<id>]", "example": "verb wait violet for at 2026-10-17T09:00Z"},
         {"topic": "wait-cancel", "usage": "wait <session> cancel <wait id>, which ends one of its own open waits [--retry=<id>]", "example": "verb wait violet cancel 323d6c8a-2be5-4685-b088-df6e5fdfbe9f"},
-        {"topic": "done", "usage": "done <session> <what> [--retry=<id>]", "example": "verb done violet help"},
+        {"topic": "done", "usage": "done <session> [--card <id>] <what> [--retry=<id>]", "example": "verb done violet help"},
         {"topic": "recommend", "usage": "recommend <session> <what> [--retry=<id>]", "example": "verb recommend violet approve"},
         {"topic": "ask", "usage": "ask <session> <question> [--retry=<id>]", "example": "verb ask violet should-we-deploy"},
         {"topic": "ask-json", "usage": "ask <session> json <object> [--retry=<id>]", "example": "verb ask violet json '{\"question\":\"deploy?\"}'"},

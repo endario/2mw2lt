@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`rest.py [--provider <harness>] [--provider-session <id>] [--lease] [--post [--json <body>] [--key <idempotency
+"""`rest.py [--provider <harness>] [--provider-session <id>] [--lease] [--root] [--post [--json <body>] [--key <idempotency
 key>] | --put --json <body> --key <idempotency key> | --delete --key <idempotency key>] <path> [--all]`: a call to the steering API (doc 126) from any machine.
 
 The path is relative to `/api/v1`, as `/knowledge/units` or `/cards?state=live`. It goes
@@ -9,7 +9,9 @@ sends the seat holder's own enrolment, which Go judges at each call. With nothin
 session's own enrolment token goes, found as `say.py` finds it (#3551). `--post` sends the path a POST with no body, or with `--json`'s body and
 `--key` as its `Idempotency-Key`, as a room's messages take (doc 156). `--put` sends `--json`'s body under
 `--key`, as appointing a goal's steward takes (doc 198). `--delete` sends a DELETE with no
-body under `--key`, as closing an understudy cast takes.
+body under `--key`, as closing an understudy cast takes. `--root` sends the path under the door's root
+`/api/v1` rather than the workspace's, as a team's or a host's settings are, naming the workspace on
+the `X-Steering-Workspace` header, since the path names none.
 
 Exits 0 with the JSON on stdout; otherwise 1, with the problem's title and remedy on stderr.
 """
@@ -19,12 +21,10 @@ import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
-import python_floor  # noqa: E402
-
-python_floor.require()
-
 import http.client
 import json
+import os
+import stat
 import time
 import urllib.error
 import urllib.parse
@@ -57,9 +57,12 @@ GO_UNSERVED = (
     ("/pulls/", "a pull request is not read on Go"),
 )
 
+# The workspace a root path's call is routed to, which a workspace path names in the path itself.
+WORKSPACE_HEADER = "X-Steering-Workspace"
+
 
 def fetch(url: str, token: str | None, method: str = "GET", body: bytes | None = None,
-          key: str | None = None) -> tuple[int, dict]:
+          key: str | None = None, workspace: str | None = None) -> tuple[int, dict]:
     """One call, sent again within one budget the call owns when the wire loses the answer — no
     answer, a reset, a gateway speaking for a silo that is down, an answer that is not JSON, as
     a captive portal's is — one line of progress per resend (#5974). A POST without an
@@ -71,6 +74,8 @@ def fetch(url: str, token: str | None, method: str = "GET", body: bytes | None =
         headers["Content-Type"] = "application/json"
     if key:
         headers["Idempotency-Key"] = key
+    if workspace:
+        headers[WORKSPACE_HEADER] = workspace
     req = urllib.request.Request(url, headers=headers, method=method,
                                  data=(body if body is not None else b"") if method in ("POST", "PUT") else None)
     again = door.resender(time.monotonic(), f"rest: {url}",
@@ -106,8 +111,8 @@ def own_bearer(flags: dict[str, str]) -> tuple[str | None, str | None]:
         return None, str(why)
 
 
-def page_contract(path: str) -> dict | None:
-    parts = ("/w/_/api/v1" + urllib.parse.urlsplit(path).path).split("/")
+def page_contract(path: str, root: bool = False) -> dict | None:
+    parts = (("/api/v1" if root else "/w/_/api/v1") + urllib.parse.urlsplit(path).path).split("/")
     for route in sorted(contract.ROUTES, key=lambda r: (r.count("{"), r)):
         method, template = route.split(" ", 1)
         segments = template.split("/")
@@ -122,13 +127,24 @@ def page_contract(path: str) -> dict | None:
     return None
 
 
+def given(stdin) -> bool:
+    """Whether stdin carries something a caller gave it: a pipe, a file, or a stream with no
+    descriptor. A terminal or a socket is not read: Claude Code's Bash hands a command a socket that
+    never closes, and a call reading it waited 3.5 hours, keeping its session at work (2026-10-20)."""
+    try:
+        mode = os.fstat(stdin.fileno()).st_mode
+    except (OSError, ValueError):
+        return not stdin.isatty()
+    return stat.S_ISFIFO(mode) or stat.S_ISREG(mode)
+
+
 def main(argv: list[str], stdin) -> int:
     if help_requested("rest", argv):
         print(script_help("rest", topic=argv[0] if len(argv) == 2 else None))
         return 0
     valued: dict[str, str] = {}
     rest = list(argv)
-    for flag in ("--json", "--key", "--post", "--put", "--delete", "--all", "--lease", *connect.SPEAKER_FLAGS):
+    for flag in ("--json", "--key", "--post", "--put", "--delete", "--all", "--lease", "--root", *connect.SPEAKER_FLAGS):
         if rest.count(flag) > 1:
             return error("rest", f"{flag} may appear once")
     for flag in ("--json", "--key", *connect.SPEAKER_FLAGS):
@@ -141,7 +157,7 @@ def main(argv: list[str], stdin) -> int:
     speaker = {f: valued.pop(f) for f in connect.SPEAKER_FLAGS if f in valued}
     if "--provider" in speaker and speaker["--provider"] not in connect.harness_mod.PROVIDERS:
         return error("rest", "--provider names no harness this client knows")
-    args = [a for a in rest if a not in ("--all", "--post", "--put", "--delete", "--lease")]
+    args = [a for a in rest if a not in ("--all", "--post", "--put", "--delete", "--lease", "--root")]
     if sum(m in rest for m in ("--post", "--put", "--delete")) > 1:
         return error("rest", "--post, --put and --delete name one method; give one")
     method = "POST" if "--post" in rest else "PUT" if "--put" in rest else "DELETE" if "--delete" in rest else "GET"
@@ -162,7 +178,8 @@ def main(argv: list[str], stdin) -> int:
             return error("rest", "--json requires valid JSON")
     body = valued["--json"].encode() if "--json" in valued else None
     base = door.door_url()
-    if door.split(base)[1] is None:
+    root, workspace = door.split(base)
+    if workspace is None:
         print("this workspace's door names no workspace; set STEERING_DOOR to …/<team>/<workspace>", file=sys.stderr)
         return 2
     why_none = None
@@ -178,16 +195,17 @@ def main(argv: list[str], stdin) -> int:
         # The seat is the holder's own enrolment, judged by Go at each call.
         token = held["token"]
     else:
-        token = None if stdin.isatty() else (stdin.read().strip() or None)
+        token = (stdin.read().strip() or None) if given(stdin) else None
     if token is None:
         token, why_none = own_bearer(speaker)
-    url = f"{base}/api/v1{args[0]}"
-    page = page_contract(args[0]) if "--all" in rest else None
+    at_root = "--root" in rest
+    url = f"{root if at_root else base}/api/v1{args[0]}"
+    page = page_contract(args[0], root=at_root) if "--all" in rest else None
     collected, first = [], None
     out = None
     while True:
         try:
-            status, answer = fetch(url, token, method, body, valued.get("--key"))
+            status, answer = fetch(url, token, method, body, valued.get("--key"), workspace if at_root else None)
         except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as e:
             print(f"the door at {base} did not answer: {e}", file=sys.stderr)
             return 1
@@ -198,6 +216,8 @@ def main(argv: list[str], stdin) -> int:
             remedy = REMEDY_ADVICE.get(answer.get("remedy") if isinstance(answer.get("remedy"), str) else "", "")
             print(f"{status} {answer.get('title') or answer.get('refused') or answer}"
                   + (f" [{answer['code']}]" if answer.get("code") else "")
+                  + (f" field {answer['field']}" if isinstance(answer.get("field"), str) and answer["field"] else "")
+                  + (f": {answer['detail']}" if isinstance(answer.get("detail"), str) and answer["detail"] else "")
                   + (f" — {remedy}" if remedy else ""), file=sys.stderr)
             hint = next((h for prefix, h in GO_UNSERVED if args[0].startswith(prefix)), None)
             if status == 404 and hint:

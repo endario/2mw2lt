@@ -44,16 +44,21 @@ unless they name one. When your change proves smaller or less risky than its tri
 brain with the evidence, proposing a lower floor: the seat sets it with `card.py --lease retier`, and
 the rounds already judged keep the floor they ran at. A floor no judge meets is refused
 (`floor-unservable`). `--final` declares this
-round the last: it runs deeper than the finding rounds, from a vendor no
-earlier round used where one can take it, and after its verdict steering refuses another round, as
+round the last: its judge may stand a rung above the floor, at the floor's effort still, from a
+vendor no earlier round used where one can take it, and after its verdict steering refuses another round, as
 at the ceiling. The round at the ceiling is final without asking. The review's run details say the
 floor and how the final round ran.
 
 `--judge <vendor>[/<model>][@<effort>]` asks for a named judge — for when the owner or the brain
 wants one, as in `--judge openai/gpt-6.1-sol@medium`. The commission is refused when the catalog
-holds no such judge at the floor (`judge-unknown`) or when the only judges matching it wrote the
+holds no such judge at the floor (`judge-unknown`, naming the judges it serves there) or when the only judges matching it wrote the
 change (`judge-authored`), and a busy pinned judge waits like any gate. Never use it to steer a
 verdict: the choice of judge stays steering's otherwise.
+
+A round runs at its floor's effort (`legendary` low, `epic` medium, `rare` high, `uncommon` max),
+fitted to the judge's CLI: Codex takes no `max`, so it runs `xhigh`. `--effort <effort>` runs this
+commission at another (`minimal`, `low`, `medium`, `high`, `xhigh`, `max`), and so does a pin's
+`@effort`; when both are given they must agree. An effort picks no judge.
 
 A round at a `rare` floor or below on a small diff, 50 changed lines unless the team's owner set
 another limit, runs read-only: no shell, network or writes. A migration, workflow, authorization,
@@ -76,7 +81,7 @@ In a repository 2mw2lt steers this gate replaces `/independent-review` and `/ind
 | | this gate | the runner |
 |---|---|---|
 | reviewer | a vendor that wrote none of the branch, chosen by usage | routed by round and usage, away from the host |
-| depth, final round | `--floor`, `--final`; the final round deeper, from a vendor no earlier round used | `--tier`, `--complement-of` |
+| depth, final round | `--floor`, `--effort`, `--final`; the final round a rung up, from a vendor no earlier round used | `--tier`, `--complement-of` |
 | tools | full inside a cage that withholds every credential but the reviewer's own | full with the host's access; `--sandbox` |
 | persona | the project's, read from the base commit | the project's, read from the checkout |
 | record | a fact per round, published by `2mw2lt[bot]` with a status pinned to the commit | a local artifact, published as the user |
@@ -111,6 +116,9 @@ push, is `awaiting`, not refused: GitHub's delivery of that head queues it. Do n
 a later head is observed first, or none within a minute, you are told why from `gate <id>`; one
 still not commissioned an hour after you asked is refused like a queued one, naming the check
 its last try was refused on. `cancel` withdraws an awaiting one too.
+
+A critique does not await. Sent before the mirror has fetched your push, it is refused
+`head-not-observed`; send the same line again a few seconds later.
 
 Fix what you verify, push, and commission again: the next round is briefed with every earlier
 round's findings. A `ship it` closes the gate. At the ceiling steering refuses another round and
@@ -154,7 +162,9 @@ ended and was published (#1986):
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> pr <pr number>
 ```
 
-Keep the pull request a draft through every round. Before each round and before merging, run the
+Opening your card's draft pull request, and editing or commenting on your own, is the owner's
+standing authorization: no one is asked (connect's "Gate your work" has its scope). Keep the pull
+request a draft through every round. Before each round and before merging, run the
 guards that read what you changed, chosen with judgment: a full steering suite only when the change
 crosses the tree (the suite runner, a shared fixture or harness, several modules). Run them where
 you choose, locally or on the CI pool with
@@ -169,7 +179,7 @@ For GitHub state reads and waiting, follow
 Merge it directly once its head holds `2mw2lt/review` and its base is `main`. That status is posted a
 sweep after the verdict or the carry, and you are told when it lands: a `say` frame
 `from: forge #<n>` reading `review status posted on <sha>; merge now`. Mark it ready in exactly this
-form, which the workspace allows without a prompt: `gh pr ready <pr number> -R <repo>`. Merge then, not before:
+form, which the workspace allows without a prompt: `gh pr ready -R <repo> <pr number>`. Merge then, not before:
 
 ```bash
 git fetch origin && merged=$(git merge-tree --write-tree origin/main <head sha>) &&
@@ -179,7 +189,7 @@ git fetch origin && merged=$(git merge-tree --write-tree origin/main <head sha>)
 After that call succeeds, issue the merge as a separate Bash tool call with the literal head SHA:
 
 ```bash
-gh pr merge <pr number> -R <repo> --squash --match-head-commit <head sha>
+gh pr merge -R <repo> <pr number> --squash --match-head-commit <head sha>
 ```
 
 The migration check applies where that script exists. Judge the merged tree: a version collision

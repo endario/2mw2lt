@@ -10,10 +10,6 @@ import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
-import python_floor  # noqa: E402
-
-python_floor.require()
-
 import os
 
 HERE = Path(__file__).resolve().parent
@@ -29,7 +25,10 @@ from local_workspace import required_workspace_root  # noqa: E402
 from verb_help import error, help_requested, script_help  # noqa: E402
 
 
-RULES = Path("coordination/internal/credentialscan/gitleaks.toml")
+RULES = Path("credentialscan/gitleaks.toml")
+
+
+SAY_TEXT_BYTES, SAY_TEXT_CHARS = 4096, 4000
 
 
 def credential_shaped(text: str, rules: Path | None) -> str:
@@ -103,6 +102,12 @@ def main(argv: list[str]) -> int:
     text = (sys.stdin.read() if args[1:] == ["-"] else " ".join(args[1:])).strip()
     if not text:
         return error("say", "nothing to say")
+    # The door's own bound (protocol.DecodeSay), said here with its numbers: the door's refusal
+    # names neither the bound nor the size.
+    if len(text.encode()) > SAY_TEXT_BYTES or len(text) > SAY_TEXT_CHARS:
+        print(f"refused: a say is at most {SAY_TEXT_CHARS} characters in {SAY_TEXT_BYTES} bytes, and this one is "
+              f"{len(text)} characters in {len(text.encode())} bytes; send it in parts", file=sys.stderr)
+        return 2
     verb = text.split(":", 1)[0].strip().lower() if ":" in text.split(None, 1)[0] else ""
     if verb in BOARD_VERBS:
         print(f"that is a board verb, and this sends speech: it would go as the text of a `say:`, "

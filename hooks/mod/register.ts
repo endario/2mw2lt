@@ -1,12 +1,15 @@
 import type { Register, EngineInterface, Timer, HookStream, ProcessSpawnChunk, ProcessSpawnResult } from 'claude-code'
 import { lines, atLeast, pick, invokes, lifecycle, tokensOf, due, owed, framesEntry, obsoleteSeatRefusal, nextSeat, asksSeat, seatCall, seatSchema, resendId, entryRefusal, refusalTurn, capBulletin, sectionRevision, READ_KEPT, POINTER, CHECKPOINT, SEAT_SECTION, BULLETIN_SECTION, SEAT_TOOLS } from './frames'
 import type { Line, SeatCall } from './frames'
+import * as surface from './surface'
 
-// The plugin's hooks module (#3872): it holds a connected Claude session's steering stream through
-// hold.py's `--wake plugin` mode, wakes the session with a fixed pointer, and hands the frames to
-// the model only as the `frames` tool's result. Every wire action is the Python client's; this
-// module owns timing and delivery. It is an enhancement: with it absent, connect finds no fresh
-// holder claim and the session keeps the model-run recipe.
+// The plugin's hooks module (#3872): it holds a connected Claude session's steering stream, wakes
+// the session with a fixed pointer, and hands the frames to the model only as the `frames` tool's
+// result. The stream is held as polls on the agent's frames route (#7838), which hands the module
+// hold.py's frame lines and records the frames itself; where the agent is older than that route, or
+// the workspace names no agent, hold.py's `--wake plugin` child holds it as before. Every other wire
+// action is the Python client's; this module owns timing and delivery. It is an enhancement: with
+// it absent, connect finds no fresh holder claim and the session keeps the model-run recipe.
 
 const BUSY = { plugin: '2mw2lt', key: 'busy' } as const
 const PENDING = { plugin: '2mw2lt', key: 'pending' } as const
@@ -40,7 +43,8 @@ const script = ($: EngineInterface, name: string) => `${$.plugin.root}/steering/
 async function append($: EngineInterface, text: string) {
   $.ui.log(`2mw2lt: appends "${text}"`, { to: 'debug' })
   try {
-    await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })
+    const stored = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })
+    if (stored.uuid !== undefined) show($, { kind: 'row', row: surface.ownRow(text, stored.uuid) })
   } catch (err) {
     $.ui.log(`2mw2lt: the append was refused: ${String(err)}`, { to: 'debug' })
   }
@@ -127,12 +131,16 @@ function locked<T>($: EngineInterface, work: () => Promise<T>): Promise<T> {
 }
 
 // Called with the chain held. A pointer the session will not take as a prompt is appended
-// instead, so the frame still reaches the model at its next request.
+// instead, so the frame still reaches the model at its next request, and the turn that request
+// belongs to is owed a pointer again if it ends unread.
 async function point($: EngineInterface) {
   const { value: pointed = false } = await $.state.get(POINTED)
   if (pointed) return
   await $.state.set(POINTED, true)
-  await $.state.set(APPENDED, await tell($, POINTER))
+  const appended = () => locked($, async () => {
+    if ((await $.state.get(POINTED)).value) await $.state.set(APPENDED, true)
+  })
+  await $.state.set(APPENDED, await tell($, POINTER, appended))
 }
 
 // A pointer appended into a running turn is read only if that turn makes another request, and a
@@ -183,13 +191,166 @@ async function retireStaleSeatFrame($: EngineInterface, seatFrameId: string) {
 
 // A fixed text the model must read: a turn of its own on an idle session, a row in the running
 // turn on a busy one. A prompt the session will not take is appended instead, to be read at its
-// next request. Whether it went into a running turn.
-async function tell($: EngineInterface, text: string): Promise<boolean> {
+// next request, and `appended` runs. The engine refuses by rejecting, or by resolving `drop`, as
+// every submit does after the person's Esc until they type again (#7827). Whether it went into a
+// running turn.
+async function tell($: EngineInterface, text: string, appended?: () => Promise<void>): Promise<boolean> {
   const { value: busy = false } = await $.state.get(BUSY)
-  if (busy) await append($, text)
-  else void $.prompt.submit({ text }).catch(() => append($, text))
-  return busy
+  if (busy) {
+    await append($, text)
+    return true
+  }
+  const refused = async (why: string) => {
+    $.ui.log(`2mw2lt: the prompt was refused: ${why}`, { to: 'debug' })
+    await append($, text)
+    await appended?.()
+  }
+  void $.prompt.submit({ text })
+    .then(r => r && 'drop' in r ? refused(String(r.drop)) : show($, { kind: 'row', row: surface.ownRow(text) }), err => refused(String(err)))
+    .catch(() => undefined)
+  return false
 }
+
+// The live view's channel to this machine's agent (#4823, design §6.1): `$.http.fetch` alone, one
+// ordered send queue out. While nobody watches, nothing is made or
+// sent; rows leave whole, and the agent redacts them.
+const SURFACE_SEQ = { plugin: '2mw2lt', key: 'surfaceSeq' } as const
+const BATCH_MS = 50
+const RETRY_MS = 250
+const RETRY_CAP_MS = 5000
+const outbox = new surface.Outbox()
+let watching = false
+let watched = ''                     // the session the channel follows: what its events are sent as
+let sending: Promise<void> = Promise.resolve()
+let agent: { base: string; key: string; workspace: string } | undefined
+let following = 0
+let surfaceSaid = ''
+
+// A refusal on the channel is logged once until it changes or the channel recovers.
+function surfaceRefused($: EngineInterface, why: string) {
+  if (why === surfaceSaid) return
+  surfaceSaid = why
+  $.ui.log(`2mw2lt: ${why}`, { to: 'debug' })
+}
+
+async function agentOf($: EngineInterface, workspace: string) {
+  const record = await $.fs.read(`${workspace}/.env`).then(String, () => '')
+  const env = async (read: () => Promise<string | undefined>) => read().catch(() => undefined)
+  const home = await env(() => $.env.get('HOME')) ?? ''
+  const { port, keyFiles } = surface.agentOf(record, {
+    port: await env(() => $.env.get('STEERING_AGENT_PORT')),
+    xdg: await env(() => $.env.get('XDG_CONFIG_HOME')),
+    home,
+  })
+  for (const file of keyFiles) {
+    const key = await $.fs.read(file).then(t => String(t).trim(), () => '')
+    // The hold's poll rides this agent too (#7838), so it carries what its frames route asks
+    // beyond the key: the harness's configuration directory, under which the agent reads the
+    // session's own registry, and the project this session runs in, which a hand-over names.
+    if (key) return { base: `http://127.0.0.1:${port}`, key, workspace,
+      config: await env(() => $.env.get('CLAUDE_CONFIG_DIR')) || (home ? `${home}/.claude` : ''),
+      cwd: await $.session.root() }
+  }
+  return undefined
+}
+
+const agentHeaders = (a: { key: string; workspace: string }) =>
+  ({ 'content-type': 'application/json', 'X-Steering-Agent-Key': a.key, 'X-Steering-Workspace': surface.workspaceHeader(a.workspace) })
+
+function show($: EngineInterface, payload: surface.Payload) {
+  if (!watching || !outbox.add(watched, payload)) return
+  $.clock.after(BATCH_MS, () => { sendBatch($) })
+}
+
+// One batch at a time, in order, until the queue is empty. A batch the agent did not take is gone,
+// and that session's next batch opens with a gap over it, an earlier gap's range included.
+function sendBatch($: EngineInterface) {
+  sending = sending.then(async () => {
+    for (let batch = outbox.take(); batch.length; batch = outbox.take()) {
+      const first = batch[0]!
+      try {
+        await $.state.set(SURFACE_SEQ, batch[batch.length - 1]!.seq)
+        const at = agent
+        if (!at) throw new Error('no agent to send to')
+        const r = await $.http.fetch(`${at.base}/steering/surface/events`,
+          { method: 'POST', headers: agentHeaders(at), body: JSON.stringify({ session: first.session, events: batch }) })
+        if (!r.ok) throw new Error(`the agent answered ${r.status}: ${r.text.slice(0, 200)}`)
+      } catch (err) {
+        surfaceRefused($, `the live view's events were not taken: ${String(err)}`)
+        outbox.failed(batch)
+      }
+    }
+  }).catch(err => { surfaceRefused($, `the live view's send broke: ${String(err)}`) })
+}
+
+// Asks the agent whether anyone watches this session, until unfollowed.
+async function pollSurface($: EngineInterface, workspace: string, session: string, gen: number) {
+  if (outbox.seq === undefined) outbox.resume((await $.state.get(SURFACE_SEQ)).value ?? 0)
+  let cursor = ''
+  let wait = RETRY_MS
+  while (gen === following) {
+    try {
+      // Resolved into a local and installed only while this poll still stands, so a follower made
+      // obsolete while it asked installs nothing over a newer one's agent.
+      const resolved = await agentOf($, workspace)
+      if (gen !== following) return
+      agent ??= resolved
+      // An agent not yet started is retried as one that stopped: its key appears when it starts.
+      if (!agent) throw new Error(`no key for the agent serving ${workspace}`)
+      const r = await $.http.fetch(`${agent.base}/steering/surface/poll?session=${encodeURIComponent(session)}&after=${encodeURIComponent(cursor)}`,
+        { headers: agentHeaders(agent) })
+      if (gen !== following) return
+      if (!r.ok) throw new Error(`the agent answered ${r.status}: ${r.text.slice(0, 200)}`)
+      const answer = JSON.parse(r.text) as { watch?: unknown; cursor?: unknown }
+      watching = answer.watch === true
+      if (typeof answer.cursor === 'string') cursor = answer.cursor
+      wait = RETRY_MS
+      surfaceSaid = ''
+    } catch (err) {
+      if (gen !== following) return
+      surfaceRefused($, `the live view's poll failed: ${String(err)}`)
+      if (watching && outbox.seq !== undefined) outbox.lost(session, outbox.seq)   // rows go unseen until it answers
+      watching = false
+      agent = undefined                  // read again: a restarted agent may hold a new key
+      await new Promise<void>(resolve => { $.clock.after(wait, resolve) })
+      wait = Math.min(wait * 2, RETRY_CAP_MS)
+    }
+  }
+}
+
+// Every change of the session's identity goes through here or `unfollow`: the old name's watch says
+// nothing about the new one, so nothing is shown until the agent answers for the new name, from an
+// empty cursor.
+function follow($: EngineInterface, workspace: string, session: string) {
+  const gen = ++following
+  watching = false
+  watched = session
+  void pollSurface($, workspace, session, gen).catch(err => $.ui.log(`2mw2lt: the live view's poll ended: ${String(err)}`, { to: 'debug' }))
+}
+
+function unfollow() {
+  following++
+  watching = false
+  watched = ''
+}
+
+// The session is known by another name from now on, or by none. If its rows were being shown, what
+// it makes before the new name is watched goes unseen, so the new name's first batch opens with a gap.
+function rename($: EngineInterface, session: string) {
+  if (!watched || session === watched) return
+  if (!session || !workspaceOf()) { unfollow(); return }
+  if (watching && outbox.seq !== undefined) outbox.lost(session, outbox.seq)
+  follow($, workspaceOf()!, session)
+}
+
+// Every write of the session's name goes through here, so the live view moves with it at once.
+async function setSession($: EngineInterface, session: string) {
+  await $.state.set(SESSION, session)
+  rename($, session)
+}
+
+// The live view follows the workspace the claim is in: the common root the agent serves.
+const workspaceOf = () => claimed?.path.match(/^(.*)\/\.claude\/steering-holders\/[^/]+$/)?.[1]
 
 // The token count the engine auto-compacts at, read from its own breakdown; the window where it
 // has auto-compaction off. A model it does not know gets the engine's default window, and the log
@@ -275,9 +436,9 @@ async function bulletinRevisions($: EngineInterface): Promise<Map<string, number
   const out = new Map<string, number>()
   const { value: session = '' } = await $.state.get(SESSION)
   if (!root || !session) return out
-  const at = await runOwn($, ['python3', script($, 'hold.py'), '--frame-path', session]).catch(() => undefined)
-  if (!at || at.exitCode !== 0) return out
-  const recording = String(await $.fs.read(at.stdout.trim()).catch(() => ''))
+  const at = await framePath($, session)
+  if (!at) return out
+  const recording = String(await $.fs.read(at).catch(() => ''))
   for (const raw of recording.split('\n')) {
     if (!raw.startsWith('data: ')) continue
     let f: { kind?: unknown; id?: unknown; revision?: unknown }
@@ -314,8 +475,8 @@ async function tellBulletins($: EngineInterface) {
   const { value: session = '' } = await $.state.get(SESSION)
   let recording = ''
   if (session) {
-    const at = await runOwn($, ['python3', script($, 'hold.py'), '--frame-path', session])
-    if (at.exitCode === 0) recording = String(await $.fs.read(at.stdout.trim()).catch(() => ''))
+    const at = await framePath($, session)
+    if (at) recording = String(await $.fs.read(at).catch(() => ''))
   }
   const { bulletins, found } = pick(recording, ids)
   if (bulletins.length) await append($, capBulletin(bulletins))
@@ -382,17 +543,193 @@ let named = ''
 // would keep the changes from every process on this enrolment (plan unit 7b). Unknown until the
 // first render, and a module variable because the trait reaches only `prompt.compose`.
 let teammate: boolean | undefined
+// The hold the agent admitted to this module's polls, to let go of when the module stops holding.
+let holdId = ''
+let holdName = ''
+// Where the agent records the frames it hands this module, which the `frames` tool reads: named
+// by the agent with the hold, else asked of hold.py for each read.
+let framesPath = ''
 
-function stop() {
+// What one arm of the hold ended with: the child's exit code, or the poll's own; whether a frame
+// woke the session; the end of what was said about it; the refusal, if one ended it; and the
+// session coordination admitted where the enrolment reconciled a retained name (#5661).
+type Ended = { code: number | null; woke: boolean; said: string; refused?: Line; session?: string }
+
+// The poll's own codes, where the child's are hold.py's: a hold the agent could not serve just
+// then is held again as a child that exited is.
+const POLL_UNSERVED = 2
+
+// Stop the arm that holds, and answer the hold it held at the agent, for the caller to let go of.
+function stop(): string {
   generation++
+  unfollow()
   void child?.return(undefined as never).catch(() => undefined)
   child = undefined
+  const held = holdId
+  holdId = ''
+  return held
+}
+
+async function framePath($: EngineInterface, session: string): Promise<string> {
+  if (framesPath) return framesPath
+  const at = await runOwn($, ['python3', script($, 'hold.py'), '--frame-path', session]).catch(() => undefined)
+  return at?.exitCode === 0 ? at.stdout.trim() : ''
+}
+
+// The hold's poll rides the agent the live view's channel resolved (#7838), whose facts carry what
+// the frames route asks beyond the key and workspace: the harness's configuration directory, where
+// the agent reads the session's own registry, and the project this session runs in, which a
+// hand-over's targeting names. The agent has no other way to know either.
+const framesRoute = (a: NonNullable<typeof agent>, session: string, held: string) =>
+  `${a.base}/steering/session/${encodeURIComponent(session)}/frames${held ? `?hold=${encodeURIComponent(held)}` : ''}`
+
+const holdHeaders = (a: NonNullable<typeof agent>, ps: string) => ({
+  'X-Steering-Agent-Key': a.key, 'X-Steering-Workspace': surface.workspaceHeader(a.workspace),
+  'X-Steering-Provider': 'claude', 'X-Steering-Provider-Session': ps, 'X-Steering-Wake': 'plugin',
+  ...(a.config ? { 'X-Steering-Config-Dir': encodeURIComponent(a.config) } : {}),
+  ...(a.cwd ? { 'X-Steering-Project': encodeURIComponent(a.cwd) } : {}),
+})
+
+// Let the agent go of a hold this module no longer polls: at the session's end, a disconnect, or a
+// start that supersedes the arm. Without it the agent keeps the hold its grace long.
+async function letGo($: EngineInterface, session: string, held: string) {
+  const a = agent
+  if (a && held) await releaseHold($, a, session, held)
+}
+
+async function releaseHold($: EngineInterface, a: NonNullable<typeof agent>, session: string, held: string) {
+  try {
+    const r = await $.http.fetch(framesRoute(a, session, held), { method: 'DELETE', headers: holdHeaders(a, await $.session.id()) })
+    if (r.status !== 204) $.ui.log(`2mw2lt: letting go of hold ${held} was answered ${r.status}`, { to: 'debug' })
+  } catch (err) {
+    $.ui.log(`2mw2lt: the hold ${held} was not let go: ${String(err)}`, { to: 'debug' })
+  }
+}
+
+// One frame line as hold.py prints it, from the child or from the agent's poll (#7838). Answers
+// the session coordination admitted where a `held` line names another, else nothing.
+async function onLine($: EngineInterface, l: Line, ps: string, session: string, arm: { woke: boolean; refused?: Line }): Promise<string | undefined> {
+  if (l.kind === 'held') {
+    hold = { state: 'holding', hold: l.hold ?? null, since: (await $.clock.now()) / 1000 }
+    await claim($, true, ps).catch(() => undefined)
+    // A hold replacement can follow a pointer submission that never became a turn: the
+    // engine then emits no `turn.complete`, so the normal repoint timer never runs. Reconcile
+    // the pending pointer when the replacement is admitted; a busy turn still defers to its
+    // completion, while an idle session gets the one prompt it missed.
+    await repoint($)
+    if (l.session && l.session !== session) await setSession($, l.session)   // admitted under this name: it is the session's from now
+    return l.session && l.session !== session ? l.session : undefined
+  }
+  if (l.kind === 'refused') { arm.refused = l; return }
+  if (l.kind === 'seat') askSeat($, true)
+  else if (asksSeat(l.kind)) await askHolder($)
+  if (l.kind === 'bulletin' && l.id) {
+    // Recorded for the turn that next starts; it wakes nobody, so no pointer either.
+    const fid = l.id
+    await locked($, async () => {
+      const { value: ids = [] } = await $.state.get(BULLETINS)
+      const { value: read = [] } = await $.state.get(READ)
+      if (!ids.includes(fid) && !read.includes(fid)) await $.state.set(BULLETINS, [...ids, fid])
+    })
+    return
+  }
+  if (!l.wakes || l.kind === 'closed') return
+  arm.woke = true
+  await locked($, async () => {
+    const { value: pending = [] } = await $.state.get(PENDING)
+    const { value: read = [] } = await $.state.get(READ)
+    if (!owed(l.id, pending, read)) {
+      $.ui.log(`2mw2lt: a ${l.kind} frame ${l.id ? `${l.id} is already pending or read` : 'carries no id'}; no pointer`, { to: 'debug' })
+      return
+    }
+    await $.state.set(PENDING, [...pending, l.id])
+    await point($)
+  })
+  return
+}
+
+// One arm of the hold: polls on the agent where the workspace names one and it serves the frames
+// route, else hold.py's child. The agent is resolved with the live view's channel's own resolver,
+// and again after an arm that could not reach it: a restarted agent may hold a new key.
+async function holdOnce($: EngineInterface, ps: string, session: string, gen: number): Promise<Ended> {
+  const workspace = workspaceOf()
+  if (workspace) {
+    // Resolved into a local and installed only past the generation check, so an arm made obsolete
+    // while it asked installs nothing over a newer arm's agent.
+    const resolved = await agentOf($, workspace)
+    if (gen !== generation) return { code: null, woke: false, said: '' }
+    agent ??= resolved
+    if (agent) {
+      const polled = await holdPolled($, ps, session, gen)
+      if (polled) return polled
+      $.ui.log('2mw2lt: the agent serves no frames route; hold.py holds this arm', { to: 'debug' })
+    }
+  }
+  return holdChild($, ps, session, gen)
+}
+
+// The hold as polls (#7838): the first admits it at the door and names it back, with where the
+// agent records the frames; each after answers the frames that came, as hold.py's lines, waiting
+// for the first up to the agent's keepalive, within the engine's own 30 s on a fetch. A `closed`
+// frame ends the arm as it ends a child: revoked is 3, and the rest hold again. A refusal of the
+// hold is hold.py's `refused` line, and ends the arm with 1. Nothing when the agent serves no such
+// route, for the child to hold this arm.
+async function holdPolled($: EngineInterface, ps: string, session: string, gen: number): Promise<Ended | undefined> {
+  const a = agent!
+  const arm: { woke: boolean; refused?: Line } = { woke: false }
+  let admitted: string | undefined
+  let held = ''
+  while (gen === generation) {
+    const r = await $.http.fetch(framesRoute(a, admitted ?? session, held), { headers: holdHeaders(a, ps) })
+    let body: { held?: Record<string, unknown>; frames?: Line[]; refused?: unknown; retry?: unknown; remedy?: unknown; serves?: unknown } = {}
+    try { body = JSON.parse(r.text) } catch { /* not the agent's answer */ }
+    if (gen !== generation) {
+      // Superseded while the poll was out: what it answered stays in the agent's recording, and
+      // the door replays what went unread. Whoever stopped the arm lets its hold go, and an
+      // admission this late answer carries is this arm's own to release, no one else's.
+      const late = body.held
+      if (late && typeof late.hold_id === 'string') {
+        const theirs = typeof late.session === 'string' ? late.session : session
+        void releaseHold($, a, theirs, late.hold_id)
+      }
+      return { code: null, woke: arm.woke, said: '', refused: arm.refused, session: admitted }
+    }
+    if (r.status === 404 && typeof body.refused !== 'string') return undefined     // no such route: an older agent
+    if (r.status !== 200) {
+      // An agent serving other workspaces than this session's is the enrolment's diagnosis, not a
+      // moment's (#1073), as hold.py reads it; the door's refusals come decided by the agent.
+      const elsewhere = r.status === 404 && Array.isArray(body.serves) && body.serves.length > 0
+      if (typeof body.retry === 'boolean' || elsewhere) {
+        const retry = typeof body.retry === 'boolean' ? body.retry : false
+        arm.refused = { id: null, kind: 'refused', wakes: false, why: `${elsewhere ? `refused ${r.status}: ` : ''}${String(body.refused)}`, retry,
+          ...(typeof body.remedy === 'string' ? { remedy: body.remedy } : retry ? {} : { remedy: 'run /2mw2lt:connect, which the plugin\'s hold follows' }) }
+        return { code: 1, woke: arm.woke, said: arm.refused.why ?? '', refused: arm.refused, session: admitted }
+      }
+      return { code: POLL_UNSERVED, woke: arm.woke, said: `the agent answered ${r.status}: ${r.text.slice(0, STDERR_TAIL)}`, refused: arm.refused, session: admitted }
+    }
+    if (body.held) {
+      held = String(body.held.hold_id ?? '')
+      holdId = held
+      holdName = String(body.held.session ?? session)
+      if (typeof body.held.frames === 'string') framesPath = body.held.frames
+      const renamed = await onLine($, { id: null, kind: 'held', wakes: false, hold: held, session: holdName }, ps, session, arm)
+      if (renamed) admitted = renamed
+    }
+    for (const l of body.frames ?? []) {
+      await onLine($, l, ps, session, arm)
+      if (l.kind === 'closed') {
+        holdId = ''
+        return { code: l.why === 'revoked' ? 3 : 0, woke: arm.woke, said: `the stream closed: ${l.why ?? ''}`, refused: arm.refused, session: admitted }
+      }
+    }
+  }
+  return { code: null, woke: arm.woke, said: '', refused: arm.refused, session: admitted }
 }
 
 // One child, read to its end: its exit code, and whether a frame it gave woke the session. The
 // child names the session coordination admitted where the enrolment reconciled a retained name
 // (#5661), so the loop answers by the admitted name from the next arm on.
-async function holdOnce($: EngineInterface, ps: string, session: string, gen: number) {
+async function holdChild($: EngineInterface, ps: string, session: string, gen: number): Promise<Ended> {
   const held = $.process.spawn({
     argv: ['python3', script($, 'hold.py'), '--wake', 'plugin', '--provider', 'claude', '--provider-session', ps, session],
     cwd: root,
@@ -401,55 +738,20 @@ async function holdOnce($: EngineInterface, ps: string, session: string, gen: nu
   child = held
   let buffer = ''
   let said = ''                                // the end of what it wrote to stderr: why it stopped
-  let woke = false
-  let refused: Line | undefined
-  let named: string | undefined
+  const arm: { woke: boolean; refused?: Line } = { woke: false }
+  let admitted: string | undefined
   for await (const { stream, text } of held) {
-    if (gen !== generation) return { code: null, woke, said, refused, session: named }   // leaving the loop kills the child
+    if (gen !== generation) return { code: null, woke: arm.woke, said, refused: arm.refused, session: admitted }   // leaving the loop kills the child
     if (stream !== 'stdout') { said = (said + text).slice(-STDERR_TAIL); continue }
     const { complete, rest } = lines(buffer + text)
     buffer = rest
     for (const l of complete) {
-      if (l.kind === 'held') {
-        named = l.session && l.session !== session ? l.session : named
-        hold = { state: 'holding', hold: l.hold ?? null, since: (await $.clock.now()) / 1000 }
-        await claim($, true, ps).catch(() => undefined)
-        // A hold replacement can follow a pointer submission that never became a turn: the
-        // engine then emits no `turn.complete`, so the normal repoint timer never runs. Reconcile
-        // the pending pointer when the replacement is admitted; a busy turn still defers to its
-        // completion, while an idle session gets the one prompt it missed.
-        await repoint($)
-        continue
-      }
-      if (l.kind === 'refused') { refused = l; continue }
-      if (l.kind === 'seat') askSeat($, true)
-      else if (asksSeat(l.kind)) await askHolder($)
-      if (l.kind === 'bulletin' && l.id) {
-        // Recorded for the turn that next starts; it wakes nobody, so no pointer either.
-        const fid = l.id
-        await locked($, async () => {
-          const { value: ids = [] } = await $.state.get(BULLETINS)
-          const { value: read = [] } = await $.state.get(READ)
-          if (!ids.includes(fid) && !read.includes(fid)) await $.state.set(BULLETINS, [...ids, fid])
-        })
-        continue
-      }
-      if (!l.wakes || l.kind === 'closed') continue
-      woke = true
-      await locked($, async () => {
-        const { value: pending = [] } = await $.state.get(PENDING)
-        const { value: read = [] } = await $.state.get(READ)
-        if (!owed(l.id, pending, read)) {
-          $.ui.log(`2mw2lt: a ${l.kind} frame ${l.id ? `${l.id} is already pending or read` : 'carries no id'}; no pointer`, { to: 'debug' })
-          return
-        }
-        await $.state.set(PENDING, [...pending, l.id])
-        await point($)
-      })
+      const renamed = await onLine($, l, ps, session, arm)
+      if (renamed) admitted = renamed
     }
   }
-  if (gen !== generation) return { code: null, woke, said, refused, session: named }
-  return { code: (await held.result).code, woke, said, refused, session: named }
+  if (gen !== generation) return { code: null, woke: arm.woke, said, refused: arm.refused, session: admitted }
+  return { code: (await held.result).code, woke: arm.woke, said, refused: arm.refused, session: admitted }
 }
 
 async function holdLoop($: EngineInterface, session: string, gen: number) {
@@ -476,13 +778,19 @@ async function holdLoop($: EngineInterface, session: string, gen: number) {
       if (code !== 0) $.ui.log(`2mw2lt: the hold exited ${code}: ${ended.said.trim()}`, { to: 'debug' })
     } catch (err) {                            // a child that broke is held again, as one that exited
       $.ui.log(`2mw2lt: the hold broke: ${String(err)}`, { to: 'debug' })
+      // A poll the agent did not answer: the agent may have moved, so it is asked of again. Only
+      // the arm's own loop clears what it owns, never a superseded one's.
+      if (gen === generation) {
+        agent = undefined
+        holdId = ''
+      }
     }
     if (gen !== generation) return
     if (admitted && admitted !== named) {
       // Coordination admitted the hold under a reconciled name: the frames and the next arm
       // follow it (#5661). Past the generation check, a superseded loop writes nothing.
       named = admitted
-      await $.state.set(SESSION, named)
+      await setSession($, named)
     }
     // The plugin holds every session's stream, the seat's included, and never hands that to the
     // session (owner ruling, #5641): a revoked (3) or refused (1) hold is held again like any
@@ -509,12 +817,16 @@ async function holdLoop($: EngineInterface, session: string, gen: number) {
 }
 
 async function start($: EngineInterface, session: string) {
-  stop()
+  void letGo($, holdName, stop())
   const gen = generation
   hold = { state: 'starting' }
-  await $.state.set(SESSION, session)
+  // The recording is asked of again for this start: it is the session's.
+  framesPath = ''
+  await setSession($, session)
   askSeat($, true)
   void holdLoop($, session, gen).catch(err => $.ui.log(`2mw2lt: the hold loop ended: ${String(err)}`, { to: 'debug' }))
+  const workspace = workspaceOf()
+  if (workspace) follow($, workspace, session)
 }
 
 export const register: Register = on => {
@@ -579,8 +891,8 @@ export const register: Register = on => {
     const pending = await locked($, async () => (await $.state.get(PENDING)).value ?? [])
     let recording = ''
     if (session && pending.length) {
-      const at = await runOwn($, ['python3', script($, 'hold.py'), '--frame-path', session])
-      if (at.exitCode === 0) recording = String(await $.fs.read(at.stdout.trim()).catch(() => ''))
+      const at = await framePath($, session)
+      if (at) recording = String(await $.fs.read(at).catch(() => ''))
     }
     const { text, envelopes, says, found, read } = pick(recording, pending)
     if (read.directives.length || read.seatGeneration !== undefined) {
@@ -666,10 +978,10 @@ export const register: Register = on => {
       const { value: session = '' } = await $.state.get(SESSION)
       if (!session || await sessionOf($, session) !== '' || gen !== generation) return result
       // The claim stays, since the module is still live for a later connect.
-      stop()
+      await letGo($, holdName, stop())
       hold = { state: 'stopped', refusal: 'this session disconnected', remedy: 'run /2mw2lt:connect', at: (await $.clock.now()) / 1000 }
       await claim($, true).catch(() => undefined)
-      await $.state.set(SESSION, '')
+      await setSession($, '')
       await $.state.set(SEAT, '')
       await $.state.set(BULLETIN, '')
       await $.state.set(BULLETINS, [])
@@ -678,6 +990,7 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('turn.start', async ($, e, next) => {
+    if (e.agentId === undefined) show($, { kind: 'turn', turn: { state: 'started' } })
     // A subagent's turn starts inside ours, and the run is the outer turn's.
     await $.state.set(BUSY, true)
     if (e.agentId === undefined) await tellBulletins($).catch(err => $.ui.log(`2mw2lt: the bulletin turn broke: ${String(err)}`, { to: 'debug' }))
@@ -686,6 +999,7 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {                                 // a subagent's turn ends inside ours
+      show($, { kind: 'turn', turn: { state: 'completed', reason: surface.turnReason(e.reason) } })
       await $.state.set(BUSY, false)
       // A turn dead on an API error (a 429) did not read its pointer, and sending it into the
       // same refusal would only be refused again. The frames stay pending, and the next one to
@@ -723,7 +1037,18 @@ export const register: Register = on => {
     // The conversation's cache is spent here anyway: the new text is in place before the next request.
     await refreshSeat($, true).catch(err => $.ui.log(`2mw2lt: the seat check broke: ${String(err)}`, { to: 'debug' }))
     const keep = await keepLine($, session)
-    return next({ ...e, instructions: [e.instructions, keep].filter(Boolean).join('\n') })
+    const compacted = await next({ ...e, instructions: [e.instructions, keep].filter(Boolean).join('\n') })
+    const row = surface.compactionRow(compacted)
+    if (row) show($, { kind: 'compaction', row })
+    return compacted
+  }).catch(($, e, next) => next(e))
+
+  // Every row the main conversation keeps, as stored, for the live view; compaction's never pass here.
+  on('session.append', async ($, e, next) => {
+    const stored = await next(e)
+    const row = watching && stored.uuid !== undefined ? surface.rowOf(e, stored) : undefined
+    if (row) show($, { kind: 'row', row })
+    return stored
   }).catch(($, e, next) => next(e))
 
   // /clear ends this session id without a `session.start` for the next: the hold goes with the old
@@ -759,12 +1084,17 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   // Stop the loop before anything else: the engine ends the child before this runs, and a loop
-  // left going would spawn another mid-shutdown. All of it shares a 1.5 s bound.
+  // left going would spawn another mid-shutdown. All of it shares a 1.5 s bound, so the local
+  // cleanup runs first and the let-go at the agent last: a door the agent waits on cannot cost
+  // the claim its release, and a let-go that misses the bound falls to the agent's grace.
   on('session.end', async ($, e, next) => {
-    stop()
+    const held = stop()
     await $.state.set(APPENDED, false)   // a turn ending now has nothing to be pointed again for
     if (e.reason !== 'clear') refresh?.cancel()
     if (root) await claim($, false, e.sessionId)
+    // Not awaited: the hook's own bound ends here, and a let-go that outlives it falls to the
+    // agent's grace, which is what it is for.
+    void letGo($, holdName, held)
     return next(e)
   })
 }

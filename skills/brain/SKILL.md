@@ -137,10 +137,12 @@ kind turned off is not told, and its standing still reads:
   (`signals.session_unannounced.*`) without ever announcing what it is doing at this epoch, however
   busily it writes, once per engagement. Ask it what it is doing; the brief that never asked it to
   announce is the one to fix.
-- **`push-quiet`**, a signal: the platform last heard a push to the session's card's branches an hour
-  ago (`signals.push_quiet.*`), once per push heard. Heard is when GitHub's delivery reached it, and it
-  is not proof that nothing was pushed since; a branch whose head the last push heard does not explain
-  reads unknown and is not told. Ask the session to push what it has.
+- **`push-quiet`**, a signal: a card the session executes and has not said done for, merged or not,
+  last moved an hour ago (`signals.push_quiet.*`), once per card and quiet spell. Moved is the
+  session's newest act on it, named in `progress_kind`: a branch claimed, a push heard, a gate it
+  commissioned, a checkpoint or an announce bound to the card, or `engaged` when it has done none.
+  A push is dated by when GitHub's delivery reached the platform. Its turns are activity, not
+  movement. Ask the session to push what it has, say what is in its way, or say done for the card.
 - **`pass-stranded`**, a signal from `gate <commission>`: a pull request's pass was published on its
   head 30 minutes ago (`signals.pass_stranded.*`) and it is still read open on that head, once per
   head. It names who asked for the review or carried it and whether they are still enrolled. Passed
@@ -161,6 +163,10 @@ kind turned off is not told, and its standing still reads:
 - **`account-unspent`**, a signal: an account the team spends resets within 60 minutes with more than
   30% of its scored window left (`signals.account_unspent.*`), once per reset. What is left at the
   reset is lost: place work on it before then.
+- **`account-reset`**, a signal from `account <subject>`: an account's spent window rolled over and
+  it takes work again (`signals.account_reset.*`), once per reset. `excluded.window` is the window
+  that had stopped it. Its sessions are told it too by default, and the platform wakes each whose stream holds; resume
+  each session under `resume`, which no wake of the platform's reaches, with `wake:` or a say.
 - **`machine-behind`**, a signal: a machine's agent runs another release than its door states, 15
   minutes after the door began stating it or the machine linked (`signals.machine_behind.*`), once
   per release. Deploy it there, or see why its follow stopped.
@@ -593,11 +599,19 @@ Have the worker that holds the work finish its merge or handoff; you are not eve
 operator. Place against current executor and pending-launch facts — never launch over either.
 
 **Prepare the plan through the goal contract.** The first plan, and every re-adoption after its
-inputs move, goes through the goal commands `/2mw2lt:discover` records: pins from the current
-reading (`expected_goal_revision`, `expected_plan_revision`, `expected_input_digest` from
-`GET /goals/<goal>/reading`), an active priority-policy decision, selections in your intended
-order, and criterion associations. A plan states instruction; it admits, refuses and fences
-nothing.
+inputs move, is prepared, then submitted. Write the decision to a file: `purpose`, `selections` in
+your intended order (`card`, `role` required, optional or excluded, and `statement`),
+`associations` (`change`, `criterion`, `card`) and an optional `cutoff`. Prepare reads the fences,
+shows each beside your decision, and writes the exact body:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/goal.py" --lease prepare plan <goal> --policy <decision unit> --decision <file>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/goal.py" --lease submit <the file prepare printed>
+```
+
+A lost answer is the same `submit` again, answered from the first. A stale refusal names what moved
+since prepare and sends nothing: reconsider, then prepare again. A plan states instruction; it
+admits, refuses and fences nothing.
 
 **Record edges as they are discovered.** When you delegate work that waits on other work, say the
 wait in the same brief:
@@ -609,8 +623,12 @@ it (the connect skill teaches the command), and never let it live only in the co
 landing of `landed` is what the sources observed; a criterion judgment through the goal contract
 is the only acceptance. A merged pull request is neither a deployment nor an accepted outcome.
 When a unit's work and evidence stand, prepare the judgment — criteria by their effective
-evidence, the goal over its criterion judgments — and judge through the goal commands, never by
-folding the backlog's shape into a conclusion.
+evidence, the goal over its criterion judgments — and submit it, never folding the backlog's shape
+into a conclusion. Evidence is a card or a pull request, never a link:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/goal.py" --lease prepare judge <goal> <criterion>|goal <verdict> --evidence pull:<owner>/<name>#<n> because <why>
+```
 
 **Appoint a steward when relaying the goal is the work.** A goal whose cards keep coming back to
 you for each launch, retier, rescue and directive runs better under a steward: a session you
@@ -739,8 +757,11 @@ written as you would relay it. Name the card the worker executes in the launch l
 `resolves <owner>/<name>#<n>`, the issue its one live card resolves, or `card <wire id>` for a
 card held by its wire id — and the session the launch starts becomes that card's executor when
 it is handed the brief, ending the engagement of the executor before it: a card has one
-executor, and the ending is recorded on the card, not silent. A launch that names a card is
-refused without a brief, and its brief is the handover. Send it through a quoted heredoc, so
+executor, and the ending is recorded on the card. A session still executing the card hands it over
+by its own `handover` checkpoint, which you launch on; otherwise the launch is refused
+`launch-card-executed`, naming that session: retire it first, or launch a critic or helper beside
+it without a card (#7797). A launch that names a
+card is refused without a brief, and its brief is the handover. Send it through a quoted heredoc, so
 nothing in the brief is expanded by the shell:
 
 ```bash
@@ -831,7 +852,7 @@ whenever the model is that vendor's: passed to another vendor's endpoint, a mode
 mapped to that vendor's own model without a word. `worker-launched` names the vendor and
 launcher the session runs on; the agent starts it in tmux through that launcher, answers the
 folder-trust prompt, and answers the launch once the session has connected itself. A machine
-offers this only for the launchers it declares in `STEERING_CLAUDE_LAUNCHERS`. End one with
+offers this only for the launchers its agent.toml declares in `[routing].claude_launchers`. End one with
 `retire: token @lease <tmux session> on <node>`, the `2mw2lt-launch-…` name `worker-launched`
 carries. On a Go workspace a retire names the session and why instead: `retire: token @lease
 <session> [to <successor>] because <reason>`. A card the session still executes open is forfeited,
@@ -999,10 +1020,9 @@ LAUNCH
 
 In `card`'s place, `resolves <owner>/<name>#<n>` names the card by the issue it resolves: the one
 live card resolving it, refused `card-absent` when none does (scope one first), `card-ambiguous`
-when several do, and `launch-card-executed`, naming the session, when a session still enrolled
-executes it: hand that card over with `card <wire id>`, or declare a card for the new work (#7678).
-Two launches by one issue both pass while the card has no executor; the second session to answer
-is not engaged, and its brief opens by saying whose the card is (#7701). A `notify <session>` clause, before `because`, names the session that asked for the
+when several do, and `launch-card-executed` as for `card` (#7678). Two launches naming one card
+both pass while it has no executor; the second session to answer is not engaged, and its brief
+opens by saying whose the card is (#7701). A `notify <session>` clause, before `because`, names the session that asked for the
 launch: it is told on its own stream who enrolled for the launch, on which machine and for which
 card, and how the launch ended when nobody did, so you watch for no arrival to relay (#7182).
 
@@ -1264,6 +1284,33 @@ or proof a worker ended: spread work toward the machine whose evidence shows roo
 it, since other workspaces' brains delegate there too, and let the launch itself decide. An agent
 refuses a launch past its cap and names it; that refusal is authoritative
 (#4177 owns capacity accounting).
+
+## Read the settings
+
+Read a setting through the API, never over ssh or from a host's files. There are three places:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /settings
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --root /teams/<team>/settings
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --root /hosts/<host>/settings
+```
+
+- **`/settings`** is the workspace's list. Its `team` is the `<team>` the workspace inherits from.
+- **`/teams/<team>/settings`** is the team's list, your own team's only.
+- **`/hosts/<host>/settings`** is a host's list. `<host>` is a machine's `host` in `/machines`.
+  - When the host belongs to your team's owner, you read it as that owner would.
+  - When your team only runs on the host, you read its values but not who set them, and an
+    account exclusion list shows as a count.
+
+You read the team and host lists only while you hold the seat.
+
+What each row tells you:
+- `source` is where the value came from.
+- `class` is the key's kind of decision.
+- `decided_by` is who decides it.
+
+You change none of these yet: every row answers `may_change: false` to you. A change the owner
+should make goes to them as an ask, naming the key, the place and the value.
 
 ## Hand work out at the effort it asks for
 

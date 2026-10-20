@@ -13,10 +13,6 @@ import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
-import python_floor  # noqa: E402
-
-python_floor.require()
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import connect  # noqa: E402
 from verb_help import error, help_requested, script_help  # noqa: E402

@@ -542,17 +542,57 @@ def create_team(console: str, token: str, intent: dict, repo: str) -> tuple[dict
     return {"id": got["id"], "name": owner, "owner": True}, got["workspace"]
 
 
+# What the person does about a Connect GitHub claim coordination refused, by the refusal's check.
+SIGN_IN_AGAIN = "your console sign-in ended or could not be verified again: sign in on {console}/ again, then choose Connect GitHub again"
+CLAIM_REFUSED = {
+    "installation-not-visible": "GitHub shows your account no 2mw2lt App installation on {owner}: install the App "
+                                "there with {repo} among its repositories, then choose Connect GitHub again",
+    "repository-not-in-installation": "the App is installed on {owner} without {repo}: add {repo} to the "
+                                      "installation's repositories on GitHub, then choose Connect GitHub again",
+    "not-admin": "your GitHub account is not an admin of {owner}: an admin of {owner} connects it, or makes you one",
+    "github-user-mismatch": "GitHub answered for another account than the one you signed in to 2mw2lt with: "
+                            "sign in to GitHub as that account, then choose Connect GitHub again",
+    "github-unlinked": "your console account is not linked to GitHub: sign in on {console}/ with GitHub, "
+                       "then choose Connect GitHub again",
+    "exchange-failed": "GitHub's sign-in code was spent or had expired: choose Connect GitHub again",
+    "owner-required": "it was asked by a member, and only the team's owner connects GitHub",
+    "member-removed": "the account that asked is no longer a member of the team: the team's owner connects GitHub",
+    "principal-membership-removed": "the account that asked is no longer a member of the team: the team's owner connects GitHub",
+    **{check: SIGN_IN_AGAIN for check in ("not-authenticated", "principal-expired", "identity-stale", "binding-expired",
+                                          "binding-revoked", "session-refused", "session-credential-superseded",
+                                          "session-epoch-stale")},
+}
+
+
+def claim_refused(refused: dict, repo: str, console: str) -> str:
+    """A refused Connect GitHub claim, in the words the person waiting on it acts on."""
+    check, request = refused.get("check") or "unknown", refused.get("request") or "none"
+    remedy = CLAIM_REFUSED.get(check)
+    if remedy:
+        return f"Connect GitHub was refused ({check}): " + remedy.format(owner=repo.split("/")[0], repo=repo, console=console)
+    return (f"Connect GitHub was refused ({check}), a refusal this install does not recognise: choose Connect GitHub "
+            f"again, and if it repeats tell the operator, quoting reference {request}")
+
+
 def wait_for_go_grant(console: str, token: str, team: str, repo: str, owner: bool) -> None:
     """Until the team holds the App's installation on `repo`, which is when its workspace's source
-    is read: the owner connects GitHub from the desk; anyone else asks them to."""
+    is read: the owner connects GitHub from the desk; anyone else asks them to. A claim coordination
+    refuses is said once, with what to do about it, and the wait goes on: a retry may hold."""
     url = f"{console}/api/v1/teams/{team}/installations?{urllib.parse.urlencode({'repository': repo})}"
     deadline = time.monotonic() + GRANT
+    seen: set = set()
+    last: list = []
 
     def held() -> bool:
         status, got = waited("GET", url, deadline, token=token)
         if status != 200:
             raise Stop(f"coordination could not say whether the App reaches {repo} ({status}): "
                        f"{got.get('code') or got}; run install again, or ask the operator if it repeats")
+        refused = got.get("refused")
+        if isinstance(refused, dict) and (refused.get("request"), refused.get("at")) not in seen:
+            seen.add((refused.get("request"), refused.get("at")))
+            last[:] = [refused]
+            say("github", claim_refused(refused, repo, console) + " (still waiting…)")
         return got.get("held") is True
 
     if held():
@@ -571,6 +611,8 @@ def wait_for_go_grant(console: str, token: str, team: str, repo: str, owner: boo
             told = time.monotonic()
             say("", f"waiting for the App to reach {repo} ({elapsed(told - start)})")
         if time.monotonic() >= deadline:
+            if last:
+                raise Stop(f"the App does not reach {repo} yet. {claim_refused(last[0], repo, console)}; then run this again")
             raise Stop(f"the App does not reach {repo} yet: the team's owner, signed in with GitHub, chooses "
                        f"Connect GitHub on {console}/; then run this again")
         time.sleep(POLL)

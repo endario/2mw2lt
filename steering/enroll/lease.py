@@ -12,10 +12,6 @@ import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
-import python_floor  # noqa: E402
-
-python_floor.require()
-
 import json  # noqa: E402
 import re  # noqa: E402
 import uuid  # noqa: E402

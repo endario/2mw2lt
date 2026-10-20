@@ -30,10 +30,6 @@ import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
-import python_floor  # noqa: E402
-
-python_floor.require()
-
 import contextlib
 import fcntl
 import hashlib
@@ -52,7 +48,7 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 import action_notice  # noqa: E402
 import holder  # noqa: E402
-from local_workspace import agent_port, path_header, required_workspace_root, workspace_header  # noqa: E402
+from local_workspace import agent_key_file, agent_port, path_header, required_workspace_root, workspace_header  # noqa: E402
 from moments import moment  # noqa: E402
 import door  # noqa: E402
 from bind import Refused, bind, incarnation, pid_arg  # noqa: E402
@@ -552,6 +548,14 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
     recorded = recording(frames)
     if plugin and recorded is None:
         return 1     # `recording` said why; the frames tool would have nothing to read
+    # A plugin hold is its holder's child: once that holder is gone, nothing reads what it holds,
+    # and an orphan that holds on keeps the session's recording and reopens its stream for no one
+    # — the next holder is refused the recording and the desk sees the hold come and go (#7859's
+    # sibling on a ZCode session, 2026-10-20).
+    parent = os.getppid() if plugin else None
+    if parent == 1:
+        print("the plugin that started this hold is already gone; nothing would read it", file=sys.stderr)
+        return 4
     try:
         while True:
             req = urllib.request.Request(url, headers={"X-Steering-Session": token,
@@ -568,6 +572,8 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                     for raw in r:
                         line = raw.decode(errors="replace")   # the response iterates as bytes
                         why = lapsed() if lapsed else None
+                        if parent is not None and os.getppid() != parent:
+                            why = "the plugin that started this hold is gone; nothing reads it"
                         if why:
                             print(why, file=sys.stderr)
                             return 4 if plugin else 1
@@ -647,6 +653,12 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                     print(f"the stream at 127.0.0.1:{port} was refused {e.code}"
                           f"{f': {why}' if why else ''}; reopening", file=sys.stderr)
                     quiet = True
+            except BrokenPipeError:
+                # Whoever reads this hold's lines has gone: reopening would hold for no one.
+                with contextlib.suppress(OSError, ValueError):
+                    os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+                print("the reader of this hold is gone; it ends", file=sys.stderr)
+                return 4 if plugin else 1
             except Exception as e:
                 if not quiet:
                     print(f"the stream at 127.0.0.1:{port} answered {type(e).__name__}: {e}; "

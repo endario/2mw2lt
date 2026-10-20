@@ -138,6 +138,7 @@ ListedAccountUsage = typing.TypedDict("ListedAccountUsage", {
     "peak_windows": "typing.NotRequired[list[PeakWindowRead] | None]",
     "resets_by": "str | None",
     "stopped_by_login": "str | None",
+    "stopped_at": "str | None",
     "owner_login": "str | None",
     "label": "str | None",
     "manages": "bool",
@@ -165,6 +166,7 @@ AccountShared = typing.TypedDict("AccountShared", {
 # carry in its expected type is nil. Plan and Credits are the vendor's, which nothing places by.
 UsageReading = typing.TypedDict("UsageReading", {
     "taken_at": "str",
+    "live_until": "str",
     "plan": "str | None",
     "credits": "UsageCredits | None",
     "limits": "list[UsageLimit] | None",
@@ -704,19 +706,42 @@ StreamUplink = typing.TypedDict("StreamUplink", {
 # StreamPolicy is the team's policy for the stream's machine (2395-machine-policy design, decision
 # 5): every machine key's effective value, and the version that names them, written when the stream
 # opens and again whenever the version moves. The agent answers it on POST …/agent/policy.
+#
+# Host is the host's own part (7637-settings design, decision 7): its pushed values, the same on
+# every team's stream to the host, with a version of its own. Until every agent reads it, the
+# team's part carries the host's pushed keys as well.
 StreamPolicy = typing.TypedDict("StreamPolicy", {
     "kind": "str",
     "team": "str",
     "version": "str",
     "values": "dict[str, typing.Any] | None",
+    "host": "typing.NotRequired[PolicyPart | None]",
+})
+
+# PolicyPart is one part of a policy frame: its values and the version that names them.
+PolicyPart = typing.TypedDict("PolicyPart", {
+    "version": "str",
+    "values": "dict[str, typing.Any] | None",
 })
 
 # PolicyReceipt is the agent's answer to a policy frame: the version it holds now and each key of it
-# that it could not apply, with why.
+# that it could not apply, with why. Host answers the frame's host part, nil from an agent that
+# does not read one.
 PolicyReceipt = typing.TypedDict("PolicyReceipt", {
     "uplink": "str",
     "version": "str",
     "refused": "list[PolicyRefusal] | None",
+    "host": "typing.NotRequired[PartReceipt | None]",
+})
+
+# PartReceipt is the agent's answer to one part of a policy frame. Refused names each key the agent
+# applies whose value it could not, Unknown each key it does not apply and so ignored, and Shadowed
+# each key the agent's own file or environment still sets, which the part's value overrides.
+PartReceipt = typing.TypedDict("PartReceipt", {
+    "version": "str",
+    "refused": "list[PolicyRefusal] | None",
+    "unknown": "list[str] | None",
+    "shadowed": "list[str] | None",
 })
 
 PolicyRefusal = typing.TypedDict("PolicyRefusal", {
@@ -848,7 +873,9 @@ StreamRevoked = typing.TypedDict("StreamRevoked", {
 
 # StreamLaunch is a launch offer: its id the offer's action, the harness it starts, and the vendor
 # and account the attempt was admitted on. DeadlineAt is when the offer lapses undelivered; the
-# agent refuses to start after it.
+# agent refuses to start after it. Forge is whose GitHub credential the worker holds, `app` or
+# `login`, which the agent keeps for the worker's later publishes; absent until the workspace's
+# forge was chosen, or from a coordination that predates it, when the agent reads its own file.
 StreamLaunch = typing.TypedDict("StreamLaunch", {
     "kind": "str",
     "id": "str",
@@ -859,6 +886,7 @@ StreamLaunch = typing.TypedDict("StreamLaunch", {
     "thinking": "typing.NotRequired[str]",
     "effort": "typing.NotRequired[str]",
     "window": "typing.NotRequired[bool]",
+    "forge": "typing.NotRequired[str]",
     "deadline_at": "typing.NotRequired[str]",
 })
 
@@ -1078,6 +1106,35 @@ StreamRetire = typing.TypedDict("StreamRetire", {
     "branches": "typing.NotRequired[list[str] | None]",
     "landed": "typing.NotRequired[list[str] | None]",
     "left": "typing.NotRequired[bool]",
+})
+
+# StreamWatch leases a browser's watch of a session this machine holds, by the session's name,
+# until Until: the agent sends the session's events up while any of its leases stands, and a
+# renewal is the same lease again (design §8.1). Not durable: a watch the uplink lost is leased
+# again by the browser's next renewal.
+StreamWatch = typing.TypedDict("StreamWatch", {
+    "kind": "str",
+    "session": "str",
+    "lease": "str",
+    "until": "str",
+})
+
+# StreamUnwatch ends one lease of a session's watch; the watch stands while another lease does.
+StreamUnwatch = typing.TypedDict("StreamUnwatch", {
+    "kind": "str",
+    "session": "str",
+    "lease": "str",
+})
+
+# StreamHistory asks the machine for a page of a session's history from the harness's own record:
+# up to Limit rows strictly before the row Before ("" for the newest). The agent answers it under
+# Request on POST …/agent/history.
+StreamHistory = typing.TypedDict("StreamHistory", {
+    "kind": "str",
+    "session": "str",
+    "request": "str",
+    "before": "str",
+    "limit": "int",
 })
 
 # AgentLaunchBody is the body of POST /steering/agent/launch: the machine's answer to a launch
@@ -1345,6 +1402,13 @@ AgentTarget = typing.TypedDict("AgentTarget", {
     "digest": "str",
     "bytes": "int",
     "pending": "bool",
+    "platforms": "typing.NotRequired[dict[str, AgentPackage] | None]",
+})
+
+# AgentPackage is one platform's agent package, checked against its digest and size.
+AgentPackage = typing.TypedDict("AgentPackage", {
+    "digest": "str",
+    "bytes": "int",
 })
 
 # AgentCheckpoint is the machine's read of one session's checkpoint currency: whether the
@@ -2207,6 +2271,14 @@ FactsPage = typing.TypedDict("FactsPage", {
     "exhausted": "bool",
 })
 
+# ForgeLogin is the workspace's pinned login, Account, and its State here, with Why the failing
+# step's words.
+ForgeLogin = typing.TypedDict("ForgeLogin", {
+    "state": "str",
+    "account": "typing.NotRequired[str]",
+    "why": "typing.NotRequired[str]",
+})
+
 # GateRow is one commission, under the incumbent's wire names where it has them. By names the
 # requesting session; Why is the commission's reason, or its result's; Findings counts the
 # verdict's findings; Review is the published review's URL. A review names its PR, a critique its
@@ -2239,6 +2311,8 @@ GateRow = typing.TypedDict("GateRow", {
     "reviewer": "GateReviewer | None",
     "run": "GateRun | None",
     "passed_over": "typing.NotRequired[dict[str, list[str] | None] | None]",
+    "priority": "typing.NotRequired[str]",
+    "ahead": "typing.NotRequired[int | None]",
 })
 
 # GateCard is a commission's card by its id and its name now.
@@ -2277,7 +2351,15 @@ GateRun = typing.TypedDict("GateRun", {
     "last_sign_at": "str | None",
     "seconds": "int | None",
     "first_output_seconds": "int | None",
+    "preparation": "list[GatePrepStep] | None",
     "tokens": "GateTokens | None",
+})
+
+# GatePrepStep is one step of a run's preparation on its machine, between delivery and its judge's
+# start (#7762), in the order the machine took it.
+GatePrepStep = typing.TypedDict("GatePrepStep", {
+    "step": "str",
+    "seconds": "float",
 })
 
 # GateTokens are a run's tokens by class, under the basis its harness counts them on.
@@ -2326,6 +2408,8 @@ GateRead = typing.TypedDict("GateRead", {
     "reviewer": "GateReviewer | None",
     "run": "GateRun | None",
     "passed_over": "typing.NotRequired[dict[str, list[str] | None] | None]",
+    "priority": "typing.NotRequired[str]",
+    "ahead": "typing.NotRequired[int | None]",
     "result": "GateResult | None",
     "attempts": "list[GateAttempt] | None",
 })
@@ -2380,11 +2464,10 @@ GateFinding = typing.TypedDict("GateFinding", {
     "status": "str",
 })
 
-# GateStats answers GET /gates/stats: the open commissions by phase and by the incumbent's
-# priority names, and, over each window, the throughput and per-vendor run facts the incumbent's
-# panel reads. Go commissions carry no priority, so every open one counts as normal; hosts are
-# this workspace's gate hosts; work sizes are what a Go run does not report, so their counts are 0
-# and their medians nil.
+# GateStats answers GET /gates/stats: the open commissions by phase and by priority — the live
+# card priority each is offered by (#6850) — and, over each window, the throughput and per-vendor
+# run facts the incumbent's panel reads. Hosts are this workspace's gate hosts; work sizes are
+# what a Go run does not report, so their counts are 0 and their medians nil.
 GateStats = typing.TypedDict("GateStats", {
     "open": "dict[str, int] | None",
     "open_by_priority": "dict[str, int] | None",
@@ -2393,9 +2476,11 @@ GateStats = typing.TypedDict("GateStats", {
 })
 
 # GateHost is a machine of this workspace that runs gates, by the name its runs' machine is read by,
-# with its gate slots and the gate runs held on it now, of any team.
+# with its gate slots and the gate runs held on it now, of any team. Host is its place
+# (settings.HostPlace), the id its settings are read at.
 GateHost = typing.TypedDict("GateHost", {
     "machine_id": "str",
+    "host": "str",
     "gate_host_limit": "int | None",
     "gate_runs": "int",
 })
@@ -2764,6 +2849,7 @@ LaunchOffer = typing.TypedDict("LaunchOffer", {
     "thinking": "typing.NotRequired[str]",
     "effort": "typing.NotRequired[str]",
     "window": "typing.NotRequired[bool]",
+    "forge": "typing.NotRequired[str]",
 })
 
 # WaitingLaunches answers the waiting launches a reader may see, in the order the recheck takes
@@ -2959,6 +3045,7 @@ FleetMachine = typing.TypedDict("FleetMachine", {
     "identity_scope": "str",
     "registrations": "list[str] | None",
     "sources": "list[FleetSource] | None",
+    "host": "str",
     "name": "str | None",
     "label": "typing.NotRequired[str | None]",
     "reported_name": "typing.NotRequired[str | None]",
@@ -3285,6 +3372,14 @@ InstallationHeld = typing.TypedDict("InstallationHeld", {
     "held": "bool",
     "installation_id": "typing.NotRequired[int]",
     "repository": "typing.NotRequired[str]",
+    "refused": "typing.NotRequired[InstallationRefused | None]",
+})
+
+# InstallationRefused is a Connect GitHub claim coordination refused.
+InstallationRefused = typing.TypedDict("InstallationRefused", {
+    "check": "str",
+    "at": "str",
+    "request": "str",
 })
 
 # PeakWindowRead describes one binding's offering, not an account-wide quota verdict.
@@ -3394,6 +3489,7 @@ PlacementFiltered = typing.TypedDict("PlacementFiltered", {
     "account": "typing.NotRequired[str]",
     "reason": "str",
     "no_account": "typing.NotRequired[list[FleetNoAccount] | None]",
+    "forge_login": "typing.NotRequired[ForgeLogin | None]",
 })
 
 # PlacementDraw is a candidate's measured quota-draw forecast as the decision journal keeps it
@@ -3766,6 +3862,66 @@ SessionForgeTokenAnswer = typing.TypedDict("SessionForgeTokenAnswer", {
     "fresh_for": "int",
 })
 
+# SessionEvent is one event of a session's surface (design §5), scanned for credentials on the
+# machine before it left. A page of history carries rows and compactions only, and leaves Seq 0:
+# a seq is a place in the live stream, which the harness's record does not know, so a page is
+# placed by its rows' ids instead.
+SessionEvent = typing.TypedDict("SessionEvent", {
+    "v": "int",
+    "session": "str",
+    "seq": "int",
+    "kind": "str",
+    "row": "typing.NotRequired[SessionRow | None]",
+})
+
+# SessionRow is a transcript row: the harness's id for it where it has one, its role, who wrote
+# it (person, console user <handle>, plugin, model or engine) and its blocks.
+SessionRow = typing.TypedDict("SessionRow", {
+    "id": "typing.NotRequired[str]",
+    "role": "str",
+    "origin": "typing.NotRequired[str]",
+    "blocks": "list[SessionBlock] | None",
+})
+
+# SessionBlock is one part of a row: text, thinking, tool-use (Tool and Input) or tool-result. ID
+# is the harness's id for a tool call, which its use and its result share.
+SessionBlock = typing.TypedDict("SessionBlock", {
+    "type": "str",
+    "id": "typing.NotRequired[str]",
+    "text": "typing.NotRequired[str]",
+    "tool": "typing.NotRequired[str]",
+    "input": "typing.NotRequired[typing.Any]",
+    "cut": "typing.NotRequired[SessionCut | None]",
+})
+
+# SessionCut marks a block that left shorter than it was, with the length it had.
+SessionCut = typing.TypedDict("SessionCut", {
+    "full": "int",
+})
+
+# AgentHistoryBody is the agent's answer to a history frame, under the frame's request: a page,
+# oldest first, and the cursor for the page above it ("" at the start); or a refusal, no-such-row
+# or history-unavailable.
+AgentHistoryBody = typing.TypedDict("AgentHistoryBody", {
+    "request": "str",
+    "events": "list[SessionEvent] | None",
+    "next": "str",
+    "refused": "typing.NotRequired[str]",
+})
+
+# AgentHistoryAnswer is the door's word on an agent's history answer.
+AgentHistoryAnswer = typing.TypedDict("AgentHistoryAnswer", {
+    "status": "str",
+})
+
+# HistoryAnswer is a page of a session's history as the machine holding it answered, or why there
+# is none.
+HistoryAnswer = typing.TypedDict("HistoryAnswer", {
+    "events": "list[SessionEvent] | None",
+    "next": "str",
+    "refused": "typing.NotRequired[str]",
+})
+
 # DetachExit is why a session left, kept with the epoch it ended (doc 123 §4): a handover's
 # checkpoint URL, or a one-line reason it abandoned or retired.
 DetachExit = typing.TypedDict("DetachExit", {
@@ -3834,7 +3990,8 @@ SessionList = typing.TypedDict("SessionList", {
 # directory spends, else the one its bind named, nil when neither names one. Status is
 # what the session last said, at the epoch it said it, or nil when it has said nothing. Observed is
 # what its machine saw this epoch run, newest first. Cards are the live cards it executes at this
-# epoch, by wire id, first engaged first. Presence is the basis of the hold it stands on,
+# epoch, by wire id, first engaged first; CardsDone are those of them it said done for, its part
+# finished (doc 199 §3). Presence is the basis of the hold it stands on,
 # "stream" or "reach", or nil when none stands; DetachedSince is since when no uplink has carried
 # that hold, or nil while one does. Vitals is this epoch's latest reading, nil before its first.
 # MachineState is the liveness of the session's own machine login, apart from its presence: a
@@ -3854,12 +4011,20 @@ ListedSession = typing.TypedDict("ListedSession", {
     "status": "ListedStatus | None",
     "observed": "list[ObservedReport] | None",
     "cards": "list[str] | None",
+    "cards_done": "list[str] | None",
     "account": "ListedAccount | None",
     "vitals": "SessionVitals | None",
     "origin": "SessionOrigin",
     "standing": "SessionStanding | None",
     "checkpoint": "ListedCheckpoint | None",
     "rarity": "str | None",
+    "stewards": "list[ListedSteward] | None",
+})
+
+# ListedSteward is one goal a session stewards: its id and its current title.
+ListedSteward = typing.TypedDict("ListedSteward", {
+    "goal": "str",
+    "title": "str",
 })
 
 # ListedCheckpoint is a session's current checkpoint: its boundary, its note's URL and when it was
@@ -3882,6 +4047,7 @@ ListedCheckpoint = typing.TypedDict("ListedCheckpoint", {
 # harness's last write, and a turn waiting on a dialog is not stale (#5615).
 SessionStanding = typing.TypedDict("SessionStanding", {
     "activity": "str | None",
+    "live_until": "str | None",
     "since": "str | None",
     "stale": "bool",
     "keep": "StandingKeep | None",
@@ -3961,6 +4127,7 @@ SessionVitals = typing.TypedDict("SessionVitals", {
     "tool": "str | None",
     "tool_since": "str | None",
     "thinking_since": "str | None",
+    "live_until": "str",
 })
 
 # SessionContext is the tokens a session's context holds, against the window its harness states;
@@ -4021,6 +4188,18 @@ Setting = typing.TypedDict("Setting", {
     "changed_by": "typing.NotRequired[str | None]",
     "changed_at": "typing.NotRequired[str | None]",
     "on_machine": "typing.NotRequired[SettingOnMachine | None]",
+    "class": "str",
+    "decided_by": "str",
+    "may_change": "bool",
+    "inherited": "SettingInherited",
+    "pushed": "bool",
+})
+
+# SettingInherited is the value a row inherits and its source: a workspace's or a machine's from its
+# team, else the default; a team's and a host's the default.
+SettingInherited = typing.TypedDict("SettingInherited", {
+    "value": "typing.Any",
+    "source": "str",
 })
 
 # SettingOption is one value a choice takes, and its name in the console.
@@ -4031,7 +4210,8 @@ SettingOption = typing.TypedDict("SettingOption", {
 
 # SettingOnMachine is a machine's answer to its policy for one key (2395-machine-policy design,
 # decision 7): applied, waiting for the machine to answer this version, refused with why, or
-# offline since seen_at, holding the policy it answered at held_at.
+# offline since seen_at, holding the policy it answered at held_at. A host's key is shadowed where
+# it applied but a login's own file still sets it.
 SettingOnMachine = typing.TypedDict("SettingOnMachine", {
     "state": "str",
     "why": "typing.NotRequired[str]",
@@ -4043,6 +4223,22 @@ SettingOnMachine = typing.TypedDict("SettingOnMachine", {
 SettingList = typing.TypedDict("SettingList", {
     "settings": "list[Setting] | None",
     "may_change": "bool",
+    "team": "typing.NotRequired[str | None]",
+})
+
+# HostSettingList is a host's settings, whether the reader is its owner and so may change them, and
+# its workers: a count of every team's, never any team's work (7637-settings design, decision 4).
+HostSettingList = typing.TypedDict("HostSettingList", {
+    "settings": "list[Setting] | None",
+    "may_change": "bool",
+    "workers": "typing.NotRequired[HostWorkers | None]",
+})
+
+# HostWorkers is how many workers run on a host now, of every team, and the cap it enforces: the
+# one it last applied, which stands while a change waits for its agents.
+HostWorkers = typing.TypedDict("HostWorkers", {
+    "used": "int",
+    "of": "int",
 })
 
 # SettingBody changes a setting from the version its writer read: value null sets it back to what it
@@ -4087,6 +4283,7 @@ StatusAnswer = typing.TypedDict("StatusAnswer", {
     "status": "str",
     "bound": "typing.NotRequired[BranchBound | None]",
     "unbound": "typing.NotRequired[str]",
+    "done": "typing.NotRequired[str]",
 })
 
 # BranchBound is the card an announce's branch claim gave the branch, by its wire id, and the branch
@@ -4596,8 +4793,10 @@ SourceRowBody = typing.TypedDict("SourceRowBody", {
 })
 
 # SourceImportBody imports one revision of a source against a goal, its rows in the source's order.
-# The register is declared input: the import does not read the source to verify it.
+# The register is declared input: the import does not read the source to verify it. It expects the
+# goal revision the register was mapped against.
 SourceImportBody = typing.TypedDict("SourceImportBody", {
+    "expected_goal_revision": "int",
     "source": "str",
     "revision": "str",
     "rows": "list[SourceRowBody] | None",
@@ -4643,8 +4842,8 @@ TrackBody = typing.TypedDict("TrackBody", {
     "why": "str",
 })
 
-# WorkActor is who a transition records: `owner` for a member, or the `seat` or a `session` by
-# the session's name.
+# WorkActor is who a transition records: `owner` for a member, the `seat` or a `session` by the
+# session's name, or the `system`, naming no one, for a claim ended with its epoch.
 WorkActor = typing.TypedDict("WorkActor", {
     "kind": "str",
     "session": "typing.NotRequired[str]",
@@ -4701,6 +4900,7 @@ ExecutorDTO = typing.TypedDict("ExecutorDTO", {
     "by": "WorkActor",
     "at": "str",
     "ended": "typing.NotRequired[WorkEnding | None]",
+    "done": "typing.NotRequired[str | None]",
 })
 
 CorrectionDTO = typing.TypedDict("CorrectionDTO", {
@@ -5514,12 +5714,14 @@ WorkerCensusBody = typing.TypedDict("WorkerCensusBody", {
     "signed_out": "typing.NotRequired[list[LauncherAccount] | None]",
     "spends": "typing.NotRequired[list[HarnessSpend] | None]",
     "harness_commands": "typing.NotRequired[dict[str, str] | None]",
+    "harness_models": "typing.NotRequired[dict[str, dict[str, list[str] | None] | None] | None]",
     "launches": "typing.NotRequired[list[str] | None]",
     "harness_preferences": "typing.NotRequired[dict[str, str] | None]",
     "no_account": "typing.NotRequired[list[LauncherNoAccount] | None]",
     "unlaunchable": "typing.NotRequired[list[HarnessUnlaunchable] | None]",
     "checkout": "typing.NotRequired[CheckoutCensus | None]",
     "machine_name": "typing.NotRequired[str | None]",
+    "forge_login": "typing.NotRequired[ForgeLogin | None]",
 })
 
 # HarnessSpend is the account an account-free launch of one harness would spend on this machine
@@ -5565,6 +5767,9 @@ RESERVED_TEAM_SLUGS = frozenset({"alpha", "api", "connect", "consent", "device",
 ROUTES = frozenset({
     "GET /api/v1/access",
     "GET /api/v1/csrf",
+    "GET /api/v1/hosts/{host}/settings",
+    "GET /api/v1/hosts/{host}/settings/{key}",
+    "POST /api/v1/hosts/{host}/settings/{key}",
     "POST /api/v1/installations/{installation}/release",
     "POST /api/v1/team-authorizations",
     "POST /api/v1/teams",
@@ -5773,6 +5978,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/steering/agent/gate",
     "POST /w/{workspace}/steering/agent/gate/lost",
     "POST /w/{workspace}/steering/agent/gate/token",
+    "POST /w/{workspace}/steering/agent/history",
     "POST /w/{workspace}/steering/agent/hold",
     "POST /w/{workspace}/steering/agent/injected",
     "POST /w/{workspace}/steering/agent/injection",
@@ -5781,6 +5987,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/steering/agent/leaving",
     "POST /w/{workspace}/steering/agent/model",
     "GET /w/{workspace}/steering/agent/package/{sha}",
+    "GET /w/{workspace}/steering/agent/package/{sha}/{platform}",
     "POST /w/{workspace}/steering/agent/park",
     "POST /w/{workspace}/steering/agent/policy",
     "POST /w/{workspace}/steering/agent/reach",
@@ -5844,7 +6051,7 @@ QUERY = {
     "GET /w/{workspace}/api/v1/sessions/{session}/checkpoints": {"epoch": frozenset({"current"}), "limit": None},
     "GET /w/{workspace}/api/v1/snapshot": {"feed": None},
     "GET /w/{workspace}/api/v1/work/regroups": {"state": frozenset({"pending"}), "limit": None},
-    "GET /w/{workspace}/steering/agent/stream": {"accepts": frozenset({"policy"})},
+    "GET /w/{workspace}/steering/agent/stream": {"accepts": frozenset({"policy", "watch", "unwatch", "history"})},
 }
 
 

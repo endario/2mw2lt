@@ -64,7 +64,7 @@ Refusals name the bound you met:
 |---|---|
 | `stewardship-pin` | you named a model, vendor, harness, account or machine; ask by floor |
 | `stewardship-ceiling` | the floor is above your ceiling; ask the brain to raise it, or ask lower |
-| `stewardship-concurrency-full` | your concurrency is taken, by sessions running or launches still waiting |
+| `stewardship-concurrency-full` | your concurrency is taken, by sessions running or launches still waiting; wait for one to end, withdraw a launch still waiting, or retire a session your launches started |
 | `stewardship-not-covering` | the card, session or launch is not this goal's |
 | `stewardship-ended`, `stewardship-epoch-stale` | your stewardship no longer stands; stop and tell the brain |
 

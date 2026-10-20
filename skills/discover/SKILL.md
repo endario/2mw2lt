@@ -119,12 +119,12 @@ policy, then send each as its own command, each on the seat's enrolment and its 
 2. **The goal**: `POST /goals`, judgment pending. Report its id and revision with the ruling.
 3. **Its contributions**: `POST /cards/<card>/links` with `{"kind": "part-of", "to_goal": "<goal>",
    "why": "…"}` for each piece of existing work. No duplicate cards.
-4. **The first plan**: `POST /goals/<goal>/plans` with `expected_plan_revision: 0`,
-   `expected_goal_revision` and `expected_input_digest` as the goal's current revision and
-   `plan_inputs` in `GET /goals/<goal>/reading`, an active
-   priority-policy decision at its current revision, and its purpose, selections and associations. Use criterion ids, never display numbers.
-5. **Prepared imports**, from fresh reads: the import command carries no expected goal revision,
-   so claim no server-fenced consent for it.
+4. **The first plan**: `goal.py --lease prepare plan <goal> --policy <unit> --decision <file>`,
+   then `submit` the file it prints (`/2mw2lt:brain` § Run a goal). Use criterion ids, never
+   display numbers.
+5. **Imports**: `goal.py --lease prepare import <goal> --source <source> --revision <revision>
+   --rows <file>`, the rows a JSON list of `key`, `statement`, `disposition` and `criteria`, then
+   `submit`. The import is fenced by the goal revision whose criteria the rows map to.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post /rulings \

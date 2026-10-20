@@ -1,7 +1,9 @@
 import type { On } from 'claude-code'
 import { register } from '../register'
-import { test, expect, mock } from 'claude-code/testing'
+import { test, expect } from 'claude-code/testing'
 import { lines, atLeast, pick, invokes, lifecycle, nextSeat, asksSeat, seatCall, entryRefusal, framesEntry, obsoleteSeatRefusal, resendId, capBulletin, sectionRevision, POINTER, CHECKPOINT, SEAT_SECTION, BULLETIN_SECTION } from '../frames'
+import { world, line, begin, never, MESSAGE, TOOL, FRAME_PATH, CLAIM_PATH, ROOT, AGENT } from './world'
+import type { HoldPoll } from './world'
 
 test('lines are whole only once their newline arrives', async () => {
   const a = lines('{"id":"f1","kind":"say","wakes":true}\n{"id":"f2","ki')
@@ -99,208 +101,6 @@ test('a section names the head it was rendered at', async () => {
   expect(sectionRevision('')).toBeUndefined()
   expect(sectionRevision('not a bulletin')).toBeUndefined()
 })
-
-// The behaviour tests fake the engine beneath the plugin: the session, the clock, the files,
-// host commands and hold.py's child. Kit gap (2.1.290): a plugin's own `$.session.append` never
-// reaches a test's hook beneath it ("no implementation for session.append"), whatever the test
-// registers, so a row is observed through the debug line the module writes as it appends.
-
-// A round is one child: its lines in order (a promise in among them holds it there), then its
-// exit code, or a throw.
-type Round = { lines: (string | Promise<void> | { stderr: string })[]; code: number | null | 'throw'; hold?: Promise<void>; holdMs?: number }
-
-const TOOL = 'mcp__2mw2lt__frames'
-const FRAME_PATH = '/ws/.claude/steering-frames/s1.ndjson'
-const CLAIM_PATH = '/ws/.claude/steering-holders/ps-1.json'
-const ROOT = '/ws/checkout'
-const line = (id: string | null, kind: string, wakes: boolean) => JSON.stringify({ id, kind, wakes }) + '\n'
-
-function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording = '', keep = 'Keep verbatim: steering session s1; branch b; checkpoint https://github.com/example-org/example-repo/pull/1.\n',
-                         enrolled = true, submitRejects = false, ackFails = false, readFails = false, engineState = false,
-                         // The engine's own answer to `$.session.usage({ breakdown })`: the window it measures
-                         // against, the token count it auto-compacts at, and who settled the window.
-                         context = { point: 167_000 as number | undefined, raw: 200_000, source: 'auto', model: 'claude-test' } } = {}) {
-  const w = {
-    clock: mock.clock(on, { now: 1_000_000 }),
-    ackFails,
-    readFails,
-    root: '',
-    writes: [] as { path: string; text: string }[],
-    tools: [] as string[],
-    runs: [] as string[][],
-    cwds: [] as (string | undefined)[],
-    spawns: [] as string[][],
-    // The environment each child was given over the host process's own, runs and spawns alike.
-    envs: [] as (Record<string, string> | undefined)[],
-    // The session id the host process carries in its environment when it differs from its own
-    // (#7069); a lease client then refuses as the Python one does, unless the child is told otherwise.
-    inherited: undefined as string | undefined,
-    claimsAtSpawn: [] as number[],
-    submits: [] as string[],
-    appends: [] as string[],
-    logs: [] as string[],
-    psession: 'ps-1',
-    claimFails: false,
-    compacts: [] as { trigger: string; instructions?: string }[],
-    recording,
-    enrolled,
-    // What connect.py last wrote to the session's connect record; empty while it has written none.
-    connected: '',
-    bashThrows: false,
-    sessionLookupCode: 0,
-    retainedName: '',
-    holdNextLookup: undefined as Promise<void> | undefined,
-    readGate: undefined as Promise<void> | undefined,
-    state: new Map<string, unknown>(),
-    // The next read of this key is answered with what it held when asked, once `release` runs.
-    holdNextGet: undefined as { key: string; release: Promise<void> } | undefined,
-    context,
-    usageCalls: 0,
-    stepUsage: 0,
-    // What seat_section.py answers: 0 with the rulings, 1 for a session that does not hold the seat.
-    seat: { code: 1, stdout: '' },
-    // What bulletin.py section answers: 0 with the snapshot, 1 for an empty bulletin, 3 for a door
-    // that cannot tell.
-    bulletin: { code: 1, stdout: '' },
-    // Held until released: a seat_section.py run still out.
-    seatGate: undefined as Promise<void> | undefined,
-    // Held until released: a lease or acknowledgement client still out.
-    wireGate: undefined as Promise<void> | undefined,
-    wireStarted: undefined as (() => void) | undefined,
-    // What each lease client was handed on stdin, and what it answers in turn.
-    stdins: [] as (string | undefined)[],
-    leaseOut: [] as string[],
-    check: { decision: 'allow' } as { decision: 'allow' | 'ask' | 'deny'; reason?: string },
-  }
-  const versions = new Map<string, number>()
-  if (!engineState) on('state.get', async ($, e) => {
-    const value = w.state.get(e.key)
-    const version = versions.get(e.key) ?? 0
-    const held = w.holdNextGet
-    if (held?.key === e.key) { w.holdNextGet = undefined; await held.release }
-    return { value: { value, version } } as never
-  })
-  // A set whose ifVersion is not the key's version writes nothing, as the engine's does.
-  if (!engineState) on('state.set', async ($, e) => {
-    const version = versions.get(e.key) ?? 0
-    if (e.ifVersion !== undefined && e.ifVersion !== version) return { value: { isSet: false, version } } as never
-    w.state.set(e.key, e.value)
-    versions.set(e.key, version + 1)
-    return { value: { isSet: true, version: version + 1 } } as never
-  })
-  on('session.start', async ($, e) => ({ cwd: e.cwd }))
-  on('session.version', async () => ({ value: { version } }))
-  on('session.root', async () => ({ value: ROOT }))
-  on('session.id', async () => ({ value: w.psession }))
-  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
-  on('turn.complete', async ($, e) => ({ text: e.text }))
-  on('fs.read', async ($, e) => {
-    if (e.path.endsWith('/.claude-plugin/plugin.json')) {
-      w.root = e.path.slice(0, -'/.claude-plugin/plugin.json'.length)
-      return { value: '{"version":"0.8.99"}' }
-    }
-    if (e.path === FRAME_PATH) { if (w.readGate) await w.readGate; return { value: w.recording } }
-    if (e.path === CLAIM_PATH.replace(/\.json$/, '.connect') && w.connected) return { value: w.connected }
-    throw new Error('ENOENT')
-  })
-  on('fs.write', async ($, e) => { w.writes.push(e); return { value: undefined } })
-  on('tool.register', async ($, e) => { w.tools.push(e.name); return { value: { tool: `mcp__2mw2lt__${e.name}` } } })
-  on('process.run', async ($, e) => {
-    w.runs.push([...e.argv])
-    w.cwds.push(e.init?.cwd)
-    w.envs.push(e.init?.env)
-    if (/\/(lease|card)\.py$/.test(String(e.argv[1]))) {
-      w.wireStarted?.()
-      if (w.wireGate) await w.wireGate
-      w.stdins.push(e.init?.stdin)
-      const own = e.init?.env?.CLAUDE_CODE_SESSION_ID ?? w.inherited
-      const named = e.argv[e.argv.indexOf('--provider-session') + 1]
-      if (own && own !== named) {
-        return { value: { exitCode: 1, stdout: '', stderr: `refused: this harness is session ${own}, not ${named}: a session speaks only as itself`, isStdoutTruncated: false, isStderrTruncated: false } }
-      }
-      const out = w.leaseOut.shift() ?? 'relayed: 01AB to amber'
-      return { value: { exitCode: /^(REJECTED|refused)/.test(out) ? 1 : 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
-    }
-    if (e.argv.some(a => a.endsWith('/ack.py'))) {
-      w.wireStarted?.()
-      if (w.wireGate) await w.wireGate
-    }
-    if (String(e.argv[1]).endsWith('/seat_section.py')) {
-      if (w.seatGate) await w.seatGate
-      return { value: { exitCode: w.seat.code, stdout: w.seat.stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
-    }
-    if (String(e.argv[1]).endsWith('/bulletin.py')) {
-      return { value: { exitCode: w.bulletin.code, stdout: w.bulletin.stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
-    }
-    const out = e.argv.includes('--session-of') ? (w.enrolled ? 's1\n' : e.argv[4] === undefined ? w.retainedName : '')
-      : e.argv.includes('--claim-path') ? (w.claimFails ? '' : `/ws/.claude/steering-holders/${e.argv[3]}.json\n`)
-      : e.argv.includes('--frame-path') ? `${FRAME_PATH}\n`
-      : e.argv.includes('--keep') ? keep : ''
-    if (e.argv.includes('--session-of') && w.holdNextLookup) {
-      const gate = w.holdNextLookup
-      w.holdNextLookup = undefined
-      await gate
-    }
-    const exitCode = e.argv.includes('--session-of') ? w.sessionLookupCode
-      : (e.argv.includes('--claim-path') && w.claimFails) || (e.argv.some(a => a.endsWith('/ack.py')) && w.ackFails)
-        || (e.argv.includes('--read-say') && w.readFails) ? 1 : 0
-    return { value: { exitCode, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
-  })
-  on('process.spawn', async function* ($, e) {
-    w.spawns.push([...e.argv])
-    w.envs.push(e.env)
-    w.claimsAtSpawn.push(w.writes.filter(write => JSON.parse(write.text).at > 0).length)
-    w.cwds.push(e.cwd)
-    const round = rounds.shift()
-    if (!round) throw new Error('no more children')
-    for (const text of round.lines) {
-      if (typeof text === 'string') yield { stream: 'stdout' as const, text }
-      else if ('stderr' in text) yield { stream: 'stderr' as const, text: text.stderr }
-      else await text
-    }
-    if (round.hold) await round.hold
-    if (round.holdMs) await w.clock.sleep(round.holdMs)
-    if (round.code === 'throw') throw new Error('the child broke')
-    return { value: { code: round.code, signal: null } }
-  })
-  on('prompt.submit', async ($, e) => {
-    w.submits.push(e.text)
-    if (submitRejects) throw new Error('the prompt was refused')
-    return { text: e.text }
-  })
-  on('tool.call', { tool: 'Bash' }, (async () => {
-    if (w.bashThrows) throw new Error('the engine broke')
-    return { result: { stdout: '', stderr: '', interrupted: false } }
-  }) as never)
-  on('ui.log', async ($, e) => {
-    w.logs.push(e.text)
-    const appended = /^2mw2lt: appends "(.*)"$/s.exec(e.text)
-    if (appended) w.appends.push(appended[1] ?? '')
-    return { value: undefined }
-  })
-  on('session.compact', async ($, e) => {
-    w.compacts.push({ trigger: e.trigger, instructions: e.instructions })
-    return { messages: [MESSAGE] }
-  })
-  on('session.measure', async ($, e) => ({ changed: e.changed }))
-  on('session.usage', async () => {
-    w.usageCalls++
-    const c = w.context
-    return { value: { startedAt: 0, context: { window: 1_000_000, breakdown: {
-      autoCompactThreshold: c.point, isAutoCompactEnabled: c.point !== undefined, rawMaxTokens: c.raw,
-      autocompactSource: c.source, model: c.model } } } } as never
-  })
-  on('turn.step', async function* ($, e) { return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage: { model: 'claude-test', input_tokens: 1, output_tokens: 1, cache_read_input_tokens: w.stepUsage - 1, cache_creation_input_tokens: 0 } } as never })
-  on('session.end', async ($, e) => ({ sessionId: e.sessionId }))
-  on('classic.SessionStart', async () => ({}) as never)
-  on('prompt.compose', async () => ({ sections: [{ id: 'intro', text: 'engine', scope: 'shared' as const }] }))
-  on('tool.check', async () => w.check as never)
-  return w
-}
-
-const MESSAGE = { role: 'user' as const, text: 'hello', toolUses: [] }
-const never = new Promise<void>(() => {})
-const begin = async ($: any) => $.session.start({ cwd: '/ws/checkout', surface: 'terminal', isInteractive: true })
 
 test('an idle session gets one pointer for two waking frames in a row', async ($, on) => {
   const w = world(on, { rounds: [{ lines: [line('f1', 'say', true), line('e1', 'envelope', true)], code: 0, hold: never }] })
@@ -1418,6 +1218,20 @@ test('a pointer the session refused to take as a prompt is appended instead', as
   expect(w.state.get('pointed')).toBe(true)
 })
 
+test('a pointer dropped after the person stopped the session is appended, and offered again once they speak', async ($, on) => {
+  const w = world(on, { submitDrops: true, rounds: [{ lines: [line('f1', 'say', true), line('f2', 'say', true)], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  expect(w.submits).toEqual([POINTER])
+  expect(w.appends).toEqual([POINTER])
+  expect(w.logs.some(l => l.includes('the session was stopped and nobody has sent input since'))).toBe(true)
+  w.submitDrops = false
+  await $.turn.start({ text: 'the person typed', turnId: 't-1' } as never)   // the model ignores the row
+  await $.turn.complete({ turnId: 't-1', text: 'done' } as never)
+  await w.clock.advance(2_000)
+  expect(w.submits).toEqual([POINTER, POINTER])
+})
+
 // The session reads the plugin's state from its claim (#5641): holding only once coordination
 // admitted the hold, retrying with the refusal that stopped it, or stopped with the remedy.
 const lastHold = (w: { writes: { path: string; text: string }[] }) =>
@@ -1991,4 +1805,154 @@ test('handing the seat on through lease.py asks at once, and drops the section',
   await $.tool.call({ tool: 'Bash', command: `python3 "/p/steering/enroll/lease.py" post /steering/brain/attach <<'JSON'\n{"lease_token":"@lease","session":"amber"}\nJSON` } as never)
   await w.clock.settle()
   expect(await seatSection($)).toBeUndefined()
+})
+
+// The hold as polls on the agent's frames route (#7838): no child holds it where the agent serves
+// the route, each poll carries the agent's key and the harness session, and the lines the agent
+// answers are handled as the child's were.
+const poll = (status: number, body: unknown): HoldPoll => ({ status, text: typeof body === 'string' ? body : JSON.stringify(body) })
+const admitted = (id = 'h-1', session = 's1', frames: unknown[] = []) =>
+  poll(200, { held: { hold_id: id, session, provider_session: 'ps-1', runtime: 'claude:n:r', frames: FRAME_PATH }, frames })
+const framesOf = (...lines: unknown[]) => poll(200, { frames: lines })
+// Only the hold's own requests: the live view's channel polls the same agent beside it.
+const framesFetches = (w: { fetches: { url: string; method: string; headers: Record<string, string>; body?: string }[] }) =>
+  w.fetches.filter(f => f.url.includes('/frames'))
+const holdsLetGo = (w: Parameters<typeof framesFetches>[0]) => framesFetches(w).filter(f => f.method === 'DELETE').map(f => f.url.split('/frames')[1])
+
+test('a workspace naming an agent is held as polls: the first admits, and a waking frame points', async ($, on) => {
+  const w = world(on, { agent: true, holdRoute: true, holdPolls: [admitted(), framesOf({ id: 'u1', kind: 'usage', wakes: false }, { id: 'f1', kind: 'say', wakes: true })] })
+  await begin($)
+  await w.clock.settle()
+  expect(w.spawns).toEqual([])
+  expect(w.submits).toEqual([POINTER])
+  const mine = framesFetches(w)
+  expect(mine.length).toBe(3)                            // admitted, the frames, and the poll out now
+  expect(mine[0]?.url).toBe(`http://127.0.0.1:${AGENT.port}/steering/session/s1/frames`)
+  expect(mine[1]?.url).toBe(`http://127.0.0.1:${AGENT.port}/steering/session/s1/frames?hold=h-1`)
+  expect(mine[0]?.headers).toEqual({ 'X-Steering-Agent-Key': AGENT.key, 'X-Steering-Workspace': '/ws', 'X-Steering-Provider': 'claude',
+    'X-Steering-Provider-Session': 'ps-1', 'X-Steering-Wake': 'plugin',
+    // The configuration the engine moved its home to, and the session's project: where the agent
+    // reads its registry of live sessions, and what a hand-over's targeting names.
+    'X-Steering-Config-Dir': encodeURIComponent('/u/owner/.claude'), 'X-Steering-Project': encodeURIComponent(ROOT) })
+  const claim = JSON.parse(w.writes.filter(x => x.path === CLAIM_PATH).at(-1)!.text)
+  expect(claim.hold.state).toBe('holding')
+  expect(claim.hold.hold).toBe('h-1')
+  // The frames tool reads the recording where the agent said it is, asking hold.py for no path.
+  w.recording = 'data: {"kind":"say","id":"f1","from":"session peer","text":"hello"}\n'
+  const r = await $.tool.call({ tool: TOOL }) as { result: string }
+  expect(r.result).toContain('"id":"f1"')
+  expect(w.runs.filter(r => r.includes('--frame-path'))).toEqual([])
+})
+
+test('an agent that serves no frames route hands the arm to hold.py, and the next arm probes it again', async ($, on) => {
+  const w = world(on, { agent: true, holdRoute: true, holdPolls: [poll(404, '404 page not found\n'), poll(404, '404 page not found\n')],
+    rounds: [{ lines: [line('f1', 'say', true)], code: 0 }, { lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  expect(w.spawns.length).toBe(1)
+  expect(w.submits).toEqual([POINTER])
+  await w.clock.advance(1_000)
+  expect(framesFetches(w).length).toBe(2)                // each arm probes the route first
+  expect(w.spawns.length).toBe(2)
+})
+
+test('a poll refused for good stops the loop and tells the session; a curable one holds again', async ($, on) => {
+  const w = world(on, { agent: true, holdRoute: true, holdPolls: [
+    poll(403, { refused: 'refused 403: uplink-stale.', retry: true }),
+    poll(403, { refused: 'refused 403: session-retired. The agent serves [/ws].', retry: false, remedy: 'run /2mw2lt:connect, which the plugin\'s hold follows' })] })
+  await begin($)
+  await w.clock.settle()
+  expect(framesFetches(w).length).toBe(1)
+  let claim = JSON.parse(w.writes.filter(x => x.path === CLAIM_PATH).at(-1)!.text)
+  expect(claim.hold.state).toBe('retrying')
+  expect(claim.hold.refusal).toBe('refused 403: uplink-stale.')
+  await w.clock.advance(1_000)
+  expect(framesFetches(w).length).toBe(2)
+  expect(w.submits.length).toBe(1)
+  expect(w.submits[0]).toContain('refused 403: session-retired')
+  expect(w.submits[0]).toContain('run /2mw2lt:connect, which the plugin\'s hold follows')
+  claim = JSON.parse(w.writes.filter(x => x.path === CLAIM_PATH).at(-1)!.text)
+  expect(claim.hold.state).toBe('stopped')
+  await w.clock.advance(120_000)
+  expect(framesFetches(w).length).toBe(2)                // the loop stopped
+})
+
+test('an agent serving another workspace is a refusal for good, as hold.py reads a 404 naming what it serves', async ($, on) => {
+  const w = world(on, { agent: true, holdRoute: true, holdPolls: [poll(404, { refused: 'this agent does not serve /ws', serves: ['/elsewhere'] })] })
+  await begin($)
+  await w.clock.settle()
+  expect(w.submits.length).toBe(1)
+  expect(w.submits[0]).toContain('refused 404: this agent does not serve /ws')
+  await w.clock.advance(120_000)
+  expect(framesFetches(w).length).toBe(1)
+})
+
+test('a closed stream ends the arm and the next poll admits anew; a revoked one backs off like a child exiting 3', async ($, on) => {
+  const w = world(on, { agent: true, holdRoute: true, holdPolls: [admitted(), framesOf({ id: null, kind: 'closed', wakes: false, why: 'uplink' }),
+    admitted('h-2'), framesOf({ id: null, kind: 'closed', wakes: true, why: 'revoked' }), admitted('h-3')] })
+  await begin($)
+  await w.clock.settle()
+  await w.clock.advance(1_000)
+  await w.clock.advance(2_000)
+  expect(framesFetches(w).map(f => f.url.split('/frames')[1])).toEqual(['', '?hold=h-1', '', '?hold=h-2', '', '?hold=h-3'])
+  expect(w.submits).toEqual([])                          // a closed frame is no pointer
+  const claim = JSON.parse(w.writes.filter(x => x.path === CLAIM_PATH).at(-1)!.text)
+  expect(claim.hold.hold).toBe('h-3')
+})
+
+test('a poll the agent did not answer is held again after the backoff', async ($, on) => {
+  const w = world(on, { agent: true, holdRoute: true, holdPolls: ['throw', admitted()] })
+  await begin($)
+  await w.clock.settle()
+  expect(w.logs.some(l => l.startsWith('2mw2lt: the hold broke: '))).toBe(true)
+  await w.clock.advance(1_000)
+  expect(framesFetches(w).length).toBe(3)
+})
+
+test('an agent answering 503 is held again after the backoff, and the agent it resolved is kept', async ($, on) => {
+  const w = world(on, { agent: true, holdRoute: true, holdPolls: [poll(503, { refused: 'no uplink' }), admitted()] })
+  await begin($)
+  await w.clock.settle()
+  expect(w.logs.some(l => l.includes('the hold exited 2: the agent answered 503'))).toBe(true)
+  await w.clock.advance(1_000)
+  expect(framesFetches(w).length).toBe(3)
+})
+
+test('the admitted session is published at once, so the frames tool receipts under the name coordination admits', async ($, on) => {
+  const w = world(on, { agent: true, holdRoute: true, holdPolls: [admitted('h-1', 's1-kept'), framesOf({ id: 'f1', kind: 'say', wakes: true })] })
+  await begin($)
+  await w.clock.settle()
+  w.recording = 'data: {"kind":"say","id":"f1","from":"session peer","text":"hello"}\n'
+  const r = await $.tool.call({ tool: TOOL }) as { result: string }
+  expect(r.result).toContain('"id":"f1"')
+  // The receipt names the admitted session, not the one the module first asked for (#5661).
+  expect(w.runs.some(argv => argv.includes('--read-say') && argv.includes('s1-kept') && argv.includes('f1'))).toBe(true)
+})
+
+test("the session's end finishes its local cleanup whatever the agent's pace", async ($, on) => {
+  const w = world(on, { agent: true, holdRoute: true, holdPolls: [admitted()], deleteHangs: true })
+  await begin($)
+  await w.clock.settle()
+  await $.session.end({ sessionId: 'ps-1', reason: 'exit' } as never)
+  const claim = JSON.parse(w.writes.filter(x => x.path === CLAIM_PATH).at(-1)!.text)
+  expect(claim.at).toBe(0)                        // released, though the let-go still hangs
+  expect(holdsLetGo(w).length).toBe(1)
+})
+
+test('the session ending, a disconnect, or a connect that starts over lets the agent go of the hold', async ($, on) => {
+  // The first arm's third poll is the one out when connect starts over; the fresh arm's admits h-2.
+  const hung: HoldPoll = { status: 0, text: '', hold: never }
+  const w = world(on, { agent: true, holdRoute: true, holdPolls: [admitted(), framesOf({ id: 'f1', kind: 'say', wakes: true }), hung, admitted('h-2')] })
+  await begin($)
+  await w.clock.settle()
+  expect(holdsLetGo(w)).toEqual([])
+  await $.tool.call({ tool: 'Bash', command: 'python3 /p/steering/enroll/connect.py --current' } as never)
+  await w.clock.settle()
+  expect(holdsLetGo(w)).toEqual(['?hold=h-1'])                          // the superseded arm's hold
+  expect(framesFetches(w).filter(f => f.method !== 'DELETE').length).toBe(5)   // a fresh admit, and the poll out now
+  await $.session.end({ sessionId: 'ps-1', reason: 'exit' } as never)
+  await w.clock.settle()
+  expect(holdsLetGo(w)).toEqual(['?hold=h-1', '?hold=h-2'])
+  const claim = JSON.parse(w.writes.filter(x => x.path === CLAIM_PATH).at(-1)!.text)
+  expect(claim.at).toBe(0)
 })

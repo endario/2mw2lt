@@ -157,9 +157,17 @@ class Server:
     # -- the hold child ---------------------------------------------------------------
 
     def _hold_child(self, argv: list[str]):
-        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 text=True, cwd=self.cwd)
+        # The child says why it holds, rebinds or ends only on stderr: kept in this server's log,
+        # an ended hold names its cause rather than an exit code alone.
+        threading.Thread(target=self._log_child, args=(proc,), daemon=True,
+                         name=f"hold stderr {proc.pid}").start()
         return proc, lambda: iter(lambda: proc.stdout.readline(), "")
+
+    def _log_child(self, proc) -> None:
+        for line in iter(proc.stderr.readline, ""):
+            self.log(f"hold {proc.pid}: {line.rstrip()}")
 
     def start_hold(self, gen: int) -> None:
         argv = ["python3", str(ROOT / "steering/enroll/hold.py"), "--wake", "plugin-frames",
@@ -231,6 +239,7 @@ class Server:
     def _note(self, hold: dict) -> None:
         """The keeper acts on the state in memory, so a claim or ledger that cannot be written
         is logged, never the end of the thread that noted it."""
+        self.log(f"hold {hold.get('state')}: {json.dumps({k: v for k, v in hold.items() if k != 'state'})}")
         with self.lock:
             self.hold_state = hold
             try:

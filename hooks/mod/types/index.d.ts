@@ -1,5 +1,5 @@
 declare module 'claude-code' {
   interface PluginState {
-    '2mw2lt': { busy: boolean; pending: string[]; read: string[]; pointed: boolean; appended: boolean; warned: boolean; point: number; session: string; connected: boolean; seat: string; bulletin: string; bulletins: string[]; unsettled: { ulid?: string; say?: string; tries: number }[] }
+    '2mw2lt': { busy: boolean; pending: string[]; read: string[]; pointed: boolean; appended: boolean; warned: boolean; point: number; session: string; connected: boolean; seat: string; bulletin: string; bulletins: string[]; unsettled: { ulid?: string; say?: string; tries: number }[]; surfaceSeq: number }
   }
 }

@@ -96,6 +96,11 @@ def _on_go(ws: Path, verb: str, session: str, text: str, retry_id: str | None) -
         except session_routes.Refused as e:
             unsure = not session_routes.settled(e)
             print(display_reply(refusal.retry(str(e)) if unsure else refusal.use(verb, str(e))), file=sys.stderr)
+            if e.code == "done-card-required":
+                # A done is one card's (doc 199 §3): Go names each the session holds.
+                cards = "\n".join(f"  {c}" for c in e.detail.split("; ") if c) or "  (see connect's card: line)"
+                print(f"this session holds more than one card; say done for the one whose part is finished:\n{cards}\n"
+                      f"  verb.py done {session} --card <id> \"<result>\"", file=sys.stderr)
         except session_routes.Unsent as e:
             unsure = True
             print(display_reply(refusal.retry(str(e))), file=sys.stderr)
@@ -149,7 +154,7 @@ def _on_go(ws: Path, verb: str, session: str, text: str, retry_id: str | None) -
     else:
         body = status_body(verb, text)
         if body is None:
-            print("malformed blocked: on <what>", file=sys.stderr)
+            print("malformed done: [--card <id>] <result>" if verb == "done" else "malformed blocked: on <what>", file=sys.stderr)
             return 1
     key = retry_id or occurrence()
     print(f"id {key}", file=sys.stderr)
@@ -160,9 +165,14 @@ def _on_go(ws: Path, verb: str, session: str, text: str, retry_id: str | None) -
 
 
 def status_body(verb: str, text: str) -> dict | None:
-    """The status route's body for a `done` or a `blocked` (`on <what>`); None for a malformed one."""
+    """The status route's body for a `done` (`[--card <id>] <result>`) or a `blocked` (`on <what>`);
+    None for a malformed one. A done names the card whose part it finished; unnamed, Go takes the one
+    card the session holds, and refuses when it holds more (doc 199 §3)."""
     if verb == "done":
-        return {"state": "done", "what": text}
+        m = re.fullmatch(r"--card (?P<card>\S+)(?:\s+(?P<what>.*))?", text, re.S)
+        if (text == "--card" or text.startswith("--card ")) and m is None:
+            return None
+        return {"state": "done", "what": (m["what"] or "").strip(), "card": m["card"]} if m else {"state": "done", "what": text}
     m = re.fullmatch(r"on (?P<what>.+)", text, re.S)
     return {"state": "blocked", "blocker": m["what"].strip()} if m else None
 

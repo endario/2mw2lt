@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 import time
 from pathlib import Path
 
@@ -25,20 +24,6 @@ class Refused(Exception):
     """Why nothing was delivered. The caller reports it; the envelope stays where it was."""
 
 
-def present(thread: str, home: Path | None = None) -> bool:
-    """Whether the thread has a transcript on this machine, readable or not: Codex compresses a
-    rollout idle long enough to `.jsonl.zst` when `local_thread_store_compression` is on, and a
-    compressed one is still this machine's thread (#6813). Nothing here reads a compressed one."""
-    if rollout(thread, home) is not None:
-        return True
-    root = (home or CODEX_HOME) / "sessions"
-    for p in sorted(root.glob("*/*/*/rollout-*.jsonl.zst")) if root.is_dir() else []:
-        m = _ROLLOUT.match(p.name.removesuffix(".zst"))
-        if m and m["thread"] == thread:
-            return True
-    return False
-
-
 def rollout(thread: str, home: Path | None = None) -> Path | None:
     """The thread's transcript, or None. Searched by the id in the filename rather than by
     date, because the day in the name is the day the thread opened and says nothing about when
@@ -49,21 +34,6 @@ def rollout(thread: str, home: Path | None = None) -> Path | None:
         if m and m["thread"] == thread:
             return p
     return None
-
-
-def app_server(timeout: float = 5.0) -> bool:
-    """Whether a Codex app-server runs on this machine as this user. An idle thread is reached
-    through the queue, and the app-server is what drains it: a rollout on disk with none running
-    is a thread nothing will read a directive into (#1967)."""
-    try:
-        p = subprocess.run(["pgrep", "-u", str(os.getuid()), "-f", r"(^|/)codex( .*)? app-server( |$)"],
-                           capture_output=True, text=True, timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired):
-        raise Refused("cannot look for a Codex app-server")
-    # 1 is "none matched"; anything else is a lookup that failed, which is not an absence.
-    if p.returncode not in (0, 1):
-        raise Refused(f"pgrep answered {p.returncode} looking for a Codex app-server")
-    return p.returncode == 0
 
 
 def serving_pid(path: Path, timeout: float = process_probe.LSOF_TIMEOUT) -> int | None:
