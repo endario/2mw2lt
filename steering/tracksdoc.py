@@ -95,13 +95,18 @@ def validate(doc: object, repo: str | None) -> list[str]:
     ci = doc.get("ci")
     if ci is not None:
         # The workflows whose red runs on the default branch wake the brain (#4283). Only the
-        # default branch is watched: a run on a tag or another branch is not.
+        # default branch is watched: a run on a tag or another branch is not. `hourly` names those
+        # of them the CI read runs there hourly (documentation/ci/15).
         files = ci.get("workflows") if isinstance(ci, dict) else None
-        if not isinstance(ci, dict) or set(ci) != {"workflows"}:
-            why.append("`ci` is not an object whose only key is `workflows`")
+        hourly = ci.get("hourly") if isinstance(ci, dict) else None
+        if not isinstance(ci, dict) or "workflows" not in ci or not set(ci) <= {"workflows", "hourly"}:
+            why.append("`ci` is not an object whose keys are `workflows` and, optionally, `hourly`")
         elif not (isinstance(files, list) and files and all(isinstance(f, str) and WORKFLOW.fullmatch(f) for f in files)):
             why.append("`ci.workflows` is not a non-empty list of workflow file names such as `steering.yml`, "
                        "each watched on the default branch only")
+        elif "hourly" in ci and not (isinstance(hourly, list) and hourly and all(f in files for f in hourly)):
+            why.append("`ci.hourly` is not a non-empty list of workflows `ci.workflows` watches, "
+                       "each run on the default branch hourly")
     return why
 
 

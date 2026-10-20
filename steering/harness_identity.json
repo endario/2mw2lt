@@ -1,0 +1,29 @@
+{
+  "_note": "Generated from machine/internal/workers.Registered: go test ./internal/workers -run TestIdentityDataIsTheRegistrys -update",
+  "harnesses": [
+    {
+      "name": "claude",
+      "session_env": [
+        "CLAUDE_CODE_SESSION_ID"
+      ],
+      "session_rows": "sessions"
+    },
+    {
+      "name": "codex",
+      "session_env": [
+        "CODEX_THREAD_ID",
+        "CODEX_SESSION_ID"
+      ]
+    },
+    {
+      "name": "grok"
+    },
+    {
+      "name": "opencode"
+    },
+    {
+      "name": "zcode",
+      "session_binding": "hook-binding"
+    }
+  ]
+}

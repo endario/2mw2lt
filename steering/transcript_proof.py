@@ -14,14 +14,15 @@ _NOT_ACCOUNT = re.compile(r"[^a-z0-9._-]+")
 
 def harness_roots() -> list[tuple[str, Path]]:
     """(provider, root) pairs. `STEERING_HARNESS_ROOTS` overrides as `provider=path` entries
-    separated by ':'; an entry without '=' is a Claude root."""
+    separated by ':'; an entry without '=' is a Claude root, as the agent reads the variable
+    (workers.Registry.roots)."""
     env = os.environ.get("STEERING_HARNESS_ROOTS")
     if env:
         out = []
         for e in env.split(":"):
             if not e:
                 continue
-            prov, _, path = e.partition("=") if "=" in e else (harness.DEFAULT, "=", e)
+            prov, _, path = e.partition("=") if "=" in e else ("claude", "=", e)
             out.append((prov, Path(path)))
         return out
     # A second account lives at `.claude-<name>` beside the default (doc 08), and its sessions

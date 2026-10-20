@@ -505,12 +505,18 @@ def card_repo(ws: Path | None = None) -> str:
 
 
 def declare_card(card: str, name: str, anchors: dict, token: str, repo: str = "", triage: dict | None = None,
-                 goal: dict | None = None) -> str:
+                 goal: dict | None = None, session: str = "") -> str:
     """The session declares its own card (`POST /cards`), which engages it as executor; Go answers
     a minted id whose declaration is the same one with that card. The key is the declaration's own,
     so a retry after a lost answer never mints a second card. `repo` names the anchors'
     repository, as `card_repo` reads it; `goal`, a birth's `{id, why, source?}`, contributes the
-    card to its goal in the same command (#7005). Raises `Refused` or `Unsent`."""
+    card to its goal in the same command (#7005). A card `session` already executes that carries
+    every anchor is joined instead of declared beside (#7634): its triage is the declaration's, and
+    a goal, which joins a card only by an edge, is refused naming it. Raises `Refused` or `Unsent`."""
+    if session and anchors:
+        joined = _join_own_card(session, card, anchors, repo, token, triage, goal)
+        if joined:
+            return joined
     body: dict = {"id": card, "name": name}
     if anchors:
         body["anchors"] = [{"verb": verb, "repo": repo, "n": n}
@@ -522,6 +528,33 @@ def declare_card(card: str, name: str, anchors: dict, token: str, repo: str = ""
     answer = write("/cards", body, _own_key("declare", card, json.dumps(body, sort_keys=True)),
                   SESSION_CARRIER, token)
     return f"declared: {card}" + (" (replayed)" if answer.get("replayed") else "")
+
+
+def _join_own_card(session: str, minted: str, anchors: dict, repo: str, token: str,
+                   triage: dict | None, goal: dict | None) -> str:
+    """The line for a declaration that joined the live card `session` already executes with every
+    anchor it names, or "" when there is none to join. The card a retry of this very declaration
+    minted is no card to join: it falls through to the post, which Go answers replayed."""
+    wanted = {(verb, n) for verb, ns in anchors.items() for n in ns}
+    held = [c for c in executing_cards(session, token) if c["id"] != minted and wanted <= {
+        (a.get("verb"), a.get("n")) for a in c.get("anchors") or []
+        if not a.get("ended") and str(a.get("repo")).lower() == repo.lower()}]
+    if not held:
+        return ""
+    ids = ", ".join(c["id"] for c in held)
+    if len(held) > 1:
+        return refusal.refuse(f"not declared: {session} already executes {len(held)} live cards carrying these anchors ({ids})",
+                              hand_to=("the brain", f"say: {session} token <t> which of {ids} is my card for these anchors"))
+    joined = held[0]["id"]
+    if goal:
+        return refusal.refuse(f"not declared: {session} already executes {joined}, which carries these anchors; "
+                              f"a goal joins a card by an edge: edge.py {session} link {joined} part-of {goal['id']} <why>",
+                              send="/2mw2lt:connect")
+    if triage:
+        write(f"/cards/{joined}/triage",
+              {**triage, "why": f"declared by {session} on the card it already executes"},
+              _own_key("declare.triage", joined, triage["criticality"], triage["size"]), SESSION_CARRIER, token)
+    return f"bound: {joined}, the card {session} already executes for these anchors"
 
 
 def edge_card(card: str, unlink: bool, kind: str, to: dict, why: str, token: str,
@@ -702,6 +735,16 @@ def announce_branch(session: str, token: str, branch: str, ws: Path, key: str,
         return f"bound: {bound['branch']} to card {bound['card']}" + (
             f", displacing {bound['displaced']}" if bound.get("displaced") else "")
     why = answer.get("unbound")
+    if why == "held-by-a-live-session":
+        # The card is this session's now, but another session still enrolled bound its branch and
+        # works it (#7678): name that session, and the claim on a card of this session's own.
+        holders = sorted({b["by"]["session"] for b in card.get("branches") or []
+                          if not b.get("ended") and (b.get("by") or {}).get("kind") == "session"
+                          and (b.get("by") or {}).get("session") not in (None, session)})
+        who = ", ".join(holders) or "another session"
+        return refusal.refuse(f"not bound: card {card['id']} ({card['name']}) holds a branch {who} bound and still works",
+                              send=[(f"taking: branch {branch} --card <id> token <t>",
+                                     "naming a card of your own, which the brain engages you on if you have none")])
     if why:
         if why in UNBOUND:
             return refusal.refuse(f"not bound: {why}", send=UNBOUND[why])
@@ -799,6 +842,29 @@ def seat_generation(session: str, token: str) -> int:
     return int(seat["generation"])
 
 
+# A goal's steward is lent these card verbs on what its stewardship covers (doc 198 §3).
+STEWARD_CARD_VERBS = ("retier",)
+# Go's refusal of a session that steers nothing covering what it acts on: the refusal each lent
+# operation keeps for a session holding neither the seat nor a stewardship.
+_NOT_STEWARD = frozenset({"seat-not-holder", "executor-required"})
+
+
+def lent(session: str, token: str, send):
+    """`send(generation)` for a verb doc 198 lends a goal's steward. The holder sends it at the
+    generation it holds; any other session sends it at 0 for Go to judge its stewardship, and Go's
+    refusal of one that steers nothing is raised as `NotSeated`, as the seat check would have."""
+    try:
+        generation = seat_generation(session, token)
+    except NotSeated as why:
+        try:
+            return send(0)
+        except Refused as e:
+            if e.code in _NOT_STEWARD:
+                raise NotSeated(f"{why}, and it steers no goal covering this ({e.code})") from None
+            raise
+    return send(generation)
+
+
 def standing_epoch(token: str, name: str) -> int | None:
     """The epoch `name` stands at, from the fleet the brain reads, or None when it is not enrolled."""
     for item in get("/sessions", token).get("items") or []:
@@ -808,16 +874,19 @@ def standing_epoch(token: str, name: str) -> int | None:
 
 
 def relay(session: str, token: str, to: str, epoch: int | None, text: str, key: str) -> str:
-    """The holder's directive to `to`, at `epoch` or the one it stands at. `key` is the send's
-    occurrence id, so a retry after a lost answer is answered from the first. Raises `NotSeated`,
-    `Refused` or `Unsent`."""
-    generation = seat_generation(session, token)
+    """The holder's directive to `to`, at `epoch` or the one it stands at, or a goal's steward's to a
+    session its launches started, at generation 0, which no seat holds (doc 198 D6). `key` is the
+    send's occurrence id, so a retry after a lost answer is answered from the first. Raises
+    `NotSeated`, `Refused` or `Unsent`."""
     if epoch is None:
         epoch = standing_epoch(token, to)
         if epoch is None:
             raise Refused(404, "session-not-enrolled", "to")
     directive = str(uuid.UUID(_own_key("relay.directive", session, key)))
-    answer = issue_directive(session, token, directive, to, epoch, generation, text)
+    answer = lent(session, token, lambda generation: issue_directive(session, token, directive, to, epoch, generation, text))
+    # A steward's directive to a busy session waits behind the one it holds (doc 198 D6).
+    if answer.get("status") == "queued":
+        return f"queued: {answer.get('id', directive)} for {to}@{epoch}, behind the directive it holds"
     return f"relayed: {answer.get('id', directive)} to {to}@{epoch}"
 
 
@@ -838,10 +907,10 @@ def seat_need(session: str, token: str, kind: str, need: str, reason: str = "", 
 
 
 def seat_launch(session: str, token: str, body: dict, key: str) -> str:
-    """The holder asks capacity for a worker (`POST /launches`), keyed by the line's own key so a
-    rerun after a lost answer is answered from the first. Raises `NotSeated`, `Refused` or `Unsent`."""
-    seat_generation(session, token)
-    answer = write("/launches", body, key, SESSION_CARRIER, token)
+    """The holder, or a goal's steward by floor for its goal's cards, asks capacity for a worker
+    (`POST /launches`), keyed by the line's own key so a rerun after a lost answer is answered from
+    the first. Raises `NotSeated`, `Refused` or `Unsent`."""
+    answer = lent(session, token, lambda _: write("/launches", body, key, SESSION_CARRIER, token))
     account = answer.get("account")
     harness = f" {body['harness']}" if body.get("harness") else ""
     on = f" on {account['vendor']} account {account['number']} ({account['account_id']}, brought by {account['brought_by']})" if account else ""
@@ -912,9 +981,9 @@ def seat_cancel(session: str, token: str, action: str, key: str) -> str:
 def seat_action(session: str, token: str, body: dict, key: str) -> str:
     """The holder asks the machine a session runs on to wake, control, retire, rehome or park it
     (`POST /actions`), keyed by the line's own key so a rerun after a lost answer is answered from
-    the first. Raises `NotSeated`, `Refused` or `Unsent`."""
-    seat_generation(session, token)
-    answer = write("/actions", body, key, SESSION_CARRIER, token)
+    the first. A goal's steward wakes, parks and retires the sessions its launches started. Raises
+    `NotSeated`, `Refused` or `Unsent`."""
+    answer = lent(session, token, lambda _: write("/actions", body, key, SESSION_CARRIER, token))
     doing = {"wake": "waking", "control": "controlling", "retire": "retiring", "rehome": "rehoming", "park": "parking"}[body["kind"]]
     value = f" {body['value']}" if body.get("value") else ""
     # A retire whose machine's credential no longer reaches the workspace is ended by the seat's
@@ -926,9 +995,9 @@ def seat_action(session: str, token: str, body: dict, key: str) -> str:
 def seat_keep(session: str, token: str, verb: str, body: dict, key: str) -> str:
     """The holder keeps a session idle on purpose (`POST /sessions/{session}/keep`) or clears its
     keep (`.../unkeep`), under its own session and keyed by the line's own key, so a rerun after a
-    lost answer is answered from the first. Raises `NotSeated`, `Refused` or `Unsent`."""
-    seat_generation(session, token)
-    answer = write(f"/sessions/{session}/{verb}", body, key, SESSION_CARRIER, token)
+    lost answer is answered from the first. A goal's steward keeps the sessions its launches started.
+    Raises `NotSeated`, `Refused` or `Unsent`."""
+    answer = lent(session, token, lambda _: write(f"/sessions/{session}/{verb}", body, key, SESSION_CARRIER, token))
     if verb == "unkeep":
         return f"unkept: {answer['session']}, kept for {answer['reason']}"
     return f"kept: {answer['session']} until {answer['until']} because {answer['reason']}"
@@ -1083,9 +1152,13 @@ def seat_card(session: str, token: str, verb: str, fact: dict, repo: str, key: s
     if planned is None:
         what = f"{verb} {fact['field']}" if fact["state"] == "card-reclassified" else verb
         raise LookupError(f"card {what}: this client sends Go no write for it")
-    seat_generation(session, token)
     path, body = planned
-    write(path, body, _own_key("seat.card", session, key), SESSION_CARRIER, token)
+    send = lambda _: write(path, body, _own_key("seat.card", session, key), SESSION_CARRIER, token)
+    if verb in STEWARD_CARD_VERBS:
+        lent(session, token, send)
+    else:
+        seat_generation(session, token)
+        send(0)
     return f"carded: card {fact['card']}"
 
 

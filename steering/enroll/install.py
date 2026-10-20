@@ -1168,8 +1168,9 @@ def uninstall(root: Path, retire: bool) -> int:
         door = None
         say("credential", f"kept: {e}")
     if retire and bound:
-        # The binding is a uuid, which no route takes: the workspace is reached at its door.
-        retire_on(console, (door_mod.split(door)[1] if door else None) or bound)
+        # By the bound id, which retire_on routes through the person's access: a door's path is how
+        # the console was reached, not always an address coordination knows (#7657).
+        retire_on(console, bound)
     elif retire:
         say("workspace", "not retired: this checkout is bound to no workspace; "
                          "name the workspace with `install.py retire <id>`")

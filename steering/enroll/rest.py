@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """`rest.py [--provider <harness>] [--provider-session <id>] [--lease] [--post [--json <body>] [--key <idempotency
-key>]] <path> [--all]`: a call to the steering API (doc 126) from any machine.
+key>] | --put --json <body> --key <idempotency key> | --delete --key <idempotency key>] <path> [--all]`: a call to the steering API (doc 126) from any machine.
 
 The path is relative to `/api/v1`, as `/knowledge/units` or `/cards?state=live`. It goes
 to the door this workspace names. A session's enrolment token on stdin goes with the current
 machine credential on Go's paired session carriers. It stays out of the process table; `--lease`
 sends the seat holder's own enrolment, which Go judges at each call. With nothing on stdin, this
 session's own enrolment token goes, found as `say.py` finds it (#3551). `--post` sends the path a POST with no body, or with `--json`'s body and
-`--key` as its `Idempotency-Key`, as a room's messages take (doc 156).
+`--key` as its `Idempotency-Key`, as a room's messages take (doc 156). `--put` sends `--json`'s body under
+`--key`, as appointing a goal's steward takes (doc 198). `--delete` sends a DELETE with no
+body under `--key`, as closing an understudy cast takes.
 
 Exits 0 with the JSON on stdout; otherwise 1, with the problem's title and remedy on stderr.
 """
@@ -70,10 +72,10 @@ def fetch(url: str, token: str | None, method: str = "GET", body: bytes | None =
     if key:
         headers["Idempotency-Key"] = key
     req = urllib.request.Request(url, headers=headers, method=method,
-                                 data=(body if body is not None else b"") if method == "POST" else None)
+                                 data=(body if body is not None else b"") if method in ("POST", "PUT") else None)
     again = door.resender(time.monotonic(), f"rest: {url}",
                           action="resending under the same key" if key else "asking again")
-    resendable = method != "POST" or bool(key)
+    resendable = method not in ("POST", "PUT", "DELETE") or bool(key)
     while True:
         try:
             with door.open_direct(req, timeout=door.SEND_TIMEOUT) as r:
@@ -126,7 +128,7 @@ def main(argv: list[str], stdin) -> int:
         return 0
     valued: dict[str, str] = {}
     rest = list(argv)
-    for flag in ("--json", "--key", "--post", "--all", "--lease", *connect.SPEAKER_FLAGS):
+    for flag in ("--json", "--key", "--post", "--put", "--delete", "--all", "--lease", *connect.SPEAKER_FLAGS):
         if rest.count(flag) > 1:
             return error("rest", f"{flag} may appear once")
     for flag in ("--json", "--key", *connect.SPEAKER_FLAGS):
@@ -137,14 +139,20 @@ def main(argv: list[str], stdin) -> int:
             valued[flag] = rest[i + 1]
             del rest[i:i + 2]
     speaker = {f: valued.pop(f) for f in connect.SPEAKER_FLAGS if f in valued}
-    if speaker.get("--provider", connect.harness_mod.DEFAULT) not in connect.harness_mod.PROVIDERS:
+    if "--provider" in speaker and speaker["--provider"] not in connect.harness_mod.PROVIDERS:
         return error("rest", "--provider names no harness this client knows")
-    args = [a for a in rest if a not in ("--all", "--post", "--lease")]
-    method = "POST" if "--post" in rest else "GET"
-    if method == "POST" and "--all" in rest:
-        return error("rest", "--post cannot be combined with --all")
-    if valued and method != "POST":
-        return error("rest", "--json and --key require --post")
+    args = [a for a in rest if a not in ("--all", "--post", "--put", "--delete", "--lease")]
+    if sum(m in rest for m in ("--post", "--put", "--delete")) > 1:
+        return error("rest", "--post, --put and --delete name one method; give one")
+    method = "POST" if "--post" in rest else "PUT" if "--put" in rest else "DELETE" if "--delete" in rest else "GET"
+    if method != "GET" and "--all" in rest:
+        return error("rest", f"--{method.lower()} cannot be combined with --all")
+    if method == "DELETE" and ("--json" in valued or "--key" not in valued):
+        return error("rest", "--delete takes --key and no --json")
+    if method == "PUT" and ("--json" not in valued or "--key" not in valued):
+        return error("rest", "--put takes --json and --key")
+    if valued and method == "GET":
+        return error("rest", "--json requires --post or --put; --key requires --post, --put or --delete")
     if len(args) != 1 or not args[0].startswith("/"):
         return error("rest", "name one API path beginning with /")
     if "--json" in valued:

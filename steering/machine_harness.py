@@ -9,6 +9,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 import urllib.parse
 from dataclasses import dataclass
@@ -251,28 +252,39 @@ def _claude_pid(psession: str) -> int | None:
     return runtime_id.claude_pid(psession)
 
 
-def _claude_session() -> str | None:
-    """The session the Claude process above this one serves, read from Claude's own registry
-    under the home this process carries. A session started inside another inherits that
-    session's `CLAUDE_CODE_SESSION_ID` (doc 08), which the engine replaces only for the Bash
-    tool, so the variable alone cannot say whose process this is — a nested session's hooks,
-    module children and MCP servers all carried the parent's (#6500, #7069). The registry row of
-    the nearest Claude process in this process's own parentage can, and it wins. Where no
-    ancestor answers — no Claude above this process, or a home that holds no vouched row for one
-    — the variable stands, as it always did."""
-    named = _env("CLAUDE_CODE_SESSION_ID")()
-    if named is None:
+# Which session a process is, as each harness declares it in the Go registry
+# (machine/internal/workers), read here from the data generated from it: the plugin ships no Go
+# binary, and an installed agent's binary moves only when it is deployed, so asking it would answer
+# with whatever registry that machine last received.
+IDENTITY = json.loads((Path(__file__).resolve().parent / "harness_identity.json").read_text())["harnesses"]
+
+
+def _session_of(name: str):
+    """The reader of the session `name`'s process is, as its declaration says, or None for a
+    harness that says no process is its session.
+
+    A session started inside another inherits the other's variable (doc 08, #6500, #7069), so a
+    harness that keeps rows lets the nearest ancestor its own row vouches for answer over it; where
+    none does, the variable stands. A harness that names its session in no variable a tool child
+    reads is answered by the binding it declares."""
+    entry = next(e for e in IDENTITY if e["name"] == name)
+    names, rows, binding = tuple(entry.get("session_env", ())), entry.get("session_rows"), entry.get("session_binding")
+    if not names and not binding:
         return None
-    import runtime_id
-    sessions = HARNESSES["claude"].config_dir() / "sessions"
-    for pid in runtime_id.ancestor_pids():
-        sid = runtime_id.serving_session(pid, sessions)
-        if sid is not None:
-            return sid
-    return named
 
-
-_claude_session.names = ("CLAUDE_CODE_SESSION_ID",)
+    def read() -> str | None:
+        named = _env(*names)() if names else None
+        if named is not None and rows:
+            under = HARNESSES[name].config_dir() / rows
+            for pid in runtime_id.ancestor_pids():
+                sid = runtime_id.serving_session(pid, under)
+                if sid is not None:
+                    return sid
+        if named is not None or not binding:
+            return named
+        return _BINDINGS[binding]()
+    read.names = names
+    return read
 
 
 def _codex_rollout(psession: str):
@@ -458,9 +470,13 @@ def _zcode_binding() -> dict | None:
         return None
 
 
-def _zcode_session() -> str | None:
+def _hook_session() -> str | None:
     binding = _zcode_binding()
     return binding["psession"] if binding else None
+
+
+# The published sessions a declaration may name, by the name the Go registry gives them.
+_BINDINGS = {"hook-binding": _hook_session}
 
 
 def _zcode_pid(psession: str) -> int | None:
@@ -719,18 +735,18 @@ def _claude_live_workers(config: Path, *, deadline: float | None = None) -> tupl
 HARNESSES = {h.provider: h for h in (
     Harness("claude", agent="claude-code", config=".claude", config_env="CLAUDE_CONFIG_DIR",
             transcript_root="projects",
-            session_id=_claude_session, harness_pid=_claude_pid,
+            session_id=_session_of("claude"), harness_pid=_claude_pid,
             transcript=_claude_transcript, version=_cli_version("claude", "--version"),
             shape=_claude_shape, workspace=_claude_workspace, hooks=True,
             reading=_claude_reading, process_kind=_claude_process, live_workers=_claude_live_workers),
     Harness("codex", agent="codex", config=".codex", config_env="CODEX_HOME",
             transcript_root="sessions",
-            session_id=_env("CODEX_THREAD_ID", "CODEX_SESSION_ID"), harness_pid=_codex_pid,
+            session_id=_session_of("codex"), harness_pid=_codex_pid,
             transcript=_codex_transcript, version=_cli_version("codex", "--version"),
             shape=_codex_shape, workspace=_codex_workspace,
             delivery="inject", loaded=_codex_loaded, reachable=_codex_reachable,
             reading=_codex_reading, process_kind=_codex_process),
-    Harness("grok", agent="grok", config=".grok", transcript_root="sessions",
+    Harness("grok", agent="grok", config=".grok", config_env="GROK_HOME", transcript_root="sessions",
             shape=_grok_shape, workspace=_grok_workspace),
     # Launched enrolled and reached (docs 83, 89).
     Harness("opencode", agent="opencode", config=".local/share/opencode",
@@ -746,7 +762,7 @@ HARNESSES = {h.provider: h for h in (
     # hands it.
     Harness("zcode", agent="zcode", config=".zcode", config_env="ZCODE_DATA_BASE_DIR",
             transcript_root="steering-workers",
-            session_id=_zcode_session, harness_pid=_zcode_pid, transcript=_zcode_transcript,
+            session_id=_session_of("zcode"), harness_pid=_zcode_pid, transcript=_zcode_transcript,
             version=zcode_version, shape=_acp_shape, workspace=_zcode_workspace, hooks=True,
             reading=_zcode_reading,
             process_kind=_zcode_process, process_names=_zcode_process_names),
@@ -779,6 +795,29 @@ def here() -> list[Harness]:
     return [h for h in HARNESSES.values() if h.exports and h.session_id() is not None]
 
 
+class NotIdentified(Exception):
+    """Why no one harness says which session this process is."""
+
+
+class Unclaimed(NotIdentified):
+    """No harness says this process is its session."""
+
+
+def identify() -> Harness:
+    """The one harness that says this process is one of its sessions. Two at once are refused, and
+    so is a process none answers for, which is never read as any one harness's."""
+    found = here()
+    if len(found) > 1:
+        raise NotIdentified("more than one harness says this is its session ("
+                            + ", ".join(h.provider for h in found) + ")")
+    if not found and zcode_unbound:
+        raise NotIdentified(f"this zcode session names no session: {zcode_unbound}")
+    if not found:
+        raise Unclaimed(f"process {os.getpid()} ({Path(sys.argv[0]).name or sys.executable}) is no "
+                        f"registered harness's session: none of {', '.join(PROVIDERS)} says so")
+    return found[0]
+
+
 def of_runtime(runtime: str | None) -> Harness | None:
     """The harness a runtime id names: `runtime_id` builds the id from the provider, so the
     provider is the id's first field."""
@@ -789,4 +828,5 @@ def of_runtime(runtime: str | None) -> Harness | None:
 # session it names in full is started without them, or `speaking_as` meets two identities.
 IDENTITY_ENV = (*(n for h in HARNESSES.values() for n in getattr(h.session_id, "names", ())), "CLAUDE_PID")
 PROVIDERS = tuple(HARNESSES)       # every provider this machine answers for, and the only list of them
-DEFAULT = "claude"                 # the harness assumed when a caller names none
+if PROVIDERS != tuple(e["name"] for e in IDENTITY):
+    raise ImportError(f"harness_identity.json declares {[e['name'] for e in IDENTITY]}, not {list(PROVIDERS)}")

@@ -34,7 +34,7 @@ from local_workspace import KEY_HEADER, agent_key, agent_port, origin_slug, requ
 import door  # noqa: E402
 from ack import token_path, valid_token  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
-from bind import Refused, bind, incarnation, incarnation_of, pid_arg, records  # noqa: E402
+from bind import Refused, Unclaimed, bind, incarnation, incarnation_of, pid_arg, records  # noqa: E402
 from transcript_proof import account_of  # noqa: E402
 import machine_harness as harness_mod  # noqa: E402
 from process_probe import Undetermined  # noqa: E402
@@ -103,16 +103,12 @@ def account(o: Options, h: harness_mod.Harness) -> str:
 def harness_of(provider: str | None) -> harness_mod.Harness:
     """The harness named, or the one that says this process is one of its sessions."""
     if provider is None:
-        found = harness_mod.here()
-        if len(found) > 1:
-            raise Refused("more than one harness says this is its session ("
-                          + ", ".join(h.provider for h in found)
-                          + "): name the one you mean with --provider")
-        if not found and harness_mod.zcode_unbound:
-            # Inside a zcode session whose binding did not resolve: Claude's default would
-            # refuse for the wrong reason.
-            raise Refused(f"this zcode session names no session: {harness_mod.zcode_unbound}")
-        return found[0] if found else harness_mod.HARNESSES[harness_mod.DEFAULT]
+        try:
+            return harness_mod.identify()
+        except harness_mod.Unclaimed as why:
+            raise Unclaimed(f"{why}: pass --provider <harness> --provider-session <id>") from None
+        except harness_mod.NotIdentified as why:
+            raise Refused(f"{why}: name the one you mean with --provider") from None
     h = harness_mod.of(provider)
     if h is None:
         raise Refused(f"{provider} is not a provider: one of {', '.join(harness_mod.PROVIDERS)}")
@@ -251,8 +247,13 @@ def provider_session(flags: dict[str, str]) -> str:
     identifies the process. A harness that does say is not overruled by the flag, and a named
     provider that is silent while another harness identifies this process does not stand in for it."""
     provider = flags.get("--provider")
-    own = harness_of(provider).whoami()[0]
     named = flags.get("--provider-session")
+    try:
+        own = harness_of(provider).whoami()[0]
+    except Unclaimed:
+        if not named:
+            raise
+        own = None  # no harness claims this process, so the session it names stands
     if named and own and named != own:
         raise Refused(f"this harness is session {own}, not {named}: a session speaks only as itself")
     if named and not own:

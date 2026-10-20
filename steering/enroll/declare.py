@@ -62,23 +62,26 @@ def main(argv: list[str]) -> int:
     try:
         reply = session_routes.declare_card(card, fact["name"], fact.get("anchors") or {}, token,
                                             repo=session_routes.card_repo(ws) if fact.get("anchors") else "",
-                                            triage=fact.get("triage"), goal=fact.get("goal"))
+                                            triage=fact.get("triage"), goal=fact.get("goal"), session=session)
     except session_routes.Refused as e:
         reply = refusal.use("declare", f"{card}: {e}")
     except session_routes.Unsent as e:
         reply = refusal.retry(str(e))
     print(reply)
-    if not reply.startswith("declared:"):
-        # The retry repeats the whole birth, goal and all: a resend under the card without it is
-        # another declaration, refused (#7005).
-        retry = f"--card {card}"
-        if goal := fact.get("goal"):
-            retry += f" --goal {goal['id']} --goal-why {shlex.quote(goal['why'])}"
-            if goal.get("source"):
-                retry += f" --goal-source {shlex.quote(goal['source'])}"
-        print(f"to retry this declaration under the same card, send it with {retry}", file=sys.stderr)
+    if reply.startswith(("declared:", "bound:")):
+        return 0
+    if str(getattr(reply, "reason", "")).startswith("not declared:"):
+        # A card already stands: sending the birth again cannot change that.
         return 1
-    return 0
+    # The retry repeats the whole birth, goal and all: a resend under the card without it is
+    # another declaration, refused (#7005).
+    retry = f"--card {card}"
+    if goal := fact.get("goal"):
+        retry += f" --goal {goal['id']} --goal-why {shlex.quote(goal['why'])}"
+        if goal.get("source"):
+            retry += f" --goal-source {shlex.quote(goal['source'])}"
+    print(f"to retry this declaration under the same card, send it with {retry}", file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":

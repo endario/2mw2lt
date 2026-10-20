@@ -933,6 +933,7 @@ RetireAction = typing.TypedDict("RetireAction", {
     "cwd": "typing.NotRequired[str]",
     "branches": "typing.NotRequired[list[str] | None]",
     "landed": "typing.NotRequired[list[str] | None]",
+    "left": "typing.NotRequired[bool]",
 })
 
 # StreamWake is a wake, by the attempt the agent answers with.
@@ -1076,6 +1077,7 @@ StreamRetire = typing.TypedDict("StreamRetire", {
     "cwd": "typing.NotRequired[str]",
     "branches": "typing.NotRequired[list[str] | None]",
     "landed": "typing.NotRequired[list[str] | None]",
+    "left": "typing.NotRequired[bool]",
 })
 
 # AgentLaunchBody is the body of POST /steering/agent/launch: the machine's answer to a launch
@@ -1160,14 +1162,12 @@ AgentJudgesBody = typing.TypedDict("AgentJudgesBody", {
 
 # AgentPlacement is the machine's role, dedicated or workstation; the share of it work may take,
 # in (0, 1]; how many gate runs it takes at once, 0 to 256; how many workers it may run; and how many
-# gate runs it takes on one account and in all, 0 to 256, which a machine that names none leaves to
-# the default.
+# gate runs it takes in all, 0 to 256, which a machine that names none leaves to the default.
 AgentPlacement = typing.TypedDict("AgentPlacement", {
     "role": "str",
     "soft": "float",
     "capacity": "int",
     "workers": "typing.NotRequired[int | None]",
-    "vendor_limit": "typing.NotRequired[int | None]",
     "agent_limit": "typing.NotRequired[int | None]",
 })
 
@@ -2915,6 +2915,7 @@ FleetSource = typing.TypedDict("FleetSource", {
     "checkout": "FleetCheckout | None",
     "offers": "typing.NotRequired[list[FleetOffer] | None]",
     "no_account": "typing.NotRequired[list[FleetNoAccount] | None]",
+    "unlaunchable": "typing.NotRequired[list[FleetUnlaunchable] | None]",
 })
 
 # FleetOffer is one account a machine's launchers can start, and which registration said.
@@ -2929,6 +2930,15 @@ FleetOffer = typing.TypedDict("FleetOffer", {
 # when it first did, and which registration said (#6793).
 FleetNoAccount = typing.TypedDict("FleetNoAccount", {
     "launcher": "str",
+    "cause": "str",
+    "since": "str",
+    "registration": "str",
+})
+
+# FleetUnlaunchable is one harness a machine's census said cannot start, its one cause, since
+# when it first did, and which registration said (#7629).
+FleetUnlaunchable = typing.TypedDict("FleetUnlaunchable", {
+    "harness": "str",
     "cause": "str",
     "since": "str",
     "registration": "str",
@@ -3328,6 +3338,7 @@ PlacementCandidate = typing.TypedDict("PlacementCandidate", {
     "harness": "typing.NotRequired[str]",
     "harness_from": "typing.NotRequired[str]",
     "preferred_harness": "typing.NotRequired[str]",
+    "harness_why": "typing.NotRequired[str]",
     "effort": "typing.NotRequired[str]",
     "thinking": "typing.NotRequired[str]",
     "multiplier": "typing.NotRequired[float | None]",
@@ -3910,7 +3921,8 @@ SessionOrigin = typing.TypedDict("SessionOrigin", {
     "vscode": "OriginVSCode | None",
 })
 
-# OriginLauncher is who asked for the launch: the seat, by its session's name, or the owner.
+# OriginLauncher is who asked for the launch: the seat or a goal's steward, by its session's name,
+# or the owner.
 OriginLauncher = typing.TypedDict("OriginLauncher", {
     "kind": "str",
     "session": "typing.NotRequired[str]",
@@ -4104,6 +4116,57 @@ SessionStatus = typing.TypedDict("SessionStatus", {
     "card": "typing.NotRequired[str]",
 })
 
+# StewardBody appoints a goal's steward, or changes its bounds. Steward is the session's name;
+# accounts are `vendor/account`, and machines are named as a launch's `machine_name` is. Until is an
+# RFC 3339 time, empty for none.
+StewardBody = typing.TypedDict("StewardBody", {
+    "steward": "str",
+    "ceiling": "str",
+    "concurrency": "int",
+    "accounts": "typing.NotRequired[list[str] | None]",
+    "machines": "typing.NotRequired[list[str] | None]",
+    "until": "typing.NotRequired[str]",
+    "reason": "str",
+})
+
+# UnstewardBody ends a goal's stewardship, by the seat, the owner or the steward handing it back.
+UnstewardBody = typing.TypedDict("UnstewardBody", {
+    "reason": "str",
+})
+
+# StewardshipDTO is a stewardship as it stands. GrantedBy is `owner` or `seat`; EndedByKind is who
+# or what ended it: `owner`, `seat`, `steward`, `epoch` or `until`.
+StewardshipDTO = typing.TypedDict("StewardshipDTO", {
+    "id": "str",
+    "goal": "str",
+    "steward": "str",
+    "steward_epoch": "int",
+    "granted_by": "str",
+    "revision": "int",
+    "ceiling": "str",
+    "concurrency": "int",
+    "accounts": "list[str] | None",
+    "machines": "list[str] | None",
+    "until": "typing.NotRequired[str]",
+    "reason": "str",
+    "created_at": "str",
+    "ended_at": "typing.NotRequired[str]",
+    "ended_by_kind": "typing.NotRequired[str]",
+    "ended_reason": "typing.NotRequired[str]",
+})
+
+# StewardshipAnswer is the stewardship a command settled on.
+StewardshipAnswer = typing.TypedDict("StewardshipAnswer", {
+    "stewardship": "StewardshipDTO",
+    "replayed": "bool",
+    "position": "int",
+})
+
+# StewardshipRead is a goal's standing stewardship, absent when none stands.
+StewardshipRead = typing.TypedDict("StewardshipRead", {
+    "stewardship": "StewardshipDTO | None",
+})
+
 # StreamFeed is one feed a stream follows and the position it has reached on it.
 StreamFeed = typing.TypedDict("StreamFeed", {
     "kind": "str",
@@ -4194,14 +4257,188 @@ TargetingAnswer = typing.TypedDict("TargetingAnswer", {
     "stored": "bool",
 })
 
+# UnderstudyCastBody is the seat's cast of a model for a rung (4754-night-shift design §2): how
+# many rounds it contends for, and the basis the seat computed for why the model qualifies. Go
+# checks the basis's shape, never its figures, which it does not hold.
+UnderstudyCastBody = typing.TypedDict("UnderstudyCastBody", {
+    "model": "str",
+    "tier": "str",
+    "rounds": "int",
+    "basis": "typing.Any",
+})
+
+# UnderstudyFreeBasis is a free promotion the seat cast the model on, and when the promotion ends;
+# a model the catalog itself marks free, or whose id ends -free or :free, has no until.
+UnderstudyFreeBasis = typing.TypedDict("UnderstudyFreeBasis", {
+    "until": "str | None",
+})
+
+# UnderstudyMate is one rated model of the rung the candidate is measured beside.
+UnderstudyMate = typing.TypedDict("UnderstudyMate", {
+    "model": "str",
+    "index": "float",
+    "price": "float",
+    "source": "str",
+})
+
+# UnderstudyCostBasis is the candidate's published index and blended price beside the rung's rated
+# models', each figure with the card it was read from.
+UnderstudyCostBasis = typing.TypedDict("UnderstudyCostBasis", {
+    "index": "float",
+    "price": "float",
+    "source": "str",
+    "mates": "list[UnderstudyMate] | None",
+})
+
+# UnderstudyBasis is the shape a cast's basis takes: the rung it qualifies for, and exactly one of
+# a free promotion, a cost case, the owner's naming, or a rated model's calibration.
+UnderstudyBasis = typing.TypedDict("UnderstudyBasis", {
+    "tier": "str",
+    "free": "UnderstudyFreeBasis | None",
+    "cost": "UnderstudyCostBasis | None",
+    "allowed": "bool",
+    "calibration": "bool",
+})
+
+# UnderstudyCastAnswer is the cast the seat opened.
+UnderstudyCastAnswer = typing.TypedDict("UnderstudyCastAnswer", {
+    "cast": "str",
+    "model": "str",
+    "tier": "str",
+    "rounds": "int",
+    "status": "str",
+    "replayed": "bool",
+})
+
+# UnderstudyCloseAnswer is the cast the seat closed.
+UnderstudyCloseAnswer = typing.TypedDict("UnderstudyCloseAnswer", {
+    "cast": "str",
+    "status": "str",
+    "replayed": "bool",
+})
+
+# Understudies answers GET /understudies: the workspace's casts and their runs, each pair laid open,
+# and per model the design's five observations beside its rung's calibration, computed at read time
+# (documentation/architecture/plans/4754-night-shift/design.md §5).
+Understudies = typing.TypedDict("Understudies", {
+    "casts": "list[UnderstudyCast] | None",
+    "models": "list[UnderstudyModel] | None",
+})
+
+# UnderstudyCast is one cast: the model, the rung it is cast for, its rounds and basis as the seat
+# gave them, and its runs, newest first. Calibration is a rated model cast for its own rung.
+UnderstudyCast = typing.TypedDict("UnderstudyCast", {
+    "id": "str",
+    "model": "str",
+    "tier": "str",
+    "rounds": "int",
+    "basis": "typing.Any",
+    "calibration": "bool",
+    "at": "str",
+    "closed_at": "str | None",
+    "runs": "list[UnderstudyRun] | None",
+})
+
+# UnderstudyRun is one run and its pair. State is the outcome's, `answer` or `failed`, or `running`
+# while it has none; a failed run carries its reason and class. Stratum is the round's, `hold` or
+# `pass`, empty when the series proved neither. Landed is that the round's pull request merged.
+UnderstudyRun = typing.TypedDict("UnderstudyRun", {
+    "id": "str",
+    "twin_commission": "str",
+    "repository": "str",
+    "pr": "int",
+    "round": "int",
+    "at": "str",
+    "state": "str",
+    "reason": "typing.NotRequired[str]",
+    "class": "typing.NotRequired[str]",
+    "stratum": "typing.NotRequired[str]",
+    "landed": "bool",
+    "twin_model": "str",
+    "twin_verdict": "str",
+    "verdict": "typing.NotRequired[str]",
+    "matches": "list[UnderstudyMatch] | None",
+    "unconfirmed": "list[UnderstudyUnconfirmed] | None",
+    "missed": "list[UnderstudyFinding] | None",
+    "caught_earlier": "list[UnderstudyMatch] | None",
+    "spent": "UnderstudySpent",
+    "twin_spent": "UnderstudySpent",
+})
+
+# UnderstudyFinding is a finding as a pair shows it.
+UnderstudyFinding = typing.TypedDict("UnderstudyFinding", {
+    "severity": "str",
+    "file": "str",
+    "line": "str",
+    "claim": "str",
+})
+
+# UnderstudyMatch is a twin's finding, or a later round's, and the understudy's matched to it by
+# place, with both claims to read side by side.
+UnderstudyMatch = typing.TypedDict("UnderstudyMatch", {
+    "twin": "UnderstudyFinding",
+    "understudy": "UnderstudyFinding",
+})
+
+# UnderstudyUnconfirmed is an understudy's finding matched to none of the twin's; corroborated when
+# another model's understudy of the round raised it too.
+UnderstudyUnconfirmed = typing.TypedDict("UnderstudyUnconfirmed", {
+    "severity": "str",
+    "file": "str",
+    "line": "str",
+    "claim": "str",
+    "corroborated": "bool",
+})
+
+# UnderstudySpent is what a run's machine measured of it (run_record).
+UnderstudySpent = typing.TypedDict("UnderstudySpent", {
+    "seconds": "int | None",
+    "tokens_input": "int | None",
+    "tokens_output": "int | None",
+})
+
+# UnderstudyModel is one model at the rung it was cast for: its runs and how many answered, the
+# fastest and slowest answer, and its observations beside the rung's own over its calibration casts.
+UnderstudyModel = typing.TypedDict("UnderstudyModel", {
+    "model": "str",
+    "tier": "str",
+    "runs": "int",
+    "answered": "UnderstudyRate",
+    "seconds_min": "int | None",
+    "seconds_max": "int | None",
+    "observations": "UnderstudyObservations",
+    "rung": "UnderstudyObservations",
+})
+
+# UnderstudyObservations are the design's five.
+UnderstudyObservations = typing.TypedDict("UnderstudyObservations", {
+    "holds": "UnderstudyRate",
+    "passes": "UnderstudyRate",
+    "finds": "UnderstudyRate",
+    "unconfirmed": "UnderstudyRate",
+    "caught_earlier": "UnderstudyRate",
+})
+
+# UnderstudyRate is count of of, with its 95% Wilson interval when of is above zero.
+UnderstudyRate = typing.TypedDict("UnderstudyRate", {
+    "count": "int",
+    "of": "int",
+    "low": "float | None",
+    "high": "float | None",
+})
+
 # SessionWait is what a session waits for (steering/verb_grammar.py parse_status): a pull
-# request's merge or its next gate verdict, or a time; told once it holds, or at its recheck
-# that it has not. Recheck 0 is the default.
+# request's merge or its next gate verdict, a time, or a workflow run it dispatched on a head of a
+# branch (documentation/ci/14); told once it holds, or at its recheck that it has not. Recheck 0 is
+# the default.
 SessionWait = typing.TypedDict("SessionWait", {
     "kind": "str",
     "repo": "typing.NotRequired[str]",
     "pr": "typing.NotRequired[int]",
     "at": "typing.NotRequired[str]",
+    "run": "typing.NotRequired[int]",
+    "head": "typing.NotRequired[str]",
+    "branch": "typing.NotRequired[str]",
     "recheck": "typing.NotRequired[int]",
 })
 
@@ -5280,6 +5517,7 @@ WorkerCensusBody = typing.TypedDict("WorkerCensusBody", {
     "launches": "typing.NotRequired[list[str] | None]",
     "harness_preferences": "typing.NotRequired[dict[str, str] | None]",
     "no_account": "typing.NotRequired[list[LauncherNoAccount] | None]",
+    "unlaunchable": "typing.NotRequired[list[HarnessUnlaunchable] | None]",
     "checkout": "typing.NotRequired[CheckoutCensus | None]",
     "machine_name": "typing.NotRequired[str | None]",
 })
@@ -5306,6 +5544,13 @@ LauncherAccount = typing.TypedDict("LauncherAccount", {
 # which keys nothing and composes with nothing across machines.
 LauncherNoAccount = typing.TypedDict("LauncherNoAccount", {
     "launcher": "str",
+    "cause": "str",
+})
+
+# HarnessUnlaunchable is a harness its machine cannot start now, with the first step it lacks
+# (#7629): a machine-local fact, as LauncherNoAccount is.
+HarnessUnlaunchable = typing.TypedDict("HarnessUnlaunchable", {
+    "harness": "str",
     "cause": "str",
 })
 
@@ -5431,6 +5676,9 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/goals/{goal}/reading",
     "GET /w/{workspace}/api/v1/goals/{goal}/register",
     "POST /w/{workspace}/api/v1/goals/{goal}/revisions",
+    "GET /w/{workspace}/api/v1/goals/{goal}/steward",
+    "PUT /w/{workspace}/api/v1/goals/{goal}/steward",
+    "POST /w/{workspace}/api/v1/goals/{goal}/steward/end",
     "POST /w/{workspace}/api/v1/goals/{goal}/unlinks",
     "POST /w/{workspace}/api/v1/incarnations",
     "GET /w/{workspace}/api/v1/intents",
@@ -5510,6 +5758,9 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/stamps",
     "GET /w/{workspace}/api/v1/tracks",
     "POST /w/{workspace}/api/v1/tracks",
+    "GET /w/{workspace}/api/v1/understudies",
+    "POST /w/{workspace}/api/v1/understudies/casts",
+    "DELETE /w/{workspace}/api/v1/understudies/casts/{cast}",
     "GET /w/{workspace}/api/v1/work/regroups",
     "POST /w/{workspace}/api/v1/work/regroups",
     "POST /w/{workspace}/api/v1/workspace/retirement",

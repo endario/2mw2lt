@@ -177,6 +177,9 @@ kind turned off is not told, and its standing still reads:
   branch or closing pull request, 15 minutes ago (`signals.card_closed.*`), once per closing. It names
   the card's executor and what it resolves still open. A candidate, never concluded for you: conclude
   it, or ask its executor what is left.
+- **`card-raised`**, a signal: a session raised its own card's floor (`signals.card_raised.*`), once
+  per raise. It names the stage, the floor it came from and went to, and the session's why. Lower it
+  with `card.py --lease retier`, or re-triage the card, when the raise is not warranted.
 
 A workspace may route `directive-unacknowledged`, `card-unbranched`, `session-unannounced`,
 `push-quiet`, `account-reset`
@@ -491,7 +494,8 @@ Work becomes a card at the first of three signs: it is declared, a gate is commi
 its pull request resolves, subsumes or advances an issue.
 When you delegate major work, scope its card so it is on the board before its first gate, and name
 the session as its executor. A session may also declare its own card with `declare.py`, without
-asking you.
+asking you; for an issue it has taken with `taking.py` it joins that card and sets its triage, so a
+brief need name only one of the two.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease scope <name> <track> [<verb>:<n>[,<n>] ...] triage:<criticality>,<size>
@@ -607,6 +611,24 @@ is the only acceptance. A merged pull request is neither a deployment nor an acc
 When a unit's work and evidence stand, prepare the judgment — criteria by their effective
 evidence, the goal over its criterion judgments — and judge through the goal commands, never by
 folding the backlog's shape into a conclusion.
+
+**Appoint a steward when relaying the goal is the work.** A goal whose cards keep coming back to
+you for each launch, retier, rescue and directive runs better under a steward: a session you
+appoint to run it within bounds.
+Appoint one for a goal with several cards in flight and a session that knows it; keep a goal of one
+card, or one whose next step is a decision, yourself. The bounds are the steward's whole authority:
+the highest rarity it may launch at, how many sessions it may run at once, and optionally the
+accounts (`vendor/account`) and machines it may place on, and an `until`:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --put "/goals/<goal>/steward" --key "<new uuid>" \
+  --json '{"steward": "<session>", "ceiling": "rare", "concurrency": 3, "until": "<RFC 3339 time>", "reason": "<why this goal, why this session>"}'
+```
+
+The same `PUT` revises the bounds, and `POST /goals/<goal>/steward/end` with `{"reason": "…"}`
+ends it. Then brief the steward: the goal, what done means, and `/2mw2lt:steward` as the skill it
+runs. A stewardship ends by itself when its `until` passes or its steward's epoch ends, and your
+seat snapshot names the stewardships standing.
 
 **Not everything has a goal.** Standalone fixes stay cards, tracks stay organization, and a
 workspace incident impedes work without becoming a goal; triage and delegate those on their own.
@@ -976,8 +998,11 @@ LAUNCH
 ```
 
 In `card`'s place, `resolves <owner>/<name>#<n>` names the card by the issue it resolves: the one
-live card resolving it, refused `card-absent` when none does (scope one first) and `card-ambiguous`
-when several do. A `notify <session>` clause, before `because`, names the session that asked for the
+live card resolving it, refused `card-absent` when none does (scope one first), `card-ambiguous`
+when several do, and `launch-card-executed`, naming the session, when a session still enrolled
+executes it: hand that card over with `card <wire id>`, or declare a card for the new work (#7678).
+Two launches by one issue both pass while the card has no executor; the second session to answer
+is not engaged, and its brief opens by saying whose the card is (#7701). A `notify <session>` clause, before `because`, names the session that asked for the
 launch: it is told on its own stream who enrolled for the launch, on which machine and for which
 card, and how the launch ended when nobody did, so you watch for no arrival to relay (#7182).
 
@@ -1347,6 +1372,81 @@ lifted, with it, and a critic round, which is not published, carries it on its c
 question — do not lift.** Leave the needs-you row standing; it already reaches the owner through
 the normal channel.
 
+## Cast an understudy
+
+An understudy replays a settled review round with a model the ladder does not rate, on spare quota,
+so the owner can see how it judges beside the rated judge that ran the round
+(the design). Nothing it says
+reaches a pull request. Cast nothing until #6499's legacy floor mapping is on `main`: before it, a
+legacy-tier round can still place an unrated model.
+
+**Find the pool.** The figures are the catalog's; the ratings are the ladder's:
+
+```bash
+unlimited models --catalog   # offerings (free, until) and cards (intelligence, price, source)
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /ladder   # a row's selector rates the models it matches at its rarity
+```
+
+A model is rated when a ladder row's selector matches it; its rung is that row's rarity. Rungs,
+least first: uncommon, rare, epic, legendary. Of the unrated models, these may be cast (the owner's
+ruling, 2026-10-14), each for one rung:
+
+- **Free**: an offering marked `free` (its `until` is the promotion's last day, UTC), or an id ending
+  `-free` or `:free`. Its rung is the highest whose every rated model's `intelligence` it reaches;
+  uncommon when its card publishes none.
+- **Cost-effective**: a priced model with a published `intelligence`, at the highest rung where its
+  intelligence per blended dollar is at or above that of every rated model of the rung with an index
+  and a price above zero. Blended price is `(3 × input + output) / 4` per million.
+- **Named by the owner**: a model in the workspace's `understudy.allow` setting. Only the owner
+  writes it, from the desk; a model with no index that is not free waits for them to name it.
+- **Calibration**: a rated model, cast for its own rung. Cast one beside each candidate, at the
+  candidate's rung, so the read has the rung's own figures to set the candidate's against.
+
+**Cast it** under a fresh key, the basis naming the rung and exactly one reason:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post /understudies/casts --key <uuid> \
+  --json '{"model": "<model>", "tier": "<rung>", "rounds": 10, "basis": <basis>}'
+```
+
+```jsonc
+{"tier": "uncommon", "free": {"until": "2026-11-30T23:59:59.999Z"}}   // "until": null for an id ending -free
+{"tier": "rare", "cost": {"index": 41.2, "price": 0.21, "source": "<card source>",
+  "mates": [{"model": "<rated model>", "index": 44.0, "price": 1.2, "source": "<its card source>"}]}}
+{"tier": "rare", "allowed": true}
+{"tier": "rare", "calibration": true}
+```
+
+Go refuses a model no account serves (`model-not-served`), a rated model cast off its rung
+(`rated-model-other-rung`), `allowed` for a model the owner has not named (`model-not-allowed`),
+`calibration` for an unrated model, a basis whose tier is not the cast's, and a second open cast of
+one model (`cast-already-open`). From there the work is the tick's: every ten minutes, one understudy
+at a time, only while none of the team's work waits and the account has quota to spare. A model whose
+last two understudies failed on its model or route sits out an hour; a calibration never does.
+
+**Close a cast** early when its model leaves the pool or its read already says enough; one closes by
+itself at its rounds:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --delete /understudies/casts/<cast> --key <uuid>
+```
+
+**Read it to the owner** when they ask, or when a cast closes:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /understudies
+```
+
+`models` holds each model's five observations as count of pairs with a 95% interval, and `rung` the
+same observations over the rung's calibration casts. Say each model in one sentence before any
+table: what it held, passed and caught, against its rung, with the intervals; ten pairs prove
+little, and the sentence says so. **Caught earlier** is the only observation by which a model beats
+the judge it replayed, so lead with it when it is above zero. For a pair the owner wants to see,
+`casts[].runs[]` lays out both verdicts, every matched finding with its two claims, the
+understudy's unconfirmed findings (`corroborated` when another model's understudy of the round
+raised it too) and the twin's confirmed findings it missed. File nothing from an unconfirmed
+finding, and propose no rung from a read: that is a later stage's, and the owner's.
+
 ## Keep the brain's own house
 
 Standing instructions from the owner. If your harness keeps memory, write any of these into it
@@ -1380,8 +1480,8 @@ that are not there already, so they survive this session.
   will answer. An ask is refused: the owner answers it in the desk.
 - **Check the issue is still open before you brief it.** Search merged pull requests for it
   first. A brief for work that has already landed wastes a session's turn.
-- **Brief a pull request to stay a draft until `ship it`.** The suite runs locally between
-  rounds instead. After a pass the worker never rebases: it
+- **Brief a pull request to stay a draft until `ship it`.** Between rounds the session runs its
+  guards where it chooses, locally or on the pool with `ci.py`. After a pass the worker never rebases: it
   merges `origin/main` into the passed head and carries the pass on its own, and once `main` has
   moved any other commit, a migration renumber included, costs a round; a round remains available
   when judgment warrants it. Do not prescribe or skip a round in a directive: the gate skill's
@@ -1393,10 +1493,12 @@ that are not there already, so they survive this session.
   sha once and pass it as an argument, as `steering/host/deploy.sh` does, then read the served
   sha back. Rehearse a new deploy script under a throwaway label and port, and tell the fleet
   before restarting the orchestrator.
-- **Run the full suite on `main` after a batch of merges, then deploy.** Sessions merge on their
-  review pass and the guards their change reads, not a full suite each (owner's ruling,
-  2026-10-08), so the full run on `main` is yours. Fix forward what it turns red, finding the
-  pull request from the failing guard; rerun a failure alone before calling it a regression.
+- **The suite runs on `main` hourly; deploy what it passed.** Sessions merge on their review pass
+  and the guards their change reads, not a full suite each (owner's ruling, 2026-10-08). The CI
+  read dispatches the suite on `main` within the hour of a merge, and a red run is a CI row on your
+  queue naming the commits it began on (documentation/ci/15). Fix forward what it turns red,
+  finding the pull request in those commits; rerun a failure alone before calling it a regression.
+  Dispatch `steering.yml` on `main` yourself only to run it again sooner.
 - **Deploy in batches, and not over a gate.** A daemon restart ends every gate run then in
   flight. Wait until no commission is outstanding, then carry everything verified since the
   last deploy in a single restart.

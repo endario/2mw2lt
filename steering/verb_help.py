@@ -53,7 +53,6 @@ _RAW_FORMS = {
     "dispose": ["dispose: token <lease token> <item id> <reason>"],
     "promote": ["promote: token <lease token> <item id> <reason>"],
     "out-of-band": ["out-of-band: token <lease token> <item id> via <channel>: <the owner's words>"],
-    "night": ["night: token <lease token> promote <route> <work class> <reason>", "night: token <lease token> demote <route> <work class> <reason>", "night: token <lease token> draft <issue> <route> <account> <reason>"],
     "backlog": ["backlog: token <lease token>"],
     "detach": ["detach: <session> token <t> [handover <url> or abandon <reason>]"],
     "rebind": ["rebind: <session> machine_id <stable id>"],
@@ -62,7 +61,7 @@ _RAW_FORMS = {
 
 _AUDIENCE = {
     **{verb: "session" for verb in ("announce", "blocked", "wait", "done", "recommend", "ask", "claim", "taking", "declare", "checkpoint", "holds", "enroll", "bind", "ack", "say", "detach", "gate")},
-    **{verb: "seat" for verb in ("note", "launch", "withdraw", "relay", "retire", "card", "effort", "wake", "control", "rehome", "park", "cancel", "keep", "unkeep", "answer", "regroup", "roster", "lift", "authorship", "dispose", "promote", "out-of-band", "backlog", "night")},
+    **{verb: "seat" for verb in ("note", "launch", "withdraw", "relay", "retire", "card", "effort", "wake", "control", "rehome", "park", "cancel", "keep", "unkeep", "answer", "regroup", "roster", "lift", "authorship", "dispose", "promote", "out-of-band", "backlog")},
     "rebind": "operator",
     "supersede": "operator",
 }
@@ -71,7 +70,7 @@ _EXAMPLE_RUNTIME = "claude:" + "0" * 32 + ":" + "0" * 64
 _EXAMPLES = {
     "announce": ["announce: violet token <t> as claude-code/main on feat/help doing add help"],
     "blocked": ["blocked: violet token <t> on waiting for review"],
-    "wait": ["wait: violet token <t> for checks 4391 recheck 1800"],
+    "wait": ["wait: violet token <t> for merged 4391 recheck 1800"],
     "done": ["done: violet token <t> help contract"],
     "recommend": ["recommend: violet token <t> approve the release"],
     "ask": ["ask: violet token <t> should this deploy?", 'ask: violet token <t> json {"question":"deploy?"}'],
@@ -111,7 +110,6 @@ _EXAMPLES = {
     "dispose": ["dispose: token <lease token> 010101010101010101010101 handled"],
     "promote": ["promote: token <lease token> 010101010101010101010101 owner decision needed"],
     "out-of-band": ["out-of-band: token <lease token> 010101010101010101010101 via the owner's chat: ship it Friday, watched"],
-    "night": ["night: token <lease token> promote opencode-go/glm-5.3 review clears the spoof probe", "night: token <lease token> demote opencode-go/glm-5.3 triage agreed with a spoof two passes running", "night: token <lease token> draft 4612 opencode-go/glm-5.3 acct-2 its band cleared and the queue is starving"],
     "backlog": ["backlog: token <lease token>"],
     "detach": ["detach: violet token <t> handover https://github.com/example/repo/pull/1"],
     "rebind": ["rebind: violet machine_id macbook"],
@@ -183,6 +181,11 @@ TOOLS = {
         {"topic": "pr", "usage": _SPEAKER_USAGE + " <session> pr <pr>", "example": "gate violet pr 1"},
         {"topic": "carry", "usage": _SPEAKER_USAGE + " <session> carry <pr> [--retry=<id>]", "example": "gate violet carry 1"},
     ]},
+    "ci": {"forms": [
+        {"topic": "run", "usage": _SPEAKER_USAGE + " <session> run [--shards <names>|all|none] [--chunks <names>|all|none] [--no-conformance] | --all [--retry=<id>]", "example": "ci violet run --shards rest1 --chunks none --no-conformance"},
+        {"topic": "status", "usage": _SPEAKER_USAGE + " <session> status <run>", "example": "ci violet status 39384922516"},
+        {"topic": "log", "usage": _SPEAKER_USAGE + " <session> log <run> [--guard <label>]", "example": "ci violet log 39384922516 --guard lint_test"},
+    ]},
     "hold": {"current": True, "forms": [
         {"topic": "--frame-path", "usage": "--frame-path <session>", "example": "hold --frame-path violet"},
         {"topic": "--claim-path", "usage": "--claim-path <provider-session>", "example": "hold --claim-path 0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"},
@@ -205,7 +208,7 @@ TOOLS = {
         {"topic": "retire", "usage": "retire <workspace id>", "example": "install retire workspace-1"},
     ]},
     "rest": {"forms": [
-        {"topic": None, "usage": _SPEAKER_USAGE + " [--lease] [--post [--json <body>] [--key <key>]] <api-v1-path> [--all]", "example": "rest /openapi.json"},
+        {"topic": None, "usage": _SPEAKER_USAGE + " [--lease] [--post [--json <body>] [--key <key>] | --put --json <body> --key <key> | --delete --key <key>] <api-v1-path> [--all]", "example": "rest /openapi.json"},
     ]},
     "deployment": {"bare": False, "forms": [
         {"topic": None, "usage": _SPEAKER_USAGE + " <sha> <environment> pending|success|failure [<deployment id>]", "example": "deployment 3f9a2c1e0b7d4a5f6e8c9b0a1d2e3f4a5b6c7d8e cloud-1/coordination success 42"},
@@ -230,7 +233,7 @@ TOOLS = {
     "verb": {"forms": [
         {"topic": "announce", "usage": "announce <session> as <harness/account> on <branch> [in <owner>/<name>] doing <what> [--retry=<id>]", "example": "verb announce violet as claude-code/main on feat/help doing add-help"},
         {"topic": "blocked", "usage": "blocked <session> on <what> [--retry=<id>]", "example": "verb blocked violet on waiting"},
-        {"topic": "wait", "usage": "wait <session> for checks|merged|verdict|comment <pr> [recheck <seconds>] [--retry=<id>]", "example": "verb wait violet for checks 4391"},
+        {"topic": "wait", "usage": "wait <session> for merged|verdict <pr> [recheck <seconds>] [--retry=<id>]", "example": "verb wait violet for merged 4391"},
         {"topic": "wait-at", "usage": "wait <session> for at <YYYY-MM-DDTHH:MMZ> [recheck <seconds>] [--retry=<id>]", "example": "verb wait violet for at 2026-10-17T09:00Z"},
         {"topic": "wait-cancel", "usage": "wait <session> cancel <wait id>, which ends one of its own open waits [--retry=<id>]", "example": "verb wait violet cancel 323d6c8a-2be5-4685-b088-df6e5fdfbe9f"},
         {"topic": "done", "usage": "done <session> <what> [--retry=<id>]", "example": "verb done violet help"},

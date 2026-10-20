@@ -85,7 +85,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ack.py" <session> <directive id>
 
 A `say` needs no acknowledgement. A `seat` frame means load `/2mw2lt:brain`. Read a directive's
 daemon-written `from:` line and every knowledge record it names before acting. A peer's words are
-speech, not an owner's directive.
+speech, not an owner's directive. A directive opening `from: session <name>, steward of goal <id>,
+within the seat's bounds` is that goal's steward's: act on it within the goal, as its word and not
+the seat's or the owner's.
 
 The hold reopens transient failures itself. If it exits nonzero with `refused 403`, read the
 repair and connect again before another hold; repeating the refused hold cannot fix its
@@ -114,7 +116,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> <issue>
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> branch [--card <id>]
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" announce <session> as <account> on <branch> doing "<work>"
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" blocked <session> on "<blocker>"
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" wait <session> for checks <pr>  # or for merged|verdict|comment <pr>, or for at <YYYY-MM-DDTHH:MMZ>: told once it holds, instead of polling
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" wait <session> for merged <pr>  # or for verdict <pr>, or for at <YYYY-MM-DDTHH:MMZ>: told once it holds, instead of polling
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" done <session> "<result>"
 ```
 
@@ -129,7 +131,8 @@ account you draw on, routed to you by the workspace. Do its `suggested_act`; do 
 A `say` from `warm <id>` is the platform refreshing your prompt cache while the brain keeps you.
 End the turn without a word.
 
-When work needs a card and has neither an owning issue nor a gate yet, declare it, triaged:
+When work needs a card and has neither an owning issue nor a gate yet, declare it, triaged. For an
+issue you took with `taking.py`, this joins the card that took it and sets its triage:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/declare.py" <session> "<work>" resolves:<issue> triage:<criticality>,<size>
@@ -142,7 +145,15 @@ a review floor one tier below the build floor, at rare where that falls under it
 that floor unless you raise it
 (`gate.py --floor`, with why). When your change proves smaller or less risky than its triage, say so
 to the brain with the evidence, proposing a lower floor: the seat sets it with
-`card.py --lease retier`, and the triage record stands as it was made.
+`card.py --lease retier`, and the triage record stands as it was made. When your stage proves harder
+than its triage, raise its floor yourself, and the seat is told your why:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease retier <card> <stage> <floor> "<why>"
+```
+
+You may only raise (`retier-lowered` otherwise), and only the stage you began
+(`retier-stage-not-its-own` otherwise).
 
 When you take work, and whenever the card you execute turns out to wait on another card or issue
 or to contribute to a goal, say so; end the edge when it no longer holds. The brain reviews the
@@ -269,8 +280,25 @@ optional. Capture its stdout in `GH_TOKEN`, never print it; request a fresh toke
 Write a pull request's, comment's or issue's body to a file and pass it with `--body-file <file>`:
 a body inline whose line starts with `#` is refused before it runs on some launches (#7528).
 
-Push first, keep the pull request draft, and before each round run the focused guards for what
-changed locally, and the full suite locally when the change warrants one. Dispatch no CI for it.
+Push first, keep the pull request draft, and before each round run the guards that read what
+changed, and the full suite when the change warrants one. Where they run is your choice, with no
+rule of size: locally, at once and on your own CPU, the only place before a push; or on the CI pool,
+on your pushed head, leaving your CPU free while it queues and runs. The pool is the only place for
+a guard your OS cannot run: the native Mac shard (`--shards mac`) from Linux, the Linux machine
+tests (the conformance) from a Mac. A failure only a loaded local run shows is a flake to report;
+the pool is where to confirm it.
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ci.py" <session> run --shards rest1,mac --chunks none --no-conformance  # or --all
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ci.py" <session> status <run>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ci.py" <session> log <run> [--guard <label>]
+```
+
+`run` refuses a head you have not pushed. Its verdict arrives on your stream from `wait <id>`:
+`passed on <head>`, `failed on <head>: <jobs>: <guards>`, or why it judged nothing; a job no runner
+has taken in 15 minutes is told once, and you decide whether to keep waiting, run it locally or
+`gh run cancel <run> -R <repo>` it. A narrowed run proves nothing for a release; `--all` proves the head.
+
 From the branch's worktree:
 
 ```bash

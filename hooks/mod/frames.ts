@@ -191,7 +191,7 @@ const text = (description: string): Field => ({ type: 'string', description })
 
 export const SEAT_TOOLS: Record<string, SeatTool> = {
   relay: {
-    description: 'Seat only: relay a directive to a session. The daemon frames it as on the owner\'s behalf.',
+    description: 'The seat, or a goal\'s steward for a session its launches started: relay a directive to a session. The daemon frames the seat\'s as on the owner\'s behalf, and a steward\'s as its own, within the seat\'s bounds.',
     fields: { to: word('The session to direct.'), epoch: { type: 'integer', description: 'The session\'s enrolment epoch, when it must be that one.' }, text: text('The directive, naming the card.') },
     required: ['to', 'text'],
     build: a => ({ client: 'say', stdin: `relay: token @lease to ${str(a, 'to')}${a.epoch !== undefined ? `@${str(a, 'epoch')}` : ''} ${str(a, 'text')}` }),
@@ -209,7 +209,7 @@ export const SEAT_TOOLS: Record<string, SeatTool> = {
     build: a => ({ client: 'say', stdin: `out-of-band: token @lease ${str(a, 'item')} via ${str(a, 'channel')}: ${str(a, 'words')}` }),
   },
   retire: {
-    description: 'Seat only: retire a session, ending its process and its enrolment. Refused while it has unpublished work. A Go workspace takes the reason; the incumbent takes the node.',
+    description: 'The seat, or a goal\'s steward for a session its launches started: retire a session, ending its process and its enrolment. Refused while it has unpublished work. A Go workspace takes the reason; the incumbent takes the node.',
     fields: { worker: word('The worker\'s session.'), node: word('The machine it runs on, on the incumbent.'), reason: text('Why, on a Go workspace.') },
     required: ['worker'],
     oneOf: ['node', 'reason'],
@@ -218,7 +218,7 @@ export const SEAT_TOOLS: Record<string, SeatTool> = {
       : `retire: token @lease ${str(a, 'worker')} because ${str(a, 'reason')}` }),
   },
   wake: {
-    description: 'Seat only: wake a session that has gone dark.',
+    description: 'The seat, or a goal\'s steward for a session its launches started: wake a session that has gone dark.',
     fields: { target: word('The session to wake.'), reason: text('Why.') },
     required: ['target', 'reason'],
     build: a => ({ client: 'say', stdin: `wake: token @lease ${str(a, 'target')} because ${str(a, 'reason')}` }),
@@ -238,19 +238,19 @@ export const SEAT_TOOLS: Record<string, SeatTool> = {
       ? (a.without_checkpoint === true ? ' compact without checkpoint' : ' compact') : ''} because ${str(a, 'reason')}` }),
   },
   park: {
-    description: 'Seat only: park an idle Claude Code session: its process stops and frees its worker slot, its enrolment, cards and queued messages stay, and a wake resumes it with its conversation. Refused unless idle. The park stands an hour unless until says otherwise; then you are told it is over.',
+    description: 'The seat, or a goal\'s steward for a session its launches started: park an idle Claude Code session: its process stops and frees its worker slot, its enrolment, cards and queued messages stay, and a wake resumes it with its conversation. Refused unless idle. The park stands an hour unless until says otherwise; then you are told it is over.',
     fields: { session: word('The session to park.'), until: word('When the park ends: a time (RFC 3339) or a duration such as 45m or 2h.'), reason: text('What needs its slot.') },
     required: ['session', 'reason'],
     build: a => ({ client: 'say', stdin: `park: token @lease ${str(a, 'session')}${a.until !== undefined ? ` until ${str(a, 'until')}` : ''} because ${str(a, 'reason')}` }),
   },
   keep: {
-    description: 'Seat only: keep a finished session idle on purpose, because work in its territory is expected soon. Name the plan as the reason; the keep stands half an hour unless until says otherwise, and work placed on the session ends it.',
+    description: 'The seat, or a goal\'s steward for a session its launches started: keep a finished session idle on purpose, because work in its territory is expected soon. Name the plan as the reason; the keep stands half an hour unless until says otherwise, and work placed on the session ends it.',
     fields: { session: word('The session to keep.'), until: word('When the keep ends: a time (RFC 3339) or a duration such as 45m or 2h.'), reason: text('The work expected in its territory, and when.') },
     required: ['session', 'reason'],
     build: a => ({ client: 'say', stdin: `keep: token @lease ${str(a, 'session')}${a.until !== undefined ? ` until ${str(a, 'until')}` : ''} because ${str(a, 'reason')}` }),
   },
   unkeep: {
-    description: 'Seat only: clear the keep on a session.',
+    description: 'The seat, or a goal\'s steward for a session its launches started: clear the keep on a session.',
     fields: { session: word('The kept session.') },
     required: ['session'],
     build: a => ({ client: 'say', stdin: `unkeep: token @lease ${str(a, 'session')}` }),

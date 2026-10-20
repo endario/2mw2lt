@@ -45,12 +45,16 @@ def main(argv: list[str]) -> int:
         return 0
     try:
         o = options(args)
-        h = harness_of(o.provider)
+        h = harness_of(o.provider) if o.provider else None  # a named provider is checked first
+    except Refused as why:
+        return error("rotate", str(why))
+    ws = required_workspace_root(project_dir(), timeout=2.0)
+    try:
+        h = h or harness_of(None)
     except Refused as why:
         return error("rotate", str(why))
     session, acct, doing = o.session, account(o, h), o.doing
 
-    ws = required_workspace_root(project_dir(), timeout=2.0)
     # Rotation reopens the hold through the same workspace launcher connect uses, and a session
     # rotating mid-seat may not have run connect since a plugin update moved past it (#1875
     # round 2) — `repin` is a no-op where this harness carries no hooks to repair. A malformed

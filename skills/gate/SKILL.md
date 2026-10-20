@@ -32,9 +32,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> review <p
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> critic <doc path>
 ```
 
-`commissioned: <id> review round <n>/<cap> by <vendor> on <node> (<tier>, <harness> harness[, final][, deeper])` — a
-reviewer from a vendor that wrote none of the branch has the run. Steering chooses it; there is no
-provider to pass.
+`commissioned: <id> review round <n>, admitted` — a reviewer from a vendor that wrote none of the
+branch has the run. Steering chooses it; there is no provider to pass.
 
 `--floor <rarity> --why "<reason>"` holds the series' judge to a rung of the ladder (`uncommon`,
 `rare`, `epic`, `legendary`): steering takes a judge at the floor, and one rung up only when none at
@@ -102,7 +101,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> status <c
 ```
 
 When every eligible reviewer is busy, the commission waits instead of being refused: you are
-told `queued: <id> <priority>, <n> ahead`, and it is offered, highest priority first and then the
+told `commissioned: <id> review round <n>, queued[ (<why it waits>)]`, and it is offered, highest priority first and then the
 oldest, as reviewers free.
 Do not commission it again: a second commission on that series is refused while it waits. One
 still queued after an hour is refused, and `cancel` withdraws a queued one.
@@ -155,12 +154,14 @@ ended and was published (#1986):
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> pr <pr number>
 ```
 
-Keep the pull request a draft through every round, and before each round run the focused guards
-for what changed locally. Before merging, run the guards that read what you changed, chosen with
-judgment: a full steering suite only when the change crosses the tree (the suite runner, a shared
-fixture or harness, several modules). The brain runs the full suite on `main` after a batch of
-merges and fixes forward what it turns red. A guard that fails under load and passes alone is a
-flake to report, not a reason to hold the merge. Dispatch no CI for it. Mark it ready only after `ship it`, then merge it.
+Keep the pull request a draft through every round. Before each round and before merging, run the
+guards that read what you changed, chosen with judgment: a full steering suite only when the change
+crosses the tree (the suite runner, a shared fixture or harness, several modules). Run them where
+you choose, locally or on the CI pool with
+[connect's `ci.py`](../connect/SKILL.md#gate-your-work). The suite runs on `main` hourly, and the
+brain fixes forward what it turns red. A guard that fails under load and
+passes alone is a flake to report, not a reason to hold the merge. Mark it ready only after
+`ship it`, then merge it.
 
 For GitHub state reads and waiting, follow
 [connect's interim GitHub rule](../connect/SKILL.md#interim-github-rule).
@@ -187,8 +188,8 @@ conflicting migration with a fresh UTC timestamp and push.
 
 Not `--auto`. Never merge a pull request whose base is another branch: it would merge into that branch. Do
 not poll GitHub to learn what happens next either. The pull request's moves come to you as a
-`say` frame `from: forge #<n>`: it merged, closed, its base moved to `main` (your cue to carry the
-pass and merge it), or, once it is ready, its checks passed or failed. A pull request you never
+`say` frame `from: forge #<n>`: it merged, closed, or its base moved to `main` (your cue to carry
+the pass and merge it). A pull request you never
 gated is told to the session whose `taking: branch` holds its branch. A `gh` loop that waits is the
 failure mode: every session on a machine shares one person's GitHub limit (#4203).
 

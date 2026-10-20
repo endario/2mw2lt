@@ -227,19 +227,11 @@ directive can reach the session. If it refuses, its line names the step to repea
 
 ## ZCode on this machine
 
-When this machine also runs ZCode, install the plugin there from the marketplace Claude Code
-already cloned, at user scope, so every ZCode session carries its skills, hooks and frames tool as
-every Claude Code session does:
-
-```bash
-zcode plugins marketplace add ~/.claude/plugins/marketplaces/2mw2lt --yes
-zcode plugins install 2mw2lt@2mw2lt --scope user --yes
-```
-
-A release does not reach an installed ZCode plugin by itself. Refresh and move it with
-`zcode plugins marketplace update 2mw2lt && zcode plugins update 2mw2lt@2mw2lt` — the command a
-behind session's `plugin:` line names; an agent host's vendor update runs the same move on its
-timer.
+The agent installs ZCode's CLI and its 2mw2lt plugin, and keeps both at the release's version, from
+its own clone of the plugin's mirror. Run nothing for them. The one step that stays a person's is
+the key: ZCode launches only on a login holding a Z.ai key in `~/.config/claude-glm*.env`, or an
+OpenCode Go account. Until then, and whenever a step the agent runs stops, the seat's kick names
+what is missing on which machine.
 
 A plugin skill is not a slash command in ZCode: connect a ZCode session with
 `/skill 2mw2lt:connect`.

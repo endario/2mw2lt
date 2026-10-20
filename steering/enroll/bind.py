@@ -26,12 +26,12 @@ from local_workspace import required_workspace_root  # noqa: E402
 from ack import records, token_path, valid_token  # noqa: E402
 from verb_help import current_args, error, help_requested, script_help  # noqa: E402
 
-# The one harness that exports its own session id and pid, and so needs neither flag.
-_SELF_DESCRIBING = harness.DEFAULT   # the default when no provider is named
-
-
 class Refused(Exception):
     """What the caller should be told, and why nothing was sent."""
+
+
+class Unclaimed(Refused):
+    """No harness says this process is its session, and none was named."""
 
 
 def pid_arg(value: str) -> int:
@@ -87,9 +87,20 @@ def ancestry(limit: int = 8) -> list[str]:
     return out
 
 
-def identity(pid: int, provider: str = _SELF_DESCRIBING) -> str | None:
+def identity(pid: int, provider: str) -> str | None:
     """The runtime id of `pid`, derived the way `observe.py` and `readout.py` derive it."""
     return runtime_id.derive(provider, pid=pid)
+
+
+def identified() -> str:
+    """The provider of the one harness that says this process is its session."""
+    try:
+        return harness.identify().provider
+    except harness.Unclaimed as why:
+        raise Unclaimed(f"{why}: pass --provider <{'|'.join(harness.PROVIDERS)}> with "
+                        "--provider-session <this session's id> and --pid <the harness process>") from None
+    except harness.NotIdentified as why:
+        raise Refused(f"{why}: name the one you mean with --provider") from None
 
 
 def fail(message: str) -> int:
@@ -98,15 +109,17 @@ def fail(message: str) -> int:
 
 
 def incarnation(psession: str | None = None, pid: int | None = None,
-                provider: str = _SELF_DESCRIBING) -> tuple[str, str]:
+                provider: str | None = None) -> tuple[str, str]:
     """(provider session, runtime id) of the process this runs inside — what `bind:` names."""
     psession, rid, _ = incarnation_of(psession, pid, provider)
     return psession, rid
 
 
 def incarnation_of(psession: str | None = None, pid: int | None = None,
-                   provider: str = _SELF_DESCRIBING) -> tuple[str, str, int]:
-    """`incarnation`, with the harness pid the runtime id was derived from."""
+                   provider: str | None = None) -> tuple[str, str, int]:
+    """`incarnation`, with the harness pid the runtime id was derived from. With no provider named,
+    the one harness that says this process is its session is asked."""
+    provider = provider or identified()
     if provider not in harness.PROVIDERS:
         raise Refused(f"{provider} is not a provider: one of {', '.join(harness.PROVIDERS)}")
     # Asked of the harness rather than read here: which session this process is, and which
@@ -119,7 +132,7 @@ def incarnation_of(psession: str | None = None, pid: int | None = None,
         # Every argument this names is one both commands accept. A message that asks for a flag
         # the entry point rejects is a dead end, and that is what the owner walked into (#543).
         raise Refused(
-            "this harness exports no CLAUDE_CODE_SESSION_ID, so it is not Claude Code: pass "
+            f"this process is no {provider} session: pass "
             f"--provider <{'|'.join(p for p in harness.PROVIDERS if p != provider)}> with "
             "--provider-session <this session's id> and --pid <the harness process>"
             if exports else
@@ -129,8 +142,7 @@ def incarnation_of(psession: str | None = None, pid: int | None = None,
     if pid is None:
         # Named per harness rather than by Claude's variable: every self-describing harness
         # reached this branch and was told to look for `CLAUDE_PID`.
-        raise Refused((f"no live CLAUDE_PID: " if provider == _SELF_DESCRIBING else
-                       f"no live {provider} harness process for {psession}: ")
+        raise Refused(f"no live {provider} harness process for {psession}: "
                       + "pass --pid <the harness process>, one of\n" + "\n".join(ancestry()))
     rid = identity(pid, provider)
     if rid is None:
@@ -153,10 +165,11 @@ def account_identity(provider: str) -> str | None:
 
 
 def bind(session: str, token: str, psession: str | None = None,
-         pid: int | None = None, provider: str = _SELF_DESCRIBING) -> tuple[str, str]:
+         pid: int | None = None, provider: str | None = None) -> tuple[str, str]:
     """(Go's answer to the bind, the runtime id it named). The caller gets the id back
     because the stream this session holds at its agent carries it too (doc 35 §2), and nothing
     else in the recipe derives it."""
+    provider = provider or identified()
     ps, rid = incarnation(psession, pid, provider)
     import session_routes  # noqa: E402
     return session_routes.bind(session, token, provider, ps, rid, account_identity(provider)), rid
@@ -171,7 +184,7 @@ def main(argv: list[str]) -> int:
         print(script_help("bind"))
         return 0
     psession = pid = session = None
-    provider = _SELF_DESCRIBING
+    provider = None
     while args and args[0].startswith("-"):
         flag = args.pop(0)
         if flag not in ("--provider-session", "--provider", "--pid"):
