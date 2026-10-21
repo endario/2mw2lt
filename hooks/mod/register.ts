@@ -40,14 +40,17 @@ const RECEIPT_TRIES = 3
 const script = ($: EngineInterface, name: string) => `${$.plugin.root}/steering/enroll/${name}`
 
 // Every row the module writes goes through here, and its text is one of the fixed texts in
-// frames.ts, or a desk prompt's words under the from: line naming who said them: a frame's own text
-// reaches the model only as the `frames` tool's result. A refused append (a plugin above, or a run
-// no plugin may shape) is logged, the hold goes on, and the refusal is returned.
-async function append($: EngineInterface, text: string, origin?: string): Promise<string | undefined> {
+// frames.ts, a desk prompt's words under the from: line naming who said them, or the note of a
+// stop from the desk under that line: a frame's own text reaches the model only as the `frames`
+// tool's result. Its row is shown here, with the desk's act that landed it, since the module's hook
+// passes its own appends by. A refused append (a plugin above, or a run no plugin may shape) is
+// logged, the hold goes on, and the refusal is returned.
+async function append($: EngineInterface, text: string, act?: string): Promise<string | undefined> {
   $.ui.log(`2mw2lt: appends "${text}"`, { to: 'debug' })
   try {
     const stored = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })
-    if (stored.uuid !== undefined) show($, { kind: 'row', row: surface.ownRow(text, stored.uuid, origin) })
+    const payload = stored.uuid === undefined ? undefined : surface.eventOf(surface.OWN_NOTE, stored, act)
+    if (payload) show($, payload)
     return undefined
   } catch (err) {
     $.ui.log(`2mw2lt: the append was refused: ${String(err)}`, { to: 'debug' })
@@ -212,25 +215,38 @@ async function tell($: EngineInterface, text: string, appended?: () => Promise<v
 
 // Words submitted as a turn of their own, and where they landed. The engine refuses by rejecting, or
 // by resolving `drop`, as every submit does after the person's Esc until they type again (#7827):
-// the words are then appended, to be read at the session's next request, and why is said. A
-// speaker's words (origin) are submitted as the user's, so the model reads them from their from:
+// the words are then appended, to be read at the session's next request, and why is said. A desk
+// prompt's words (its act) are submitted as the user's, so the model reads them from their from:
 // line rather than under the engine's frame of a plugin's message (spike A); the terminal still
-// labels the turn the plugin's.
-async function submit($: EngineInterface, text: string, origin?: string): Promise<surface.Landing> {
+// labels the turn the plugin's. The submitted row is shown by the module's hook as it is stored,
+// before the submit resolves, under the act its words were submitted with.
+async function submit($: EngineInterface, text: string, act?: string): Promise<surface.Landing> {
   let why: string
+  const waiting = act === undefined ? undefined : { text, act }
+  if (waiting) submitted.push(waiting)
   try {
-    const r = await $.prompt.submit(origin === undefined ? { text } : { text, asUser: true })
-    if (!(r && 'drop' in r)) {
-      show($, { kind: 'row', row: surface.ownRow(text, undefined, origin) })
-      return { landed: 'new-turn' }
-    }
+    const r = await $.prompt.submit(act === undefined ? { text } : { text, asUser: true })
+    if (!(r && 'drop' in r)) return { landed: 'new-turn' }
     why = String(r.drop)
   } catch (err) {
     why = String(err)
+  } finally {
+    // Its row is stored before the submit settles, so words still waiting now were never stored.
+    if (waiting && submitted.includes(waiting)) submitted.splice(submitted.indexOf(waiting), 1)
   }
   $.ui.log(`2mw2lt: the prompt was refused: ${why}`, { to: 'debug' })
-  const failed = await append($, text, origin)
+  const failed = await append($, text, act)
   return failed === undefined ? { landed: 'queued', why } : { refused: `the session took it neither as a prompt (${why}) nor as a row (${failed})` }
+}
+
+// The desk prompts submitted and not yet stored, oldest first: a submit names no row, so the row the
+// hook sees stored with the same words is the one their act landed.
+const submitted: { text: string; act: string }[] = []
+
+// The act that submitted text, taken from those waiting.
+function actOf(text: string): string | undefined {
+  const at = submitted.findIndex(s => s.text === text)
+  return at < 0 ? undefined : submitted.splice(at, 1)[0]!.act
 }
 
 // A desk prompt (#4823 unit 2.2), landed as the module's own pointer is — submitted on an idle
@@ -241,9 +257,9 @@ async function land($: EngineInterface, session: string, body: unknown) {
   let landing: surface.Landing
   if ('refused' in p) landing = { refused: p.refused }
   else if ((await $.state.get(BUSY)).value) {
-    const failed = await append($, p.text, p.from)
+    const failed = await append($, p.text, p.id)
     landing = failed === undefined ? { landed: 'running-turn' } : { refused: `the running turn did not take it as a row (${failed})` }
-  } else landing = await submit($, p.text, p.from)
+  } else landing = await submit($, p.text, p.id)
   if (!p.id) {
     $.ui.log(`2mw2lt: the agent's prompt was not taken, and names no id to say so under: ${'refused' in landing ? landing.refused : ''}`, { to: 'debug' })
     return
@@ -320,11 +336,14 @@ async function stopTurn($: EngineInterface, turn: string, from: string): Promise
 // ordered send queue out. While nobody watches, nothing is made or
 // sent; rows leave whole, and the agent redacts them.
 const SURFACE_SEQ = { plugin: '2mw2lt', key: 'surfaceSeq' } as const
-const BATCH_MS = 50
+const BATCH_MS = 5
 const RETRY_MS = 250
 const RETRY_CAP_MS = 5000
 const outbox = new surface.Outbox()
 let watching = false
+// Whether a turn runs, as the turn hooks last said, before their awaits: a watch beginning reads it
+// without one, so a turn starting meanwhile is not told over. Unknown until one says, after a reload.
+let busyNow: boolean | undefined
 let watched = ''                     // the session the channel follows: what its events are sent as
 let sending: Promise<void> = Promise.resolve()
 let agent: { base: string; key: string; workspace: string } | undefined
@@ -413,7 +432,14 @@ async function pollSurface($: EngineInterface, workspace: string, session: strin
       if (gen !== following) return
       if (!r.ok) throw new Error(`the agent answered ${r.status}: ${r.text.slice(0, 200)}`)
       const answer = JSON.parse(r.text) as { watch?: unknown; cursor?: unknown; commands?: unknown }
+      const was = watching
       watching = answer.watch === true
+      // A watch beginning has no word of the turn until the next one starts or ends: it is told
+      // the turn as it stands.
+      if (watching && !was) {
+        const stored = busyNow ?? (await $.state.get(BUSY)).value === true
+        show($, surface.turnNow(busyNow ?? stored))
+      }
       if (typeof answer.cursor === 'string') cursor = answer.cursor
       for (const c of Array.isArray(answer.commands) ? answer.commands as surface.Command[] : []) command($, session, c)
       wait = RETRY_MS
@@ -1174,6 +1200,7 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) show($, { kind: 'turn', turn: { state: 'started' } })
     // A subagent's turn starts inside ours, and the run is the outer turn's.
+    busyNow = true
     await $.state.set(BUSY, true)
     if (e.agentId === undefined) await $.state.set(TURN, e.turnId)
     if (e.agentId === undefined) await tellBulletins($).catch(err => $.ui.log(`2mw2lt: the bulletin turn broke: ${String(err)}`, { to: 'debug' }))
@@ -1183,6 +1210,7 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {                                 // a subagent's turn ends inside ours
       show($, { kind: 'turn', turn: { state: 'completed', reason: surface.turnReason(e.reason) } })
+      busyNow = false
       await $.state.set(BUSY, false)
       await $.state.set(TURN, '')
       if (stopping?.turn === e.turnId) stopping.ended()
@@ -1223,16 +1251,18 @@ export const register: Register = on => {
     await refreshSeat($, true).catch(err => $.ui.log(`2mw2lt: the seat check broke: ${String(err)}`, { to: 'debug' }))
     const keep = await keepLine($, session)
     const compacted = await next({ ...e, instructions: [e.instructions, keep].filter(Boolean).join('\n') })
-    const row = surface.compactionRow(compacted)
-    if (row) show($, { kind: 'compaction', row })
     return compacted
   }).catch(($, e, next) => next(e))
 
-  // Every row the main conversation keeps, as stored, for the live view; compaction's never pass here.
+  // Every row the main conversation keeps, as stored, for the live view, its compaction's summary
+  // and the desk prompts this module submits among them; the module's own appends are shown where
+  // they are made. A submitted prompt's act is taken whether or not anyone watches.
   on('session.append', async ($, e, next) => {
     const stored = await next(e)
-    const row = watching && stored.uuid !== undefined ? surface.rowOf(e, stored) : undefined
-    if (row) show($, { kind: 'row', row })
+    if (stored.uuid === undefined || surface.ownNote(e)) return stored
+    const act = e.door === 'prompt' && surface.ours(e.origin) ? actOf(surface.firstText(stored.message.content)) : undefined
+    const payload = watching ? surface.eventOf(e, stored, act) : undefined
+    if (payload) show($, payload)
     return stored
   }).catch(($, e, next) => next(e))
 

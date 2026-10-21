@@ -1,7 +1,7 @@
 """The one authenticated POST shape every per-turn sender uses (doc 15, doc 113).
 
-Shared between `enroll/readout.py` (a Stop-hook subprocess) and `wakeexec.py` (the long-lived
-agent process, posting a self-backfilled targeting record): both reach the same daemon door the
+Shared between `enroll/readout.py` (a Stop-hook subprocess) and `enroll/connect.py` (a session's
+connect, handing its pane over at enrolment): both reach the same daemon door the
 same way, so the shape lives once rather than as two copies that could drift.
 """
 from __future__ import annotations

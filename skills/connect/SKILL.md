@@ -308,8 +308,8 @@ changed, and the full suite when the change warrants one. Where they run is your
 rule of size: locally, at once and on your own CPU, the only place before a push; or on the CI pool,
 on your pushed head, leaving your CPU free while it queues and runs. The pool is the only place for
 a guard your OS cannot run: the native Mac shard (`--shards mac`) from Linux, the Linux machine
-tests (the conformance) from a Mac. A failure only a loaded local run shows is a flake to report;
-the pool is where to confirm it.
+tests (the conformance) from a Mac. A failure only a loaded run shows is a defect in that guard, to
+fix: every guard passes under load.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ci.py" <session> run --shards rest1,mac --chunks none --no-conformance  # or --all

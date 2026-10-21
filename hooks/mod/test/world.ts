@@ -25,7 +25,7 @@ export type Poll = { watch: boolean; cursor?: string; commands?: unknown[] } | {
 export type HoldPoll = { status: number; text: string; hold?: Promise<void> } | 'throw'
 
 export function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording = '', keep = 'Keep verbatim: steering session s1; branch b; checkpoint https://github.com/example-org/example-repo/pull/1.\n',
-                         agent = false, polls = [] as (Poll | Promise<Poll>)[], posts = [] as (number | Promise<number>)[], holdPolls = [] as (HoldPoll | Promise<HoldPoll>)[], deleteHangs = false, holdRoute = false, enrolled = true, submitRejects = false, submitDrops = false, ackFails = false, readFails = false, engineState = false,
+                         agent = false, polls = [] as (Poll | Promise<Poll>)[], posts = [] as (number | Promise<number>)[], holdPolls = [] as (HoldPoll | Promise<HoldPoll>)[], deleteHangs = false, holdRoute = false, enrolled = true, submitRejects = false, submitDrops = false, storesSubmits = false, ackFails = false, readFails = false, engineState = false,
                          // The engine's own answer to `$.session.usage({ breakdown })`: the window it measures
                          // against, the token count it auto-compacts at, and who settled the window.
                          context = { point: 167_000 as number | undefined, raw: 200_000, source: 'auto', model: 'claude-test' } } = {}) {
@@ -48,6 +48,8 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
     inherited: undefined as string | undefined,
     claimsAtSpawn: [] as number[],
     submits: [] as string[],
+    // Releases a submit held for its row to be stored (storesSubmits).
+    stored: undefined as (() => void) | undefined,
     // Whether each submit asked to be the user's, unframed.
     asUser: [] as boolean[],
     appends: [] as string[],
@@ -250,6 +252,9 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
     w.asUser.push((e.origin as { asUser?: boolean } | undefined)?.asUser === true)
     if (submitRejects) throw new Error('the prompt was refused')
     if (w.submitDrops) return { drop: 'the session was stopped and nobody has sent input since' } as never
+    // A submit 2.1.306 takes stores its row, passing session.append, before it resolves; a test
+    // that stores the row itself holds the submit until it has.
+    if (storesSubmits) await new Promise<void>(r => { w.stored = r })
     return { text: e.text }
   })
   on('tool.call', { tool: 'Bash' }, (async () => {

@@ -34,9 +34,8 @@ def build(*, provider_session: str, runtime_id: str, observed_at: str, entrypoin
          cwd: str | None = None, tmux: tuple[str, str] | None = None,
          tmux_attached: bool | None = None, source: str = SOURCE) -> dict:
     """The record's field shape, assembled from already-known values — the one place a
-    targeting record is built, whether captured by the Stop hook (`read`, below), handed over by
-    `connect.py` from the pane it runs in, or self-backfilled from a wake's own local discovery
-    (`wakeexec._backfill`)."""
+    targeting record is built, whether captured by the Stop hook (`read`, below) or handed
+    over by `connect.py` from the pane it runs in."""
     out = {"v": V, "source": source, "provider_session": provider_session,
            "runtime_id": runtime_id, "observed_at": observed_at, "entrypoint": entrypoint}
     if cwd:
@@ -67,11 +66,11 @@ def read(hook: dict, entry: dict, rid: str | None, observed_at: str, *,
 
 
 def complete(rec: dict) -> bool:
-    """Whether `rec` carries everything `wakeexec.target()` needs to skip the registry
+    """Whether `rec` carries everything a wake needs to skip its own discovery
     entirely — not just a found VS Code instance (`user_data_dir`/`app_pid`, the fields only a
     successful `ps` search fills in), but `pid`/`cwd` too: neither is in `_REQUIRED`, so a
-    validator-accepted capture can carry an instance and still be missing one of them, and
-    `target()` would fall to `row_for()` for exactly the field this record exists to spare it."""
+    validator-accepted capture can carry an instance and still be missing one of them, and the
+    wake would discover it locally for exactly the field this record exists to spare it."""
     if rec.get("entrypoint") == TMUX_ENTRYPOINT:
         return all(k in rec for k in ("pid", "cwd", *_TMUX))
     return all(k in rec for k in ("pid", "cwd", *_INSTANCE))

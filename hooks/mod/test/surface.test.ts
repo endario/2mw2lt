@@ -1,13 +1,15 @@
 import { test, expect } from 'claude-code/testing'
 import { POINTER } from '../frames'
-import { Outbox, agentOf } from '../surface'
+import { Outbox, agentOf, eventOf, ownNote, OWN_NOTE } from '../surface'
+import { SLICE } from './rows-slice'
 import { world, line, begin, never, AGENT } from './world'
 
 // The live view's half in the module (#4823): what reaches the machine agent, and when.
 
 const HELD = { lines: [], code: 0 as const, hold: never }
 const posted = (w: ReturnType<typeof world>) => w.fetches.filter(f => f.method === 'POST')
-const events = (w: ReturnType<typeof world>) => posted(w).flatMap(f => (JSON.parse(f.body ?? '{}') as { events: any[] }).events)
+const events = (w: ReturnType<typeof world>) => posted(w).flatMap(f => (JSON.parse(f.body ?? '{}') as { events: any[] }).events ?? [])
+const rowsOf = (w: ReturnType<typeof world>) => events(w).filter(e => e.kind === 'row').map(e => e.row)
 // The surface channel's own polls: the hold's frames polls ride the same agent beside them (#7838).
 const polls = (w: ReturnType<typeof world>) => w.fetches.filter(f => f.method === 'GET' && f.url.includes('/surface/poll'))
 
@@ -29,6 +31,17 @@ test('nothing is sent while nobody watches', async ($, on) => {
   expect(posted(w)).toEqual([])
 })
 
+// A row is not held for long once stored: every millisecond here is a millisecond before the desk
+// draws it (#4823, design §12: the bar is 500 ms from stored to drawn).
+test('a stored row leaves for the agent within 5 ms', async ($, on) => {
+  const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true, cursor: 'c1' }] })
+  await begin($)
+  await w.clock.settle()
+  await $.session.append(call as never)
+  await w.clock.advance(5)
+  expect(events(w).filter(e => e.kind === 'row').map(e => e.row?.id)).toEqual(['u2'])
+})
+
 test('a watched session\'s rows arrive in order with rising seq', async ($, on) => {
   const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true, cursor: 'c1' }] })
   await begin($)
@@ -37,13 +50,15 @@ test('a watched session\'s rows arrive in order with rising seq', async ($, on) 
   for (const row of [prompt, call, result]) await $.session.append(row as never)
   await w.clock.advance(50)
   const got = events(w)
-  expect(got.map(e => e.kind)).toEqual(['turn', 'row', 'row', 'row'])
-  expect(got.map(e => e.seq)).toEqual([1, 2, 3, 4])
-  expect(got[0]).toEqual({ v: 1, session: 's1', seq: 1, kind: 'turn', turn: { state: 'started' } })
-  expect(got.slice(1).map(e => e.row)).toEqual([
+  expect(got.map(e => e.kind)).toEqual(['turn', 'turn', 'row', 'row', 'row'])
+  expect(got.map(e => e.seq)).toEqual([1, 2, 3, 4, 5])
+  // The watch began on an idle session, and is told so before anything else.
+  expect(got[0]).toEqual({ v: 1, session: 's1', seq: 1, kind: 'turn', turn: { state: 'completed' } })
+  expect(got[1]).toEqual({ v: 1, session: 's1', seq: 2, kind: 'turn', turn: { state: 'started' } })
+  expect(got.slice(2).map(e => e.row)).toEqual([
     { id: 'u1', role: 'user', origin: 'person', blocks: [{ type: 'text', text: 'list the files' }] },
     { id: 'u2', role: 'assistant', origin: 'model', blocks: [{ type: 'tool-use', id: 'toolu_1', tool: 'Bash', input: { command: 'ls' } }] },
-    { id: 'u3', role: 'tool-result', origin: 'engine', blocks: [{ type: 'tool-result', id: 'toolu_1', tool: 'Bash', text: 'a\nb' }] },
+    { id: 'u3', role: 'tool-result', origin: 'engine', blocks: [{ type: 'tool-result', id: 'toolu_1', text: 'a\nb' }] },
   ])
   // Rows within one window leave together, on the agent's key and naming the workspace.
   expect(posted(w).length).toBe(1)
@@ -78,21 +93,27 @@ test('the poll names its producer', async ($, on) => {
   expect(polls(w).map(p => new URL(p.url).searchParams.get('producer'))).toEqual(['ps-1', 'ps-1', 'ps-2'])
 })
 
-// Compaction's boundary and summary never pass `session.append` (spike A): the summary is the
-// compaction hook's result.
-test('compaction is emitted from session.compact, not session.append', async ($, on) => {
+// A compaction stores its boundary and its summary through `session.append` (door `compaction`), as
+// a recorded session showed on 2.1.306: the summary is the compaction's row, under the id history
+// reads it by, and the boundary is a notice. The compaction hook's own result is not shown again.
+test('a compaction\'s summary is shown as the session stores it, once', async ($, on) => {
   const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true }] })
   await begin($)
   await w.clock.settle()
   await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'before', toolUses: [] }] } as never)
+  await $.session.append({ message: { type: 'system', name: 'compact_boundary', content: [{ type: 'text', text: 'Conversation compacted' }] },
+    door: 'compaction', origin: { kind: 'engine' }, uuid: 'b1' } as never)
+  await $.session.append({ message: { type: 'user', role: 'user', content: [{ type: 'text', text: 'The summary.' }] },
+    door: 'compaction', origin: { kind: 'engine' }, uuid: 's9' } as never)
   await w.clock.advance(50)
-  expect(events(w)).toEqual([
-    { v: 1, session: 's1', seq: 1, kind: 'compaction', row: { role: 'system', origin: 'engine', blocks: [{ type: 'text', text: 'hello' }] } },
+  expect(events(w).filter(e => e.kind !== 'turn')).toEqual([
+    { v: 1, session: 's1', seq: 2, kind: 'compaction', row: { id: 's9', role: 'system', origin: 'engine', blocks: [{ type: 'text', text: 'The summary.' }] } },
   ])
 })
 
-// A plugin's own submit never re-enters its own hooks, so the module emits the pointer itself.
-test('the module\'s own pointer row is origin plugin', async ($, on) => {
+// A plugin's submit returns no row, so the row its pointer is stored as is shown by the hook, under
+// the plugin's origin and the id history reads it by; until it is stored nothing is shown.
+test('the module\'s own pointer row is the one the session stores, origin plugin', async ($, on) => {
   let wake!: () => void
   const w = world(on, { agent: true, polls: [{ watch: true }],
     rounds: [{ lines: [new Promise<void>(r => { wake = r }), line('f1', 'say', true)], code: 0, hold: never }] })
@@ -103,7 +124,12 @@ test('the module\'s own pointer row is origin plugin', async ($, on) => {
   await w.clock.advance(50)
   expect(w.submits).toEqual([POINTER])
   expect(w.asUser).toEqual([false])                // the pointer stays framed as the plugin's
-  expect(events(w).map(e => e.row)).toEqual([{ role: 'user', origin: 'plugin', blocks: [{ type: 'text', text: POINTER }] }])
+  expect(rowsOf(w)).toEqual([])
+  const framed = `The 2mw2lt plugin sent a message:\n${POINTER}`
+  await $.session.append({ message: { type: 'user', role: 'user', content: [{ type: 'text', text: framed }] }, door: 'prompt',
+    origin: { kind: 'plugin', name: '2mw2lt' }, uuid: 'p1' } as never)
+  await w.clock.advance(50)
+  expect(rowsOf(w)).toEqual([{ id: 'p1', role: 'user', origin: 'plugin', blocks: [{ type: 'text', text: framed }] }])
 })
 
 const turn = { kind: 'turn' as const, turn: { state: 'started' as const } }
@@ -156,7 +182,7 @@ test('a key that appears after the session connected is found, and rows flow', a
   expect(polls(w).length).toBeGreaterThan(0)
   await $.turn.start({ turnId: 't1', text: 'hi' })
   await w.clock.advance(50)
-  expect(events(w).map(e => e.kind)).toEqual(['turn'])
+  expect(events(w).map(e => [e.kind, e.turn.state])).toEqual([['turn', 'completed'], ['turn', 'started']])
 })
 
 // A batch taken while an earlier one is still out learns of that one's loss before it is numbered.
@@ -173,8 +199,8 @@ test('a batch sent behind one the agent refused opens with a gap over the refuse
   await w.clock.settle()
   const sent = posted(w).map(f => (JSON.parse(f.body!) as { events: any[] }).events)
   expect(sent.length).toBe(2)
-  expect(sent[0]!.map(e => e.seq)).toEqual([1])
-  expect(sent[1]!.map(e => [e.seq, e.kind, e.gap])).toEqual([[2, 'gap', { from: 0, to: 2 }], [3, 'turn', undefined]])
+  expect(sent[0]!.map(e => e.seq)).toEqual([1, 2])            // the watch's opening turn, and t1's
+  expect(sent[1]!.map(e => [e.seq, e.kind, e.gap])).toEqual([[3, 'gap', { from: 0, to: 3 }], [4, 'turn', undefined]])
 })
 
 // A reconciled name is a new identity (#5661): from the moment the hold is admitted under it, while
@@ -204,8 +230,9 @@ test('a session renamed by its hold shows nothing until its new name is watched,
   await w.clock.settle()
   const sent = posted(w).map(f => JSON.parse(f.body!) as { session: string; events: any[] })
   expect(sent.map(b => [b.session, b.events.map(e => [e.session, e.seq, e.kind])])).toEqual([
-    ['s1', [['s1', 1, 'turn']]],
-    ['s2', [['s2', 2, 'gap'], ['s2', 3, 'turn']]],       // the rows s2 made while unwatched are owed as a gap
+    ['s1', [['s1', 1, 'turn'], ['s1', 2, 'turn']]],
+    // The rows s2 made while unwatched are owed as a gap, and its watch is told the turn running.
+    ['s2', [['s2', 3, 'gap'], ['s2', 4, 'turn'], ['s2', 5, 'turn']]],
   ])
   expect(polls(w).map(p => p.url.split('?')[1]).slice(0, 3)).toEqual(['session=s1&producer=ps-1&after=', 'session=s1&producer=ps-1&after=c1', 'session=s2&producer=ps-1&after='])
 })
@@ -223,8 +250,8 @@ test('an ask the agent emits is numbered among the module\'s rows', async ($, on
   second({ watch: true, cursor: 'c1', commands: [{ kind: 'emit', body: { kind: 'ask', ask } }] })
   await w.clock.settle()
   await w.clock.advance(50)
-  expect(events(w).map(e => [e.seq, e.kind])).toEqual([[1, 'turn'], [2, 'ask']])
-  expect(events(w)[1]).toEqual({ v: 1, session: 's1', seq: 2, kind: 'ask', ask })
+  expect(events(w).map(e => [e.seq, e.kind])).toEqual([[1, 'turn'], [2, 'turn'], [3, 'ask']])
+  expect(events(w)[2]).toEqual({ v: 1, session: 's1', seq: 3, kind: 'ask', ask })
 })
 
 test('a command the module does not know is ignored and said', async ($, on) => {
@@ -233,7 +260,7 @@ test('a command the module does not know is ignored and said', async ($, on) => 
   await begin($)
   await w.clock.settle()
   await w.clock.advance(50)
-  expect(posted(w)).toEqual([])
+  expect(events(w).map(e => e.kind)).toEqual(['turn'])
   expect(w.logs.some(l => l.includes('ignored the agent\'s command of kind "teleport"'))).toBe(true)
   expect(w.logs.some(l => l.includes('emit was not taken: an emit of "row"'))).toBe(true)
 })
@@ -248,7 +275,7 @@ const sentRows = (w: ReturnType<typeof world>) => posted(w).filter(f => f.url.en
 const landings = (w: ReturnType<typeof world>) => posted(w).filter(f => f.url.endsWith('/steering/surface/landed')).map(f => JSON.parse(f.body!))
 
 // The poll after the first is answered with the desk's prompt once `ready` has run.
-async function prompted(opts: { submitDrops?: boolean } = {}, ready: ($: any, w: ReturnType<typeof world>) => Promise<void> = async () => {}) {
+async function prompted(opts: { submitDrops?: boolean; storesSubmits?: boolean } = {}, ready: ($: any, w: ReturnType<typeof world>) => Promise<void> = async () => {}) {
   return async ($: any, on: any) => {
     let second!: (p: { watch: boolean; cursor: string; commands: unknown[] }) => void
     const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true, cursor: 'c1' }, new Promise(r => { second = r })], ...opts })
@@ -262,6 +289,11 @@ async function prompted(opts: { submitDrops?: boolean } = {}, ready: ($: any, w:
   }
 }
 
+// The row the engine stores for a submitted desk prompt, as a recorded session's showed it on
+// 2.1.306: the words as submitted, under the plugin's origin and the user's voice.
+const storedPrompt = (uuid: string, text = WORDS) => ({ message: { type: 'user', role: 'user', content: [{ type: 'text', text }] }, door: 'prompt',
+  origin: { kind: 'plugin', name: '2mw2lt', asUser: true }, uuid })
+
 test('a desk prompt to an idle session starts a turn and is reported submitted', async ($, on) => {
   const w = await (await prompted())($, on)
   expect(w.submits).toEqual([WORDS])
@@ -270,32 +302,49 @@ test('a desk prompt to an idle session starts a turn and is reported submitted',
   expect(landings(w)).toEqual([{ session: 's1', producer: 'ps-1', id: 'prompt-1', landed: 'new-turn' }])
   const sent = posted(w).find(f => f.url.endsWith('/steering/surface/landed'))!
   expect(sent.headers['X-Steering-Agent-Key']).toBe(AGENT.key)
-  // Its row is the speaker's, not the plugin's: the desk says who spoke.
-  expect(sentRows(w)).toEqual([{ role: 'user', origin: FROM, blocks: [{ type: 'text', text: 'list the files' }] }])
 })
 
-// The row shows who spoke by its origin, so the from: line is dropped from its words; the model's
-// text, which is what the session submitted or appended, keeps it.
-test('a desk prompt\'s row drops the from: line and the model keeps it', async ($, on) => {
-  const idle = await (await prompted())($, on)
-  expect(idle.submits).toEqual([WORDS])
-  expect(sentRows(idle).map(r => r.blocks[0].text)).toEqual(['list the files'])
+// D1: the row a submit made is the one the session stored, so it carries the id history reads it
+// by, and a reload neither draws it twice nor as the plugin's. Its origin is the speaker the from:
+// line names, the line itself not drawn, and it carries the act that landed it.
+test('a submitted desk prompt\'s row is the stored one: its id, its speaker, its act, once', async ($, on) => {
+  const w = await (await prompted({ storesSubmits: true }))($, on)
+  expect(sentRows(w)).toEqual([])
+  await $.session.append(storedPrompt('stored-1') as never)
+  w.stored!()
+  await w.clock.advance(50)
+  expect(w.submits).toEqual([WORDS])               // the model's text keeps the line
+  expect(w.appends).toEqual([])
+  expect(landings(w).map(l => l.landed)).toEqual(['new-turn'])
+  expect(sentRows(w)).toEqual([{ id: 'stored-1', role: 'user', origin: FROM, act: 'prompt-1', blocks: [{ type: 'text', text: 'list the files' }] }])
+})
+
+// Another prompt of the same plugin, the pointer, is stored with no act to take.
+test('a stored prompt whose words no desk prompt submitted carries no act', async ($, on) => {
+  const w = await (await prompted({ storesSubmits: true }))($, on)
+  await $.session.append(storedPrompt('stored-1') as never)
+  w.stored!()
+  await w.clock.advance(50)
+  await $.session.append(storedPrompt('stored-2') as never)
+  await w.clock.advance(50)
+  expect(sentRows(w).map(r => [r.id, r.act])).toEqual([['stored-1', 'prompt-1'], ['stored-2', undefined]])
+})
+
+// A submit that settles before its row was stored stored none: its act waits for no later row, which
+// may only share its words.
+test('a desk prompt\'s act is not taken by a later row with its words once its submit has settled', async ($, on) => {
+  const w = await (await prompted({ storesSubmits: true }))($, on)
+  w.stored!()
+  await w.clock.advance(50)
+  await $.session.append(storedPrompt('stored-1') as never)
+  await w.clock.advance(50)
+  expect(sentRows(w).map(r => [r.id, r.act])).toEqual([['stored-1', undefined]])
 })
 
 test('a desk prompt appended to a running turn shows no from: line, and the model reads it', async ($, on) => {
   const w = await (await prompted({}, async $ => { await $.turn.start({ turnId: 't1', text: 'list the files' }) }))($, on)
   expect(w.appends).toEqual([WORDS])
   expect(sentRows(w).filter(r => r.origin === FROM).map(r => r.blocks[0].text)).toEqual(['list the files'])
-})
-
-// The transcript's own record of a submitted desk prompt keeps the origin the plugin submitted
-// under, which rowOf leaves to the module's row: the prompt is drawn once.
-test('the stored record of a desk prompt is not drawn a second time', async ($, on) => {
-  const w = await (await prompted())($, on)
-  await $.session.append({ message: { type: 'user', role: 'user', content: [{ type: 'text', text: WORDS }] }, door: 'prompt',
-    origin: { kind: 'plugin', name: '2mw2lt', asUser: true }, uuid: 'stored-1' } as never)
-  await w.clock.advance(50)
-  expect(sentRows(w).map(r => r.blocks[0].text)).toEqual(['list the files'])
 })
 
 // A recorded slice in the shape of machine/internal/surface/claude/testdata/session.jsonl, with the
@@ -320,7 +369,7 @@ test('attachments the harness stores beside the conversation are no rows', async
   await w.clock.settle()
   for (const row of slice) await $.session.append(row as never)
   await w.clock.advance(50)
-  expect(events(w).map(e => e.row.id)).toEqual(['u1', 'u2', 'u3'])
+  expect(rowsOf(w).map(r => r.id)).toEqual(['u1', 'u2', 'u3'])
 })
 
 test('a stored row with no blocks to draw is never emitted', async ($, on) => {
@@ -329,7 +378,7 @@ test('a stored row with no blocks to draw is never emitted', async ($, on) => {
   await w.clock.settle()
   await $.session.append({ message: { type: 'user', role: 'user', content: [{ type: 'image', source: {} }] }, door: 'prompt', origin: { kind: 'composer' }, uuid: 'u9' } as never)
   await w.clock.advance(50)
-  expect(events(w)).toEqual([])
+  expect(rowsOf(w)).toEqual([])
 })
 
 test('a desk prompt to a busy session is appended to the running turn and reported so', async ($, on) => {
@@ -337,7 +386,7 @@ test('a desk prompt to a busy session is appended to the running turn and report
   expect(w.submits).toEqual([])
   expect(landings(w)).toEqual([{ session: 's1', producer: 'ps-1', id: 'prompt-1', landed: 'running-turn' }])
   // The session stored the row, under an id of its own, and that row is the speaker's.
-  expect(sentRows(w).filter(r => r.origin === FROM)).toEqual([{ id: expect.any(String), role: 'user', origin: FROM, blocks: [{ type: 'text', text: 'list the files' }] }])
+  expect(sentRows(w).filter(r => r.origin === FROM)).toEqual([{ id: expect.any(String), role: 'user', origin: FROM, act: 'prompt-1', blocks: [{ type: 'text', text: 'list the files' }] }])
 })
 
 // #7827: after the person's Esc the engine drops every submit until they type again. The words are
@@ -350,7 +399,7 @@ test('a desk prompt after the person\'s Esc is appended for the next request and
   expect(w.submits).toEqual([WORDS])
   expect(landings(w)).toEqual([{ session: 's1', producer: 'ps-1', id: 'prompt-1', landed: 'queued',
     why: 'the session was stopped and nobody has sent input since' }])
-  expect(sentRows(w).filter(r => r.origin === FROM)).toEqual([{ id: expect.any(String), role: 'user', origin: FROM, blocks: [{ type: 'text', text: 'list the files' }] }])
+  expect(sentRows(w).filter(r => r.origin === FROM)).toEqual([{ id: expect.any(String), role: 'user', origin: FROM, act: 'prompt-1', blocks: [{ type: 'text', text: 'list the files' }] }])
 })
 
 test('a desk prompt without a speaker is refused, not landed', async ($, on) => {
@@ -453,4 +502,16 @@ test('a Bash call an abort moved to the background triggers none of the module\'
   w.bash = sleeping('bg-2', false)
   await $.tool.call({ tool: 'Bash', command: 'sleep 40' } as never)
   expect(w.abortedRuns).toBe(1)
+})
+
+// Unit 8.1's proof: one recorded session, mapped live as the module's hook is handed it, makes the
+// rows history reads from the same session's transcript (history_test.go holds history to them): the
+// same ids, origins and blocks, so a reload draws what the live view drew. Only the live rows of desk
+// prompts carry the act that landed them, which no transcript records.
+test('one recorded session maps live to the rows history reads from its transcript', async () => {
+  const acts = SLICE.acts as Record<string, string>
+  const made = SLICE.live.map(x => eventOf(ownNote(x as never) ? OWN_NOTE : x as never, { uuid: x.uuid, message: x.message as never }, acts[x.uuid]))
+    .filter(p => p !== undefined) as { kind: string; row: { act?: string } }[]
+  expect(made.map(({ kind, row: { act, ...row } }) => ({ kind, row }))).toEqual(SLICE.rows as never)
+  expect(made.filter(p => p.row.act).map(p => p.row.act)).toEqual(['act-1', 'act-2'])
 })

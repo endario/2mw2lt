@@ -114,9 +114,17 @@ kind turned off is not told, and its standing still reads:
   `closed_card` names a card whose pull requests all closed unmerged, for you to conclude.
 - **`session-stale`**: no sign of life for 30 minutes and no keep, whether it is idle, concluded,
   waiting on work it holds, never read since it enrolled, or in a turn whose harness has written
-  nothing, which may be hung or gone; `activity` and `last_sign` say which. Close it, drive it, or
+  nothing, which may be gone; `activity` and `last_sign` say which. Close it, drive it, or
   keep it with a reason. A stale wait may still be alive: check before you retire it, and keep a
   wait you trust (a review round, say) with what it waits on.
+- **`session-stuck`**: a session in an open turn has made no tool call, finished none and written
+  no model content for 15 minutes, or 60 with a tool still running (`tool` and `tool_since` name
+  it), however fresh its other writes: a model request waiting or retrying keeps those fresh.
+  `last_step` is its last step this turn, absent when it has taken none. Look at it before you act:
+  a long build can run past the bound. Interrupt it from the desk and drive it, retire it, or keep it
+  with what it runs. A stuck turn that has also gone silent is told as stuck, not again as stale.
+  The snapshot's fleet line says every working session's `last step` age, which tells a long turn
+  from a hung one.
 - **`session-quiet`**: a worker holding a card ended its turn without saying done 20 minutes ago,
   with nothing it waits on open, and has written nothing since. Drive it, or keep it with what it
   waits on.
@@ -263,7 +271,7 @@ unkeep: token @lease <session>
 
 `until` defaults to 30 minutes and has no ceiling; the owner sees each keep with its reason. Work
 you place on it ends the keep. On `session-lapsing`, decide while it is cheap: drive it now, let it
-lapse knowingly, or close it. On `session-stale`, `session-quiet` or `session-kept-over`, act in
+lapse knowingly, or close it. On `session-stale`, `session-stuck`, `session-quiet` or `session-kept-over`, act in
 that turn. Only Anthropic's cache lifetime, one hour, is stated; another vendor's session carries no
 cache and raises no `session-lapsing`.
 
@@ -1329,6 +1337,23 @@ it, since other workspaces' brains delegate there too, and let the launch itself
 refuses a launch past its cap and names it; that refusal is authoritative
 (#4177 owns capacity accounting).
 
+A machine that is gone stays on the fleet, read `offline` and then `expired`, until its credentials
+age out a week past their expiry. Take it off sooner, on the owner's behalf, with the registration
+the fleet lists for it:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post "/machines/<machine registration>/removal" \
+  --json '{"reason": "<why the host is gone>"}' --key <uuid>
+```
+
+It ends every login's credentials on that host in this workspace, as the per-login revocation does.
+It is refused, each under its own check and with the count that held it, while the host is online
+(`machine-removal-online`) or a session epoch, an execution offer on its way (a launch, a gate run), an engaged card or an unsettled
+action of yours is bound to a login of it (`machine-removal-epoch-bound`, `-offer-bound`,
+`-card-bound`, `-action-bound`): retire or hand those on first. It is also refused unless the
+team's owner registered every login of the host (`machine-removal-host-not-owned`). Only the seat
+holder asks it.
+
 ## Read the settings
 
 Read a setting through the API, never over ssh or from a host's files. There are three places:
@@ -1353,8 +1378,28 @@ What each row tells you:
 - `class` is the key's kind of decision.
 - `decided_by` is who decides it.
 
-You change none of these yet: every row answers `may_change: false` to you. A change the owner
-should make goes to them as an ask, naming the key, the place and the value.
+You change what the owner's delegation grants, on the seat's delegated bearer, never over ssh:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --delegated --post --json '{"value": <json>, "version": <n>, "why": "<why>"}' --key <idempotency key> /settings/<key>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --root --delegated --post --json '{"value": <json>, "version": <n>, "why": "<why>"}' --key <idempotency key> /teams/<team>/settings/<key>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --root --delegated --post --json '{"value": <json>, "version": <n>, "why": "<why>"}' --key <idempotency key> /hosts/<host>/settings/<key>
+```
+
+The body is the value, the `version` the row carried, and a `why` with a visible reason in it: your
+write is refused `why-required` without one, and answers the row as it now reads. Each row's
+`may_change` answers as the live grant stands. The grant names classes at a reach: where it names
+the class, your own workspace's rows are covered at either reach, your team's at `grantor`, a
+host's at either — but a host only where its owner is your team's owner (ruling 19376986,
+2026-10-21): a guest team's seat is refused `host-not-the-teams-owners`, an unowned host
+`host-unowned`. Change a host's setting only when its current value blocks progress — the owner's
+standing ruling. A `judgement` change applies at once and stands on the owner's Needs You until
+they acknowledge it.
+
+The rest stays the owner's: `authority` keys are never delegable (`worker_forge`, `retention.days`,
+and on a host `host.label` and `network.proxy`), and neither is the delegation itself, granted and
+revoked in the console. A change outside the grant goes to the owner as an ask, naming the key,
+the place and the value.
 
 ## Hand work out at the effort it asks for
 

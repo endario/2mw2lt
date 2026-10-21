@@ -483,8 +483,8 @@ PromptReceiptAnswer = typing.TypedDict("PromptReceiptAnswer", {
 
 # ActRead is a desk act as its receipt stands (`GET …/sessions/{session}/acts/{act}`). State is the
 # row's own: pending, delivered or settled. Outcome is how the act ended, else empty: landed,
-# refused, interrupted, uncertain (taken by its machine and never answered) or not-reached (never
-# taken, with Machine its machine's state). Landed is where a prompt landed
+# refused, interrupted, delivered, settled-already, uncertain (taken by its machine and never
+# answered) or not-reached (never taken, with Machine its machine's state). Landed is where a prompt landed
 # (new-turn, running-turn, queued) and Why the engine's reason for that; Refused is what stopped an
 # act the machine refused.
 ActRead = typing.TypedDict("ActRead", {
@@ -495,8 +495,57 @@ ActRead = typing.TypedDict("ActRead", {
     "landed": "typing.NotRequired[str]",
     "why": "typing.NotRequired[str]",
     "refused": "typing.NotRequired[str]",
+    "winner": "typing.NotRequired[str]",
+    "winner_why": "typing.NotRequired[str]",
     "machine": "typing.NotRequired[MachineState | None]",
     "deadline_at": "str",
+})
+
+# AnswerBody is a desk answer to a dialog a session waits at: the dialog's Need, and the decision —
+# allow, deny (with the model's Message, and Interrupt to end the turn as the terminal's No does) or
+# answer, a question's Answers, question text to answer text.
+AnswerBody = typing.TypedDict("AnswerBody", {
+    "need": "str",
+    "decision": "str",
+    "message": "typing.NotRequired[str]",
+    "interrupt": "typing.NotRequired[bool]",
+    "answers": "typing.NotRequired[dict[str, str] | None]",
+})
+
+# AnswerReceipt is what a machine answers of a desk answer it was offered: the answer, and the
+# attempt as the session's adapter reports it, delivered, settled already (naming who won) or
+# refused. It says nothing of who won a dialog it delivered to: that is AnswerSettlement's.
+AnswerReceipt = typing.TypedDict("AnswerReceipt", {
+    "uplink": "str",
+    "answer": "str",
+    "result": "typing.Any",
+})
+
+# AnswerReceiptAnswer is the state the answer took on that receipt.
+AnswerReceiptAnswer = typing.TypedDict("AnswerReceiptAnswer", {
+    "answer": "str",
+    "state": "str",
+    "replayed": "bool",
+})
+
+# AnswerSettlement is a machine's reading of how the dialog a desk answer it delivered settled, as
+# its harness showed it: who won (the person, the answer's own console user, or undetermined with
+# Why), when the hook event that settled it was observed, and the process it was read in, as the
+# answer's frame pinned it.
+AnswerSettlement = typing.TypedDict("AnswerSettlement", {
+    "answer": "str",
+    "winner": "str",
+    "why": "typing.NotRequired[str]",
+    "observed_at": "str",
+    "harness": "str",
+    "psession": "str",
+    "runtime": "str",
+})
+
+# AnswerSettlementAnswer is the dialog's settlement as it was recorded.
+AnswerSettlementAnswer = typing.TypedDict("AnswerSettlementAnswer", {
+    "answer": "str",
+    "status": "str",
 })
 
 # InterruptReceipt is what a machine answers of an interrupt it was offered: the interrupt, and
@@ -599,6 +648,31 @@ AgentUndeliveredAnswer = typing.TypedDict("AgentUndeliveredAnswer", {
     "requeued": "bool",
 })
 
+# AgentEndedBody is the body of POST /steering/agent/ended: the sessions of this machine's launch
+# records whose tmux session still runs, asked whether their enrolment has ended (#8257). Leaving
+# is the other direction: a record whose process is gone ends its enrolment.
+AgentEndedBody = typing.TypedDict("AgentEndedBody", {
+    "uplink": "str",
+    "sessions": "list[str] | None",
+})
+
+# AgentEndedAnswer is the asked sessions whose last enrolment, held on the asking machine, has
+# ended, each as the question named it, with when and why. A session not named still stands, stands
+# on another machine, ran last in a process that has enrolled again, or is not this workspace's.
+AgentEndedAnswer = typing.TypedDict("AgentEndedAnswer", {
+    "ended": "list[EndedSession] | None",
+})
+
+# EndedSession is one ended enrolment: Why is its exit's kind, or how its epoch ended where it
+# left no exit; Runtime is the process it last ran in, which the machine ends only where its pane
+# still runs it.
+EndedSession = typing.TypedDict("EndedSession", {
+    "session": "str",
+    "at": "str",
+    "why": "str",
+    "runtime": "str",
+})
+
 # AgentHoldBody is the body of POST /steering/agent/hold: a session on this machine holds its stream
 # over the machine's uplink, on the session's own token, in the incarnation the machine observed.
 # Wake is how the stream declared its X-Steering-Wake — plugin, plugin-frames, event, service or
@@ -686,6 +760,8 @@ SessionReading = typing.TypedDict("SessionReading", {
     "provider_session": "str",
     "observed_at": "str",
     "active_at": "typing.NotRequired[str]",
+    "step_at": "typing.NotRequired[str]",
+    "steps": "typing.NotRequired[bool]",
     "model": "str",
     "vendor": "str",
     "turn": "str",
@@ -796,11 +872,14 @@ PolicyReceipt = typing.TypedDict("PolicyReceipt", {
 # PartReceipt is the agent's answer to one part of a policy frame. Refused names each key the agent
 # applies whose value it could not, Unknown each key it does not apply and so ignored, and Shadowed
 # each key the agent's own file or environment still sets, which the part's value overrides.
+# ShadowedValues holds, for each shadowed key whose value it may carry, what the file states:
+# nil from an agent that reports none, never the proxy's (7637-settings phase-2g, decision 2).
 PartReceipt = typing.TypedDict("PartReceipt", {
     "version": "str",
     "refused": "list[PolicyRefusal] | None",
     "unknown": "list[str] | None",
     "shadowed": "list[str] | None",
+    "shadowed_values": "typing.NotRequired[dict[str, typing.Any] | None]",
 })
 
 PolicyRefusal = typing.TypedDict("PolicyRefusal", {
@@ -1012,6 +1091,12 @@ MachineAction = typing.TypedDict("MachineAction", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "ask": "typing.NotRequired[str]",
+    "dialog": "typing.NotRequired[str]",
+    "decision": "typing.NotRequired[str]",
+    "message": "typing.NotRequired[str]",
+    "interrupt": "typing.NotRequired[bool]",
+    "answers": "typing.NotRequired[dict[str, str] | None]",
 })
 
 # RetireAction is what a retire carries: the worker, pinned to its incarnation on this machine, the
@@ -1063,6 +1148,12 @@ StreamWake = typing.TypedDict("StreamWake", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "ask": "typing.NotRequired[str]",
+    "dialog": "typing.NotRequired[str]",
+    "decision": "typing.NotRequired[str]",
+    "message": "typing.NotRequired[str]",
+    "interrupt": "typing.NotRequired[bool]",
+    "answers": "typing.NotRequired[dict[str, str] | None]",
 })
 
 # StreamControl is a control, by its id.
@@ -1099,6 +1190,12 @@ StreamControl = typing.TypedDict("StreamControl", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "ask": "typing.NotRequired[str]",
+    "dialog": "typing.NotRequired[str]",
+    "decision": "typing.NotRequired[str]",
+    "message": "typing.NotRequired[str]",
+    "interrupt": "typing.NotRequired[bool]",
+    "answers": "typing.NotRequired[dict[str, str] | None]",
 })
 
 # StreamRehome is a rehome, by its id.
@@ -1135,6 +1232,12 @@ StreamRehome = typing.TypedDict("StreamRehome", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "ask": "typing.NotRequired[str]",
+    "dialog": "typing.NotRequired[str]",
+    "decision": "typing.NotRequired[str]",
+    "message": "typing.NotRequired[str]",
+    "interrupt": "typing.NotRequired[bool]",
+    "answers": "typing.NotRequired[dict[str, str] | None]",
 })
 
 # StreamPark is a park, by its id.
@@ -1171,6 +1274,12 @@ StreamPark = typing.TypedDict("StreamPark", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "ask": "typing.NotRequired[str]",
+    "dialog": "typing.NotRequired[str]",
+    "decision": "typing.NotRequired[str]",
+    "message": "typing.NotRequired[str]",
+    "interrupt": "typing.NotRequired[bool]",
+    "answers": "typing.NotRequired[dict[str, str] | None]",
 })
 
 # StreamPrompt is a prompt, by its id.
@@ -1207,6 +1316,54 @@ StreamPrompt = typing.TypedDict("StreamPrompt", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "ask": "typing.NotRequired[str]",
+    "dialog": "typing.NotRequired[str]",
+    "decision": "typing.NotRequired[str]",
+    "message": "typing.NotRequired[str]",
+    "interrupt": "typing.NotRequired[bool]",
+    "answers": "typing.NotRequired[dict[str, str] | None]",
+})
+
+# StreamAnswer is a desk answer to a dialog, by its id.
+StreamAnswer = typing.TypedDict("StreamAnswer", {
+    "kind": "str",
+    "id": "str",
+    "session": "str",
+    "epoch": "int",
+    "provider_session": "str",
+    "psession": "str",
+    "runtime": "str",
+    "harness": "str",
+    "provider": "str",
+    "node": "str",
+    "os_user": "str",
+    "reason": "str",
+    "pid": "int",
+    "cwd": "str",
+    "entrypoint": "str",
+    "tmux_socket": "typing.NotRequired[str]",
+    "tmux_pane": "typing.NotRequired[str]",
+    "user_data_dir": "typing.NotRequired[str]",
+    "app_pid": "typing.NotRequired[int]",
+    "nonce": "typing.NotRequired[str]",
+    "role": "typing.NotRequired[str]",
+    "stuck": "typing.NotRequired[bool]",
+    "value": "typing.NotRequired[str]",
+    "effort": "typing.NotRequired[str]",
+    "account": "typing.NotRequired[str]",
+    "vendor": "typing.NotRequired[str]",
+    "model": "typing.NotRequired[str]",
+    "compact": "typing.NotRequired[bool]",
+    "until": "typing.NotRequired[str]",
+    "text": "typing.NotRequired[str]",
+    "mode": "typing.NotRequired[str]",
+    "from": "typing.NotRequired[str]",
+    "ask": "typing.NotRequired[str]",
+    "dialog": "typing.NotRequired[str]",
+    "decision": "typing.NotRequired[str]",
+    "message": "typing.NotRequired[str]",
+    "interrupt": "typing.NotRequired[bool]",
+    "answers": "typing.NotRequired[dict[str, str] | None]",
 })
 
 # StreamInterrupt is an interrupt, by its id.
@@ -1243,6 +1400,12 @@ StreamInterrupt = typing.TypedDict("StreamInterrupt", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "ask": "typing.NotRequired[str]",
+    "dialog": "typing.NotRequired[str]",
+    "decision": "typing.NotRequired[str]",
+    "message": "typing.NotRequired[str]",
+    "interrupt": "typing.NotRequired[bool]",
+    "answers": "typing.NotRequired[dict[str, str] | None]",
 })
 
 # StreamRetire is a retire, by its id.
@@ -3147,6 +3310,7 @@ FleetCensus = typing.TypedDict("FleetCensus", {
     "gaps": "list[str] | None",
     "draining": "typing.NotRequired[bool]",
     "runtimes": "typing.NotRequired[list[CensusRuntime] | None]",
+    "unaccounted": "typing.NotRequired[list[str] | None]",
     "expires_at": "str",
     "historical": "bool",
 })
@@ -3213,7 +3377,6 @@ FleetMachine = typing.TypedDict("FleetMachine", {
     "sources": "list[FleetSource] | None",
     "host": "str",
     "name": "str | None",
-    "label": "typing.NotRequired[str | None]",
     "reported_name": "typing.NotRequired[str | None]",
     "state": "MachineState",
 })
@@ -3228,21 +3391,25 @@ MachineState = typing.TypedDict("MachineState", {
     "since": "str | None",
 })
 
-# MachineLabel is the body of POST /machines/{machine}/label: the name a member gives the
-# machine, or null to clear it and return to the reported name.
-MachineLabel = typing.TypedDict("MachineLabel", {
-    "label": "str | None",
-})
-
-# MachineLabelled is its answer: the label now held, null when cleared.
-MachineLabelled = typing.TypedDict("MachineLabelled", {
-    "label": "str | None",
-})
-
 MachineFleetPage = typing.TypedDict("MachineFleetPage", {
     "items": "list[FleetMachine] | None",
     "next": "str | None",
     "read_at": "str",
+})
+
+# MachineRemovalBody is the seat removing a dead machine's registrations from the fleet, with the
+# reason it gives.
+MachineRemovalBody = typing.TypedDict("MachineRemovalBody", {
+    "reason": "str",
+})
+
+# MachineRemovalAnswer is the host removed, named by the registration the request named, and how many
+# machine credentials the removal revoked, none on an answer replayed from the first.
+MachineRemovalAnswer = typing.TypedDict("MachineRemovalAnswer", {
+    "machine": "str",
+    "status": "str",
+    "credentials": "int",
+    "replayed": "bool",
 })
 
 MachineReportAnswer = typing.TypedDict("MachineReportAnswer", {
@@ -4084,22 +4251,26 @@ SessionGap = typing.TypedDict("SessionGap", {
 })
 
 # SessionRow is a transcript row: the harness's id for it where it has one, its role, who wrote
-# it (person, console user <handle>, plugin, model or engine) and its blocks.
+# it (person, console user <handle>, plugin, model or engine) and its blocks. Act is the desk's act
+# that landed it, on a live row of a desk prompt; history has no record of acts.
 SessionRow = typing.TypedDict("SessionRow", {
     "id": "typing.NotRequired[str]",
     "role": "str",
     "origin": "typing.NotRequired[str]",
+    "act": "typing.NotRequired[str]",
     "blocks": "list[SessionBlock] | None",
 })
 
 # SessionBlock is one part of a row: text, thinking, tool-use (Tool and Input) or tool-result. ID
-# is the harness's id for a tool call, which its use and its result share.
+# is the harness's id for a tool call, which its use and its result share. Error marks a result
+# the harness recorded as a failed call.
 SessionBlock = typing.TypedDict("SessionBlock", {
     "type": "str",
     "id": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "tool": "typing.NotRequired[str]",
     "input": "typing.NotRequired[typing.Any]",
+    "error": "typing.NotRequired[bool]",
     "cut": "typing.NotRequired[SessionCut | None]",
 })
 
@@ -4136,6 +4307,7 @@ HistoryAnswer = typing.TypedDict("HistoryAnswer", {
 AgentSurfaceBody = typing.TypedDict("AgentSurfaceBody", {
     "session": "str",
     "producer": "str",
+    "after": "typing.NotRequired[int]",
     "events": "list[SessionEvent] | None",
 })
 
@@ -4146,10 +4318,14 @@ AgentSurfaceAnswer = typing.TypedDict("AgentSurfaceAnswer", {
 })
 
 # SessionLiveState is whether the machine holding a watched session took its watch, told to the
-# browser as it changes; Reason is the check that found an offline one so.
+# browser as it changes and as a stream opens; Reason is the check that found an offline one so.
+# Turn is the session's turn as the events relayed so far say, idle or running, absent while they
+# have not said; Asks are the asks those events left open.
 SessionLiveState = typing.TypedDict("SessionLiveState", {
     "machine": "str",
     "reason": "typing.NotRequired[str]",
+    "turn": "typing.NotRequired[str]",
+    "asks": "typing.NotRequired[list[str] | None]",
 })
 
 # DetachExit is why a session left, kept with the epoch it ended (doc 123 §4): a handover's
@@ -4303,6 +4479,8 @@ SessionStanding = typing.TypedDict("SessionStanding", {
     "live_until": "str | None",
     "since": "str | None",
     "stale": "bool",
+    "stuck": "bool",
+    "step_at": "str | None",
     "keep": "StandingKeep | None",
     "park": "StandingPark | None",
     "cache": "StandingCache | None",
@@ -4419,6 +4597,8 @@ SessionVitals = typing.TypedDict("SessionVitals", {
     "tool": "str | None",
     "tool_since": "str | None",
     "thinking_since": "str | None",
+    "step_at": "str | None",
+    "steps": "bool",
     "live_until": "str",
 })
 
@@ -4487,6 +4667,15 @@ Setting = typing.TypedDict("Setting", {
     "may_change": "bool",
     "inherited": "SettingInherited",
     "pushed": "bool",
+    "ignored": "typing.NotRequired[list[SettingIgnored] | None]",
+})
+
+# SettingIgnored is one value of a host key that the files of Logins state, none for a value that
+# cannot be shown, and the sentence that says so.
+SettingIgnored = typing.TypedDict("SettingIgnored", {
+    "logins": "list[str] | None",
+    "value": "typing.NotRequired[typing.Any]",
+    "says": "str",
 })
 
 # SettingInherited is the value a row inherits and its source: a workspace's or a machine's from its
@@ -6058,6 +6247,7 @@ WorkerCensus = typing.TypedDict("WorkerCensus", {
     "gaps": "list[str] | None",
     "draining": "typing.NotRequired[bool]",
     "runtimes": "typing.NotRequired[list[CensusRuntime] | None]",
+    "unaccounted": "typing.NotRequired[list[str] | None]",
 })
 
 # CensusRuntime is one process a version-2 census names.
@@ -6157,9 +6347,6 @@ ROUTES = frozenset({
     "DELETE /api/v1/teams/{team}/invitations/{invitation}",
     "POST /api/v1/teams/{team}/invitations/{invitation}/redeem",
     "GET /api/v1/teams/{team}/launches/waiting",
-    "POST /api/v1/teams/{team}/machines/{machine}/label",
-    "GET /api/v1/teams/{team}/machines/{machine}/settings",
-    "POST /api/v1/teams/{team}/machines/{machine}/settings/{key}",
     "GET /api/v1/teams/{team}/members",
     "POST /api/v1/teams/{team}/members",
     "DELETE /api/v1/teams/{team}/members/me",
@@ -6273,6 +6460,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/launches/{launch}/withdrawal",
     "POST /w/{workspace}/api/v1/machine-renewals",
     "GET /w/{workspace}/api/v1/machines",
+    "POST /w/{workspace}/api/v1/machines/{machine}/removal",
     "GET /w/{workspace}/api/v1/momentum",
     "POST /w/{workspace}/api/v1/names",
     "GET /w/{workspace}/api/v1/needs",
@@ -6306,6 +6494,7 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/sessions",
     "POST /w/{workspace}/api/v1/sessions",
     "GET /w/{workspace}/api/v1/sessions/{session}/acts/{act}",
+    "POST /w/{workspace}/api/v1/sessions/{session}/answers",
     "POST /w/{workspace}/api/v1/sessions/{session}/bindings",
     "GET /w/{workspace}/api/v1/sessions/{session}/checkpoints",
     "POST /w/{workspace}/api/v1/sessions/{session}/detachment",
@@ -6345,9 +6534,11 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/workspace/retirement",
     "POST /w/{workspace}/api/v1/workspace/slug",
     "POST /w/{workspace}/steering/agent/accounts",
+    "POST /w/{workspace}/steering/agent/answer",
     "POST /w/{workspace}/steering/agent/census",
     "GET /w/{workspace}/steering/agent/checkpoint/{session}",
     "POST /w/{workspace}/steering/agent/control",
+    "POST /w/{workspace}/steering/agent/ended",
     "POST /w/{workspace}/steering/agent/facts",
     "POST /w/{workspace}/steering/agent/gate",
     "POST /w/{workspace}/steering/agent/gate/lost",
@@ -6374,6 +6565,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/steering/agent/renew",
     "POST /w/{workspace}/steering/agent/retire",
     "POST /w/{workspace}/steering/agent/routes",
+    "POST /w/{workspace}/steering/agent/settled",
     "GET /w/{workspace}/steering/agent/stream",
     "POST /w/{workspace}/steering/agent/surface",
     "GET /w/{workspace}/steering/agent/target",

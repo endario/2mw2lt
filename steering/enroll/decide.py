@@ -52,7 +52,11 @@ def decision(hook: dict, answer: object) -> tuple[dict | None, str]:
     if kind == "allow":
         if asking:  # allowing a question with no answers would answer it empty
             return None, "an allow for AskUserQuestion carries no answers; it takes an answer decision"
-        out = {"behavior": "allow"}
+        if not isinstance(hook.get("tool_input"), dict):
+            return None, "the request carries no tool input for the allow to pass back"
+        # A bare allow leaves a plan approval's dialog up and the turn waiting, in the terminal and
+        # in VS Code alike (#8260), so every allow hands the call its own input back.
+        out = {"behavior": "allow", "updatedInput": hook["tool_input"]}
     elif kind == "deny":
         message = answer.get("message")
         out = {"behavior": "deny",

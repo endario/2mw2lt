@@ -6,8 +6,8 @@ import type { Args, ResultOf } from 'claude-code'
 
 type Append = Args<'session.append'>
 
-export type Block = { type: 'text' | 'thinking' | 'tool-use' | 'tool-result'; id?: string; text?: string; tool?: string; input?: unknown }
-export type Row = { id?: string; role: 'user' | 'assistant' | 'tool-result' | 'system'; origin: string; blocks: Block[] }
+export type Block = { type: 'text' | 'thinking' | 'tool-use' | 'tool-result'; id?: string; text?: string; tool?: string; input?: unknown; error?: true }
+export type Row = { id?: string; role: 'user' | 'assistant' | 'tool-result' | 'system'; origin: string; act?: string; blocks: Block[] }
 export type Turn = { state: 'started' | 'completed'; reason?: 'answered' | 'interrupted' | 'error' }
 export type Ask = { id: string; kind: 'permission' | 'question'; tool?: string; options?: string[] }
 export type Settled = { ask: string; by: string; answer?: unknown }
@@ -27,21 +27,16 @@ export type Event = { v: 1; session: string; seq: number } & (Payload | { kind: 
 
 export const DEFAULT_PORT = '9990'
 
-// Who wrote a row: the person at the terminal or on Remote Control, a plugin, the model, or the
-// engine, which a tool's result is too.
-export function originOf(o: Append['origin']): string {
+// Who wrote a user row, as history reads the stored origin (machine/internal/surface/claude's
+// originOf): the person at the terminal or on Remote Control, or with no stamp the ingress could
+// name, which Claude stores as no origin; a plugin; and the engine otherwise.
+function originOf(o: Append['origin'], meta: boolean): string {
   switch (o.kind) {
-    case 'composer': case 'bridge': return 'person'
+    case 'composer': case 'bridge': case 'sdk': return 'person'
+    case 'unclassified': return meta ? 'engine' : 'person'
     case 'plugin': return 'plugin'
-    case 'model': return 'model'
     default: return 'engine'
   }
-}
-
-function roleOf(m: Append['message'], door: Append['door']): Row['role'] {
-  if (m.type === 'assistant') return 'assistant'
-  if (door === 'tool-result') return 'tool-result'
-  return m.type === 'user' ? 'user' : 'system'
 }
 
 const str = (v: unknown) => typeof v === 'string' ? v : undefined
@@ -52,29 +47,96 @@ function textOf(content: unknown): string {
   return content.filter(b => b?.type === 'text' && typeof b.text === 'string').map(b => b.text as string).join('\n')
 }
 
+// An empty text is left out, as the agent's encoding leaves it out of what it sends on.
+const spoken = (text: string) => text ? { text } : {}
+
 // A block the event has no kind for (an image, a document, redacted thinking) is left out.
-export function blocksOf(content: readonly { type: string; [field: string]: unknown }[], tool?: string): Block[] {
+export function blocksOf(content: readonly { type: string; [field: string]: unknown }[]): Block[] {
   const out: Block[] = []
   for (const b of content) {
-    if (b.type === 'text' && typeof b.text === 'string') out.push({ type: 'text', text: b.text })
-    else if (b.type === 'thinking' && typeof b.thinking === 'string') out.push({ type: 'thinking', text: b.thinking })
+    if (b.type === 'text' && typeof b.text === 'string') out.push({ type: 'text', ...spoken(b.text) })
+    else if (b.type === 'thinking' && typeof b.thinking === 'string' && b.thinking.trim() !== '') out.push({ type: 'thinking', text: b.thinking })
     else if (b.type === 'tool_use') out.push({ type: 'tool-use', id: str(b.id), tool: str(b.name), input: b.input })
-    else if (b.type === 'tool_result') out.push({ type: 'tool-result', id: str(b.tool_use_id), tool, text: textOf(b.content) })
+    else if (b.type === 'tool_result') out.push({ type: 'tool-result', id: str(b.tool_use_id), ...spoken(textOf(b.content)), ...(b.is_error === true ? { error: true as const } : {}) })
   }
   return out
 }
 
-// A row the main conversation stored, or undefined for one the view does not show: a subagent's,
-// a message queue record (no row of the conversation), an attachment (the harness's context, an
-// output style or a hook's result, not something said), one with no blocks to draw, and the
-// module's own, which never come back through its own hook and are emitted where they are made.
-export function rowOf(e: Append, stored: { uuid: string; message: Append['message'] }): Row | undefined {
-  if (e.agentId !== undefined || e.door === 'queue' || stored.message.type === 'attachment') return undefined
-  if (e.origin.kind === 'plugin' && 'name' in e.origin && e.origin.name === '2mw2lt') return undefined
-  const tool = e.origin.kind === 'tool' ? e.origin.tool : undefined
-  const blocks = blocksOf(stored.message.content, tool)
-  return blocks.length ? { id: stored.uuid, role: roleOf(stored.message, e.door), origin: originOf(e.origin), blocks } : undefined
+// The name this plugin's rows are stored under: its own rows that open with a from: line are that
+// speaker's words.
+const OWN = '2mw2lt'
+const FROM_LINE = /^from: ([^\n]+)\n\n/
+const COMMAND_TAG = /<(command-message|command-name|command-args)>([\s\S]*?)<\/(command-message|command-name|command-args)>/g
+const LOCAL_OUTPUT = /^\s*<local-command-(?:stdout|stderr)>([\s\S]*)<\/local-command-(?:stdout|stderr)>\s*$/
+
+// The command line a slash command's stored record was typed as, `/name args`, or undefined for text
+// that is not wholly such a record.
+export function commandLine(text: string): string | undefined {
+  let name = '', args = '', rest = '', at = 0
+  for (const m of text.matchAll(COMMAND_TAG)) {
+    if (m[1] !== m[3]) return undefined
+    rest += text.slice(at, m.index)
+    at = m.index + m[0].length
+    if (m[1] === 'command-name') name = m[2]!
+    if (m[1] === 'command-args') args = m[2]!
+  }
+  rest += text.slice(at)
+  if (!name || rest.trim()) return undefined
+  return args.trim() ? `${name} ${args.trim()}` : name
 }
+
+// A user row's words as the view draws them: the speaker a from: line names on this plugin's own
+// rows, the line itself not drawn though the model read it; a slash command as its command line;
+// and what a local command printed, which is the harness's.
+function said(row: Row, own: boolean) {
+  row.blocks.forEach((b, i) => {
+    if (b.type !== 'text' || b.text === undefined) return
+    const from = FROM_LINE.exec(b.text), line = commandLine(b.text), printed = LOCAL_OUTPUT.exec(b.text)
+    if (own && i === 0 && from) { row.origin = from[1]!; b.text = b.text.slice(from[0].length) }
+    else if (line !== undefined) b.text = line
+    else if (printed) { row.origin = 'engine'; b.text = printed[1]! }
+  })
+}
+
+// Whether the view draws anything of a row: a call, its result (drawn under the call), a thought, or
+// words that are not blank.
+const drawn = (r: Row) => r.blocks.some(b => b.type !== 'text' || !!b.text?.trim())
+
+type Stored = { uuid: string; message: Append['message'] }
+
+// The event a row the main conversation stored makes, or undefined for one the view does not show:
+// a subagent's, a message queue record (no row of the conversation), an attachment (the harness's
+// context, an output style or a hook's result, not something said), a notice, the compaction's
+// boundary, and one the view would draw nothing of. History maps the transcript's lines by the same
+// rules (machine/internal/surface/claude/history.go), so a reload draws what the live view drew;
+// test/rows-slice.ts is one recorded session both are held to. `act` is the desk's act that landed it.
+export function eventOf(e: Pick<Append, 'door' | 'origin' | 'agentId'>, stored: Stored, act?: string): Payload | undefined {
+  const m = stored.message
+  if (e.agentId !== undefined || e.door === 'queue' || (m.type !== 'user' && m.type !== 'assistant')) return undefined
+  const blocks = blocksOf(m.content)
+  const row: Row = { id: stored.uuid, role: 'assistant', origin: 'model', ...(act ? { act } : {}), blocks }
+  let kind: 'row' | 'compaction' = 'row'
+  if (m.type === 'user') {
+    if (e.door === 'compaction') { kind = 'compaction'; row.role = 'system'; row.origin = 'engine' }
+    else if (blocks.length && blocks.every(b => b.type === 'tool-result')) { row.role = 'tool-result'; row.origin = 'engine' }
+    else {
+      row.role = 'user'
+      row.origin = originOf(e.origin, m.isMeta === true)
+      said(row, ours(e.origin))
+    }
+  }
+  return drawn(row) ? { kind, row } : undefined
+}
+
+// Whether a row's origin is this plugin's.
+export const ours = (o: Append['origin']) => o.kind === 'plugin' && 'name' in o && o.name === OWN
+
+// Whether a row stored under door and origin is one this module appended itself: it emits those
+// where it makes them, with the act that landed them, and its hook passes them by.
+export const ownNote = (e: Pick<Append, 'door' | 'origin'>) => e.door === 'note' && ours(e.origin)
+
+// The origin and door this module's own appends are stored under.
+export const OWN_NOTE = { door: 'note', origin: { kind: 'plugin', name: OWN } } as const
 
 // The event an `emit` asks for: an ask or its settlement, which the agent sees in the session's
 // hooks and the module numbers among its own rows, so the session's events keep one numbering.
@@ -117,19 +179,15 @@ export function interruptNote(from: string, stopped: number, unstopped: number, 
   return `from: ${from}\n\nYour turn was interrupted from the desk.${ended}${left}${unknown} Do not carry on with it; wait for what you are asked next.`
 }
 
-// The row shows the words without the from: line that opens them: the row's origin already says who
-// spoke, and the model keeps reading the line in the text it was given.
-const FROM_LINE = /^from: [^\n]*\n\n/
-
-export const ownRow = (text: string, id?: string, origin = 'plugin'): Row =>
-  ({ ...(id ? { id } : {}), role: 'user', origin, blocks: [{ type: 'text', text: text.replace(FROM_LINE, '') }] })
-
-// The compacted conversation opens with its summary.
-export function compactionRow(r: ResultOf['session.compact']): Row | undefined {
-  const summary = r.skip === undefined ? r.messages[0] : undefined
-  if (!summary) return undefined
-  return { role: 'system', origin: 'engine', blocks: summary.text ? [{ type: 'text', text: summary.text }] : [] }
+// The first text a stored row holds: the words a submitted prompt was stored with.
+export function firstText(content: readonly { type: string; [field: string]: unknown }[]): string {
+  const b = content.find(b => b.type === 'text' && typeof b.text === 'string')
+  return b ? b.text as string : ''
 }
+
+// The turn as it stands, told to a watch that begins between a turn's start and end: running, or
+// idle, which the view reads from a completed turn that carries no reason.
+export const turnNow = (busy: boolean): Payload => ({ kind: 'turn', turn: { state: busy ? 'started' : 'completed' } })
 
 // The event has no refusal: a turn the model refused ended without its answer, as an error's did.
 export function turnReason(reason: Args<'turn.complete'>['reason']): NonNullable<Turn['reason']> {

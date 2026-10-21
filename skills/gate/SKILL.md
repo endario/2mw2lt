@@ -169,8 +169,8 @@ guards that read what you changed, chosen with judgment: a full steering suite o
 crosses the tree (the suite runner, a shared fixture or harness, several modules). Run them where
 you choose, locally or on the CI pool with
 [connect's `ci.py`](../connect/SKILL.md#gate-your-work). The suite runs on every push to `main`,
-and the brain fixes forward what it turns red. A guard that fails under load and
-passes alone is a flake to report, not a reason to hold the merge. Mark it ready only after
+and the brain fixes forward what it turns red. Every guard passes under load: one that
+fails in a loaded run and passes alone is a defect to fix, never a flake to report past. Mark it ready only after
 `ship it`, then merge it.
 
 For GitHub state reads and waiting, follow
@@ -192,8 +192,8 @@ After that call succeeds, issue the merge as a separate Bash tool call with the 
 gh pr merge -R <repo> <pr number> --squash --match-head-commit <head sha>
 ```
 
-Once `main`'s ruleset requires the merge queue, the same command joins the queue: the queue merges
-after the Steering run on its merge commit passes, and the pass stays pinned to your head, so
+Where the base branch's ruleset requires a merge queue, the same command joins the queue, which
+merges once the required checks pass on its group's commit. The pass stays pinned to your head, so
 carry it to any head you push as before.
 
 The migration check applies where that script exists. Judge the merged tree: a version collision
