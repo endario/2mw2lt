@@ -278,6 +278,8 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
 GO_READ_PAGES = 20
 # How long a carry waits for GitHub to deliver a head it was refused as unobserved, and how often it asks.
 CARRY_UNOBSERVED_WAIT, CARRY_UNOBSERVED_POLL = 60.0, 5.0
+# The most foreign commits a carry names, Go's CarryForeignMax; with more it names none.
+CARRY_FOREIGN_MAX = 256
 # How long a carry waits for its status's decision, and how often it asks: the decision takes a pass
 # of the effect queue, or half a minute more while a read names the pull request's base.
 CARRY_DECISION_WAIT, CARRY_DECISION_POLL = 60.0, 3.0
@@ -368,7 +370,8 @@ def gate_read(r: dict) -> str:
 def go_carry(ws: Path, session: str, flags, pr: int, retry_id: str | None) -> int:
     """Carry the pass on `pr` to this checkout's `HEAD` through Go's `POST /gates/carries`. Go proves
     the head itself; `equivalent` only forces its replay, sent unless every commit the branch holds
-    beyond the trunk was made in this checkout."""
+    beyond the trunk was made in this checkout. Those it did not make go as `foreign`, so Go forces
+    the replay only for one the review did not hold: a branch continued from another session's."""
     import refusal
     import session_routes
     here = Path.cwd()
@@ -389,14 +392,18 @@ def go_carry(ws: Path, session: str, flags, pr: int, retry_id: str | None) -> in
                   if _git(here, "rev-parse", "-q", "--verify", f"{r}^{{commit}}")), None)
     walked, after = _git_result(here, "rev-list", at, *([f"^{trunk}"] if trunk else []))
     made = made_here(_git(here, "reflog", "--format=%H %gs", "HEAD"))
-    equivalent = not walked or not trunk or any(c not in made for c in after.split())
+    foreign = [c for c in after.split() if c not in made]
+    equivalent = not walked or not trunk or bool(foreign)
+    body = {"repo": repo, "pr": pr, "head": at, "equivalent": equivalent}
+    if walked and trunk and foreign and len(foreign) <= CARRY_FOREIGN_MAX:
+        body["foreign"] = foreign
     this = retry_id or occurrence()
     waited_until = time.monotonic() + CARRY_UNOBSERVED_WAIT
     while True:
         print(f"id {this}", file=sys.stderr)
         uncertain = False
         try:
-            answer = session_routes.write("/gates/carries", {"repo": repo, "pr": pr, "head": at, "equivalent": equivalent},
+            answer = session_routes.write("/gates/carries", body,
                                          this, session_routes.SESSION_CARRIER, token)
             if answer.get("id") and answer.get("proof"):
                 reply = carry_decided(pr, at, answer, token)

@@ -39,7 +39,10 @@ LAUNCHER = HERE / "launch.py"      # the file installed into a workspace, not th
 LAUNCH_NAME = "steering-launch.py"  # what it is called once it is there
 TOKENS = ("steering-observe-token",)
 TIMEOUT = 5  # seconds; the sender's own budget is 4
-DECIDE_TIMEOUT = 600  # seconds; the deciding hook waits for the console, and its own wait ends first
+DECIDE_TIMEOUT = 3600  # seconds; the deciding hook waits for the console, and its own wait ends first.
+# 3.6's measurement (#4823, design §12): the wait holds through 585 s under 600 and through 3,580 s
+# under 3,600 with the observe hook beside, the dialog answerable throughout; 86,400 is accepted
+# the same way but a full day's hold was not measured, so the hour is what is set.
 
 
 def launcher_path(workspace: Path) -> Path:

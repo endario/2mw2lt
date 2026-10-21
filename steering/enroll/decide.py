@@ -31,14 +31,18 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE / "enroll"))
 import local_workspace  # noqa: E402
 import pretool  # noqa: E402
+import supervision  # noqa: E402
 import verb_help  # noqa: E402
 import urllib.error  # noqa: E402
 from door import record, send  # noqa: E402
 from local_workspace import workspace_root  # noqa: E402
 
 # Under the settings timeout `hooks.DECIDE_TIMEOUT`, so the hook ends by itself rather than by
-# the harness's kill. Phase 3.6 measures the longest workable wait.
-WAIT = 590.0
+# the harness's kill: 3.6 measured the wait holding through 585 s under a 600 s timeout and an
+# hour under 3600, the dialog answerable throughout (design §12). The margin covers the hook's
+# own start and the poll in flight when the wait ends. Keep this 10 s under hooks.DECIDE_TIMEOUT;
+# importing hooks here is an edge the client boundary keeps out.
+WAIT = 3590.0
 POLL = 60.0  # one request's bound: the agent holds a poll for less and answers `pending`
 PACE = 1.0   # the least time between polls, so an agent that answers `pending` at once is not spun
 
@@ -57,6 +61,17 @@ def decision(hook: dict, answer: object) -> tuple[dict | None, str]:
         # A bare allow leaves a plan approval's dialog up and the turn waiting, in the terminal and
         # in VS Code alike (#8260), so every allow hands the call its own input back.
         out = {"behavior": "allow", "updatedInput": hook["tool_input"]}
+        if answer.get("always") is True:
+            # The desk's "Always allow": the suggestions this hook's own request carries, echoed
+            # back as the dialog's option 2 writes it — a rule to the project's settings, never a
+            # mode change or a session-scoped grant (unit 3.6's measurement).
+            rules = supervision.always_rules(hook.get("permission_suggestions"))
+            if rules:
+                out["updatedPermissions"] = rules
+            else:
+                return ({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": out}},
+                        "an always whose suggestions no longer carry the domain-rule shape; "
+                        "allowed once, nothing written for later asks")
     elif kind == "deny":
         message = answer.get("message")
         out = {"behavior": "deny",
@@ -115,6 +130,8 @@ def wait(ws: Path, hook: dict, ask: str, deadline: float) -> dict | None:
         out, why = decision(hook, answer)
         if out is None:
             record("decide", f"ask {ask}: the agent's answer decides nothing: {why}", ws)
+        elif why:
+            record("decide", f"ask {ask}: {why}", ws)
         return out
     record("decide", f"ask {ask}: no decision within {WAIT:.0f}s; the dialog is the person's", ws)
     return None

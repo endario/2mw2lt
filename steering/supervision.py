@@ -31,6 +31,33 @@ ASK_KEYS = ("command", "file_path", "path", "url", "pattern")
 ASK_OPTIONS = 8  # labels kept from one question; the tool offers four and an "Other"
 
 
+def always_rules(suggestions: object) -> list:
+    """The `permission_suggestions` entries a deciding hook may echo back as `updatedPermissions`
+    for the dialog's own "don't ask again" (#4823 unit 3.6): every entry an `addRules` of behavior
+    `allow` to `localSettings` whose rules are domain-scoped. Measured on Claude Code 2.1.299: echoing that
+    shape writes the rule the dialog's option 2 writes, and nothing else does — a `setMode`
+    entry switches the session's mode, an `addDirectories` entry grants session-scoped access
+    where option 2 grants the project's, and an exact-command rule (a bare `ruleContent`) is
+    narrower than the prefix option 2 offers. Any entry outside the shape offers nothing, so one
+    list is either all echoable or not offered at all.
+    """
+    if not isinstance(suggestions, list) or not suggestions:
+        return []
+    out = []
+    for s in suggestions:
+        if not isinstance(s, dict) or s.get("type") != "addRules" or s.get("destination") != "localSettings" or s.get("behavior") != "allow":
+            return []
+        rules = s.get("rules")
+        if not isinstance(rules, list) or not rules:
+            return []
+        for r in rules:
+            content = r.get("ruleContent") if isinstance(r, dict) else None
+            if not isinstance(content, str) or not content.startswith("domain:"):
+                return []
+        out.append(s)
+    return out
+
+
 def _version(v: str) -> tuple[int, ...]:
     try:
         return tuple(int(x) for x in v.split(".")[:3])
@@ -139,6 +166,11 @@ def observe(hook: dict, occurrence: str, observed_at: str, source_version: str, 
             for field, k in (("ask_head", "ask"), ("ask_options", "options"), ("ask_truncated", "truncated")):
                 if a.get(k):
                     o[field] = a[k]
+    # An ask whose "always allow" the desk may offer: the suggestions' shape is the one a deciding
+    # hook can echo as the dialog's own option 2 (#4823 unit 3.6). Added beside the ask fields, not
+    # within them, so a sink that knows it not still reads the ask.
+    if event == "PermissionRequest" and always_rules(hook.get("permission_suggestions")):
+        o["ask_always"] = True
     return o
 
 

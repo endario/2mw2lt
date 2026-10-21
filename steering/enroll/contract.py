@@ -503,13 +503,16 @@ ActRead = typing.TypedDict("ActRead", {
 
 # AnswerBody is a desk answer to a dialog a session waits at: the dialog's Need, and the decision —
 # allow, deny (with the model's Message, and Interrupt to end the turn as the terminal's No does) or
-# answer, a question's Answers, question text to answer text.
+# answer, a question's Answers, question text to answer text. Always carries an allow whose hook
+# answers the dialog as the terminal's own option 2 does: "don't ask again" for the rule the ask's
+# suggestions name (#4823 unit 3.6).
 AnswerBody = typing.TypedDict("AnswerBody", {
     "need": "str",
     "decision": "str",
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
     "answers": "typing.NotRequired[dict[str, str] | None]",
+    "always": "typing.NotRequired[bool]",
 })
 
 # AnswerReceipt is what a machine answers of a desk answer it was offered: the answer, and the
@@ -1097,6 +1100,7 @@ MachineAction = typing.TypedDict("MachineAction", {
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
     "answers": "typing.NotRequired[dict[str, str] | None]",
+    "always": "typing.NotRequired[bool]",
 })
 
 # RetireAction is what a retire carries: the worker, pinned to its incarnation on this machine, the
@@ -1154,6 +1158,7 @@ StreamWake = typing.TypedDict("StreamWake", {
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
     "answers": "typing.NotRequired[dict[str, str] | None]",
+    "always": "typing.NotRequired[bool]",
 })
 
 # StreamControl is a control, by its id.
@@ -1196,6 +1201,7 @@ StreamControl = typing.TypedDict("StreamControl", {
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
     "answers": "typing.NotRequired[dict[str, str] | None]",
+    "always": "typing.NotRequired[bool]",
 })
 
 # StreamRehome is a rehome, by its id.
@@ -1238,6 +1244,7 @@ StreamRehome = typing.TypedDict("StreamRehome", {
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
     "answers": "typing.NotRequired[dict[str, str] | None]",
+    "always": "typing.NotRequired[bool]",
 })
 
 # StreamPark is a park, by its id.
@@ -1280,6 +1287,7 @@ StreamPark = typing.TypedDict("StreamPark", {
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
     "answers": "typing.NotRequired[dict[str, str] | None]",
+    "always": "typing.NotRequired[bool]",
 })
 
 # StreamPrompt is a prompt, by its id.
@@ -1322,6 +1330,7 @@ StreamPrompt = typing.TypedDict("StreamPrompt", {
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
     "answers": "typing.NotRequired[dict[str, str] | None]",
+    "always": "typing.NotRequired[bool]",
 })
 
 # StreamAnswer is a desk answer to a dialog, by its id.
@@ -1364,6 +1373,7 @@ StreamAnswer = typing.TypedDict("StreamAnswer", {
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
     "answers": "typing.NotRequired[dict[str, str] | None]",
+    "always": "typing.NotRequired[bool]",
 })
 
 # StreamInterrupt is an interrupt, by its id.
@@ -1406,6 +1416,7 @@ StreamInterrupt = typing.TypedDict("StreamInterrupt", {
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
     "answers": "typing.NotRequired[dict[str, str] | None]",
+    "always": "typing.NotRequired[bool]",
 })
 
 # StreamRetire is a retire, by its id.
@@ -2452,12 +2463,14 @@ ReceiptSession = typing.TypedDict("ReceiptSession", {
 
 # GateCarryBody asks that a pull request's passing review be carried to its new head. Equivalent
 # is the author's word that the head is the reviewed change on a new base: it forces a replay and
-# never waives one.
+# never waives one. Foreign, when the author can name them, are the commits beyond the trunk it did
+# not make; equivalence is then forced only by one the reviewed change does not hold.
 GateCarryBody = typing.TypedDict("GateCarryBody", {
     "repo": "str",
     "pr": "int",
     "head": "str",
     "equivalent": "bool",
+    "foreign": "typing.NotRequired[list[str] | None]",
 })
 
 # GateCarryAnswer is the carry recorded for the head, and the proof that admitted it.
@@ -4227,13 +4240,16 @@ SessionTurn = typing.TypedDict("SessionTurn", {
 })
 
 # SessionAsk is a permission or a question the harness waits on: the tool's input, which for a
-# question is the questions and their options, and the answers the harness offers.
+# question is the questions and their options, and the answers the harness offers. Always says a
+# permission's suggestions carry the domain-rule shape the desk may answer as "Always allow"
+# (#4823 unit 3.6).
 SessionAsk = typing.TypedDict("SessionAsk", {
     "id": "str",
     "kind": "str",
     "tool": "typing.NotRequired[str]",
     "input": "typing.NotRequired[typing.Any]",
     "options": "typing.NotRequired[list[str] | None]",
+    "always": "typing.NotRequired[bool]",
 })
 
 # SessionSettled is an ask the harness saw answered, by whom and with what.
