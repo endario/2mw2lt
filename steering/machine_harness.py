@@ -469,21 +469,12 @@ _BINDINGS = {"hook-binding": _hook_session}
 
 
 def _zcode_pid(psession: str) -> int | None:
+    # The binding only: the launch-record chain this fell back to served the app-server
+    # workers #7108 retired, and no live zcode process is named by one.
     binding = _zcode_binding()
     if binding and binding.get("psession") == psession and isinstance(binding.get("pid"), int):
         return binding["pid"]
-    import worker_probe
-    return worker_probe.zcode_pid_of(psession)
-
-
-def _zcode_transcript(psession: str):
-    import worker_probe
-    return worker_probe.zcode_path_of(psession)
-
-
-def _zcode_workspace(fd: int, rel, workspace: str) -> str | None:
-    import worker_probe
-    return worker_probe.zcode_workspace_of(fd, rel, workspace)
+    return None
 
 
 def zcode_version() -> str | None:
@@ -525,7 +516,7 @@ def _zcode_process(argv: list[str]) -> str | None:
 
 
 def _acp_shape(rel):
-    """The shape of an ACP harness's .jsonl transcript line, shared by opencode and zcode."""
+    """The shape of an ACP harness's .jsonl transcript line, as opencode writes its workers'."""
     import worker_probe
     return worker_probe.shape(rel)
 
@@ -746,13 +737,12 @@ HARNESSES = {h.provider: h for h in (
             process_names=_opencode_process_names),
     # One stream harness, like Claude (the owner's ruling, 2026-10-14, #6257): every zcode
     # session holds its own stream through the plugin's frames server and is observed by the
-    # plugin's hooks, so it names its session by the binding those hooks publish. A platform-
-    # launched worker still passes its id explicitly, and its transcript is the file the manager
-    # hands it.
+    # plugin's hooks, so it names its session by the binding those hooks publish. It keeps no
+    # transcripts this door validates — the steering-workers root served only the app-server
+    # workers #7108 retired — so it registers no root, shape, workspace or transcript.
     Harness("zcode", agent="zcode", config=".zcode", config_env="ZCODE_DATA_BASE_DIR",
-            transcript_root="steering-workers",
-            session_id=_session_of("zcode"), harness_pid=_zcode_pid, transcript=_zcode_transcript,
-            version=zcode_version, shape=_acp_shape, workspace=_zcode_workspace, hooks=True,
+            session_id=_session_of("zcode"), harness_pid=_zcode_pid,
+            version=zcode_version, hooks=True,
             reading=_zcode_reading,
             process_kind=_zcode_process, process_names=_zcode_process_names),
 )}

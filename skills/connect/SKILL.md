@@ -13,7 +13,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/connect.py" --current
 ```
 
 The reply names your session, account, binding and `repo:`, the workspace's repository for `gh -R`, and `card:`, the card you execute now: after leaving and
-connecting again it says `none`, since leaving ends the engagement. Use that **session** and printed
+connecting again it says `none`, since leaving ends the engagement. After a restart, `checkpoint:` hands back
+this epoch's latest checkpoint: act on it. Use that **session** and printed
 **account** below; replace each `<…>` placeholder before running a command. Clients read the
 stored enrollment credential themselves.
 
@@ -118,7 +119,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> <issue>
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> branch [--card <id>]
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" announce <session> as <account> on <branch> doing "<work>"
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" blocked <session> on "<blocker>"
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" wait <session> for merged <pr>  # or for verdict <pr>, or for at <YYYY-MM-DDTHH:MMZ>: told once it holds, instead of polling
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" wait <session> [--card <id>] for merged <pr>  # or for verdict <pr>, or for at <YYYY-MM-DDTHH:MMZ>: told once it holds, instead of polling
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" done <session> [--card <id>] "<result>"
 ```
 
@@ -126,6 +127,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" done <session> [--card <
 merged, and name the card with `--card` when you hold more than one. Until you do, you hold the card
 and read busy; a done that names no card while you hold several is refused, naming them. A done said
 again for the same card is answered as the first.
+
+A `wait` is for a card too: the one it names with `--card`, the one whose branch the pull request
+or run is on, or the one card you hold. While it waits on another and is not due, that card raises
+no `card-unbranched` or `push-quiet`; a merge you owe yourself is not such a wait.
 
 A `say` from `kick <id>`, a `session-kick` signal naming the card you hold, means your turn ended
 with nothing you wait on open.
@@ -290,6 +295,11 @@ repository: `gh pr create -R <repo> --draft`, `gh pr edit -R <repo> <n>` on a pu
 is your branch, and `gh pr comment -R <repo> <n>`. Never an auto or admin merge, and never
 a push to `main`.
 
+**Codex** is granted these through one verb, which checks every word and runs `gh` with exactly them:
+`python3 <launcher> exec forge pr create -R <repo> --draft --head <your branch> …`, and the same for `pr edit`,
+`pr comment`, `issue create` and `issue comment`, spelled as connect's `forge grant:` line spells it. A refusal names its reason and runs nothing. A rule connect has
+just written reaches the next session; until then Codex asks. `pr ready` and `pr merge` are not in it.
+
 Write a pull request's, comment's or issue's body to a file and pass it with `--body-file <file>`:
 a body inline whose line starts with `#` is refused before it runs on some launches (#7528).
 
@@ -332,13 +342,13 @@ renumber included, costs a round.
 
 ## Checkpoint and leave
 
-Before compacting, handover or exit, put the work on its branch/issue and post a
-`## Checkpoint` comment on its draft pull request (or issue). The note names state, next
-steps, contingencies, agreements and links; `/2mw2lt:checkpoint` gives the full template.
-Using that comment's URL:
+Before compacting, handover or exit, put the work on its branch/issue and write a
+`## Checkpoint` note to a file. The note names state, next steps, contingencies, agreements and
+links; `/2mw2lt:checkpoint` gives the full template. Hand it to the platform, which keeps it and
+hands its text to whoever the brain directs to take over; it answers `checkpointed: <checkpoint id>`:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <session> handover <note-url>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <session> handover --text-file <note-file>
 ```
 
 When your card's plan will hand tasks to other builders, as its brief names them, write it before
@@ -351,12 +361,12 @@ or account, propose the move: write a `handover` checkpoint, then `say` to the b
 (vendor, model, effort), the way you prefer, fresh or rehome, and why. The brain decides.
 
 Use `spec-settled` after the critic converges, `context` before compacting and `unit-done`
-when the brain requests it. If you leave work unfinished, record `exit` against the note, then
-disconnect:
+when the brain requests it. If you leave work unfinished, record `exit`, then disconnect naming
+the checkpoint it answered:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <session> exit <note-url>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/disconnect.py" --handover <note-url> <session>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <session> exit --text-file <note-file>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/disconnect.py" --handover <checkpoint id> <session>
 ```
 
 With nothing to hand over, leave explicitly:

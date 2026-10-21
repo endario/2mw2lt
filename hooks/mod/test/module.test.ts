@@ -1725,6 +1725,75 @@ test('entryRefusal: a subagent, another plugin, ask and deny are refused; the mo
   expect(entryRefusal(undefined, 'engine', 't', allow)).toBeNull()
 })
 
+// #6324: a Claude Code session hands its checkpoint over as a typed tool, through checkpoint.py.
+const CHECKPOINT_TOOL_NAME = 'mcp__2mw2lt__checkpoint'
+const checkpointRuns = (w: { runs: string[][] }) => w.runs.filter(argv => String(argv[1]).endsWith('/checkpoint.py'))
+
+test('every session has the checkpoint tool in front, the seat or none', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  on('tool.describe', async ($, e) => ({ description: e.description, ...(e.isDeferred ? { isDeferred: e.isDeferred } : {}) }))
+  await begin($)
+  await w.clock.settle()
+  expect(w.state.get('seat') ?? '').toBe('')
+  expect(w.tools).toContain('checkpoint')
+  const described = await $.tool.describe({ tool: CHECKPOINT_TOOL_NAME, description: 'd', isDeferred: true, provider: { plugin: '2mw2lt', tier: 'user' } } as never)
+  expect((described as { isDeferred?: boolean }).isDeferred).toBe(false)
+  const seatVerb = await $.tool.describe({ tool: 'mcp__2mw2lt__relay', description: 'd', isDeferred: true, provider: { plugin: '2mw2lt', tier: 'user' } } as never)
+  expect((seatVerb as { isDeferred?: boolean }).isDeferred).toBe(true)
+})
+
+test('a subagent\'s checkpoint is refused before checkpoint.py runs: the checkpoint is the session\'s own', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  const r = await $.tool.call({ tool: CHECKPOINT_TOOL_NAME, agentId: 'subagent-1', boundary: 'context', text: 'note' } as never)
+  expect(String((r as { deny?: string }).deny)).toContain('never a subagent\'s')
+  expect(checkpointRuns(w)).toEqual([])
+})
+
+test('the checkpoint\'s text reaches checkpoint.py byte for byte on stdin, the lessons through a file it removes after', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  const text = '## Checkpoint\n\nBoundary: `context` — session s1.\n\n**Next.**\n1. `rm -rf "$x"`; ünïcode, trailing spaces   \n\n'
+  const learned = [{ text: 'Read the plan first.', scope: ['steering/'] }]
+  const r = await $.tool.call({ tool: CHECKPOINT_TOOL_NAME, boundary: 'context', text, learned, mirror: 'https://github.com/example-org/example-repo/pull/1' } as never)
+  expect((r as { result?: string }).result).toBe('checkpointed: 7d1c0f2e-0000-4000-8000-000000000001 context\nid 0123456789abcdef0123')
+  expect(checkpointRuns(w)).toEqual([['python3', `${w.root}/steering/enroll/checkpoint.py`, 's1', 'context',
+    '--learned-file', '/tmp/tmp.lessons', '--mirror', 'https://github.com/example-org/example-repo/pull/1']])
+  expect(w.stdins).toEqual([text])
+  expect(w.writes).toContainEqual({ path: '/tmp/tmp.lessons', text: JSON.stringify(learned) })
+  const at = (argv: string[]) => w.runs.findIndex(run => run.join(' ') === argv.join(' '))
+  expect(at(['rm', '-f', '/tmp/tmp.lessons'])).toBeGreaterThan(at(checkpointRuns(w)[0]!))
+})
+
+test('a checkpoint whose answer was lost goes once more under its id, with the same text, and no more', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  const lost = { code: 1, stdout: 'unavailable: the door did not answer\nif it may have been recorded, resend with --retry=0123456789abcdef0123\n', stderr: 'id 0123456789abcdef0123\n' }
+  w.checkpointOut = [lost, lost]
+  await begin($)
+  await w.clock.settle()
+  const r = await $.tool.call({ tool: CHECKPOINT_TOOL_NAME, boundary: 'handover', text: 'the note' } as never)
+  const runs = checkpointRuns(w)
+  expect(runs.length).toBe(2)
+  expect(runs[0]?.slice(2)).toEqual(['s1', 'handover'])
+  expect(runs[1]?.slice(2)).toEqual(['s1', 'handover', '--retry=0123456789abcdef0123'])
+  expect(w.stdins).toEqual(['the note', 'the note'])
+  expect(String((r as { deny?: string }).deny)).toContain('resend with --retry=0123456789abcdef0123')
+})
+
+test('a checkpoint from a session not connected, or at no known boundary, runs nothing', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  const odd = await $.tool.call({ tool: CHECKPOINT_TOOL_NAME, boundary: '--retry=x', text: 'note' } as never)
+  expect(String((odd as { deny?: string }).deny)).toContain('boundary is one of')
+  w.enrolled = false
+  const unconnected = await $.tool.call({ tool: CHECKPOINT_TOOL_NAME, boundary: 'exit', text: 'note' } as never)
+  expect(String((unconnected as { deny?: string }).deny)).toContain('/2mw2lt:connect')
+  expect(checkpointRuns(w)).toEqual([])
+})
+
 test('seatCall: word fields are one word, enums hold, and unknown fields are refused', async () => {
   expect(seatCall('retire', { worker: 'w 1', node: 'm4' })).toEqual({ refused: 'worker is one word' })
   expect(seatCall('retire', { worker: 'teal', reason: 'the card landed' })).toEqual({ client: 'say', stdin: 'retire: token @lease teal because the card landed' })
@@ -1734,6 +1803,8 @@ test('seatCall: word fields are one word, enums hold, and unknown fields are ref
   expect(seatCall('card_session', { card: 'c', session: 's', role: 'boss' })).toEqual({ refused: 'role is one of executor, planned' })
   expect(seatCall('dispose', { item: 'i', reason: 'r', token: 'x' })).toEqual({ refused: 'dispose takes no token' })
   expect(seatCall('relay', { to: 'amber', epoch: 3, text: 'go' })).toEqual({ client: 'say', stdin: 'relay: token @lease to amber@3 go' })
+  expect(seatCall('relay', { to: 'amber', checkpoint: '0b5f3c1e-4a2d-4c8e-9f10-2a3b4c5d6e7f', text: 'take over' }))
+    .toEqual({ client: 'say', stdin: 'relay: token @lease to amber checkpoint 0b5f3c1e-4a2d-4c8e-9f10-2a3b4c5d6e7f take over' })
   expect(seatCall('card_scope', { name: 'The work', track: 'rt', anchors: ['resolves:12'], major: true })).toEqual(
     { client: 'card', argv: ['scope', 'The work', 'rt', 'resolves:12', 'major'] })
   expect(seatCall('card_scope', { name: 'The work', track: 'rt', criticality: 'major', size: 'L' })).toEqual(

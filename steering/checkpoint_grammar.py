@@ -11,13 +11,27 @@ BOUNDARIES = ("spec-settled", "unit-done", "context", "handover", "exit")
 MAX_LEARNED = 8
 MAX_TEXT = 500
 MAX_NOTE = 300
+MAX_CHECKPOINT_TEXT = 8192  # bytes, Go's `work.CheckpointTextMax`
 _LINE = re.compile(r"\Acheckpoint:\s*(?P<session>\S+)\s+token\s+\S+\s+json\s+(?P<body>.+?)\s*\Z", re.S)
 
 # The characters a URL carries, less `<` and `>`: a note redaction reached reads `<redacted>`.
 _NOTE = re.compile(r"https://github\.com/[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]+")
 _SHA = re.compile(r"[0-9a-f]{64}")
 _ID = re.compile(r"[A-Za-z0-9-]{16,64}")  # the client's occurrence id (`door.OCCURRENCE`)
-_FIELDS = {"id", "boundary", "note", "note_sha256", "learned"}
+_FIELDS = {"id", "boundary", "text", "note", "note_sha256", "learned"}
+
+
+def text_refusal(raw: bytes) -> str | None:
+    """Why Go would refuse `raw` as a checkpoint's text, by its refusal's name, or None."""
+    if not raw:
+        return "checkpoint-text-invalid: the text is empty"
+    if len(raw) > MAX_CHECKPOINT_TEXT:
+        return f"checkpoint-text-too-large: the text is {len(raw)} bytes, and at most {MAX_CHECKPOINT_TEXT} are kept"
+    try:
+        raw.decode("utf-8")
+    except UnicodeDecodeError as e:
+        return f"checkpoint-text-invalid: the text is not UTF-8 at byte {e.start}"
+    return None
 
 
 def _scope_ok(scope) -> bool:
@@ -44,10 +58,16 @@ def parse(text: str) -> dict | str:
         return "id is 16 to 64 letters, digits or dashes"
     if body.get("boundary") not in BOUNDARIES:
         return f"boundary is one of {', '.join(BOUNDARIES)}"
-    note = body.get("note")
-    if not isinstance(note, str) or len(note) > MAX_NOTE or not _NOTE.fullmatch(note):
+    text, note = body.get("text"), body.get("note")
+    if text is not None:
+        # The platform keeps the text itself, and a mirror of it is posted only after, so it names no note.
+        if note is not None or "note_sha256" in body:
+            return "a checkpoint is its text or a note, not both"
+        if not isinstance(text, str) or (why := text_refusal(text.encode("utf-8", "surrogatepass"))):
+            return why or "text is a string"
+    elif not isinstance(note, str) or len(note) > MAX_NOTE or not _NOTE.fullmatch(note):
         return f"note is a https://github.com/ URL of at most {MAX_NOTE} characters"
-    if not isinstance(body.get("note_sha256"), str) or not _SHA.fullmatch(body["note_sha256"]):
+    elif not isinstance(body.get("note_sha256"), str) or not _SHA.fullmatch(body["note_sha256"]):
         return "note_sha256 is 64 lowercase hex characters"
     learned = body.get("learned", [])
     if not isinstance(learned, list) or len(learned) > MAX_LEARNED:
@@ -62,5 +82,5 @@ def parse(text: str) -> dict | str:
             dropped.append(n)
         else:
             kept.append({"text": item["text"], "scope": item["scope"]})
-    return {"session": m["session"], "id": body["id"], "boundary": body["boundary"], "note": note,
-            "note_sha256": body["note_sha256"], "learned": kept, "dropped": dropped}
+    return {"session": m["session"], "id": body["id"], "boundary": body["boundary"], "text": text, "note": note,
+            "note_sha256": body.get("note_sha256"), "learned": kept, "dropped": dropped}

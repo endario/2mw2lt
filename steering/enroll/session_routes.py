@@ -214,7 +214,7 @@ def _current_machine_refusal(e: Refused) -> str:
 
 
 def _incarnation(provider: str, psession: str, runtime: str) -> dict:
-    return {"provider": provider, "provider_session": psession, "runtime_id": runtime}
+    return {"harness": provider, "provider_session": psession, "runtime_id": runtime}
 
 
 def observe(provider: str, psession: str, runtime: str) -> None:
@@ -320,7 +320,7 @@ def bind(session: str, token: str, provider: str, psession: str, runtime: str,
 
 
 def detach(session: str, token: str, key: str | None = None, handover: str = "") -> str:
-    """The session ends its own epoch, its handover note kept with it when it names one. A retry
+    """The session ends its own epoch, its handover checkpoint kept with it when it names one. A retry
     after a lost answer finds its token refused, which says only that the session can no longer act,
     never that it detached."""
     body = {"exit": "handover", "text": handover} if handover else {}
@@ -336,7 +336,7 @@ def detach(session: str, token: str, key: str | None = None, handover: str = "")
         if e.code in INVALID_TOKEN:
             return refusal.reconnect(f"{session} can no longer act: its token is not valid")
         if e.status == 400 and handover:  # a handover Go does not take: sent again it fails again
-            return refusal.resend(str(e), "a --handover that is a https://github.com/ comment URL")
+            return refusal.resend(str(e), "a --handover that is the exit checkpoint's id")
         if e.status == 400:  # no handover was sent, so what Go refused is the session it names
             return reconnect(e)
         return refusal.retry(str(e))
@@ -344,11 +344,13 @@ def detach(session: str, token: str, key: str | None = None, handover: str = "")
 
 
 def checkpoint(token: str, body: dict) -> tuple[str, bool]:
-    """The session records its checkpoint (`POST /checkpoints`), keyed by its occurrence, so a resend
-    under `--retry` is answered from the first: the answer, and whether it may have been recorded
-    unanswered, which only a resend under the id settles."""
-    sent = {"occurrence": body["id"], "boundary": body["boundary"], "note": body["note"],
-            "note_sha256": body["note_sha256"], **({"learned": body["learned"]} if body.get("learned") else {})}
+    """The session records its checkpoint (`POST /checkpoints`), its text or the pointer to a note,
+    keyed by its occurrence, so a resend under `--retry` is answered from the first: the answer,
+    naming the checkpoint's own id, and whether it may have been recorded unanswered, which only a
+    resend under the occurrence settles."""
+    kept = {"text": body["text"]} if "text" in body else {"note": body["note"], "note_sha256": body["note_sha256"]}
+    sent = {"occurrence": body["id"], "boundary": body["boundary"], **kept,
+            **({"learned": body["learned"]} if body.get("learned") else {})}
     try:
         answer = write("/checkpoints", sent, body["id"], SESSION_CARRIER, token)
     except Unsent as e:
@@ -365,7 +367,49 @@ def checkpoint(token: str, body: dict) -> tuple[str, bool]:
         return refusal.use("checkpoint", str(e)), False
     got = answer.get("checkpoint") or {}
     dropped = got.get("dropped") or 0
-    return f"checkpointed: {body['id']} {body['boundary']}" + (f" dropped: {dropped}" if dropped else ""), False
+    return f"checkpointed: {got['id']} {body['boundary']}" + (f" dropped: {dropped}" if dropped else ""), False
+
+
+def checkpoint_now(session: str, token: str, timeout: float) -> dict | None:
+    """The session's latest checkpoint at its current epoch, or None: one ask, for a hook that must
+    answer within `timeout` whatever the door does. Raises `Refused` or `Unsent` as `get` does."""
+    req = urllib.request.Request(_base() + f"/sessions/{urllib.parse.quote(session, safe='')}/checkpoints?epoch=current&limit=1",
+                                 headers=session_headers(token))
+    try:
+        with door.open_direct(req, timeout) as r:
+            newest = json.loads(r.read() or b"{}").get("checkpoints") or []
+    except urllib.error.HTTPError as e:
+        problem = _problem(e)
+        raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
+                      request=_request(e, problem), remedy=_remedy(problem)) from None
+    except (urllib.error.URLError, OSError, TimeoutError, http.client.HTTPException, ValueError) as e:
+        raise Unsent(f"{_base()}: no answer ({e})") from None
+    return newest[0] if newest else None
+
+
+def checkpoint_read(session: str, token: str, which: str) -> tuple[str, dict | None]:
+    """A checkpoint as this session is shown it: `latest`, its own newest at any epoch, or one by its
+    id. The checkpoint, or why there is none to show and None."""
+    path = (f"/sessions/{urllib.parse.quote(session, safe='')}/checkpoints?limit=1" if which == "latest"
+            else f"/checkpoints/{urllib.parse.quote(which, safe='')}")
+    try:
+        got = get(path, token)
+    except Unsent as e:
+        return refusal.retry(str(e)), None
+    except Refused as e:
+        if e.code == "session-binding-moved":
+            return _current_machine_refusal(e), None
+        if e.remedy == "update-plugin":
+            return refusal.outdated(str(e)), None
+        if e.code in INVALID_TOKEN:
+            return refusal.reconnect("the session's token is not valid"), None
+        if not settled(e):
+            return refusal.retry(str(e)), None
+        return refusal.use("checkpoint", str(e)), None
+    if which != "latest":
+        return "", got
+    newest = got.get("checkpoints") or []
+    return ("", newest[0]) if newest else (f"{session} has no checkpoint recorded", None)
 
 
 def acknowledge(session: str, token: str, directive: str) -> str:
@@ -373,7 +417,7 @@ def acknowledge(session: str, token: str, directive: str) -> str:
     key is the acknowledgement's own, so a retry after a lost answer is answered from the first."""
     key = hashlib.sha256(f"ack\n{session}\n{directive}".encode()).hexdigest()[:32]
     try:
-        write(f"/sessions/{session}/directives/{directive}/acknowledgement", {}, key, SESSION_CARRIER, token)
+        got = write(f"/sessions/{session}/directives/{directive}/acknowledgement", {}, key, SESSION_CARRIER, token)
     except Unsent as e:
         return refusal.retry(str(e))
     except Refused as e:
@@ -385,10 +429,16 @@ def acknowledge(session: str, token: str, directive: str) -> str:
             return refusal.reconnect(f"unknown, detached or stale token for {session}")
         if not settled(e):
             return refusal.retry(str(e))
+        if e.code == "directive-missing":
+            # Nothing was sent to this session under that id: a mistyped id, which the brain cannot fix.
+            return refusal.resend(f"no directive {directive} was sent to {session}: {e}",
+                                  "with the id copied from the frame's directive field")
         # Absent, lapsed or another epoch's: settled where sending it again cannot change, and the
         # brain's to follow up.
         return refusal.refuse(f"directive {directive}: {e}",
                               hand_to=("the brain", f"blocked: {session} on directive {directive} refused"))
+    if got.get("status") == "already-acknowledged":
+        return f"already acknowledged: {directive}"
     return f"acked: {directive} by {session}"
 
 
@@ -463,13 +513,15 @@ def seat_release(session: str, token: str, generation: int) -> dict:
                 _own_key("seat.release", session, str(generation)), SESSION_CARRIER, token)
 
 
-def issue_directive(session: str, token: str, directive: str, to: str, to_epoch: int, generation: int, text: str) -> dict:
-    """The holder, at the seat generation it holds, directs the session `to` at `to_epoch`. `directive`
-    is a UUID the caller mints once and sends again with a retry, which Go answers from the first.
-    Raises `Refused` or `Unsent`."""
-    return write(f"/sessions/{session}/directives",
-                {"id": directive, "to": to, "to_epoch": to_epoch, "generation": generation, "body": text},
-                _own_key("directive.issue", session, directive), SESSION_CARRIER, token)
+def issue_directive(session: str, token: str, directive: str, to: str, to_epoch: int, generation: int, text: str,
+                    checkpoint: str | None = None) -> dict:
+    """The holder, at the seat generation it holds, directs the session `to` at `to_epoch`, handing it
+    `checkpoint`'s text when it names one. `directive` is a UUID the caller mints once and sends again
+    with a retry, which Go answers from the first. Raises `Refused` or `Unsent`."""
+    body = {"id": directive, "to": to, "to_epoch": to_epoch, "generation": generation, "body": text}
+    if checkpoint:
+        body["checkpoint"] = checkpoint
+    return write(f"/sessions/{session}/directives", body, _own_key("directive.issue", session, directive), SESSION_CARRIER, token)
 
 
 def claim_name(token: str, key: str) -> dict:
@@ -842,11 +894,12 @@ def seat_generation(session: str, token: str) -> int:
     return int(seat["generation"])
 
 
-# A goal's steward is lent these card verbs on what its stewardship covers (doc 198 §3).
-STEWARD_CARD_VERBS = ("retier",)
+# A goal's steward is lent these card verbs on what its stewardship covers (doc 198 §3): a scope
+# only when born part of a goal (#8121).
+STEWARD_CARD_VERBS = ("retier", "scope")
 # Go's refusal of a session that steers nothing covering what it acts on: the refusal each lent
 # operation keeps for a session holding neither the seat nor a stewardship.
-_NOT_STEWARD = frozenset({"seat-not-holder", "executor-required"})
+_NOT_STEWARD = frozenset({"seat-not-holder", "executor-required", "seat-required"})
 
 
 def lent(session: str, token: str, send):
@@ -873,17 +926,17 @@ def standing_epoch(token: str, name: str) -> int | None:
     return None
 
 
-def relay(session: str, token: str, to: str, epoch: int | None, text: str, key: str) -> str:
+def relay(session: str, token: str, to: str, epoch: int | None, text: str, key: str, checkpoint: str | None = None) -> str:
     """The holder's directive to `to`, at `epoch` or the one it stands at, or a goal's steward's to a
-    session its launches started, at generation 0, which no seat holds (doc 198 D6). `key` is the
-    send's occurrence id, so a retry after a lost answer is answered from the first. Raises
-    `NotSeated`, `Refused` or `Unsent`."""
+    session its launches started, at generation 0, which no seat holds (doc 198 D6), handing it
+    `checkpoint`'s text when it names one. `key` is the send's occurrence id, so a retry after a lost
+    answer is answered from the first. Raises `NotSeated`, `Refused` or `Unsent`."""
     if epoch is None:
         epoch = standing_epoch(token, to)
         if epoch is None:
             raise Refused(404, "session-not-enrolled", "to")
     directive = str(uuid.UUID(_own_key("relay.directive", session, key)))
-    answer = lent(session, token, lambda generation: issue_directive(session, token, directive, to, epoch, generation, text))
+    answer = lent(session, token, lambda generation: issue_directive(session, token, directive, to, epoch, generation, text, checkpoint))
     # A steward's directive to a busy session waits behind the one it holds (doc 198 D6).
     if answer.get("status") == "queued":
         return f"queued: {answer.get('id', directive)} for {to}@{epoch}, behind the directive it holds"
@@ -1154,7 +1207,16 @@ def seat_card(session: str, token: str, verb: str, fact: dict, repo: str, key: s
         raise LookupError(f"card {what}: this client sends Go no write for it")
     path, body = planned
     send = lambda _: write(path, body, _own_key("seat.card", session, key), SESSION_CARRIER, token)
-    if verb in STEWARD_CARD_VERBS:
+    if verb == "scope" and fact.get("goal"):
+        # A scope into a goal from a session not holding the seat is its goal's steward's, or else
+        # Go makes it a declaration (doc 198 §3): the card's author is said, not assumed.
+        try:
+            send(seat_generation(session, token))
+        except NotSeated:
+            by = (send(0).get("card") or {}).get("by") or {}
+            if by.get("kind") != "steward":
+                return f"declared: card {fact['card']}, by {by.get('kind', 'unknown')} {by.get('session', '')}".rstrip()
+    elif verb in STEWARD_CARD_VERBS and verb != "scope":
         lent(session, token, send)
     else:
         seat_generation(session, token)

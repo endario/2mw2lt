@@ -132,7 +132,8 @@ kind turned off is not told, and its standing still reads:
   launch's brief is told as `launch-brief-unheard` instead.
 - **`card-unbranched`**, a signal: the session has executed its card for 45 minutes
   (`signals.card_unbranched.*`) with no branch claimed for it, however busily it writes, once per
-  engagement. Ask what it has, and to claim its branch and push.
+  engagement, unless it waits on another for that card and the wait is not due. Ask what it has,
+  and to claim its branch and push.
 - **`session-unannounced`**, a signal: the session has worked on its card for 10 minutes
   (`signals.session_unannounced.*`) without ever announcing what it is doing at this epoch, however
   busily it writes, once per engagement. Ask it what it is doing; the brief that never asked it to
@@ -140,12 +141,15 @@ kind turned off is not told, and its standing still reads:
 - **`push-quiet`**, a signal: a card the session executes and has not said done for, merged or not,
   last moved an hour ago (`signals.push_quiet.*`), once per card and quiet spell. Moved is the
   session's newest act on it, named in `progress_kind`: a branch claimed, a push heard, a gate it
-  commissioned, a checkpoint or an announce bound to the card, or `engaged` when it has done none.
+  commissioned, a checkpoint or an announce bound to the card, a wait for it registered or come due
+  (`wait`), or `engaged` when it has done none. A card it waits on another for, before the wait is
+  due, is not told.
   A push is dated by when GitHub's delivery reached the platform. Its turns are activity, not
   movement. Ask the session to push what it has, say what is in its way, or say done for the card.
 - **`pass-stranded`**, a signal from `gate <commission>`: a pull request's pass was published on its
-  head 30 minutes ago (`signals.pass_stranded.*`) and it is still read open on that head, once per
-  head. It names who asked for the review or carried it and whether they are still enrolled. Passed
+  head and it is still read open on that head, once per head (`signals.pass_stranded.*`). Routed
+  `escalate`, the default, its author was told first and you hear it only if it is still open at the
+  seat's window, or at once when no session asked for it or its author left. It names who asked for the review or carried it and whether they are still enrolled. Passed
   and open, not proven mergeable: have the author merge it, merge it, or say why it waits.
 - **`gate-delayed`**, a signal from `gate <commission>`: a gate has waited 15 minutes for a judge
   (`signals.gate_delayed.*`), counted from its commission across every judge that handed it on, or
@@ -179,6 +183,10 @@ kind turned off is not told, and its standing still reads:
   there, and `partly` when another login on the host still answers. Those sessions are not told to you
   as stale or quiet, and nothing can wake or kick them: give their cards to sessions on a live
   machine, then retire them. `/sessions` reads each one's `machine_state`.
+- **`machine-disk-low`**, a signal: the volume a machine's checkout is on has less than a tenth free
+  (`signals.machine_disk_low.*`), told again as the free share halves past that, and each day it
+  stays low. It names what is free of what. Have it freed before builds there fail: a build cache
+  is the usual cause.
 - **`card-closed`**, a signal: a live card's work landed, or every issue it resolves was closed with no
   branch or closing pull request, 15 minutes ago (`signals.card_closed.*`), once per closing. It names
   the card's executor and what it resolves still open. A candidate, never concluded for you: conclude
@@ -186,9 +194,13 @@ kind turned off is not told, and its standing still reads:
 - **`card-raised`**, a signal: a session raised its own card's floor (`signals.card_raised.*`), once
   per raise. It names the stage, the floor it came from and went to, and the session's why. Lower it
   with `card.py --lease retier`, or re-triage the card, when the raise is not warranted.
+- **`forge-credential`**, a signal: a pull request's, an issue's or a comment's text held a credential
+  the door's scanner found, or could not be scanned (`signals.forge_credential.*`), once per delivery
+  and field. It names where and the rules, never the text. Have the text edited and the credential
+  rotated; the session whose card holds the pull request's branch is told too.
 
 A workspace may route `directive-unacknowledged`, `card-unbranched`, `session-unannounced`,
-`push-quiet`, `account-reset`
+`push-quiet`, `account-reset`, `forge-credential`
 and `account-unspent` to the sessions each is about instead of you, or to both; you are told unless
 set. A session is told its
 own `suggested_act`, and is told nothing once it has left; routed to `session`, the kind is not told
@@ -201,7 +213,9 @@ what still holds, once, and nothing from while it was off.
 Every 30 minutes by default (the workspace's `signals.fallback.*` settings), whatever else you heard
 and however busy you are, a say `from: signal <id>` gives you a `seat-fallback` snapshot. It is one
 signal whose facts lead with `changed`, what moved since the last snapshot you received in this seat
-generation (or `nothing changed`), then `act_on`, one line per thing waiting on you, then a compact
+generation (or `nothing changed`), then `act_on`, one line per thing waiting on you (a machine whose
+agent is gone is one line naming its sessions), except that
+lines you answered `considered` and unchanged since are counted in one line, not restated, then a compact
 inventory, a section each in the order you act on them: fleet, work, capacity, attention, launches,
 gates, machines, sources. Each section is lines, its moments in minutes from `observed_at`; a
 section with nothing to say is left out. Work names only cards someone executes or a gate judges,
@@ -279,7 +293,7 @@ report to the owner because a notice arrived. A turn
 that answers a frame changing nothing the owner knows — a notice with nothing to delegate, a
 routine say — is one line at most, and no line when nothing in it is new to them.
 
-`data: {"kind": "fleet", "accounts": [{"account", "provider", "vendor", "verdict", "tightest", "incentive", "sessions", "owner", "serves", "labels"}]}`
+`data: {"kind": "fleet", "accounts": [{"account", "harness", "vendor", "verdict", "tightest", "incentive", "sessions", "owner", "serves", "labels"}]}`
 is every account's verdict,
 `account` its number, `sessions` this workspace's sessions drawing on it and `owner` the member who
 brought it to the platform, as a `from: console user` line names them, sent when you take the
@@ -780,7 +794,10 @@ session, refused by its machine or withdrawn for any cause but your own withdraw
 as a `launch-ended` signal naming its cause and what the machine said; `/launches/ended` lists the
 last day's. A launch still waiting for a machine after 15 minutes (`signals.launch_waiting.*`) is
 told to you once as `launch-waiting`, with why it waits and the machines short of room. A launch without a brief that starts appears in `/sessions` and you delegate to it like
-any idle session. One launch is in flight per machine, and an agent refuses
+any idle session; if it has had no directive and holds no card five minutes after it enrolled
+(`signals.launch_undirected.*`), you are told `launch-undirected`. The work is never the reason:
+the reason is the ledger's, and the session never reads it. A launch without a brief whose reason
+runs past 300 characters is refused `launch-reason-is-a-brief`. One launch is in flight per machine, and an agent refuses
 one past `STEERING_MAX_WORKERS` live workers.
 
 **Name a floor, not a model.** A launch names the least rarity its work needs, `uncommon`, `rare`,
@@ -806,7 +823,7 @@ Its clauses go in this order:
 |---|---|
 | `<harness>` | placement chooses with a floor; otherwise required: `claude`, `zcode` or `opencode`. A named one pins the launch even where the machine prefers another for that vendor |
 | `on <node>` | the daemon places it; not with a floor |
-| `vendor <vendor>` | `anthropic` for `claude`; `any` for every vendor; not with a floor |
+| `vendor <vendor>` | `anthropic` for `claude`; `any` for every vendor; with a floor, the floor is placed only on that vendor's accounts |
 | `account <n>` | the best-ranked account; named, that account or a refusal; not with a floor |
 | `model <model>` or `floor <rarity>` | one is required for `claude` and `zcode`; prefer the floor |
 | `thinking <level>` | the model's own; opencode only |
@@ -814,7 +831,7 @@ Its clauses go in this order:
 | `window` | headless |
 | `card <card>` or `resolves <owner>/<name>#<n>` | no card; either needs a brief |
 | `because <why>` | required; with a model, why that model |
-| `brief: <directive>` (next line) | none; the session waits to be delegated to |
+| `brief: [checkpoint <checkpoint id>] <directive>` (next line) | none; the session waits to be delegated to |
 
 Leave effort out unless the work asks for another level than its rung's. The default gives an
 uncommon model its full depth (the owner's ruling, 2026-10-19: uncommon launches at `max`, whatever
@@ -858,6 +875,11 @@ carries. On a Go workspace a retire names the session and why instead: `retire: 
 <session> [to <successor>] because <reason>`. A card the session still executes open is forfeited,
 live with no executor, or yielded to the successor named; the machine still refuses the retire
 while a card's branch holds work not pushed.
+
+A session that is done is kept with a reason or has its card concluded; a retire is the exception.
+Its `because` names what made neither fit. Go records it beside the session's standing, the
+notices that standing raised and the cards it still executed, for audit:
+`rest.py '/retires?since=<RFC 3339>'`.
 
 A launched session stays headless in tmux. Name `window` only when the owner must view or
 interact with it; otherwise leave it out. To show one already running, on the machine it runs on:
@@ -963,6 +985,12 @@ wake it again once there is room. A wake or rehome onto an account whose owner's
 full is refused `account-concurrency-full`, not queued as a launch would be: wake it once a session
 on that account ends, or rehome it to another account.
 
+A retired session's conversation survives on its machine: `wake:` it and its machine resumes it from
+its transcript, on the account that holds it, and it connects again under the same name at its next
+epoch. The wake settles `resumed` when it does. It returns holding no card, since its retire
+forfeited or yielded them. A session that left by its own word is not woken, since its process may
+still run.
+
 ## Move a card to another model
 
 **A move between stages is a handoff, not a split.** One card carries its stages from spec to
@@ -994,7 +1022,9 @@ satellites and docs. Ask for the plan written for those builders.
 other than its author is also gated before any of its build is handed over: committed under its
 subject's `plans/<n>/plan.md`, naming a builder for each task, and passed by the critic
 (`gate.py <session> critic <plan path>` ending `build it`), since a lesser model needs its
-precision. Launch no builder on a card whose plan has not passed. Each builder takes its tasks by a fresh
+precision. A launch taking over a major card its executor handed over is refused
+`critique-not-converged` until a critique of the card ends `build it`, or a lift of its review waives
+it; one whose executor left without a handover is a rescue and passes (#6052). Each builder takes its tasks by a fresh
 launch on the card in turn, or, where the plan splits into independent pieces, on its own card
 that the major one `requires`.
 
@@ -1008,12 +1038,14 @@ card may propose the move with a `say` naming the target and the way it prefers,
 | Fresh | The plan is committed and written for a reader with no context; the target is a small model (flash); the conversation is long and mostly exploration; or the move crosses machines. |
 | Rehome | What matters is in the conversation and not in any file: mid-build debugging state, or an account running out with the work half done. Compact first while the source account can still run it. |
 
-Fresh is a launch naming the card, with a brief pointing at the handover note:
+Fresh is a launch naming the card, its brief opening with the handover checkpoint's id, the one
+the session's row shows: the daemon hands the launched session its text below your words, so you
+never paste it.
 
 ```bash
 say "$(cat <<'LAUNCH'
 launch: token @lease claude [on <node>] vendor <vendor> [account <n>] model <model> effort <level> card <card> because <why>
-brief: Continue <card>: read the handover checkpoint <note url>, then the plan it names, and take the tasks it gives <model>.
+brief: checkpoint <checkpoint id> Continue <card>: the handover checkpoint follows; read it, then the plan it names, and take the tasks it gives <model>.
 LAUNCH
 )"
 ```
@@ -1057,13 +1089,15 @@ retired and a `confirmed` verdict ask nothing of you, so the hold records them w
 read them in the recording when you want them.
 
 The row also shows what a session has written down:
-`checkpoint` is its last `{boundary, note, at, current}`, current until it next acknowledges a
+`checkpoint` is its last `{id, boundary, note, at, expires_at}`, current until it next acknowledges a
 directive, and `compacted` its last `{at, trigger, skipped}`. Neither tells you by itself: the
-snapshot's rows carry them (the owner's ruling, 2026-10-17). One telling stands: a compaction no
-checkpoint followed within its grace reaches you as a `compaction-uncovered` signal, `from: session
-<id>`, because its session may have nothing to be re-briefed from. After a compaction you ordered
+snapshot's rows carry them (the owner's ruling, 2026-10-17). A compaction no checkpoint covered is
+told only when its session then shows lost context: a `directive-unacknowledged` or
+`launch-brief-unheard` carries `compacted_uncovered_at` when the session compacted so at its epoch
+before the directive or brief went unacknowledged. After a compaction you ordered
 with `control:`, the next directive
-re-briefs it with the card's context, as below. An automatic compaction is a notice, not a reason
+re-briefs it with the card's context, as below: name its checkpoint with `relay: token @lease to
+<session> checkpoint <checkpoint id> <words>`, and it is handed the text. An automatic compaction is a notice, not a reason
 to re-brief: give the card's context again only when the session shows it lost some — it asks what
 it was doing, repeats finished work, or acts against a ruling it was given (the owner's ruling,
 2026-10-06).
@@ -1084,14 +1118,14 @@ usage frame moves its account. Name the evidence in `because`: the fill, the ver
   keep the session. When the row's `context` passes 120k tokens, checkpoint, then compact. The
   window is not readable, so the threshold is absolute.
 - **The next card is unrelated, and the session is tmux-launched:** checkpoint at `unit-done`,
-  retire it, and launch fresh on the card's model routing (below), naming the note in its first directive. A fresh launch
+  retire it, and launch fresh on the card's model routing (below), naming the checkpoint in its brief. A fresh launch
   takes the routed model, pays no summarising turn, and starts from the same floor a compact leaves.
 - **The next card is loosely related and the session fits its model routing** (the same track, a card
   citing its last issue, the same paths): checkpoint, compact, then the directive. Name the
   relation in `because`.
 - **The session has neither a pane nor a VS Code tab the agent can reach** (a plain terminal):
   relay `checkpoint: <card>` before its next directive. Its harness compacts it, and the rebrief
-  points it at the note.
+  names the checkpoint by its id.
 - **Spec settled.** A session whose spec converged checkpoints at `spec-settled` and says
   so; lower its effort or model with `control:` on tmux, and compact it on either surface.
 - **No `/clear`.** A session that should start clean is checkpointed, retired and launched again.
@@ -1103,15 +1137,16 @@ Ask a session to pack up only when both hold: its
 account's verdict is `excluded`, or its `runway` in your `fleet` rows is shorter than the unit
 still needs, with the exclusion lifting (`until`) later than the work can wait — **and** the work blocks others
 (another card or session waits on its branch or issue). Work that blocks nothing is left to
-pause itself with `blocked: … resets …`; do not move it.
+pause itself with `wait <session> for at <until>`; do not move it.
 
 ```bash
 say "relay: token @lease to <session> pack up: <card or issue>"
 ```
 
-It answers `done: <card> handed over — <PR comment url>` once its branch is pushed and a
-`## Handover` comment is on the draft pull request. Then relay a session whose account ranks first (by `fleet`)
-the directive to take it over, naming that comment. It checks out the branch and announces on
+It answers `done: <card> handed over — <checkpoint id>` once its branch is pushed and its
+`handover` checkpoint is recorded. Then relay a session whose account ranks first (by `fleet`)
+the directive to take it over, naming that checkpoint (`relay: token @lease to <session> checkpoint
+<checkpoint id> <words>`), so it is handed the text. It checks out the branch and announces on
 it first; only after that announce, record the new holder, in this order:
 
 ```bash

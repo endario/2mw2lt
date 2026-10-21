@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""The `SessionStart` hook for `compact` and `clear` (doc 154 §8): point the session back at its
-last checkpoint note. A pointer and never the note itself, because what a hook adds to the
-context is capped at 10,000 characters. It reads nothing but files in the workspace, and it
-always exits 0: a hook never fails the start it is attached to.
+"""The `SessionStart` hook for `compact` and `clear` (doc 154 §8): hand the session back its latest
+checkpoint at its epoch, the text the platform keeps (#6324 design §5), asked of the door once and
+within `FETCH_TIMEOUT`. A door that cannot answer falls back to the pointer `checkpoint.py` left in
+the workspace. What a hook adds to the context is capped at 10,000 characters, which a checkpoint's
+8192 bytes and the framing stay within. It always exits 0: a hook never fails the start it is
+attached to.
 
 `--keep <session>` is the plugin's hooks module asking, at a compaction, for the line it adds to
 the summariser's instructions (#3872 D5). It reads the same files, and answers even when it can
@@ -22,6 +24,8 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 
 CAP = 10_000
+FETCH_TIMEOUT = 3.0  # seconds; the session's start waits on it
+REBUILD = "Rebuild what you need from your card, its pull request and its issue before acting."
 CLEARED_FOR = 60  # seconds a clear's SessionEnd waits for the SessionStart that follows it
 
 
@@ -41,13 +45,22 @@ def _path(ws: Path, session: str) -> Path:
     return ws / ".claude" / "steering-checkpoints" / (hashlib.sha256(session.encode()).hexdigest()[:32] + ".json")
 
 
-def remember(ws: Path, session: str, note: str, boundary: str) -> None:
-    """Keep the note of the checkpoint the door just recorded, for this hook to point at."""
+def remember(ws: Path, session: str, boundary: str, *, checkpoint: str | None = None, note: str | None = None) -> None:
+    """Keep which checkpoint the platform just recorded, by its id, or the note URL of the pointer
+    form, for this hook to point at."""
     import spool
     p = _path(ws, session)
     p.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    spool.write_atomic(p, json.dumps({"note": note, "boundary": boundary,
+    spool.write_atomic(p, json.dumps({**({"checkpoint": checkpoint} if checkpoint else {"note": note}),
+                                      "boundary": boundary,
                                       "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}))
+
+
+def _where(last: dict, session: str) -> str:
+    """Where the last checkpoint is read: its note, or the command that prints its text."""
+    if last.get("checkpoint"):
+        return f"`python3 {HERE / 'checkpoint.py'} {session} read {last['checkpoint']}`"
+    return last["note"]
 
 
 def _session(payload: dict, records: dict[str, dict]) -> str | None:
@@ -66,7 +79,7 @@ def _last(ws: Path, session: str) -> dict | None:
         last = json.loads(_path(ws, session).read_text())
     except (OSError, ValueError):
         return None
-    return last if isinstance(last, dict) and last.get("note") else None
+    return last if isinstance(last, dict) and (last.get("note") or last.get("checkpoint")) else None
 
 
 def _cleared(ws: Path) -> Path:
@@ -106,21 +119,37 @@ def context(payload: dict, ws: Path, records: dict[str, dict]) -> str | None:
         session = _took_clear(ws) if records else None
         if session is None:
             return None
-        last = _last(ws, session)
-        told = (f" Your last checkpoint ({last.get('boundary')}, {last.get('at')}) is {last['note']}. "
-                "Read it, then act." if last else " It has no checkpoint recorded.")
         return (f"This is a new provider session after /clear of {session}: run /2mw2lt:connect before "
-                "anything else." + told)[:CAP]
+                "anything else. " + _handed(ws, session, records))
     session = _session(payload, records) if source == "compact" else None
     if session is None:
         return None
-    last = _last(ws, session)
-    if last is None:
-        return ("Your context was compacted, and this session has no checkpoint recorded. Rebuild what "
-                "you need from your card, its pull request and its issue before acting.")[:CAP]
-    # The daemon, not this file, knows whether a directive acknowledged since made it stale.
-    return (f"Your context was compacted. Your last checkpoint ({last.get('boundary')}, {last.get('at')}) "
-            f"is {last['note']}. Read it, and any directive you acknowledged after it, then act.")[:CAP]
+    return "Your context was compacted. " + _handed(ws, session, records)
+
+
+def _handed(ws: Path, session: str, records: dict[str, dict]) -> str:
+    """The session's latest checkpoint at its epoch, as the door holds it: its text, or why there is
+    none. The daemon, not this file, knows whether a directive acknowledged since made it stale."""
+    try:
+        import session_routes
+        token = (records.get(session) or {}).get("token")
+        if not token:
+            raise LookupError("no stored token")
+        got = session_routes.checkpoint_now(session, token, FETCH_TIMEOUT)
+    except (Exception, SystemExit) as e:  # noqa: BLE001 — whatever stops the read, the pointer stands in
+        last = _last(ws, session)
+        if last is None:
+            return f"This session has no checkpoint recorded here, and the platform could not be asked ({e}). {REBUILD}"
+        return (f"Your last checkpoint ({last.get('boundary')}, {last.get('at')}) is at {_where(last, session)}; "
+                f"its text could not be fetched ({e}). Read it, and any directive you acknowledged after it, then act.")
+    if got is None:
+        return f"This session has no checkpoint recorded at this epoch. {REBUILD}"
+    said = f"Your last checkpoint, {got.get('boundary')} at {got.get('at')}"
+    if got.get("text") is not None:
+        return f"{said}, follows. Act on it and on any directive you acknowledged after it.\n\n{got['text']}"
+    if got.get("expired"):
+        return f"{said}, expired on {got.get('expires_at')}. {REBUILD}"
+    return f"{said}, is at {got.get('note')}. Read it, and any directive you acknowledged after it, then act."
 
 
 def keep(session: str, cwd: Path) -> str:
@@ -140,7 +169,7 @@ def keep(session: str, cwd: Path) -> str:
     except Exception:  # noqa: BLE001 — what cannot be read is said to be unknown
         last = None
     return (f"Keep verbatim: steering session {session}; branch {branch or 'unknown'}; "
-            f"last checkpoint {last['note'] if last else 'none recorded'}.")
+            f"last checkpoint {(last.get('checkpoint') or last['note']) if last else 'none recorded'}.")
 
 
 def main() -> int:

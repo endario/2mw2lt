@@ -98,15 +98,19 @@ directive. `from: session <name>` is a peer's own enrollment; a claimed owner re
 adds no authority.
 
 An envelope opening `pack up: <card or issue>` asks for handover: finish the smallest safe
-step, commit/push with no half-edit, post a checkpoint on the draft PR, and send `done` with
-its note URL. A worker taking it over claims/announces the branch and reads that note first.
+step, commit/push with no half-edit, record a `handover` checkpoint, and send `done` with the
+checkpoint's id. A worker taking it over is handed the checkpoint's text below its directive, in a
+fenced `checkpoint <id> <boundary> <session>` block, and reads it before it claims/announces the
+branch. A block that says `checkpoint <id> expired on <date>` carries no text: ask the brain.
 
 ## Usage
 
 `ranked` names rank/tier and the forecast. `unread` is not spare capacity: take only work that
 fits the hour and name that bound in announce. `excluded`, or runway shorter than the next
-unit needs, means stop before starting it: preserve the work, push, and report the limit and
-reset with `blocked`.
+unit needs, means stop before starting it: preserve the work, push, and declare
+`wait <session> for at <reset>`, the verdict's `until`. That records why you stopped without
+asking the seat to dispose of anything, and you are told when the reset comes. Say `blocked`
+only when no reset is named.
 
 `incentive` beside the verdict is the owner's own steering of the account, not the
 vendor's word: above 1x, worry less — keep working as the window fills; below 1x, spend it

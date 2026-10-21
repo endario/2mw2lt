@@ -261,11 +261,12 @@ def merge_grant(payload, repo: str) -> dict | None:
 FORGE_GRANT_ENV = "STEERING_FORGE_GRANT"
 # Each verb of that grant: the options it may carry, those taking a value and those not, and
 # whether it names its pull request or issue by number. An option not here gets no answer: the
-# `--auto` and `--admin` merges, and the editor and browser forms, on purpose.
+# `--auto` and `--admin` merges, the editor and browser forms, and a create's `--recover`, which
+# reloads its draft from a file after the words are read, on purpose.
 FORGE_VERBS = {
     ("pr", "create"): ({"-R", "--repo", "-a", "--assignee", "-B", "--base", "-b", "--body", "-F", "--body-file", "-H", "--head",
                         "-l", "--label", "-m", "--milestone", "-p", "--project", "-r", "--reviewer", "-t", "--title",
-                        "-T", "--template", "--recover"},
+                        "-T", "--template"},
                        {"-d", "--draft", "-f", "--fill", "--fill-first", "--fill-verbose", "--no-maintainer-edit", "--dry-run"}, False),
     ("pr", "comment"): ({"-R", "--repo", "-b", "--body", "-F", "--body-file"},
                         {"--edit-last", "--create-if-none", "--delete-last", "--yes"}, True),
@@ -323,21 +324,25 @@ def literal_words(command: str) -> list[str] | None:
     return words
 
 
-def _gh_granted(args: list[str], repo: str, own=None) -> bool:
-    """Whether the gh words pass the grant on repo; own(number) answers whether a pull request is
-    the session's own, for a verb FORGE_OWN holds."""
+def gh_refusal(args: list[str], repo: str, check=None, verbs=FORGE_VERBS, owned=None) -> str | None:
+    """Why the gh words do not pass a grant on repo, naming the check and the word it failed on, or
+    None when they pass. verbs and owned are the grant's policy, the hook's by default: owned maps a
+    verb to the kind of ownership it needs, `pull` for a numbered pull request, `issue` for a number
+    that may be an issue or a pull request, `head` for a create's head branch. check(kind, value)
+    answers None when the session owns value, else why not."""
+    owned = {verb: "pull" for verb in FORGE_OWN} if owned is None else owned
     verb = tuple(args[:2])
-    spec = FORGE_VERBS.get(verb)
+    spec = verbs.get(verb)
     if spec is None:
-        return False
+        return f"forge-verb-not-granted: gh {' '.join(args[:2])} is not in the grant"
     values, bools, positional = spec
-    named, numbers, i, seen, number = False, 0, 2, set(), None
+    named, numbers, i, seen, number, head = False, 0, 2, set(), None, None
     while i < len(args):
         arg = args[i]
         flag, glued, value = arg.partition("=")
         if not arg.startswith("-"):
             if not positional or not arg.isdigit():
-                return False
+                return f"forge-flag-not-granted: {arg!r} is no option or number gh {' '.join(verb)} is granted"
             numbers, number = numbers + 1, arg
         elif arg in bools:
             seen.add(arg)
@@ -346,29 +351,98 @@ def _gh_granted(args: list[str], repo: str, own=None) -> bool:
                 i, value = i + 1, args[i + 1]
             if flag in ("-R", "--repo"):
                 if value.lower() != repo.lower():
-                    return False
+                    return f"forge-repo-not-granted: {flag} names {value}, and the grant covers {repo}"
                 named = True
+            elif flag in ("-H", "--head"):
+                head = value
+        elif flag in values:
+            return f"forge-flag-not-granted: {flag} wants a value"
         else:
-            return False
+            return f"forge-flag-not-granted: {flag} is not granted on gh {' '.join(verb)}"
         i += 1
-    if not named or numbers > 1 or verb in FORGE_REQUIRED and not seen & FORGE_REQUIRED[verb]:
-        return False
-    return verb not in FORGE_OWN or number is not None and own is not None and own(number)
+    if not named:
+        return f"forge-repo-not-granted: no -R names the repository; name -R {repo}"
+    if numbers > 1:
+        return "forge-flag-not-granted: more than one number"
+    if verb in FORGE_REQUIRED and not seen & FORGE_REQUIRED[verb]:
+        return "forge-draft-required: a worker opens its pull request as a draft; add --draft"
+    kind = owned.get(verb)
+    if kind is None:
+        return None
+    if kind in ("pull", "issue") and number is None:
+        return f"forge-not-own-pull: gh {' '.join(verb)} names no number to check"
+    if check is None:
+        return "forge-not-own-pull: no ownership check was given"
+    return check(kind, head if kind == "head" else number)
+
+
+def _gh_granted(args: list[str], repo: str, own=None) -> bool:
+    """Whether the gh words pass the hook's grant on repo; own(number) answers whether a pull
+    request is the session's own."""
+    return gh_refusal(args, repo, lambda kind, n: None if own is not None and own(n) else "forge-not-own-pull") is None
+
+
+def branch_of(cwd: str | None) -> tuple[str, str]:
+    """The branch the checkout at cwd is on, or empty and why it could not be read."""
+    try:
+        run = subprocess.run(["git", "-C", cwd or os.getcwd(), "branch", "--show-current"],
+                             capture_output=True, text=True, timeout=2)
+    except subprocess.TimeoutExpired:
+        return "", "forge-ownership-unknown: git took over 2s to name this checkout's branch"
+    except (OSError, subprocess.SubprocessError) as e:
+        return "", f"forge-ownership-unknown: git could not run: {e}"
+    if run.returncode != 0:
+        return "", f"forge-ownership-unknown: git branch exited {run.returncode}: {run.stderr.strip()[:200]}"
+    if not run.stdout.strip():
+        return "", "forge-ownership-unknown: this checkout is on no branch"
+    return run.stdout.strip(), ""
+
+
+def current_branch(cwd: str | None) -> str:
+    """The branch the checkout at cwd is on, or empty when it is on none or cannot be read."""
+    return branch_of(cwd)[0]
+
+
+def _gh(args: list[str], what: str) -> tuple[str | None, str]:
+    """gh's answer to args within the hook's budget, or None and why: its exit and GitHub's words, or
+    the timeout."""
+    try:
+        run = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=3)
+    except subprocess.TimeoutExpired:
+        return None, f"forge-ownership-unknown: gh took over 3s to answer {what}"
+    except (OSError, subprocess.SubprocessError) as e:
+        return None, f"forge-ownership-unknown: gh could not run: {e}"
+    if run.returncode != 0:
+        return None, f"forge-ownership-unknown: gh exited {run.returncode} on {what}: {run.stderr.strip()[:200]}"
+    return run.stdout.strip(), ""
+
+
+def pull_refusal(number: str, repo: str, cwd: str | None) -> str | None:
+    """None when the pull request's head is the branch the checkout at cwd is on, as GitHub answers
+    it; otherwise why not, a lookup that failed kept apart from a head that is another branch's."""
+    branch, why = branch_of(cwd)
+    if not branch:
+        return why
+    head, why = _gh(["pr", "view", number, "-R", repo, "--json", "headRefName", "-q", ".headRefName"],
+                    f"pull request #{number}'s head")
+    if head is None:
+        return why
+    return None if head == branch else f"forge-not-own-pull: #{number}'s head is {head}, and this checkout is on {branch}"
+
+
+def issue_refusal(number: str, repo: str, cwd: str | None) -> str | None:
+    """None for a number that is an issue, or a pull request of the session's own: gh comments on
+    either through `issue comment`."""
+    pull, why = _gh(["api", f"repos/{repo}/issues/{number}", "--jq", ".pull_request != null"], f"whether #{number} is a pull request")
+    if pull is None:
+        return why
+    return pull_refusal(number, repo, cwd) if pull == "true" else None
 
 
 def own_pull(number: str, repo: str, cwd: str | None) -> bool:
     """Whether the pull request's head is the branch the checkout at cwd is on, as GitHub answers it
     within the hook's budget; a lookup that fails or is slow is not the session's own."""
-    try:
-        branch = subprocess.run(["git", "-C", cwd or os.getcwd(), "branch", "--show-current"],
-                                capture_output=True, text=True, timeout=2).stdout.strip()
-        if not branch:
-            return False
-        head = subprocess.run(["gh", "pr", "view", number, "-R", repo, "--json", "headRefName", "-q", ".headRefName"],
-                              capture_output=True, text=True, timeout=3)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return head.returncode == 0 and head.stdout.strip() == branch
+    return pull_refusal(number, repo, cwd) is None
 
 
 BINDING = os.path.join(".claude", "steering-workspace")
@@ -378,22 +452,51 @@ def grant_repo(payload: dict, environ) -> str | None:
     """The repository the forge grant covers: the launch's, else that of a checkout bound to a
     workspace, whose binding install writes only when the workspace serves its `origin` (#2618).
     It only reads; anything it cannot read grants nothing."""
+    return grant_repo_why(payload, environ)[0]
+
+
+def _redacted(text: str) -> str:
+    """git's words with any URL's userinfo taken out, since an origin may carry a credential."""
+    return re.sub(r"(?<=://)[^/@\s]+@", "***@", text.strip())[:200]
+
+
+def grant_repo_why(payload: dict, environ) -> tuple[str | None, str]:
+    """grant_repo's answer, and why it is none: each failed check named apart, its tool's status and
+    words kept, a URL's credential never."""
     repo = environ.get(FORGE_GRANT_ENV, "")
     if repo:
-        return repo if GRANT_SHAPE.fullmatch(repo) else None
+        return (repo, "") if GRANT_SHAPE.fullmatch(repo) else (None, f"{FORGE_GRANT_ENV} is not owner/name")
     cwd = payload.get("cwd") if isinstance(payload.get("cwd"), str) else None
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     try:
-        common = subprocess.run(["git", "-C", cwd or os.getcwd(), "rev-parse", "--path-format=absolute", "--git-common-dir"],
-                                capture_output=True, text=True, timeout=2).stdout.strip()
-        if not common or not Path(common).parent.joinpath(BINDING).is_file():
-            return None
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
         import local_workspace
-        remote = local_workspace.origin_url(Path(common).parent, timeout=2)
-        slug = local_workspace.github_slug(remote, timeout=2) if remote else None
-    except (OSError, subprocess.SubprocessError, ImportError):
-        return None
-    return slug if slug and GRANT_SHAPE.fullmatch(slug) else None
+    except ImportError as e:
+        return None, f"the workspace reader could not load: {e}"
+
+    def git(*args: str) -> tuple[str | None, str]:
+        try:
+            run = subprocess.run(["git", "-C", cwd or os.getcwd(), *args], capture_output=True, text=True, timeout=2)
+        except subprocess.TimeoutExpired:
+            return None, f"git {args[0]} took over 2s"
+        except (OSError, subprocess.SubprocessError) as e:
+            return None, f"git could not run: {e}"
+        if run.returncode != 0:
+            return None, f"git {' '.join(args)} exited {run.returncode}: {_redacted(run.stderr)}"
+        return run.stdout.strip(), ""
+
+    common, why = git("rev-parse", "--path-format=absolute", "--git-common-dir")
+    if common is None:
+        return None, why
+    root = Path(common).parent
+    if not root.joinpath(BINDING).is_file():
+        return None, f"{root} is bound to no workspace ({BINDING} is absent)"
+    remote, why = git("remote", "get-url", "origin")
+    if remote is None:
+        return None, f"the checkout's origin could not be read: {why}"
+    slug, why = local_workspace.github_slug_why(remote, timeout=2)
+    if slug is None:
+        return None, f"origin is no GitHub repository: {why}"
+    return (slug, "") if GRANT_SHAPE.fullmatch(slug) else (None, "origin's owner/name is not one the grant reads")
 
 
 def _client_granted(path: str) -> bool:

@@ -556,6 +556,17 @@ CLAIM_REFUSED = {
                        "then choose Connect GitHub again",
     "exchange-failed": "GitHub's sign-in code was spent or had expired: choose Connect GitHub again",
     "owner-required": "it was asked by a member, and only the team's owner connects GitHub",
+    # The webhook's own claim when Connect GitHub's return never arrived (#7912).
+    "membership-unreadable": "GitHub would not say whether you administer {owner}: choose Connect GitHub again, and if "
+                             "it repeats tell the operator",
+    "installation-revoked": "the App was uninstalled from {owner}, or released, after you installed it: install it "
+                            "again, then choose Connect GitHub again",
+    "installation-held-elsewhere": "another team already holds the App's installation on {owner}: its owner releases it "
+                                   "in its console first",
+    "owner-replaced": "the team's owner changed since you installed the App: its owner now chooses Connect GitHub",
+    "owner-unverified": "your console account no longer verifies as the GitHub account that installed the App: sign "
+                        "in on {console}/ with that account, then choose Connect GitHub again",
+    "reconcile-timeout": "GitHub did not answer in time to finish the connection: choose Connect GitHub again",
     "member-removed": "the account that asked is no longer a member of the team: the team's owner connects GitHub",
     "principal-membership-removed": "the account that asked is no longer a member of the team: the team's owner connects GitHub",
     **{check: SIGN_IN_AGAIN for check in ("not-authenticated", "principal-expired", "identity-stale", "binding-expired",
@@ -574,25 +585,68 @@ def claim_refused(refused: dict, repo: str, console: str) -> str:
             f"again, and if it repeats tell the operator, quoting reference {request}")
 
 
+def reconciling(got: dict, repo: str, console: str) -> str | None:
+    """Where GitHub's notice of the installation stands while it keeps the repository unreadable: a
+    failure retried each minute, or the check it settled on without the repository's source."""
+    r = got.get("reconciling")
+    if not isinstance(r, dict):
+        return None
+    check = r.get("check") or "unknown"
+    if r.get("settled"):
+        if check in CLAIM_REFUSED:
+            return claim_refused({"check": check, "request": r.get("at")}, repo, console)
+        return f"the App is connected, but {repo} was not set up to be read ({check}): choose Connect GitHub again on {console}/"
+    return f"GitHub's notice of the installation is being retried each minute ({check})"
+
+
 def wait_for_go_grant(console: str, token: str, team: str, repo: str, owner: bool) -> None:
+    """The grant waited for on the person's terminal session, as a first admission does."""
+    url = f"{console}/api/v1/teams/{team}/installations?{urllib.parse.urlencode({'repository': repo})}"
+
+    def read(deadline: float) -> dict:
+        status, got = waited("GET", url, deadline, token=token)
+        if status != 200:
+            raise Stop(f"coordination could not say whether the App reaches {repo} ({status}): "
+                       f"{got.get('code') or got}; run install again, or ask the operator if it repeats")
+        return got
+    wait_for_installation(read, console, repo, owner)
+
+
+def wait_for_door_grant(door: str, console: str, repo: str) -> None:
+    """The grant waited for on the machine's credential, as the door's authorities view answers it,
+    so a run that resumes on an admitted checkout signs nobody in (#7928)."""
+    def read(deadline: float) -> dict:
+        status, got = waited("GET", f"{door}/steering/authorities", deadline)
+        installation = got.get("installation")
+        if status != 200 or not isinstance(installation, dict):
+            raise Stop(f"the workspace's door could not say whether the App reaches {repo} ({status}): "
+                       f"{got.get('code') or got.get('error') or got}; run install again, or ask the operator if it repeats")
+        return installation
+    wait_for_installation(read, console, repo, None)
+
+
+def wait_for_installation(read, console: str, repo: str, owner: bool | None) -> None:
     """Until the team holds the App's installation on `repo`, which is when its workspace's source
     is read: the owner connects GitHub from the desk; anyone else asks them to. A claim coordination
-    refuses is said once, with what to do about it, and the wait goes on: a retry may hold."""
-    url = f"{console}/api/v1/teams/{team}/installations?{urllib.parse.urlencode({'repository': repo})}"
+    refuses is said once, with what to do about it, and the wait goes on: a retry may hold. `owner`
+    is None where the run cannot tell whether the person is the team's owner."""
     deadline = time.monotonic() + GRANT
     seen: set = set()
     last: list = []
 
     def held() -> bool:
-        status, got = waited("GET", url, deadline, token=token)
-        if status != 200:
-            raise Stop(f"coordination could not say whether the App reaches {repo} ({status}): "
-                       f"{got.get('code') or got}; run install again, or ask the operator if it repeats")
+        got = read(deadline)
         refused = got.get("refused")
         if isinstance(refused, dict) and (refused.get("request"), refused.get("at")) not in seen:
             seen.add((refused.get("request"), refused.get("at")))
             last[:] = [refused]
             say("github", claim_refused(refused, repo, console) + " (still waiting…)")
+        # A held installation whose notice is still retrying, or settled unsourced, is not readable yet.
+        if (pending := reconciling(got, repo, console)) is not None:
+            if pending not in seen:
+                seen.add(pending)
+                say("github", pending + " (still waiting…)")
+            return False
         return got.get("held") is True
 
     if held():
@@ -603,6 +657,9 @@ def wait_for_go_grant(console: str, token: str, team: str, repo: str, owner: boo
         say("", f"open {console}/ and choose Connect GitHub in the account menu "
                 + (f"(nothing opened: {why}; waiting…)" if (why := unopened()) else "(opened in your browser; waiting…)"))
         open_page(f"{console}/")
+    elif owner is None:
+        say("", f"the team's owner, signed in with GitHub, opens {console}/ and chooses Connect GitHub in the "
+                "account menu; anyone else asks them to (waiting…)")
     else:
         say("", "only the team's owner, signed in with GitHub, connects it: ask them to (waiting…)")
     start = told = time.monotonic()
@@ -891,6 +948,8 @@ def wire(root: Path, door: str, authority: str, codex: bool = False) -> None:
     record(root, door, authority)
     if codex:
         hooks.tokens_directory(root)
+        # The forge verb's one rule names the launcher, which a Codex install has no hooks to write.
+        hooks.install_launcher(root)
     else:
         hooks.hooks_install(root, local=False, workspace_id=authority)
 
@@ -987,8 +1046,20 @@ def install(root: Path, codex: bool = False, team: str | None = None,
         if authority is None:
             raise Stop(f"the workspace's door {door} names no workspace_id in its authorities; it runs a "
                        "release before the alias window, so ask its operator")
+        # A run that stopped at the grant recorded the door first, so the grant is checked again here.
+        if isinstance(view.get("installation"), dict):
+            wait_for_door_grant(door, console, repo)
+        else:
+            say("github", f"the workspace's door does not say whether the App reaches {repo}: it runs a release "
+                          "before this plugin's, so this run cannot check the grant")
     wire(root, door, authority, codex)
     say("hooks", "none for Codex" if codex else "written")
+    if codex:
+        import codex_rules
+        try:
+            say("forge", codex_rules.write(root).removeprefix("forge grant: "))
+        except OSError as e:
+            say("forge", f"grant not written, so Codex asks for each pull request write: {e}")
     held = machine_workspaces.at(root)
     machine_workspaces.replace(machine_workspaces.directory(Path.home()), authority, machine_workspaces.Entry(
         root.resolve(), door, held.capability_file if held else None, held.port if held else None, name))

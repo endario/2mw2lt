@@ -633,6 +633,23 @@ def bulletin_snapshot(ws: Path, session: str, psession: str) -> str | None:
     return session_routes.get("/bulletin?render=snapshot&mark=1", token).get("text") or None
 
 
+def checkpoint_block(ws: Path, session: str, psession: str) -> str | None:
+    """The epoch's latest checkpoint, handed back after a restart (#6324 design §5): its text under a
+    `checkpoint:` line, or that it expired or where its note is; None when the epoch has none. Raises
+    whatever the read raised, as the bulletin's does."""
+    import session_routes  # noqa: E402
+    _, token = own_enrolment(ws, psession, session)
+    got = session_routes.checkpoint_now(session, token, 10.0)
+    if got is None:
+        return None
+    said = f"checkpoint: {got.get('boundary')} at {got.get('at')}"
+    if got.get("text") is not None:
+        return f"{said}; act on it and on any directive you acknowledged after it:\n{got['text'].rstrip(chr(10))}"
+    if got.get("expired"):
+        return f"{said}, expired on {got.get('expires_at')}"
+    return f"{said}, at {got.get('note')}"
+
+
 def repo_line(ws: Path) -> str:
     """`repo: owner/name`, the repository this workspace serves as its door names it. A checkout's
     `origin` may be an SSH host alias, which `gh` cannot resolve; `gh -R` with this line does not
@@ -685,6 +702,17 @@ def repo_line(ws: Path) -> str:
             except OSError:
                 pass   # best-effort: a checkout that cannot be written still gets its line
     return f"repo: {mine[0]['repo']}"
+
+
+def forge_grant(ws: Path) -> tuple[str, bool]:
+    """A Codex session's forge grant, written: the launcher its rule names, which a Codex install
+    made before the rule did not write, then the rule. The line to print, and whether it warns."""
+    import codex_rules
+    try:
+        hooks.refresh_launcher(codex_rules.shared(ws))
+        return codex_rules.write(ws), False
+    except OSError as e:
+        return f"forge grant: not written, so Codex asks for each pull request write: {e}", True
 
 
 def main(argv: list[str]) -> int:
@@ -744,6 +772,13 @@ def main(argv: list[str]) -> int:
         print(f"bulletin: unread ({type(e).__name__}: {e})", file=sys.stderr)
     if snapshot:
         print(snapshot)
+    try:
+        kept = checkpoint_block(ws, session, psession)
+    except Exception as e:
+        kept = None
+        print(f"checkpoint: unread ({type(e).__name__}: {e})", file=sys.stderr)
+    if kept:
+        print(kept)
     # The stream this session holds at its agent names the incarnation it belongs to, and this
     # is the only place the recipe derives it.
     print(f"STEERING_RUNTIME_ID={rid}")
@@ -776,6 +811,8 @@ def main(argv: list[str]) -> int:
         import codex_hooks
         trust, warn = codex_hooks.report(Path.cwd(), UPDATE["codex"])
         print(trust, file=sys.stderr if warn else sys.stdout)
+        said, warn = forge_grant(ws)
+        print(said, file=sys.stderr if warn else sys.stdout)
     try:
         import ghmeter
         blind = ghmeter.shadowed(os.environ.get("PATH", ""))

@@ -139,7 +139,9 @@ def _fences(reading: dict) -> dict:
 
 def prepare(held: dict, kind: str, goal: str, rest: list[str]) -> int:
     import session_routes
-    session_routes.seat_generation(held["session"], held["token"])
+    # A goal's steward plans its own goal, which Go judges at submit (doc 198 §3); judging stays the seat's.
+    if kind != "plan":
+        session_routes.seat_generation(held["session"], held["token"])
     reading = _read(held["token"], goal)
     fences = _fences(reading)
     shown: list[str] = [f"goal {goal}: {reading['goal']['current'].get('title', '')}",
@@ -223,11 +225,13 @@ def submit(held: dict, file: Path) -> int:
         path, body, key, goal = prepared["path"], prepared["body"], prepared["key"], prepared["goal"]
     except (OSError, ValueError, KeyError, TypeError) as why:
         raise ValueError(f"{file} is not a prepared goal command ({why})") from None
-    session_routes.seat_generation(held["session"], held["token"])
+    send = lambda _: session_routes.write(path, body, session_routes._own_key("seat.goal", held["session"], key),
+                                          session_routes.SESSION_CARRIER, held["token"])
+    if not path.endswith("/plans"):
+        session_routes.seat_generation(held["session"], held["token"])
     print(f"command id {key}", file=sys.stderr)
     try:
-        answer = session_routes.write(path, body, session_routes._own_key("seat.goal", held["session"], key),
-                                      session_routes.SESSION_CARRIER, held["token"])
+        answer = session_routes.lent(held["session"], held["token"], send) if path.endswith("/plans") else send(0)
     except session_routes.Unsent as e:
         print(refusal.retry(str(e)))
         print(f"the answer was lost: submit {file} again, which sends the same body under the same key", file=sys.stderr)

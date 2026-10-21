@@ -29,6 +29,7 @@ import readout  # noqa: E402
 import runtime_id  # noqa: E402
 import spool  # noqa: E402
 import supervision  # noqa: E402
+from pretool import stamp_tool  # noqa: E402
 import verb_help  # noqa: E402
 from local_workspace import workspace_root  # noqa: E402
 from door import door_url, failure, record, remote, brain_route, send  # noqa: E402
@@ -84,42 +85,6 @@ def harness_pid(source: str, ws: Path, hook: dict) -> int | None:
         return int(zcode_binding.resolve(ws, cwd=str(hook.get("cwd") or os.getcwd()))["pid"])
     except (zcode_binding.Refused, OSError, ValueError, KeyError, TypeError):
         return None
-
-
-# Calls kept, of every thread together: a permission request follows its own call's PreToolUse
-# by tens of milliseconds, but other threads' calls, and auto-allowed ones of its own, land between.
-PRETOOL_KEPT = 32
-
-
-def stamp_tool(ws: Path, hook: dict) -> None:
-    """Claude Code sends no `tool_use_id` on `PermissionRequest` (2.1.304, #7837), so one turn's
-    dialogs would fold into one item that closes only at its end. A thread asks one call at a
-    time, and the call's own PreToolUse fired just before with the same tool and input: its id is
-    the ask's. One file for the workspace, so nothing piles up per session. Best effort; a request
-    with nothing to match stays keyed by its prompt."""
-    event = hook.get("hook_event_name")
-    if event not in ("PreToolUse", "PermissionRequest") or hook.get("tool_use_id") and event == "PermissionRequest":
-        return
-    try:
-        call = [hook.get("session_id"), hook.get("agent_id") or "", hook.get("tool_name"),
-                hashlib.sha256(json.dumps(hook.get("tool_input"), sort_keys=True).encode()).hexdigest()]
-        path = spool.spool_dir(ws) / ".pretool"
-        if event == "PermissionRequest":
-            kept = json.loads(path.read_text())
-            hook["tool_use_id"] = next(i for i, *c in reversed(kept) if c == call)
-            return
-        if not isinstance(hook.get("tool_use_id"), str) or not hook["tool_use_id"]:
-            return
-        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with path.with_suffix(".lock").open("a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            try:
-                kept = json.loads(path.read_text())
-            except (OSError, ValueError):
-                kept = []
-            spool.write_atomic(path, json.dumps((kept + [[hook["tool_use_id"], *call]])[-PRETOOL_KEPT:]))
-    except (OSError, ValueError, TypeError, StopIteration):
-        pass
 
 
 def main() -> int:
@@ -201,8 +166,8 @@ def main() -> int:
             ride = agent_send(ws, o, left)
         except Exception as e:  # no HTTP answer at all: the door is the fallback it always was
             record("observe", f"agent relay not taken: {failure(e)}", ws)
-    if ride == AGENT_REFUSED:
-        notice = None  # an answering agent is final; the spool and its drain own a refusal
+    if ride in (AGENT_REFUSED, AGENT_HELD):
+        notice = None  # an agent that took the post is final; the spool and its drain own the rest
     elif ride is not None:
         said, release = ride
         claimed = spool.claim(path)
@@ -211,7 +176,7 @@ def main() -> int:
         keep_release(ws, release)
         notice = received_notice(ws, o, said, time.time())
     else:
-        notice = door_send(seated, ws, o, path, left)
+        notice = door_send(seated, ws, o, path, deadline - time.monotonic())
     # A turn that runs long reaches no Stop, so its tool calls carry the reading (#1159).
     left = deadline - time.monotonic()
     if source == "claude" and o["event"] == "PostToolUse" and left > 0.3:
@@ -229,30 +194,33 @@ def main() -> int:
 # occurrence again through the door would duplicate a refusal the ledger already keeps. The
 # observation stays spooled, and the drain owns refusals as it always has.
 AGENT_REFUSED = "agent-relay-refused"
+# An agent that took the post but had not answered when this hook's patience ran out. Its relay
+# waits on the door no longer than this hook does, on a warm connection, so a door that slow for
+# the agent is no faster for a cold handshake in what is left of the budget: falling back cost the
+# session two more seconds per hook on the M4's degraded route and raced the relay with a second
+# write of the same occurrence.
+AGENT_HELD = "agent-relay-held"
 
 
 def agent_send(ws: Path, o: dict, left: float):
     """The observation through this machine's agent, admitted by its key and naming its
     workspace, as the reach and turn routes are; None when no agent answered at all, so the
     caller sends to the door as it always has — an agent that answered is final, its 2xx carrying
-    the door's answer and anything else AGENT_REFUSED. The loopback is cheap to fail, so an agent
+    the door's answer and anything else AGENT_REFUSED, and one still forwarding when the wait ends
+AGENT_HELD. The loopback is cheap to fail, so an agent
     that is absent costs the hook milliseconds of its budget, not the send."""
-    port = local_workspace.agent_port(ws, timeout=1.0)
-    key = local_workspace.agent_key(ws, port)
-    if not key:
+    req = local_workspace.agent_request(ws, "/steering/observe", o, timeout=1.0)
+    if req is None:
         return None
-    req = urllib.request.Request(
-        f"http://127.0.0.1:{port}/steering/observe", data=json.dumps(o).encode(),
-        headers={"Content-Type": "application/json",
-                 local_workspace.KEY_HEADER: key,
-                 **local_workspace.workspace_header(str(ws))},
-        method="POST")
     try:
         with send(req, timeout=min(2.0, left)) as r:
             return answer_in(r)
     except urllib.error.HTTPError as e:
         record("observe", f"the agent relayed the door's refusal: {failure(e)}", ws)
         return AGENT_REFUSED
+    except TimeoutError as e:  # urllib wraps a connect's timeout in URLError; a bare one is the answer's
+        record("observe", f"the agent held the observation past the hook's wait; it stays spooled: {failure(e)}", ws)
+        return AGENT_HELD
 
 
 def door_send(seated, ws: Path, o: dict, path, left: float) -> str | None:

@@ -52,11 +52,30 @@ test('a watched session\'s rows arrive in order with rising seq', async ($, on) 
   expect(sent.headers['X-Steering-Agent-Key']).toBe(AGENT.key)
   expect(sent.headers['X-Steering-Workspace']).toBe('/ws')
   expect(JSON.parse(sent.body!).session).toBe('s1')
+  expect(JSON.parse(sent.body!).producer).toBe('ps-1')    // the conversation that numbered them
   // The next poll resumes from the cursor the agent gave.
   expect(polls(w).map(p => p.url)).toEqual([
-    `http://127.0.0.1:${AGENT.port}/steering/surface/poll?session=s1&after=`,
-    `http://127.0.0.1:${AGENT.port}/steering/surface/poll?session=s1&after=c1`,
+    `http://127.0.0.1:${AGENT.port}/steering/surface/poll?session=s1&producer=ps-1&after=`,
+    `http://127.0.0.1:${AGENT.port}/steering/surface/poll?session=s1&producer=ps-1&after=c1`,
   ])
+})
+
+// The agent advertises the session's rows live only while the conversation its hold pins is polling
+// (plan 1b.1): the poll names the conversation it asks for, the one the events name as their
+// producer, read again at each poll so a conversation that changed under the module is not the old.
+test('the poll names its producer', async ($, on) => {
+  let second!: (p: { watch: boolean; cursor: string }) => void
+  const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true, cursor: 'c1' }, new Promise(r => { second = r })] })
+  await begin($)
+  await w.clock.settle()
+  await $.turn.start({ turnId: 't1', text: 'list the files' })
+  await w.clock.advance(50)
+  const producer = (JSON.parse(posted(w)[0]!.body!) as { producer: string }).producer
+  expect(new URL(polls(w)[0]!.url).searchParams.get('producer')).toBe(producer)
+  w.psession = 'ps-2'
+  second({ watch: true, cursor: 'c2' })
+  await w.clock.settle()
+  expect(polls(w).map(p => new URL(p.url).searchParams.get('producer'))).toEqual(['ps-1', 'ps-1', 'ps-2'])
 })
 
 // Compaction's boundary and summary never pass `session.append` (spike A): the summary is the
@@ -83,6 +102,7 @@ test('the module\'s own pointer row is origin plugin', async ($, on) => {
   await w.clock.settle()
   await w.clock.advance(50)
   expect(w.submits).toEqual([POINTER])
+  expect(w.asUser).toEqual([false])                // the pointer stays framed as the plugin's
   expect(events(w).map(e => e.row)).toEqual([{ role: 'user', origin: 'plugin', blocks: [{ type: 'text', text: POINTER }] }])
 })
 
@@ -187,5 +207,102 @@ test('a session renamed by its hold shows nothing until its new name is watched,
     ['s1', [['s1', 1, 'turn']]],
     ['s2', [['s2', 2, 'gap'], ['s2', 3, 'turn']]],       // the rows s2 made while unwatched are owed as a gap
   ])
-  expect(polls(w).map(p => p.url.split('?')[1]).slice(0, 3)).toEqual(['session=s1&after=', 'session=s1&after=c1', 'session=s2&after='])
+  expect(polls(w).map(p => p.url.split('?')[1]).slice(0, 3)).toEqual(['session=s1&producer=ps-1&after=', 'session=s1&producer=ps-1&after=c1', 'session=s2&producer=ps-1&after='])
+})
+
+// Unit 3.2: the agent sees a session's dialogs in its hooks, and hands them to the module on the
+// poll to number among its own rows, so the session's events keep one numbering.
+test('an ask the agent emits is numbered among the module\'s rows', async ($, on) => {
+  const ask = { id: 'toolu_1', kind: 'permission', tool: 'Bash' }
+  let second!: (p: { watch: boolean; cursor: string; commands: unknown[] }) => void
+  const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true, cursor: 'c1' }, new Promise(r => { second = r })] })
+  await begin($)
+  await w.clock.settle()
+  await $.turn.start({ turnId: 't1', text: 'list the files' })
+  await w.clock.advance(50)
+  second({ watch: true, cursor: 'c1', commands: [{ kind: 'emit', body: { kind: 'ask', ask } }] })
+  await w.clock.settle()
+  await w.clock.advance(50)
+  expect(events(w).map(e => [e.seq, e.kind])).toEqual([[1, 'turn'], [2, 'ask']])
+  expect(events(w)[1]).toEqual({ v: 1, session: 's1', seq: 2, kind: 'ask', ask })
+})
+
+test('a command the module does not know is ignored and said', async ($, on) => {
+  const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true, cursor: 'c1',
+    commands: [{ kind: 'teleport', body: {} }, { kind: 'emit', body: { kind: 'row', row: {} } }] }] })
+  await begin($)
+  await w.clock.settle()
+  await w.clock.advance(50)
+  expect(posted(w)).toEqual([])
+  expect(w.logs.some(l => l.includes('ignored the agent\'s command of kind "teleport"'))).toBe(true)
+  expect(w.logs.some(l => l.includes('emit was not taken: an emit of "row"'))).toBe(true)
+})
+
+// Unit 2.2: a desk prompt lands as the module's own pointer does, and the module tells the agent
+// where, whose receipt settles the act. The words open with the from: line the agent wrote.
+const FROM = 'console user alice, member of the team'
+const WORDS = `from: ${FROM}\n\nlist the files`
+const deskPrompt = { kind: 'prompt', body: { id: 'prompt-1', text: WORDS, from: FROM } }
+// The rows the module sent the agent: a row it appended carries the id the session stored it under.
+const sentRows = (w: ReturnType<typeof world>) => posted(w).filter(f => f.url.endsWith('/steering/surface/events')).flatMap(f => JSON.parse(f.body!).events).filter(e => e.kind === 'row').map(e => e.row)
+const landings = (w: ReturnType<typeof world>) => posted(w).filter(f => f.url.endsWith('/steering/surface/landed')).map(f => JSON.parse(f.body!))
+
+// The poll after the first is answered with the desk's prompt once `ready` has run.
+async function prompted(opts: { submitDrops?: boolean } = {}, ready: ($: any, w: ReturnType<typeof world>) => Promise<void> = async () => {}) {
+  return async ($: any, on: any) => {
+    let second!: (p: { watch: boolean; cursor: string; commands: unknown[] }) => void
+    const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true, cursor: 'c1' }, new Promise(r => { second = r })], ...opts })
+    await begin($)
+    await w.clock.settle()
+    await ready($, w)
+    second({ watch: true, cursor: 'c1', commands: [deskPrompt] })
+    await w.clock.settle()
+    await w.clock.advance(50)
+    return w
+  }
+}
+
+test('a desk prompt to an idle session starts a turn and is reported submitted', async ($, on) => {
+  const w = await (await prompted())($, on)
+  expect(w.submits).toEqual([WORDS])
+  expect(w.asUser).toEqual([true])                 // the model reads the from: line first, unframed
+  expect(w.appends).toEqual([])
+  expect(landings(w)).toEqual([{ session: 's1', producer: 'ps-1', id: 'prompt-1', landed: 'new-turn' }])
+  const sent = posted(w).find(f => f.url.endsWith('/steering/surface/landed'))!
+  expect(sent.headers['X-Steering-Agent-Key']).toBe(AGENT.key)
+  // Its row is the speaker's, not the plugin's: the desk says who spoke.
+  expect(sentRows(w)).toEqual([{ role: 'user', origin: FROM, blocks: [{ type: 'text', text: WORDS }] }])
+})
+
+test('a desk prompt to a busy session is appended to the running turn and reported so', async ($, on) => {
+  const w = await (await prompted({}, async $ => { await $.turn.start({ turnId: 't1', text: 'list the files' }) }))($, on)
+  expect(w.submits).toEqual([])
+  expect(landings(w)).toEqual([{ session: 's1', producer: 'ps-1', id: 'prompt-1', landed: 'running-turn' }])
+  // The session stored the row, under an id of its own, and that row is the speaker's.
+  expect(sentRows(w).filter(r => r.origin === FROM)).toEqual([{ id: expect.any(String), role: 'user', origin: FROM, blocks: [{ type: 'text', text: WORDS }] }])
+})
+
+// #7827: after the person's Esc the engine drops every submit until they type again. The words are
+// appended for the session's next request, never lost, and the receipt says so and why.
+test('a desk prompt after the person\'s Esc is appended for the next request and reported with why', async ($, on) => {
+  const w = await (await prompted({ submitDrops: true }, async $ => {
+    await $.turn.start({ turnId: 't1', text: 'sleep 20' })
+    await $.turn.complete({ turnId: 't1', text: '', reason: 'aborted' } as never)
+  }))($, on)
+  expect(w.submits).toEqual([WORDS])
+  expect(landings(w)).toEqual([{ session: 's1', producer: 'ps-1', id: 'prompt-1', landed: 'queued',
+    why: 'the session was stopped and nobody has sent input since' }])
+  expect(sentRows(w).filter(r => r.origin === FROM)).toEqual([{ id: expect.any(String), role: 'user', origin: FROM, blocks: [{ type: 'text', text: WORDS }] }])
+})
+
+test('a desk prompt without a speaker is refused, not landed', async ($, on) => {
+  let second!: (p: { watch: boolean; cursor: string; commands: unknown[] }) => void
+  const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true, cursor: 'c1' }, new Promise(r => { second = r })] })
+  await begin($)
+  await w.clock.settle()
+  second({ watch: true, cursor: 'c1', commands: [{ kind: 'prompt', body: { id: 'prompt-1', text: 'list the files' } }] })
+  await w.clock.settle()
+  expect(w.submits).toEqual([])
+  expect(w.appends).toEqual([])
+  expect(landings(w)).toEqual([{ session: 's1', producer: 'ps-1', id: 'prompt-1', refused: 'the agent\'s prompt carried no words or no speaker' }])
 })

@@ -39,6 +39,7 @@ LAUNCHER = HERE / "launch.py"      # the file installed into a workspace, not th
 LAUNCH_NAME = "steering-launch.py"  # what it is called once it is there
 TOKENS = ("steering-observe-token",)
 TIMEOUT = 5  # seconds; the sender's own budget is 4
+DECIDE_TIMEOUT = 600  # seconds; the deciding hook waits for the console, and its own wait ends first
 
 
 def launcher_path(workspace: Path) -> Path:
@@ -51,7 +52,8 @@ def command(workspace: Path, verb: str) -> str:
 
 
 def handler(workspace: Path, verb: str) -> dict:
-    return {"type": "command", "command": command(workspace, verb), "timeout": TIMEOUT}
+    return {"type": "command", "command": command(workspace, verb),
+            "timeout": DECIDE_TIMEOUT if verb == "decide" else TIMEOUT}
 
 
 # `<…>/plugins/cache/<marketplace>/<plugin>/<version>/steering/enroll/<script>.py`. Everything
@@ -270,6 +272,8 @@ def pack(workspace: Path) -> dict:
     out = {ev: [{"hooks": [handler(workspace, "observe")]}] for ev in sorted(supervision.ADMITTED)}
     out["Stop"].append({"hooks": [handler(workspace, "readout")]})  # doc 30 §3: its own handler, not a branch in the adapter
     out["Stop"].append({"hooks": [handler(workspace, "armed")]})     # #1506
+    # #4823: decides a dialog from the console while the terminal's own copy stays answerable.
+    out["PermissionRequest"].append({"hooks": [handler(workspace, "decide")]})
     # doc 154 §8: a compacted or cleared session is pointed back at its checkpoint.
     out["SessionStart"] = [{"matcher": "compact|clear", "hooks": [handler(workspace, "rebrief")]}]
     out["SessionEnd"] = [{"matcher": "clear", "hooks": [handler(workspace, "rebrief")]}]  # which session was cleared
@@ -290,6 +294,19 @@ def install_launcher(workspace: Path) -> Path:
     spool.write_atomic(dst, LAUNCHER.read_text().replace('SOURCE = ""', f"SOURCE = {str(HERE)!r}", 1),
                        mode=0o700)
     return dst
+
+
+def refresh_launcher(workspace: Path) -> bool:
+    """Write workspace's launcher when it is absent or not this pack's, and say whether it wrote: a
+    Codex workspace has no hook event for repin to refresh it on (#7940)."""
+    p = launcher_path(workspace)
+    try:
+        if p.read_text() == LAUNCHER.read_text().replace('SOURCE = ""', f"SOURCE = {str(HERE)!r}", 1):
+            return False
+    except OSError:
+        pass
+    install_launcher(workspace)
+    return True
 
 
 def settings_path(workspace: Path) -> Path:

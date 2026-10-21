@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """`rest.py [--provider <harness>] [--provider-session <id>] [--lease] [--root] [--post [--json <body>] [--key <idempotency
-key>] | --put --json <body> --key <idempotency key> | --delete --key <idempotency key>] <path> [--all]`: a call to the steering API (doc 126) from any machine.
+key>] | --put --json <body> --key <idempotency key> | --delete --key <idempotency key>] [--delegated] <path> [--all]`: a call to the steering API (doc 126) from any machine.
 
 The path is relative to `/api/v1`, as `/knowledge/units` or `/cards?state=live`. It goes
 to the door this workspace names. A session's enrolment token on stdin goes with the current
@@ -11,7 +11,10 @@ session's own enrolment token goes, found as `say.py` finds it (#3551). `--post`
 `--key`, as appointing a goal's steward takes (doc 198). `--delete` sends a DELETE with no
 body under `--key`, as closing an understudy cast takes. `--root` sends the path under the door's root
 `/api/v1` rather than the workspace's, as a team's or a host's settings are, naming the workspace on
-the `X-Steering-Workspace` header, since the path names none.
+the `X-Steering-Workspace` header, since the path names none. `--delegated` exchanges the enrolment the
+call would carry, the seat's with `--lease`, and its machine's credential at the console for the seat's delegated bearer (7601-seat-settings
+design, decision 2) and sends that alone, as a settings write the owner granted the seat takes. The
+token is kept in this process's memory only, never written or printed.
 
 Exits 0 with the JSON on stdout; otherwise 1, with the problem's title and remedy on stderr.
 """
@@ -60,15 +63,94 @@ GO_UNSERVED = (
 # The workspace a root path's call is routed to, which a workspace path names in the path itself.
 WORKSPACE_HEADER = "X-Steering-Workspace"
 
+# The console's RFC 8693 exchange, and what it is told each token is (console/src/lib/token-exchange.ts).
+EXCHANGE_PATH = "/api/oauth/token-exchange"
+GRANT_TYPE = "urn:ietf:params:oauth:grant-type:token-exchange"
+SUBJECT_TOKEN_TYPE = "urn:2mw2lt:enrolment"
+ACTOR_TOKEN_TYPE = "urn:2mw2lt:machine"
+# A token this close to its expiry is exchanged again before it is sent, so no page goes on one that
+# lapses in flight.
+EXPIRY_MARGIN = 60.0
+
+# The console's refusal, by RFC 8693's error, in what it means for the seat. When coordination
+# refused the claims, its `error_description` is the check that refused, said in CLAIMS_REFUSALS.
+EXCHANGE_REFUSALS: dict[str, str] = {
+    "invalid_grant": "coordination refused the seat's claims: this session does not hold the seat, no grant "
+                     "of the owner's stands for this workspace, or its grantor no longer owns the team",
+    "invalid_target": "the console serves another door than this workspace names",
+    "temporarily_unavailable": "the console could not ask coordination; send again in a minute",
+    "invalid_request": "the console refused the request's shape: a credential or a workspace it does not accept",
+    "unsupported_grant_type": "this client and the console disagree on the exchange: update the plugin",
+    "server_error": "the console could not sign the token; send again in a minute",
+}
+CLAIMS_REFUSALS: dict[str, str] = {
+    "seat-not-holder": "this session does not hold the seat; only the seated session acts for the owner",
+    "delegation-none": "the owner has granted the seat nothing for this workspace; they grant it in Team settings",
+    "grantor-lost": "the owner who granted it no longer owns the team; the team's owner grants anew in Team settings",
+    "delegation-class-unknown": "the grant names a kind of setting the cluster no longer delegates; the owner grants anew",
+    "not-authenticated": "coordination did not accept this session's enrolment or its machine's credential: run /2mw2lt:connect",
+}
+
+
+class ExchangeRefused(Exception):
+    """The console's exchange did not answer a token, with why in the seat's words."""
+
+
+def exchange(root: str, workspace: str, enrolment: str) -> tuple[str, float]:
+    """The seat's delegated bearer and the monotonic time it lapses at, exchanged at the console the
+    door is served from for this session's enrolment and its machine's credential. The console
+    takes only its own origin as the resource, so the credentials never go to a door the client
+    names."""
+    parts = urllib.parse.urlsplit(root)
+    origin = urllib.parse.urlunsplit((parts.scheme, parts.netloc, "", "", ""))
+    form = urllib.parse.urlencode({
+        "grant_type": GRANT_TYPE, "subject_token": enrolment, "subject_token_type": SUBJECT_TOKEN_TYPE,
+        "actor_token": session_routes._machine_token(), "actor_token_type": ACTOR_TOKEN_TYPE,
+        "workspace": workspace, "resource": origin,
+    }).encode()
+    req = urllib.request.Request(origin + EXCHANGE_PATH, data=form, method="POST", headers={
+        "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json", "User-Agent": door.USER_AGENT})
+    began = time.monotonic()
+    try:
+        with door.open_direct(req, timeout=door.SEND_TIMEOUT) as r:
+            answer = json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        try:
+            problem = json.loads(e.read() or b"{}")
+        except ValueError:
+            problem = None
+        problem = problem if isinstance(problem, dict) else {}
+        said, check = problem.get("error"), problem.get("error_description")
+        code = said if isinstance(said, str) else f"status {e.code}"
+        if isinstance(check, str) and check:
+            raise ExchangeRefused(f"{e.code} the console refused the exchange [{code}: {check}]: "
+                                  + CLAIMS_REFUSALS.get(check, "coordination refused the seat's claims by that check")) from None
+        raise ExchangeRefused(f"{e.code} the console refused the exchange [{code}]: "
+                              + EXCHANGE_REFUSALS.get(code, "it named no reason this client knows")) from None
+    except (urllib.error.URLError, OSError, TimeoutError, http.client.HTTPException, ValueError) as e:
+        raise ExchangeRefused(f"the console did not answer the exchange: {e}") from None
+    answer = answer if isinstance(answer, dict) else {}
+    token, ttl, kind = answer.get("access_token"), answer.get("expires_in"), answer.get("token_type")
+    if not isinstance(token, str) or not token:
+        raise ExchangeRefused("the console's exchange answered no access_token")
+    if kind != "Bearer":
+        raise ExchangeRefused(f"the console's exchange answered token_type {kind!r}, not 'Bearer'")
+    if not isinstance(ttl, int) or isinstance(ttl, bool) or ttl <= 0:
+        raise ExchangeRefused(f"the console's exchange answered expires_in {ttl!r}, not a positive whole number of seconds")
+    return token, began + ttl
+
 
 def fetch(url: str, token: str | None, method: str = "GET", body: bytes | None = None,
-          key: str | None = None, workspace: str | None = None) -> tuple[int, dict]:
+          key: str | None = None, workspace: str | None = None, bearer: str | None = None) -> tuple[int, dict]:
     """One call, sent again within one budget the call owns when the wire loses the answer — no
     answer, a reset, a gateway speaking for a silo that is down, an answer that is not JSON, as
     a captive portal's is — one line of progress per resend (#5974). A POST without an
-    idempotency key is never resent: the server could not tell the resend from a second write."""
+    idempotency key is never resent: the server could not tell the resend from a second write. A
+    delegated `bearer` goes alone, with no carrier beside it, which Go refuses as ambiguous."""
     headers = {"Accept": "application/json", "User-Agent": door.USER_AGENT}
-    if token:
+    if bearer:
+        headers["Authorization"] = f"Bearer {bearer}"
+    elif token:
         headers.update(session_routes.session_headers(token))
     if body is not None:
         headers["Content-Type"] = "application/json"
@@ -144,7 +226,7 @@ def main(argv: list[str], stdin) -> int:
         return 0
     valued: dict[str, str] = {}
     rest = list(argv)
-    for flag in ("--json", "--key", "--post", "--put", "--delete", "--all", "--lease", "--root", *connect.SPEAKER_FLAGS):
+    for flag in ("--json", "--key", "--post", "--put", "--delete", "--all", "--lease", "--root", "--delegated", *connect.SPEAKER_FLAGS):
         if rest.count(flag) > 1:
             return error("rest", f"{flag} may appear once")
     for flag in ("--json", "--key", *connect.SPEAKER_FLAGS):
@@ -157,7 +239,7 @@ def main(argv: list[str], stdin) -> int:
     speaker = {f: valued.pop(f) for f in connect.SPEAKER_FLAGS if f in valued}
     if "--provider" in speaker and speaker["--provider"] not in connect.harness_mod.PROVIDERS:
         return error("rest", "--provider names no harness this client knows")
-    args = [a for a in rest if a not in ("--all", "--post", "--put", "--delete", "--lease", "--root")]
+    args = [a for a in rest if a not in ("--all", "--post", "--put", "--delete", "--lease", "--root", "--delegated")]
     if sum(m in rest for m in ("--post", "--put", "--delete")) > 1:
         return error("rest", "--post, --put and --delete name one method; give one")
     method = "POST" if "--post" in rest else "PUT" if "--put" in rest else "DELETE" if "--delete" in rest else "GET"
@@ -171,6 +253,8 @@ def main(argv: list[str], stdin) -> int:
         return error("rest", "--json requires --post or --put; --key requires --post, --put or --delete")
     if len(args) != 1 or not args[0].startswith("/"):
         return error("rest", "name one API path beginning with /")
+    if args[0].split("?")[0].split("/")[1:3] == ["api", "v1"]:
+        return error("rest", "the path goes after /api/v1, which the client adds: name it without that prefix")
     if "--json" in valued:
         try:
             json.loads(valued["--json"])
@@ -183,6 +267,7 @@ def main(argv: list[str], stdin) -> int:
         print("this workspace's door names no workspace; set STEERING_DOOR to …/<team>/<workspace>", file=sys.stderr)
         return 2
     why_none = None
+    delegated = "--delegated" in rest
     if "--lease" in rest:
         import lease
         try:
@@ -198,14 +283,23 @@ def main(argv: list[str], stdin) -> int:
         token = (stdin.read().strip() or None) if given(stdin) else None
     if token is None:
         token, why_none = own_bearer(speaker)
+    if delegated and token is None:
+        print(f"no enrolment to exchange: {why_none}", file=sys.stderr)
+        return 1
     at_root = "--root" in rest
     url = f"{root if at_root else base}/api/v1{args[0]}"
     page = page_contract(args[0], root=at_root) if "--all" in rest else None
     collected, first = [], None
     out = None
+    bearer, lapses = None, 0.0
     while True:
         try:
-            status, answer = fetch(url, token, method, body, valued.get("--key"), workspace if at_root else None)
+            if delegated and time.monotonic() >= lapses - EXPIRY_MARGIN:
+                bearer, lapses = exchange(root, workspace, token)
+            status, answer = fetch(url, token, method, body, valued.get("--key"), workspace if at_root else None, bearer)
+        except ExchangeRefused as why:
+            print(why, file=sys.stderr)
+            return 1
         except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as e:
             print(f"the door at {base} did not answer: {e}", file=sys.stderr)
             return 1
@@ -222,6 +316,9 @@ def main(argv: list[str], stdin) -> int:
             hint = next((h for prefix, h in GO_UNSERVED if args[0].startswith(prefix)), None)
             if status == 404 and hint:
                 print(f"{args[0].split('?')[0]} is not a route on Go: {hint}", file=sys.stderr)
+            if delegated and answer.get("code") == "terminal-route-closed":
+                print(f"{method} {args[0].split('?')[0]} takes no delegated bearer: send it without --delegated, "
+                      "on the session carrier", file=sys.stderr)
             if why_none and status in (401, 403):
                 print(f"no credential was sent: {why_none}", file=sys.stderr)
             return 1

@@ -18,7 +18,7 @@ export const line = (id: string | null, kind: string, wakes: boolean) => JSON.st
 // The machine agent the workspace records, and what its surface poll answers, in turn; a poll past
 // the last answer is held, as the agent holds one with nothing to say. An answer may itself be held.
 export const AGENT = { port: '9991', keyFile: '/keys/9991.key', key: 'agent-key' }
-export type Poll = { watch: boolean; cursor?: string } | { status: number; text: string }
+export type Poll = { watch: boolean; cursor?: string; commands?: unknown[] } | { status: number; text: string }
 // What the agent's frames route answers one of the hold's polls with (#7838), in turn; a poll past
 // the last answer is held, and 'throw' is one the agent did not answer at all. An answer may be
 // held. What a DELETE is answered with needs no scripting: 204, or a hang while deleteHangs.
@@ -48,6 +48,8 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
     inherited: undefined as string | undefined,
     claimsAtSpawn: [] as number[],
     submits: [] as string[],
+    // Whether each submit asked to be the user's, unframed.
+    asUser: [] as boolean[],
     appends: [] as string[],
     logs: [] as string[],
     psession: 'ps-1',
@@ -81,6 +83,8 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
     // What each lease client was handed on stdin, and what it answers in turn.
     stdins: [] as (string | undefined)[],
     leaseOut: [] as string[],
+    // What checkpoint.py answers each run, in turn; past the last, the checkpoint is kept.
+    checkpointOut: [] as { code: number; stdout: string; stderr: string }[],
     check: { decision: 'allow' } as { decision: 'allow' | 'ask' | 'deny'; reason?: string },
     polls,
     // What the agent answers each events post, in turn (202 past the last); a promise holds it.
@@ -176,6 +180,14 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
       const out = w.leaseOut.shift() ?? 'relayed: 01AB to amber'
       return { value: { exitCode: /^(REJECTED|refused)/.test(out) ? 1 : 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
+    if (e.argv[0] === 'mktemp') {
+      return { value: { exitCode: 0, stdout: '/tmp/tmp.lessons\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    if (String(e.argv[1]).endsWith('/checkpoint.py')) {
+      w.stdins.push(e.init?.stdin)
+      const out = w.checkpointOut.shift() ?? { code: 0, stdout: 'checkpointed: 7d1c0f2e-0000-4000-8000-000000000001 context\n', stderr: 'id 0123456789abcdef0123\n' }
+      return { value: { exitCode: out.code, stdout: out.stdout, stderr: out.stderr, isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (e.argv.some(a => a.endsWith('/ack.py'))) {
       w.wireStarted?.()
       if (w.wireGate) await w.wireGate
@@ -220,6 +232,7 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
   })
   on('prompt.submit', async ($, e) => {
     w.submits.push(e.text)
+    w.asUser.push((e.origin as { asUser?: boolean } | undefined)?.asUser === true)
     if (submitRejects) throw new Error('the prompt was refused')
     if (w.submitDrops) return { drop: 'the session was stopped and nobody has sent input since' } as never
     return { text: e.text }

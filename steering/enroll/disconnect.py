@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""`disconnect.py [--handover <note url>] [<session>]`: end this session's enrollment and forget its
-token. The handover is the exit checkpoint's note (doc 154 §4), recorded on the detach (doc 123)."""
+"""`disconnect.py [--handover <checkpoint id>] [<session>]`: end this session's enrollment and forget
+its token. The handover is the exit checkpoint's id (doc 154 §4), recorded on the detach (doc 123);
+its note's URL is still taken until every client names an id."""
 from __future__ import annotations
 
 import sys
@@ -29,7 +30,7 @@ def main(argv: list[str]) -> int:
     handover = None
     if args[:1] == ["--handover"]:
         if len(args) < 2 or args[1].startswith("-"):
-            return error("disconnect", "--handover takes a note URL")
+            return error("disconnect", "--handover takes the exit checkpoint's id")
         handover, args = args[1], args[2:]
     if args and args[0].startswith("-"):
         return error("disconnect", f"no such flag: {args[0]}")

@@ -1,6 +1,6 @@
 ---
 name: checkpoint
-description: Write down what this session knows before it forgets — before a compact, a handover or leaving — as a note on the card's pull request or issue, and record it with steering.
+description: Write down what this session knows before it forgets — before a compact, a handover or leaving — as a note the platform keeps.
 ---
 
 A checkpoint puts the work where it lives and indexes it with one note.
@@ -23,9 +23,7 @@ concluded leaves nothing to hand over, and needs none.
 - Measurements: the record, or the issue they decide.
 - Lessons: the `learned` list below.
 
-**2. Post the note** as a comment on the card's draft pull request, or on its issue when there is
-no pull request yet, written to a file and passed with `gh pr comment -R <repo> <n> --body-file <file>`
-(or `gh issue comment -R <repo> <n> --body-file <file>`):
+**2. Hand the note to the platform**, written to a file, at most 8192 bytes:
 
 ```markdown
 ## Checkpoint
@@ -53,20 +51,27 @@ A `handover` note is read by a builder with none of your context, perhaps a smal
 work has already hit. Push the branch first: the builder starts from the remote, and a commit only
 in your worktree never reaches it.
 
-**3. Record it.** Lessons are optional: at most eight, each one rule and the mistake it prevents
-in 500 characters or fewer, scoped to repository paths or `"*"`.
+Lessons are optional: at most eight, each one rule and the mistake it prevents in 500 characters
+or fewer, scoped to repository paths or `"*"`.
 
 ```bash
 learned=$(mktemp)
 cat > "$learned" <<'JSON'
 [{"text": "<rule, and the mistake it prevents>", "scope": ["steering/"]}]
 JSON
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <your session> <boundary> <note url> [--learned-file "$learned"]
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <your session> <boundary> --text-file <note file> [--learned-file "$learned"] [--mirror <pull request or issue URL>]
 ```
 
-It reads the comment back from GitHub and sends its hash with it. `checkpointed: <id> <boundary>`
-is the answer; `dropped: <n>` names a lesson that carried something credential-shaped and was
-left out, and the rest stand. A lost answer goes again with `--retry=<the id it printed>`.
+A Claude Code session with the plugin hands the note over with the `mcp__2mw2lt__checkpoint` tool
+(`{boundary, text, learned?, mirror?}`) instead of this command.
+
+The platform scans the note for credentials and keeps it for the workspace's retention.
+`checkpointed: <checkpoint id> <boundary>` is the answer; `dropped: <n>` names a lesson that
+carried something credential-shaped and was left out, and the rest stand. A lost answer goes again
+with `--retry=<the id on its id line>`. `checkpoint.py <your session> read [latest|<checkpoint id>]`
+prints a note back. `--mirror` also posts the note as a comment on the card's pull request or issue,
+only once the platform has kept it, for people who read GitHub; a `handover` or `exit` note is
+mirrored, since its next reader reads it there.
 
 After it, the brain reads the checkpoint as current on your delegation row until you next
 acknowledge a directive.

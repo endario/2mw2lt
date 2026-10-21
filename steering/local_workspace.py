@@ -169,37 +169,54 @@ def origin_url(anchor: Path, timeout: float | None = None) -> str | None:
 def ssh_host(alias: str, timeout: float | None = None) -> str:
     """The host ssh connects `alias` to, as this machine's configuration resolves it: the alias
     itself when ssh cannot say, since a literal host is its own answer."""
+    return ssh_host_why(alias, timeout)[0]
+
+
+def ssh_host_why(alias: str, timeout: float | None = None) -> tuple[str, str]:
+    """ssh_host's answer, and why ssh could not say when it could not."""
     try:
         out = subprocess.run(["ssh", "-G", alias], capture_output=True, text=True,
                              timeout=timeout or 10)
-    except (OSError, subprocess.SubprocessError):
-        return alias
+    except subprocess.TimeoutExpired:
+        return alias, f"ssh -G {alias} took over {timeout or 10:g}s"
+    except (OSError, subprocess.SubprocessError) as e:
+        return alias, f"ssh could not run: {e}"
     for line in out.stdout.splitlines():
         key, _, value = line.partition(" ")
         if key.strip() == "hostname":
-            return value.strip()
-    return alias
+            return value.strip(), ""
+    return alias, f"ssh -G {alias} exited {out.returncode} naming no hostname"
 
 
 def github_slug(remote: str, timeout: float | None = None) -> str | None:
     """`owner/name` when remote is a GitHub repository however it is spelled, else None. The host
     is checked, an ssh alias resolved first: a path alone would take any server's `…/owner/name`
     for GitHub's (machine/internal/checkout/slug.go)."""
+    return github_slug_why(remote, timeout)[0]
+
+
+def github_slug_why(remote: str, timeout: float | None = None) -> tuple[str | None, str]:
+    """github_slug's answer, and why it is none, naming the host but never the URL, whose userinfo
+    may hold a credential."""
     remote = remote.strip()
+    resolved = ""
     if "://" in remote:
         parts = urlsplit(remote)
         host, path = parts.hostname or "", parts.path
         if parts.scheme == "ssh":
-            host = ssh_host(host, timeout)
+            alias, (host, resolved) = host, ssh_host_why(host, timeout)
     elif ":" in remote and not remote.startswith(("/", ".")):
         host, _, path = remote.partition(":")
-        host = ssh_host(host.rpartition("@")[2], timeout)
+        alias, (host, resolved) = host.rpartition("@")[2], ssh_host_why(host.rpartition("@")[2], timeout)
     else:
-        return None
+        return None, "the remote is a local path, not a URL"
     if (host or "").lower() != "github.com":
-        return None
+        said = f"its host {host or '(none)'} is not github.com"
+        return None, f"{said} ({resolved})" if resolved else said
     segments = path.strip("/").removesuffix(".git").split("/")
-    return "/".join(segments) if len(segments) == 2 and all(segments) else None
+    if len(segments) == 2 and all(segments):
+        return "/".join(segments), ""
+    return None, "its path names no owner/name"
 
 
 DEFAULT_AGENT_PORT = "9990"
@@ -265,6 +282,24 @@ def agent_key(anchor, port) -> str | None:
         return agent_key_file(anchor, port).read_text().strip() or None
     except OSError:
         return None
+
+
+def agent_request(anchor: Path, path: str, body: dict | None, timeout: float | None = None):
+    """A POST of `body` to `path`, or a GET when there is none, on the loopback of the agent
+    serving this workspace, admitted by its key and naming the workspace; None when no agent key
+    is held, so nothing can take it."""
+    import json
+    import urllib.request
+    port = agent_port(anchor, timeout=timeout)
+    key = agent_key(anchor, port)
+    if not key:
+        return None
+    if body is None:
+        return urllib.request.Request(f"http://127.0.0.1:{port}{path}", method="GET",
+                                      headers={KEY_HEADER: key, **workspace_header(str(anchor))})
+    return urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}", data=json.dumps(body).encode(), method="POST",
+        headers={"Content-Type": "application/json", KEY_HEADER: key, **workspace_header(str(anchor))})
 
 
 def agent_port(anchor: Path, timeout: float | None = None) -> str:

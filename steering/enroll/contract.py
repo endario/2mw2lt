@@ -113,7 +113,8 @@ AccountModel = typing.TypedDict("AccountModel", {
     "rarity": "str | None",
 })
 
-# ListedAccountUsage is one account. Provider is the harness its folded reading came from, Reading
+# ListedAccountUsage is one account. Harness is the harness its folded reading came from, and
+# Provider the same under the name release N+1 drops (#6550). Reading is
 # that reading, and Machines the names of the machines whose readings of it stand, the folded one's
 # first. Number is the team's number for it, nil until numbered. Sessions are the names of the
 # workspace's sessions drawing on it. VendorAccount is the vendor's own id for it, the same through
@@ -123,6 +124,7 @@ ListedAccountUsage = typing.TypedDict("ListedAccountUsage", {
     "account_id": "str",
     "vendor_account": "str | None",
     "number": "int | None",
+    "harness": "str",
     "provider": "str",
     "reading": "UsageReading",
     "machines": "list[str] | None",
@@ -252,6 +254,7 @@ AccountIncentive = typing.TypedDict("AccountIncentive", {
 
 # UnnamedDirectory is a directory a machine read whose credential names no account.
 UnnamedDirectory = typing.TypedDict("UnnamedDirectory", {
+    "harness": "str",
     "provider": "str",
     "directory": "str",
     "machine": "str",
@@ -377,7 +380,7 @@ AccountUnshareAnswer = typing.TypedDict("AccountUnshareAnswer", {
 })
 
 # ActionBody asks a machine to act on a session's process: to wake it, set its level, end it,
-# resume it under another account, or stop it and keep its enrolment.
+# resume it under another account, stop it and keep its enrolment, or interrupt its turn.
 ActionBody = typing.TypedDict("ActionBody", {
     "kind": "str",
     "to": "str",
@@ -452,6 +455,61 @@ RehomeReceipt = typing.TypedDict("RehomeReceipt", {
 # RehomeReceiptAnswer is the state the rehome took on that answer.
 RehomeReceiptAnswer = typing.TypedDict("RehomeReceiptAnswer", {
     "rehome": "str",
+    "state": "str",
+    "replayed": "bool",
+})
+
+# PromptBody is a prompt to a live session from the desk: its words, and whether they start a turn
+# (`prompt`) or steer the running one (`steer`).
+PromptBody = typing.TypedDict("PromptBody", {
+    "text": "str",
+    "mode": "str",
+})
+
+# PromptReceipt is what a machine answers of a prompt it was offered: the prompt, and where it
+# landed (a new turn, the running turn, queued), or why it refused.
+PromptReceipt = typing.TypedDict("PromptReceipt", {
+    "uplink": "str",
+    "prompt": "str",
+    "result": "typing.Any",
+})
+
+# PromptReceiptAnswer is the state the prompt took on that answer.
+PromptReceiptAnswer = typing.TypedDict("PromptReceiptAnswer", {
+    "prompt": "str",
+    "state": "str",
+    "replayed": "bool",
+})
+
+# ActRead is a desk act as its receipt stands (`GET …/sessions/{session}/acts/{act}`). State is the
+# row's own: pending, delivered or settled. Outcome is how the act ended, else empty: landed,
+# refused, interrupted, uncertain (taken by its machine and never answered) or not-reached (never
+# taken, with Machine its machine's state). Landed is where a prompt landed
+# (new-turn, running-turn, queued) and Why the engine's reason for that; Refused is what stopped an
+# act the machine refused.
+ActRead = typing.TypedDict("ActRead", {
+    "id": "str",
+    "kind": "str",
+    "state": "str",
+    "outcome": "str",
+    "landed": "typing.NotRequired[str]",
+    "why": "typing.NotRequired[str]",
+    "refused": "typing.NotRequired[str]",
+    "machine": "typing.NotRequired[MachineState | None]",
+    "deadline_at": "str",
+})
+
+# InterruptReceipt is what a machine answers of an interrupt it was offered: the interrupt, and
+# whether the session's turn stopped, or why it refused.
+InterruptReceipt = typing.TypedDict("InterruptReceipt", {
+    "uplink": "str",
+    "interrupt": "str",
+    "result": "typing.Any",
+})
+
+# InterruptReceiptAnswer is the state the interrupt took on that answer.
+InterruptReceiptAnswer = typing.TypedDict("InterruptReceiptAnswer", {
+    "interrupt": "str",
     "state": "str",
     "replayed": "bool",
 })
@@ -642,6 +700,7 @@ SessionReading = typing.TypedDict("SessionReading", {
     "background": "typing.NotRequired[int | None]",
     "pending_frames": "list[str] | None",
     "flight": "typing.NotRequired[ReadingFlight | None]",
+    "capabilities": "typing.NotRequired[list[str] | None]",
 })
 
 # ReadingFlight is the step a reading says is in flight: the tool and when it began, or the model
@@ -826,10 +885,11 @@ StreamFleet = typing.TypedDict("StreamFleet", {
     "accounts": "list[FleetAccount] | None",
 })
 
-# FleetAccount is one account in a fleet frame. Provider is the harness its standing reading came
-# from, Sessions the names drawing on it.
+# FleetAccount is one account in a fleet frame. Harness is the harness its standing reading came
+# from, and Provider the same, under the name release N+1 drops (#6550); Sessions the names drawing on it.
 FleetAccount = typing.TypedDict("FleetAccount", {
     "account": "int | None",
+    "harness": "str",
     "provider": "str",
     "vendor": "str",
     "verdict": "AccountVerdict",
@@ -890,11 +950,12 @@ StreamLaunch = typing.TypedDict("StreamLaunch", {
     "deadline_at": "typing.NotRequired[str]",
 })
 
-# StreamGateRun is a gate run offered to this machine.
+# StreamGateRun is a gate run offered to this machine, to be judged by Judge.
 StreamGateRun = typing.TypedDict("StreamGateRun", {
     "kind": "str",
     "id": "str",
     "run": "str",
+    "judge": "str",
     "provider": "str",
     "model": "str",
     "effort": "str",
@@ -926,6 +987,7 @@ MachineAction = typing.TypedDict("MachineAction", {
     "provider_session": "str",
     "psession": "str",
     "runtime": "str",
+    "harness": "str",
     "provider": "str",
     "node": "str",
     "os_user": "str",
@@ -947,6 +1009,9 @@ MachineAction = typing.TypedDict("MachineAction", {
     "model": "typing.NotRequired[str]",
     "compact": "typing.NotRequired[bool]",
     "until": "typing.NotRequired[str]",
+    "text": "typing.NotRequired[str]",
+    "mode": "typing.NotRequired[str]",
+    "from": "typing.NotRequired[str]",
 })
 
 # RetireAction is what a retire carries: the worker, pinned to its incarnation on this machine, the
@@ -973,6 +1038,7 @@ StreamWake = typing.TypedDict("StreamWake", {
     "provider_session": "str",
     "psession": "str",
     "runtime": "str",
+    "harness": "str",
     "provider": "str",
     "node": "str",
     "os_user": "str",
@@ -994,6 +1060,9 @@ StreamWake = typing.TypedDict("StreamWake", {
     "model": "typing.NotRequired[str]",
     "compact": "typing.NotRequired[bool]",
     "until": "typing.NotRequired[str]",
+    "text": "typing.NotRequired[str]",
+    "mode": "typing.NotRequired[str]",
+    "from": "typing.NotRequired[str]",
 })
 
 # StreamControl is a control, by its id.
@@ -1005,6 +1074,7 @@ StreamControl = typing.TypedDict("StreamControl", {
     "provider_session": "str",
     "psession": "str",
     "runtime": "str",
+    "harness": "str",
     "provider": "str",
     "node": "str",
     "os_user": "str",
@@ -1026,6 +1096,9 @@ StreamControl = typing.TypedDict("StreamControl", {
     "model": "typing.NotRequired[str]",
     "compact": "typing.NotRequired[bool]",
     "until": "typing.NotRequired[str]",
+    "text": "typing.NotRequired[str]",
+    "mode": "typing.NotRequired[str]",
+    "from": "typing.NotRequired[str]",
 })
 
 # StreamRehome is a rehome, by its id.
@@ -1037,6 +1110,7 @@ StreamRehome = typing.TypedDict("StreamRehome", {
     "provider_session": "str",
     "psession": "str",
     "runtime": "str",
+    "harness": "str",
     "provider": "str",
     "node": "str",
     "os_user": "str",
@@ -1058,6 +1132,9 @@ StreamRehome = typing.TypedDict("StreamRehome", {
     "model": "typing.NotRequired[str]",
     "compact": "typing.NotRequired[bool]",
     "until": "typing.NotRequired[str]",
+    "text": "typing.NotRequired[str]",
+    "mode": "typing.NotRequired[str]",
+    "from": "typing.NotRequired[str]",
 })
 
 # StreamPark is a park, by its id.
@@ -1069,6 +1146,7 @@ StreamPark = typing.TypedDict("StreamPark", {
     "provider_session": "str",
     "psession": "str",
     "runtime": "str",
+    "harness": "str",
     "provider": "str",
     "node": "str",
     "os_user": "str",
@@ -1090,6 +1168,81 @@ StreamPark = typing.TypedDict("StreamPark", {
     "model": "typing.NotRequired[str]",
     "compact": "typing.NotRequired[bool]",
     "until": "typing.NotRequired[str]",
+    "text": "typing.NotRequired[str]",
+    "mode": "typing.NotRequired[str]",
+    "from": "typing.NotRequired[str]",
+})
+
+# StreamPrompt is a prompt, by its id.
+StreamPrompt = typing.TypedDict("StreamPrompt", {
+    "kind": "str",
+    "id": "str",
+    "session": "str",
+    "epoch": "int",
+    "provider_session": "str",
+    "psession": "str",
+    "runtime": "str",
+    "harness": "str",
+    "provider": "str",
+    "node": "str",
+    "os_user": "str",
+    "reason": "str",
+    "pid": "int",
+    "cwd": "str",
+    "entrypoint": "str",
+    "tmux_socket": "typing.NotRequired[str]",
+    "tmux_pane": "typing.NotRequired[str]",
+    "user_data_dir": "typing.NotRequired[str]",
+    "app_pid": "typing.NotRequired[int]",
+    "nonce": "typing.NotRequired[str]",
+    "role": "typing.NotRequired[str]",
+    "stuck": "typing.NotRequired[bool]",
+    "value": "typing.NotRequired[str]",
+    "effort": "typing.NotRequired[str]",
+    "account": "typing.NotRequired[str]",
+    "vendor": "typing.NotRequired[str]",
+    "model": "typing.NotRequired[str]",
+    "compact": "typing.NotRequired[bool]",
+    "until": "typing.NotRequired[str]",
+    "text": "typing.NotRequired[str]",
+    "mode": "typing.NotRequired[str]",
+    "from": "typing.NotRequired[str]",
+})
+
+# StreamInterrupt is an interrupt, by its id.
+StreamInterrupt = typing.TypedDict("StreamInterrupt", {
+    "kind": "str",
+    "id": "str",
+    "session": "str",
+    "epoch": "int",
+    "provider_session": "str",
+    "psession": "str",
+    "runtime": "str",
+    "harness": "str",
+    "provider": "str",
+    "node": "str",
+    "os_user": "str",
+    "reason": "str",
+    "pid": "int",
+    "cwd": "str",
+    "entrypoint": "str",
+    "tmux_socket": "typing.NotRequired[str]",
+    "tmux_pane": "typing.NotRequired[str]",
+    "user_data_dir": "typing.NotRequired[str]",
+    "app_pid": "typing.NotRequired[int]",
+    "nonce": "typing.NotRequired[str]",
+    "role": "typing.NotRequired[str]",
+    "stuck": "typing.NotRequired[bool]",
+    "value": "typing.NotRequired[str]",
+    "effort": "typing.NotRequired[str]",
+    "account": "typing.NotRequired[str]",
+    "vendor": "typing.NotRequired[str]",
+    "model": "typing.NotRequired[str]",
+    "compact": "typing.NotRequired[bool]",
+    "until": "typing.NotRequired[str]",
+    "text": "typing.NotRequired[str]",
+    "mode": "typing.NotRequired[str]",
+    "from": "typing.NotRequired[str]",
 })
 
 # StreamRetire is a retire, by its id.
@@ -1217,12 +1370,12 @@ AgentJudgesBody = typing.TypedDict("AgentJudgesBody", {
     "placement": "AgentPlacement",
 })
 
-# AgentPlacement is the machine's role, dedicated or workstation; the share of it work may take,
-# in (0, 1]; how many gate runs it takes at once, 0 to 256; how many workers it may run; and how many
-# gate runs it takes in all, 0 to 256, which a machine that names none leaves to the default.
+# AgentPlacement is how many gate runs the machine takes at once, 0 to 256. A machine before
+# release B also states its role, dedicated or workstation; the share of it work may take, in (0, 1];
+# how many workers it may run; and how many gate runs it takes in all, which coordination no longer reads.
 AgentPlacement = typing.TypedDict("AgentPlacement", {
-    "role": "str",
-    "soft": "float",
+    "role": "typing.NotRequired[str]",
+    "soft": "typing.NotRequired[float]",
     "capacity": "int",
     "workers": "typing.NotRequired[int | None]",
     "agent_limit": "typing.NotRequired[int | None]",
@@ -1383,6 +1536,7 @@ Authorities = typing.TypedDict("Authorities", {
     "release": "typing.NotRequired[str]",
     "authorities": "list[Authority] | None",
     "coordination": "bool",
+    "installation": "typing.NotRequired[InstallationHeld | None]",
 })
 
 # Authority is one workspace: its alias, the id a checkout is bound to, whichever of its routes the
@@ -1455,13 +1609,15 @@ SeatAppointment = typing.TypedDict("SeatAppointment", {
 })
 
 # DirectiveIssue is the body of POST /sessions/{session}/directives. ID is the directive's
-# identity, minted by its issuer.
+# identity, minted by its issuer. Checkpoint names a checkpoint whose text the recipient is handed
+# after the body when it is delivered.
 DirectiveIssue = typing.TypedDict("DirectiveIssue", {
     "id": "str",
     "to": "str",
     "to_epoch": "int",
     "generation": "int",
     "body": "str",
+    "checkpoint": "typing.NotRequired[str]",
 })
 
 # Dispatch is the body of POST /dispatches: the owner's own directive to the session To names
@@ -2009,7 +2165,10 @@ ModelOffer = typing.TypedDict("ModelOffer", {
 })
 
 # GateOffer pins the commission and the catalog row that this attempt was offered.
-# Model is the launch selector; ExpectedModel is the separately observed receipt identity.
+# Model is the launch selector; ExpectedModel is the separately observed receipt identity. Judge is
+# the judge that runs it, and Access the sandbox mode it runs in, `full` or `sandbox`; an offer an
+# earlier release kept names them only by the names they replace, so they are read through
+# JudgeName and AccessName (#7957).
 GateOffer = typing.TypedDict("GateOffer", {
     "commission": "str",
     "kind": "typing.NotRequired[str]",
@@ -2021,8 +2180,10 @@ GateOffer = typing.TypedDict("GateOffer", {
     "base": "str",
     "round": "int",
     "cap": "int",
+    "access": "str",
     "harness": "str",
     "tier": "str",
+    "judge": "str",
     "provider": "str",
     "model": "str",
     "expected_model": "str",
@@ -2048,6 +2209,7 @@ GateBrief = typing.TypedDict("GateBrief", {
     "pr": "int",
     "branch": "typing.NotRequired[str]",
     "doc": "typing.NotRequired[str]",
+    "access": "str",
     "harness": "str",
     "prior": "list[GatePriorRound] | None",
     "knowledge": "str",
@@ -2294,6 +2456,7 @@ GateRow = typing.TypedDict("GateRow", {
     "cap": "int",
     "final": "bool",
     "tier": "str",
+    "access": "str",
     "harness": "str",
     "sha": "str",
     "base": "str",
@@ -2391,6 +2554,7 @@ GateRead = typing.TypedDict("GateRead", {
     "cap": "int",
     "final": "bool",
     "tier": "str",
+    "access": "str",
     "harness": "str",
     "sha": "str",
     "base": "str",
@@ -2476,7 +2640,8 @@ GateStats = typing.TypedDict("GateStats", {
 })
 
 # GateHost is a machine of this workspace that runs gates, by the name its runs' machine is read by,
-# with its gate slots and the gate runs held on it now, of any team. Host is its place
+# with the gate limit admission holds it to, absent where the team holds no live login there, and
+# the gate runs held on it now, of any team. Host is its place
 # (settings.HostPlace), the id its settings are read at.
 GateHost = typing.TypedDict("GateHost", {
     "machine_id": "str",
@@ -2762,6 +2927,7 @@ LaunchBody = typing.TypedDict("LaunchBody", {
     "card": "typing.NotRequired[str]",
     "resolves": "typing.NotRequired[IssueRef | None]",
     "notify": "typing.NotRequired[str]",
+    "checkpoint": "typing.NotRequired[str]",
 })
 
 # LaunchWithdrawal withdraws a launch still waiting. It names nothing: the launch is the route's.
@@ -3373,6 +3539,14 @@ InstallationHeld = typing.TypedDict("InstallationHeld", {
     "installation_id": "typing.NotRequired[int]",
     "repository": "typing.NotRequired[str]",
     "refused": "typing.NotRequired[InstallationRefused | None]",
+    "reconciling": "typing.NotRequired[InstallationReconciling | None]",
+})
+
+# InstallationReconciling is where the webhook's reconcile of an installation stands.
+InstallationReconciling = typing.TypedDict("InstallationReconciling", {
+    "check": "str",
+    "at": "str",
+    "settled": "typing.NotRequired[bool]",
 })
 
 # InstallationRefused is a Connect GitHub claim coordination refused.
@@ -3872,6 +4046,41 @@ SessionEvent = typing.TypedDict("SessionEvent", {
     "seq": "int",
     "kind": "str",
     "row": "typing.NotRequired[SessionRow | None]",
+    "turn": "typing.NotRequired[SessionTurn | None]",
+    "ask": "typing.NotRequired[SessionAsk | None]",
+    "settled": "typing.NotRequired[SessionSettled | None]",
+    "gap": "typing.NotRequired[SessionGap | None]",
+})
+
+# SessionTurn is a turn starting or completing; Reason (answered, interrupted, error) says how it
+# completed.
+SessionTurn = typing.TypedDict("SessionTurn", {
+    "state": "str",
+    "reason": "typing.NotRequired[str]",
+})
+
+# SessionAsk is a permission or a question the harness waits on: the tool's input, which for a
+# question is the questions and their options, and the answers the harness offers.
+SessionAsk = typing.TypedDict("SessionAsk", {
+    "id": "str",
+    "kind": "str",
+    "tool": "typing.NotRequired[str]",
+    "input": "typing.NotRequired[typing.Any]",
+    "options": "typing.NotRequired[list[str] | None]",
+})
+
+# SessionSettled is an ask the harness saw answered, by whom and with what.
+SessionSettled = typing.TypedDict("SessionSettled", {
+    "ask": "str",
+    "by": "str",
+    "answer": "typing.NotRequired[typing.Any]",
+})
+
+# SessionGap says the events numbered strictly between From and To are lost, so a reader re-reads
+# history.
+SessionGap = typing.TypedDict("SessionGap", {
+    "from": "int",
+    "to": "int",
 })
 
 # SessionRow is a transcript row: the harness's id for it where it has one, its role, who wrote
@@ -3922,8 +4131,30 @@ HistoryAnswer = typing.TypedDict("HistoryAnswer", {
     "refused": "typing.NotRequired[str]",
 })
 
+# AgentSurfaceBody is a batch of one watched session's live events, from the machine holding it,
+# oldest first.
+AgentSurfaceBody = typing.TypedDict("AgentSurfaceBody", {
+    "session": "str",
+    "producer": "str",
+    "events": "list[SessionEvent] | None",
+})
+
+# AgentSurfaceAnswer is the door's word on a batch: relayed to the browsers watching, or dropped
+# because none is.
+AgentSurfaceAnswer = typing.TypedDict("AgentSurfaceAnswer", {
+    "status": "str",
+})
+
+# SessionLiveState is whether the machine holding a watched session took its watch, told to the
+# browser as it changes; Reason is the check that found an offline one so.
+SessionLiveState = typing.TypedDict("SessionLiveState", {
+    "machine": "str",
+    "reason": "typing.NotRequired[str]",
+})
+
 # DetachExit is why a session left, kept with the epoch it ended (doc 123 §4): a handover's
-# checkpoint URL, or a one-line reason it abandoned or retired.
+# checkpoint, by its id or, until every client names one (6324-checkpoints plan, unit 9), its
+# comment's URL; or a one-line reason it abandoned or retired.
 DetachExit = typing.TypedDict("DetachExit", {
     "kind": "str",
     "text": "str",
@@ -3938,14 +4169,16 @@ DetachBody = typing.TypedDict("DetachBody", {
 # EnrolSessionBody is an enrolment's body: the session's name and the incarnation it runs in.
 EnrolSessionBody = typing.TypedDict("EnrolSessionBody", {
     "name": "str",
-    "provider": "str",
+    "harness": "typing.NotRequired[str]",
+    "provider": "typing.NotRequired[str]",
     "provider_session": "str",
     "runtime_id": "str",
 })
 
 # IncarnationBody is an observation's body: what a machine saw of one harness process.
 IncarnationBody = typing.TypedDict("IncarnationBody", {
-    "provider": "str",
+    "harness": "typing.NotRequired[str]",
+    "provider": "typing.NotRequired[str]",
     "provider_session": "str",
     "runtime_id": "str",
 })
@@ -3971,7 +4204,8 @@ SessionCredential = typing.TypedDict("SessionCredential", {
 # the usage join; it names no credential. Only a harness that spends an OpenAI login has one: Codex,
 # or Claude Code proxied to such a login.
 BindBody = typing.TypedDict("BindBody", {
-    "provider": "str",
+    "harness": "typing.NotRequired[str]",
+    "provider": "typing.NotRequired[str]",
     "provider_session": "str",
     "runtime_id": "str",
     "account_id": "typing.NotRequired[str]",
@@ -4017,14 +4251,33 @@ ListedSession = typing.TypedDict("ListedSession", {
     "origin": "SessionOrigin",
     "standing": "SessionStanding | None",
     "checkpoint": "ListedCheckpoint | None",
+    "gate": "ListedGate | None",
     "rarity": "str | None",
     "stewards": "list[ListedSteward] | None",
+    "capabilities": "list[str] | None",
 })
 
 # ListedSteward is one goal a session stewards: its id and its current title.
 ListedSteward = typing.TypedDict("ListedSteward", {
     "goal": "str",
     "title": "str",
+})
+
+# ListedGate is a session's open gate commission, as its fleet row's pill and its card draw it:
+# the newest it holds, with Open counting every one of them. Phase is one of GateOpenPhases, so
+# the pill clears the moment the commission leaves it — verdict, publication, refusal or
+# cancellation each end it.
+ListedGate = typing.TypedDict("ListedGate", {
+    "id": "str",
+    "kind": "str",
+    "phase": "str",
+    "round": "int",
+    "cap": "int",
+    "open": "int",
+    "repo": "str",
+    "pr": "int | None",
+    "branch": "str | None",
+    "doc": "str | None",
 })
 
 # ListedCheckpoint is a session's current checkpoint: its boundary, its note's URL and when it was
@@ -4076,6 +4329,45 @@ StandingKeep = typing.TypedDict("StandingKeep", {
 StandingCache = typing.TypedDict("StandingCache", {
     "lapses_at": "str",
     "phase": "str",
+})
+
+# RetireStanding is what Go read of a session as it admitted the seat's retire of it (#5666): its
+# standing, nil when it was not enrolled at that epoch, the notices that standing raised, and the
+# cards it still executed with what Go read of their landing.
+RetireStanding = typing.TypedDict("RetireStanding", {
+    "at": "str",
+    "standing": "SessionStanding | None",
+    "notices": "list[str] | None",
+    "cards": "list[RetireCard] | None",
+})
+
+# RetireCard is a card the retired session still executed, by its wire id, and its landing's verdict.
+RetireCard = typing.TypedDict("RetireCard", {
+    "card": "str",
+    "landing": "str",
+    "landed_at": "str | None",
+})
+
+# RetireList is the workspace's retires over a window, newest first.
+RetireList = typing.TypedDict("RetireList", {
+    "retires": "list[RetireRecord] | None",
+})
+
+# RetireRecord is one retire: whom, at which epoch, who asked and why, how it settled, and the
+# standing Go recorded when it admitted it, nil for one recorded before that or the daemon's own
+# teardown. Outcome is "" while the retire is unsettled.
+RetireRecord = typing.TypedDict("RetireRecord", {
+    "id": "str",
+    "session": "str",
+    "epoch": "int",
+    "by_kind": "str",
+    "by": "str | None",
+    "reason": "str",
+    "successor": "str | None",
+    "outcome": "str",
+    "requested_at": "str",
+    "settled_at": "str | None",
+    "standing": "RetireStanding | None",
 })
 
 # SessionOrigin is where a session epoch runs and what launched it (#5026), read from its launch
@@ -4186,10 +4478,12 @@ Setting = typing.TypedDict("Setting", {
     "source": "str",
     "version": "int",
     "changed_by": "typing.NotRequired[str | None]",
+    "changed_by_kind": "typing.NotRequired[str]",
     "changed_at": "typing.NotRequired[str | None]",
     "on_machine": "typing.NotRequired[SettingOnMachine | None]",
     "class": "str",
     "decided_by": "str",
+    "scope": "str",
     "may_change": "bool",
     "inherited": "SettingInherited",
     "pushed": "bool",
@@ -4234,6 +4528,57 @@ HostSettingList = typing.TypedDict("HostSettingList", {
     "workers": "typing.NotRequired[HostWorkers | None]",
 })
 
+# DelegationClaims is what the console signs a seated session's delegated token with: the live
+# grant of its workspace, who granted it, and the seat's session and epoch the token acts as
+# (7601-seat-settings design, decision 2). Seat is the workspace's id, which an alias never is.
+# Classes are the grant's, for the client only.
+DelegationClaims = typing.TypedDict("DelegationClaims", {
+    "seat": "str",
+    "grantor": "str",
+    "delegation": "str",
+    "session": "str",
+    "epoch": "int",
+    "classes": "list[str] | None",
+})
+
+# DelegationList is each live workspace of a team with its live grant to the seat, or none
+# (7601-seat-settings plan, Task 6).
+DelegationList = typing.TypedDict("DelegationList", {
+    "workspaces": "list[WorkspaceDelegation] | None",
+})
+
+# WorkspaceDelegation is one workspace and the grant its seat holds, nil where it holds none.
+WorkspaceDelegation = typing.TypedDict("WorkspaceDelegation", {
+    "workspace": "str",
+    "name": "str",
+    "grant": "Delegation | None",
+})
+
+# Delegation is a grant as the Team dialog draws it. Lapsed is true once its grantor no longer owns
+# the team: it then admits nothing until the owner revokes it or grants anew. GrantorLogin is drawn
+# in place of the id where Go holds one, and is never authority.
+Delegation = typing.TypedDict("Delegation", {
+    "id": "str",
+    "grantor": "str",
+    "grantor_login": "str | None",
+    "classes": "list[str] | None",
+    "reach": "str",
+    "granted_at": "str",
+    "lapsed": "bool",
+})
+
+# DelegationBody is the owner's grant: the classes the seat may change, and its reach, workspace
+# or grantor.
+DelegationBody = typing.TypedDict("DelegationBody", {
+    "classes": "list[str] | None",
+    "reach": "str",
+})
+
+# DelegationRevokeAnswer is revoked, or unchanged where no grant was live.
+DelegationRevokeAnswer = typing.TypedDict("DelegationRevokeAnswer", {
+    "status": "str",
+})
+
 # HostWorkers is how many workers run on a host now, of every team, and the cap it enforces: the
 # one it last applied, which stands while a change waits for its agents.
 HostWorkers = typing.TypedDict("HostWorkers", {
@@ -4242,10 +4587,11 @@ HostWorkers = typing.TypedDict("HostWorkers", {
 })
 
 # SettingBody changes a setting from the version its writer read: value null sets it back to what it
-# inherits.
+# inherits. Why is the reason for the change, and required for a delegated write.
 SettingBody = typing.TypedDict("SettingBody", {
     "value": "typing.Any",
     "version": "int",
+    "why": "typing.NotRequired[str]",
 })
 
 # SignalAnswerBody is the seat's answer to a snapshot it was told: whether it acted on it or
@@ -4436,8 +4782,11 @@ Snapshot = typing.TypedDict("Snapshot", {
     "provenance": "SnapshotProvenance",
 })
 
+# TargetingRecord is where a session runs, as its machine observed it. A record names its harness as
+# Harness; Provider is the name this release still takes, and a record is stored with both (#6550).
 TargetingRecord = typing.TypedDict("TargetingRecord", {
-    "provider": "str",
+    "harness": "typing.NotRequired[str]",
+    "provider": "typing.NotRequired[str]",
     "provider_session": "str",
     "runtime_id": "str",
     "entrypoint": "str",
@@ -4637,6 +4986,7 @@ SessionWait = typing.TypedDict("SessionWait", {
     "head": "typing.NotRequired[str]",
     "branch": "typing.NotRequired[str]",
     "recheck": "typing.NotRequired[int]",
+    "card": "typing.NotRequired[str]",
 })
 
 # WaitAnswer names the wait registered.
@@ -5358,11 +5708,26 @@ GoalExecutionOmitted = typing.TypedDict("GoalExecutionOmitted", {
 # GoalExecutionValidity is the working plan's pins as they stand: which no longer hold, where its
 # policy is now, and whether the inputs it was adopted under have moved. Stale describes the plan's
 # scope and policy alone; an empty array says nothing of the inputs, which InputsMoved names
-# separately.
+# separately, and InputsDelta names what moved — the canonical input lines added and removed since
+# adoption, omitted when the plan recorded none or nothing moved (#7012).
 GoalExecutionValidity = typing.TypedDict("GoalExecutionValidity", {
     "stale": "list[str] | None",
     "policy_now": "str",
     "inputs_moved": "bool",
+    "inputs_delta": "typing.NotRequired[GoalPlanInputsDelta | None]",
+})
+
+# GoalPlanInputsDelta is the diff of the working plan's input lines as the reading workspace may
+# see it: its own cards' canonical lines added and removed since adoption, sorted, and other
+# workspaces' cards' moved lines counted — a wire is that workspace's own name for its card,
+# which this read carries no further than its elsewhere reference. A line added beside its remove
+# is one change — a state, conclusion or wait that moved; a line alone is a contributor or a
+# judgment that came or went. The pairs carry no cause and no attribution.
+GoalPlanInputsDelta = typing.TypedDict("GoalPlanInputsDelta", {
+    "added": "list[str] | None",
+    "removed": "list[str] | None",
+    "elsewhere_added": "int",
+    "elsewhere_removed": "int",
 })
 
 # GoalExecutionCriterion is one criterion of the current revision as the execution reads it: its
@@ -5781,6 +6146,9 @@ ROUTES = frozenset({
     "POST /api/v1/teams/{team}/collaborators/{collaborator}/grants/{grant}/narrowing",
     "POST /api/v1/teams/{team}/collaborators/{collaborator}/grants/{grant}/revocation",
     "POST /api/v1/teams/{team}/collaborators/{collaborator}/title",
+    "GET /api/v1/teams/{team}/delegations",
+    "DELETE /api/v1/teams/{team}/delegations/{workspace}",
+    "PUT /api/v1/teams/{team}/delegations/{workspace}",
     "GET /api/v1/teams/{team}/installations",
     "POST /api/v1/teams/{team}/installations",
     "POST /api/v1/teams/{team}/installations/{installation}/release",
@@ -5849,6 +6217,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/collaborators/{collaborator}/wakes",
     "POST /w/{workspace}/api/v1/collaborators/{collaborator}/wakes/{wake}/revocation",
     "POST /w/{workspace}/api/v1/credentials/{credential}/revocations",
+    "POST /w/{workspace}/api/v1/delegation/claims",
     "POST /w/{workspace}/api/v1/deployments",
     "POST /w/{workspace}/api/v1/device-approvals",
     "POST /w/{workspace}/api/v1/device-exchanges",
@@ -5919,6 +6288,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/push/subscriptions/{subscription}/revocation",
     "POST /w/{workspace}/api/v1/push/subscriptions/{subscription}/tests",
     "GET /w/{workspace}/api/v1/releases",
+    "GET /w/{workspace}/api/v1/retires",
     "GET /w/{workspace}/api/v1/rooms",
     "POST /w/{workspace}/api/v1/rooms",
     "GET /w/{workspace}/api/v1/rooms/{room}",
@@ -5935,13 +6305,17 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/seat/release",
     "GET /w/{workspace}/api/v1/sessions",
     "POST /w/{workspace}/api/v1/sessions",
+    "GET /w/{workspace}/api/v1/sessions/{session}/acts/{act}",
     "POST /w/{workspace}/api/v1/sessions/{session}/bindings",
     "GET /w/{workspace}/api/v1/sessions/{session}/checkpoints",
     "POST /w/{workspace}/api/v1/sessions/{session}/detachment",
     "POST /w/{workspace}/api/v1/sessions/{session}/directives",
     "POST /w/{workspace}/api/v1/sessions/{session}/directives/{directive}/acknowledgement",
     "POST /w/{workspace}/api/v1/sessions/{session}/forge-token",
+    "GET /w/{workspace}/api/v1/sessions/{session}/history",
     "POST /w/{workspace}/api/v1/sessions/{session}/keep",
+    "GET /w/{workspace}/api/v1/sessions/{session}/live",
+    "POST /w/{workspace}/api/v1/sessions/{session}/prompts",
     "POST /w/{workspace}/api/v1/sessions/{session}/push/raises",
     "POST /w/{workspace}/api/v1/sessions/{session}/rebind",
     "POST /w/{workspace}/api/v1/sessions/{session}/regroups",
@@ -5982,6 +6356,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/steering/agent/hold",
     "POST /w/{workspace}/steering/agent/injected",
     "POST /w/{workspace}/steering/agent/injection",
+    "POST /w/{workspace}/steering/agent/interrupt",
     "POST /w/{workspace}/steering/agent/judges",
     "POST /w/{workspace}/steering/agent/launch",
     "POST /w/{workspace}/steering/agent/leaving",
@@ -5990,6 +6365,7 @@ ROUTES = frozenset({
     "GET /w/{workspace}/steering/agent/package/{sha}/{platform}",
     "POST /w/{workspace}/steering/agent/park",
     "POST /w/{workspace}/steering/agent/policy",
+    "POST /w/{workspace}/steering/agent/prompt",
     "POST /w/{workspace}/steering/agent/reach",
     "POST /w/{workspace}/steering/agent/reading",
     "POST /w/{workspace}/steering/agent/received",
@@ -5999,6 +6375,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/steering/agent/retire",
     "POST /w/{workspace}/steering/agent/routes",
     "GET /w/{workspace}/steering/agent/stream",
+    "POST /w/{workspace}/steering/agent/surface",
     "GET /w/{workspace}/steering/agent/target",
     "POST /w/{workspace}/steering/agent/undelivered",
     "POST /w/{workspace}/steering/agent/wake",
@@ -6020,6 +6397,7 @@ PAGINATION = {
     "GET /w/{workspace}/api/v1/releases": {"parameter":"next","collection":"releases","first":["tails","open"]},
     "GET /w/{workspace}/api/v1/rooms/{room}/messages": {"parameter":"cursor","collection":"items","stop":"head","drop_query":["before"]},
     "GET /w/{workspace}/api/v1/rulings": {"parameter":"next","collection":"rulings"},
+    "GET /w/{workspace}/api/v1/sessions/{session}/history": {"parameter":"before","collection":"events"},
 }
 
 # Every query parameter a route reads, by its pattern: the values it takes, or None for any.
@@ -6045,10 +6423,13 @@ QUERY = {
     "GET /w/{workspace}/api/v1/placement": {"harness": None, "vendor": None, "model": None, "floor": frozenset({"uncommon", "rare", "epic", "legendary"}), "effort": None},
     "GET /w/{workspace}/api/v1/placements": {"launch": None, "gate": None, "session": None},
     "GET /w/{workspace}/api/v1/releases": {"limit": None, "next": None},
+    "GET /w/{workspace}/api/v1/retires": {"since": None, "until": None},
     "GET /w/{workspace}/api/v1/rooms/{room}/messages": {"limit": None, "cursor": None, "before": None, "wait": None},
     "GET /w/{workspace}/api/v1/rulings": {"state": frozenset({"unacknowledged"}), "limit": None, "next": None},
     "GET /w/{workspace}/api/v1/sessions": {"gone": frozenset({"1"})},
     "GET /w/{workspace}/api/v1/sessions/{session}/checkpoints": {"epoch": frozenset({"current"}), "limit": None},
+    "GET /w/{workspace}/api/v1/sessions/{session}/history": {"before": None, "limit": None},
+    "GET /w/{workspace}/api/v1/sessions/{session}/live": {"after": None},
     "GET /w/{workspace}/api/v1/snapshot": {"feed": None},
     "GET /w/{workspace}/api/v1/work/regroups": {"state": frozenset({"pending"}), "limit": None},
     "GET /w/{workspace}/steering/agent/stream": {"accepts": frozenset({"policy", "watch", "unwatch", "history"})},

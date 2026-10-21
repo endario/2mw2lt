@@ -25,6 +25,18 @@ from local_workspace import workspace_root  # noqa: E402
 VERBS = ("announce", "blocked", "wait", "done", "recommend", "ask")
 # `wait: <session> cancel <wait id>`: the session ends one of its own open waits.
 WAIT_CANCEL = re.compile(r"cancel (?P<id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
+# `wait: <session> --card <card> for ...`: the card the wait is for, which a session executing
+# several names (doc 200 D8).
+WAIT_CARD = re.compile(r"--card (?P<card>[0-9a-f]{24}) (?P<rest>.+)", re.S)
+
+
+def wait_card(text: str) -> tuple[str | None, str | None]:
+    """The card a wait names and the wait without it; (None, text) when it names none, and
+    (None, None) for a `--card` that names no card."""
+    if text != "--card" and not text.startswith("--card "):
+        return None, text
+    m = WAIT_CARD.fullmatch(text)
+    return (m["card"], m["rest"]) if m else (None, None)
 
 
 def invocation() -> str:
@@ -96,11 +108,12 @@ def _on_go(ws: Path, verb: str, session: str, text: str, retry_id: str | None) -
         except session_routes.Refused as e:
             unsure = not session_routes.settled(e)
             print(display_reply(refusal.retry(str(e)) if unsure else refusal.use(verb, str(e))), file=sys.stderr)
-            if e.code == "done-card-required":
-                # A done is one card's (doc 199 §3): Go names each the session holds.
+            if e.code in ("done-card-required", "wait-card-required"):
+                # A done or a wait is one card's (doc 199 §3, doc 200 D8): Go names each the session holds.
                 cards = "\n".join(f"  {c}" for c in e.detail.split("; ") if c) or "  (see connect's card: line)"
-                print(f"this session holds more than one card; say done for the one whose part is finished:\n{cards}\n"
-                      f"  verb.py done {session} --card <id> \"<result>\"", file=sys.stderr)
+                act, form = ("say done for the one whose part is finished", f"verb.py done {session} --card <id> \"<result>\"") \
+                    if verb == "done" else ("name the card the wait is for", f"verb.py wait {session} --card <id> for ...")
+                print(f"this session holds more than one card; {act}:\n{cards}\n  {form}", file=sys.stderr)
         except session_routes.Unsent as e:
             unsure = True
             print(display_reply(refusal.retry(str(e))), file=sys.stderr)
@@ -191,8 +204,11 @@ def _wait_on_go(ws: Path, session: str, token: str, text: str, retry_id: str | N
             return 1
         print(f"cancelled: wait {session} {answer['id']}, it was {answer['from']}")
         return 0
+    card, text = wait_card(text)
     status = verb_grammar.parse_status(line("wait", session, text))
     body: dict = {"kind": status["kind"]}
+    if card:
+        body["card"] = card
     if status["kind"] == "at":
         body["at"] = status["on"]
     else:
@@ -260,7 +276,8 @@ def main(argv: list[str]) -> int:
     unparsed = False
     if verb in ("announce", "blocked", "wait"):
         import verb_grammar
-        unparsed = verb_grammar.parse_status(line(verb, session, text)) is None and not (
+        judged = wait_card(text)[1] if verb == "wait" else text
+        unparsed = judged is None or verb_grammar.parse_status(line(verb, session, judged)) is None and not (
             verb == "wait" and WAIT_CANCEL.fullmatch(text))
         go_shape = verb == "announce" and ANNOUNCE.fullmatch(text) is not None
         if unparsed and not go_shape:

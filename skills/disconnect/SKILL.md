@@ -3,11 +3,11 @@ name: disconnect
 description: Use when a session finishes or the brain releases it.
 ---
 
-If you leave work unfinished, checkpoint at `exit` first (`/2mw2lt:checkpoint`). Using its posted
-note and the session name connect printed:
+If you leave work unfinished, checkpoint at `exit` first (`/2mw2lt:checkpoint`). Using the id it
+answered `checkpointed:` with and the session name connect printed:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/disconnect.py" --handover <note-url> <session>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/disconnect.py" --handover <checkpoint id> <session>
 ```
 
 With nothing to hand over:

@@ -46,6 +46,8 @@ def held(flags: dict[str, str]) -> dict | None:
 GO_NOT_SEATED = "refused: this session does not hold the seat ({why})"
 # Go's refusals of a holder whose seat moved between its read of the seat and its command.
 SEAT_LOST = frozenset({"seat-not-holder", "seat-generation-stale"})
+# The daemon's launch-reason-is-a-brief, told with where the work belongs.
+REASON_IS_A_BRIEF = "a launch without a brief takes a reason of at most 300 characters: put the work on the line after the launch, as `brief: <the work>`, and say only why in the reason, since the session the launch starts is never told it"
 _NEED = re.compile(r"^(?P<verb>dispose|promote):\s*token\s+@lease\s+(?P<item>\S+)\s+(?P<reason>.+)$", re.S)
 # An owner's row the owner answered somewhere else (#6325): where they gave it, and their decision
 # as the seat received it.
@@ -73,6 +75,9 @@ _LAUNCH = re.compile(r"^launch:\s*token\s+@lease(?:\s+(?P<harness>[a-z][a-z0-9-]
                      r"\s+because\s+(?P<reason>\S.*?)"
                      # The launched session's first directive follows on its own line (doc 192).
                      r"(?:\nbrief:[ \t]*(?P<brief>.*?))?\s*$", re.S)
+# A brief may open with the checkpoint it hands over, whose text the daemon appends at delivery.
+_BRIEF_CHECKPOINT = re.compile(r"^checkpoint\s+(?P<checkpoint>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+                               r"(?:\s+(?P<brief>.*))?$", re.S)
 _WITHDRAW = re.compile(r"^withdraw:\s*token\s+@lease\s+(?P<launch>[0-9a-f-]{36})\s*$")
 _CANCEL = re.compile(r"^cancel:\s*token\s+@lease\s+(?P<action>[0-9a-f-]{36})\s*$")
 _BACKLOG = re.compile(r"^backlog:\s*token\s+@lease\s*$")
@@ -119,7 +124,9 @@ GO_VERBS = tuple(sorted({"authorship", "backlog", "cancel", "dispose", "launch",
 # The paths `go_post` takes: each is the seat's own command, translated to the route Go serves.
 POST_TARGETS = ("/steering/seat/read", "/steering/brain/reply", "/steering/brain/attach",
                 "/steering/brain/detach", "/steering/push/raise")
-_RELAY = re.compile(r"^relay:\s*token\s+@lease\s+to\s+(?P<target>[^\s@]+)(?:@(?P<epoch>[0-9]{1,9}))?\s+(?P<text>.+)$", re.S)
+# `checkpoint <id>` hands the session a checkpoint's text, which the daemon appends at delivery.
+_RELAY = re.compile(r"^relay:\s*token\s+@lease\s+to\s+(?P<target>[^\s@]+)(?:@(?P<epoch>[0-9]{1,9}))?"
+                    r"(?:\s+checkpoint\s+(?P<checkpoint>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}))?\s+(?P<text>.+)$", re.S)
 # `lift:` of a review series by its pull request or a critic series by its branch (speak.py _LIFT).
 _LIFT = re.compile(r"^lift:\s*token\s+@lease\s+(?P<kind>review|critic)\b(?P<rest>.*)$", re.S)
 # `lift:` of a bench, by the dimension and key its bench reason names, or a judge's vendor and model
@@ -180,7 +187,8 @@ def go_say(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         return 2, refusal.use("relay", "malformed relay: invocation"), False
     try:
         said = session_routes.relay(rec["session"], rec["token"], m["target"],
-                                    int(m["epoch"]) if m["epoch"] else None, " ".join(m["text"].split()), key)
+                                    int(m["epoch"]) if m["epoch"] else None, " ".join(m["text"].split()), key,
+                                    checkpoint=m["checkpoint"] and m["checkpoint"].lower())
     except session_routes.NotSeated as why:
         return 1, GO_NOT_SEATED.format(why=why), False
     except session_routes.Unsent as e:
@@ -269,8 +277,8 @@ def _go_launch(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         return 2, refusal.use("launch", "a launch names its harness unless it names a floor"), False
     if harness == "claude" and not (m["model"] or m["floor"]):
         return 2, refusal.use("launch", "a claude launch names its model (as Claude Code takes it) or a floor; its effort, left out, is the placed model's rarity's: legendary low, epic medium, rare high, uncommon max"), False
-    if m["floor"] and (m["machine"] or m["quoted"] or m["machine_name"] or m["vendor"] or m["account"]):
-        return 2, refusal.use("launch", "a floor is placed by the platform: leave out on, vendor and account, or name the model"), False
+    if m["floor"] and (m["machine"] or m["quoted"] or m["machine_name"] or m["account"]):
+        return 2, refusal.use("launch", "a floor is placed by the platform: leave out on and account, or name the model"), False
     body = {k: m[k] for k in ("machine", "machine_name", "vendor", "account", "model", "floor", "thinking", "effort", "notify") if m[k]}
     if harness:
         body["harness"] = harness
@@ -278,11 +286,14 @@ def _go_launch(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         body["machine_name"] = m["quoted"]
     body["reason"] = " ".join(m["reason"].split())
     if m["brief"] is not None:
-        if not m["brief"].strip():
+        brief = m["brief"]
+        if c := _BRIEF_CHECKPOINT.match(brief):
+            body["checkpoint"], brief = c["checkpoint"].lower(), c["brief"] or ""
+        if not brief.strip():
             return 2, refusal.use("launch", "an empty brief: write the launched session's first directive after `brief:`, or leave the line out"), False
         if harness == "claude-brain":
             return 2, refusal.use("launch", "a seat brain is briefed by its host, not by a launch"), False
-        body["brief"] = m["brief"]
+        body["brief"] = brief
     if m["window"]:
         body["window"] = True
     if m["card"]:
@@ -306,6 +317,8 @@ def _go_launch(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
             return 1, GO_NOT_SEATED.format(why=e), False
         if e.code in ("launch-machine-unknown", "launch-machine-ambiguous"):
             return 1, refusal.use("launch", f"{e}; {session_routes.machines_here(rec['token'])}"), False
+        if e.code == "launch-reason-is-a-brief":
+            return 1, refusal.use("launch", REASON_IS_A_BRIEF), False
         if session_routes.settled(e):
             return 1, refusal.use("launch", str(e)), False
         return 1, refusal.retry(str(e)), True

@@ -4,7 +4,7 @@
 export type Line = { id: string | null; kind: string; wakes: boolean; hold?: string; session?: string; why?: string; retry?: boolean; remedy?: string }
 
 export const POINTER = 'Call mcp__2mw2lt__frames.'
-export const CHECKPOINT = 'Compaction is near. Write your checkpoint (/2mw2lt:checkpoint) now.'
+export const CHECKPOINT = 'Compaction is near. Write your checkpoint with mcp__2mw2lt__checkpoint now.'
 export const FLOOR = [2, 1, 289] as const
 
 // What a hold that no retry outlives tells the session in a turn of its own (#6308): the refusal
@@ -192,9 +192,9 @@ const text = (description: string): Field => ({ type: 'string', description })
 export const SEAT_TOOLS: Record<string, SeatTool> = {
   relay: {
     description: 'The seat, or a goal\'s steward for a session its launches started: relay a directive to a session. The daemon frames the seat\'s as on the owner\'s behalf, and a steward\'s as its own, within the seat\'s bounds.',
-    fields: { to: word('The session to direct.'), epoch: { type: 'integer', description: 'The session\'s enrolment epoch, when it must be that one.' }, text: text('The directive, naming the card.') },
+    fields: { to: word('The session to direct.'), epoch: { type: 'integer', description: 'The session\'s enrolment epoch, when it must be that one.' }, checkpoint: word('A checkpoint\'s id, when the session takes over from it: the daemon hands it the checkpoint\'s text after the directive, so do not paste the text.'), text: text('The directive, naming the card.') },
     required: ['to', 'text'],
-    build: a => ({ client: 'say', stdin: `relay: token @lease to ${str(a, 'to')}${a.epoch !== undefined ? `@${str(a, 'epoch')}` : ''} ${str(a, 'text')}` }),
+    build: a => ({ client: 'say', stdin: `relay: token @lease to ${str(a, 'to')}${a.epoch !== undefined ? `@${str(a, 'epoch')}` : ''}${a.checkpoint !== undefined ? ` checkpoint ${str(a, 'checkpoint')}` : ''} ${str(a, 'text')}` }),
   },
   dispose: {
     description: 'Seat only: close one of the brain\'s Needs You rows, with a reason the owner can read.',
@@ -333,14 +333,47 @@ export function resendId(stdout: string): string | null {
   return m ? m[1]! : null
 }
 
-// Why a seat tool's call is refused at its entry, or null to send it. A subagent's call, another
+// Why a seat tool's call, or the checkpoint tool's, is refused at its entry, or null to send it. A subagent's call, another
 // plugin's, and one the session's permission settings do not allow outright are refused: the
 // plugin answers above the permission system and cannot show its dialog (doc 175 §8).
+export type Entry = { own: string; verbs: string; client: string }
+export const SEAT_ENTRY: Entry = { own: "a seat verb is the brain's own", verbs: "the seat's verbs", client: 'lease.py' }
+export const CHECKPOINT_ENTRY: Entry = { own: "a checkpoint is the session's own", verbs: 'the checkpoint tool', client: 'checkpoint.py' }
 export function entryRefusal(agentId: string | undefined, origin: string, tool: string,
-                             check: { decision: 'allow' | 'ask' | 'deny'; reason?: string }): string | null {
-  if (agentId !== undefined) return "refused: a seat verb is the brain's own, never a subagent's."
-  if (origin !== 'engine') return `refused: ${origin} may not call the seat's verbs.`
+                             check: { decision: 'allow' | 'ask' | 'deny'; reason?: string }, entry: Entry = SEAT_ENTRY): string | null {
+  if (agentId !== undefined) return `refused: ${entry.own}, never a subagent's.`
+  if (origin !== 'engine') return `refused: ${origin} may not call ${entry.verbs}.`
   if (check.decision === 'allow') return null
   return `refused: ${check.reason ?? `this session's permission settings ${check.decision === 'ask' ? 'ask before' : 'deny'} ${tool}`}. `
-    + 'The plugin cannot show the permission dialog; run the same verb through lease.py in Bash, where it applies.'
+    + `The plugin cannot show the permission dialog; run the same verb through ${entry.client} in Bash, where it applies.`
+}
+
+// The checkpoint tool (#6324): checkpoint.py's arguments, the text for its stdin and the lessons
+// for its --learned-file, or why the call is refused. checkpoint.py judges the text and the lessons.
+export const CHECKPOINT_BOUNDARIES = ['spec-settled', 'unit-done', 'context', 'handover', 'exit']
+export const CHECKPOINT_TOOL = {
+  description: "Hand this session's checkpoint to the platform, which scans and keeps its text (/2mw2lt:checkpoint says what goes in it). "
+    + 'With mirror, the same text is posted as a comment on that pull request or issue once the platform has kept it.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      boundary: { type: 'string', enum: CHECKPOINT_BOUNDARIES, description: 'The boundary this checkpoint is written at.' },
+      text: { type: 'string', maxLength: 8192, description: 'The note, as /2mw2lt:checkpoint lays it out: at most 8192 bytes.' },
+      learned: { type: 'array', description: 'At most eight lessons: each one rule and the mistake it prevents, scoped to repository paths or "*".',
+                 items: { type: 'object', properties: { text: { type: 'string' }, scope: { type: 'array', items: { type: 'string' } } },
+                          required: ['text', 'scope'], additionalProperties: false } },
+      mirror: { type: 'string', description: 'A GitHub pull request or issue URL to post the note on.' },
+    },
+    required: ['boundary', 'text'],
+    additionalProperties: false,
+  },
+}
+export function checkpointCall(args: Record<string, unknown>): { boundary: string; text: string; learned?: string; mirror?: string } | { refused: string } {
+  for (const k of Object.keys(args)) if (!['boundary', 'text', 'learned', 'mirror'].includes(k)) return { refused: `checkpoint takes no ${k}` }
+  const { boundary, text, learned, mirror } = args
+  if (typeof boundary !== 'string' || !CHECKPOINT_BOUNDARIES.includes(boundary)) return { refused: `boundary is one of ${CHECKPOINT_BOUNDARIES.join(', ')}` }
+  if (typeof text !== 'string' || text === '') return { refused: 'text is required' }
+  if (learned !== undefined && !Array.isArray(learned)) return { refused: 'learned is a list' }
+  if (mirror !== undefined && (typeof mirror !== 'string' || mirror === '')) return { refused: 'mirror is a URL' }
+  return { boundary, text, ...(learned !== undefined ? { learned: JSON.stringify(learned) } : {}), ...(mirror !== undefined ? { mirror } : {}) }
 }

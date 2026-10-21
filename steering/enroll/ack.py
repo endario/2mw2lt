@@ -113,6 +113,8 @@ def main(argv: list[str]) -> int:
         reply = acknowledge(ws, session, ulid)
     except LookupError as e:
         print(e, file=sys.stderr); return 1
+    if reply.startswith("already acknowledged:"):
+        print(reply); return 0
     print("acked" if reply.startswith("acked:") else f"not acked: {display_reply(reply, 200)}")
     return 0 if reply.startswith("acked:") else 1
 

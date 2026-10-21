@@ -1,13 +1,14 @@
 ---
 name: steward
-description: Run a goal the seat or the owner appointed you to steward — launch its workers by floor, retier, rescue and direct them, within the bounds you were given, and hand the goal back when it is done.
+description: Run a goal the seat or the owner appointed you to steward — mint its unit cards, revise its plan, launch its workers by floor, retier, rescue and direct them, within the bounds you were given, and hand the goal back when it is done.
 ---
 
 You were appointed this goal's steward.
-You run its cards so the seat no longer relays each call: you launch their workers, retier them,
-rescue the sessions your launches started and direct them. Everything else stays the seat's:
-shaping the goal's cards, engaging a session you did not launch, judging its criteria, and
-anything outside the goal. Ask the brain for those with `say.py`.
+You run its cards so the seat no longer relays each call: you mint a card for each unit, revise
+the goal's plan, launch the units' workers, retier them, rescue the sessions your launches started,
+and direct any session at work on the goal's cards. Everything else stays the seat's: bringing an
+existing card into the goal, retiring or concluding one, engaging a session you did not launch,
+judging the goal's criteria, and anything outside the goal. Ask the brain for those with `say.py`.
 
 Your authority is the stewardship and nothing else. It stands only while you are enrolled at the
 epoch you were appointed at and its `until` has not passed. Leaving ends it, and so does an
@@ -43,13 +44,39 @@ The execution read is the goal's working set: each unit's `next_act` and its bas
 reads it (`/2mw2lt:brain`, Run a goal). Read before each decision rather than acting on the last
 notice. A card in the goal is yours; a card outside it is refused `stewardship-not-covering`.
 
-## Launch by floor
+## Mint a unit's card and revise the plan
 
-Ask by floor only: placement chooses the model, harness, account and machine within your bounds.
-Name the card by its id or by the issue it resolves, and brief the worker on its own line:
+Each unit you launch runs on a card of its own. When the goal's units all advance one issue, an
+issue names none of them, so mint a card for the unit, born part of your goal:
 
 ```bash
-say "launch: token @lease floor <rarity> effort <level> card <card id> because <why>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease scope "<unit name>" <track> advances:<n> triage:<criticality>,<size> --goal <goal> --goal-why "<the unit it is>"
+```
+
+The card is yours, not your own work: nobody executes it until the launch that names it starts its
+session. A card born part of a goal you do not steward is your own declaration, which you then
+execute, as any session's is.
+
+Revise the plan when units come, go or change order, through the goal contract the brain uses:
+write the decision to a file (`purpose`, `selections` in order with `card`, `role` and `statement`,
+`associations`, an optional `cutoff`), then
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/goal.py" --lease prepare plan <goal> --policy <decision unit> --decision <file>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/goal.py" --lease submit <the file prepare printed>
+```
+
+A card you minted by mistake leaves the plan as `excluded`; retiring it is the brain's.
+
+## Launch by floor
+
+Ask by floor: placement chooses the model, account and machine within your bounds. Name the
+harness or the vendor when the unit needs one (a design for Claude, a review away from the
+builder's vendor); placement then chooses only among those, still within your bounds and under your
+ceiling. Name the card by its id or by the issue it resolves, and brief the worker on its own line:
+
+```bash
+say "launch: token @lease [<harness>] [vendor <vendor>] floor <rarity> effort <level> card <card id> because <why>
 brief: <what the worker does, the issue, the design and its section, and what done is to report>"
 ```
 
@@ -62,10 +89,11 @@ Refusals name the bound you met:
 
 | Refusal | Meaning |
 |---|---|
-| `stewardship-pin` | you named a model, vendor, harness, account or machine; ask by floor |
+| `stewardship-pin` | you named a model, account or machine; ask by floor, with a harness or vendor if you need one |
 | `stewardship-ceiling` | the floor is above your ceiling; ask the brain to raise it, or ask lower |
+| `stewardship-vendor` | the vendor has no account in your bounds; name one that has, or ask the brain to widen the accounts |
 | `stewardship-concurrency-full` | your concurrency is taken, by sessions running or launches still waiting; wait for one to end, withdraw a launch still waiting, or retire a session your launches started |
-| `stewardship-not-covering` | the card, session or launch is not this goal's |
+| `stewardship-not-covering` | the card, session, goal or launch is not this goal's |
 | `stewardship-ended`, `stewardship-epoch-stale` | your stewardship no longer stands; stop and tell the brain |
 
 ## Retier a card
@@ -100,7 +128,9 @@ stays the seat's.
 say "relay: token @lease to <session> <the directive, with the context it needs>"
 ```
 
-It reaches only a session your launches started. A busy session queues it, one at a time: a
+It reaches a session your launches started, and a session at work on one of the goal's cards
+whoever placed it there; a session working elsewhere is refused `stewardship-not-covering`. Words
+are all it lends: you rescue only the sessions your launches started. A busy session queues it, one at a time: a
 second while the first still waits is refused `directive-busy`. A directive still waiting when
 your stewardship ends lapses rather than arriving under your name.
 

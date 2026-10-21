@@ -1,5 +1,5 @@
 import type { Register, EngineInterface, Timer, HookStream, ProcessSpawnChunk, ProcessSpawnResult } from 'claude-code'
-import { lines, atLeast, pick, invokes, lifecycle, tokensOf, due, owed, framesEntry, obsoleteSeatRefusal, nextSeat, asksSeat, seatCall, seatSchema, resendId, entryRefusal, refusalTurn, capBulletin, sectionRevision, READ_KEPT, POINTER, CHECKPOINT, SEAT_SECTION, BULLETIN_SECTION, SEAT_TOOLS } from './frames'
+import { lines, atLeast, pick, invokes, lifecycle, tokensOf, due, owed, framesEntry, obsoleteSeatRefusal, nextSeat, asksSeat, seatCall, seatSchema, resendId, entryRefusal, checkpointCall, CHECKPOINT_ENTRY, CHECKPOINT_TOOL, refusalTurn, capBulletin, sectionRevision, READ_KEPT, POINTER, CHECKPOINT, SEAT_SECTION, BULLETIN_SECTION, SEAT_TOOLS } from './frames'
 import type { Line, SeatCall } from './frames'
 import * as surface from './surface'
 
@@ -25,6 +25,7 @@ const BULLETINS = { plugin: '2mw2lt', key: 'bulletins' } as const
 const UNSETTLED = { plugin: '2mw2lt', key: 'unsettled' } as const
 
 const TOOL = 'mcp__2mw2lt__frames'
+const CHECKPOINT_CALL = 'mcp__2mw2lt__checkpoint'
 const SEAT_TOOL = new RegExp(`^mcp__2mw2lt__(${Object.keys(SEAT_TOOLS).join('|')})$`)
 const REFRESH_MS = 60_000
 const REPOINT_MS = 1500
@@ -38,15 +39,18 @@ const RECEIPT_TRIES = 3
 const script = ($: EngineInterface, name: string) => `${$.plugin.root}/steering/enroll/${name}`
 
 // Every row the module writes goes through here, and its text is one of the fixed texts in
-// frames.ts: a frame's own text reaches the model only as the `frames` tool's result. A refused
-// append (a plugin above, or a run no plugin may shape) is logged, and the hold goes on.
-async function append($: EngineInterface, text: string) {
+// frames.ts, or a desk prompt's words under the from: line naming who said them: a frame's own text
+// reaches the model only as the `frames` tool's result. A refused append (a plugin above, or a run
+// no plugin may shape) is logged, the hold goes on, and the refusal is returned.
+async function append($: EngineInterface, text: string, origin?: string): Promise<string | undefined> {
   $.ui.log(`2mw2lt: appends "${text}"`, { to: 'debug' })
   try {
     const stored = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })
-    if (stored.uuid !== undefined) show($, { kind: 'row', row: surface.ownRow(text, stored.uuid) })
+    if (stored.uuid !== undefined) show($, { kind: 'row', row: surface.ownRow(text, stored.uuid, origin) })
+    return undefined
   } catch (err) {
     $.ui.log(`2mw2lt: the append was refused: ${String(err)}`, { to: 'debug' })
+    return String(err)
   }
 }
 
@@ -191,24 +195,67 @@ async function retireStaleSeatFrame($: EngineInterface, seatFrameId: string) {
 
 // A fixed text the model must read: a turn of its own on an idle session, a row in the running
 // turn on a busy one. A prompt the session will not take is appended instead, to be read at its
-// next request, and `appended` runs. The engine refuses by rejecting, or by resolving `drop`, as
-// every submit does after the person's Esc until they type again (#7827). Whether it went into a
-// running turn.
+// next request, and `appended` runs. Whether it went into a running turn.
 async function tell($: EngineInterface, text: string, appended?: () => Promise<void>): Promise<boolean> {
   const { value: busy = false } = await $.state.get(BUSY)
   if (busy) {
     await append($, text)
     return true
   }
-  const refused = async (why: string) => {
-    $.ui.log(`2mw2lt: the prompt was refused: ${why}`, { to: 'debug' })
-    await append($, text)
-    await appended?.()
-  }
-  void $.prompt.submit({ text })
-    .then(r => r && 'drop' in r ? refused(String(r.drop)) : show($, { kind: 'row', row: surface.ownRow(text) }), err => refused(String(err)))
+  // Never awaited: a hook the turn waits on hangs awaiting its own submit.
+  void submit($, text)
+    .then(l => 'landed' in l && l.landed === 'new-turn' ? undefined : appended?.())
     .catch(() => undefined)
   return false
+}
+
+// Words submitted as a turn of their own, and where they landed. The engine refuses by rejecting, or
+// by resolving `drop`, as every submit does after the person's Esc until they type again (#7827):
+// the words are then appended, to be read at the session's next request, and why is said. A
+// speaker's words (origin) are submitted as the user's, so the model reads them from their from:
+// line rather than under the engine's frame of a plugin's message (spike A); the terminal still
+// labels the turn the plugin's.
+async function submit($: EngineInterface, text: string, origin?: string): Promise<surface.Landing> {
+  let why: string
+  try {
+    const r = await $.prompt.submit(origin === undefined ? { text } : { text, asUser: true })
+    if (!(r && 'drop' in r)) {
+      show($, { kind: 'row', row: surface.ownRow(text, undefined, origin) })
+      return { landed: 'new-turn' }
+    }
+    why = String(r.drop)
+  } catch (err) {
+    why = String(err)
+  }
+  $.ui.log(`2mw2lt: the prompt was refused: ${why}`, { to: 'debug' })
+  const failed = await append($, text, origin)
+  return failed === undefined ? { landed: 'queued', why } : { refused: `the session took it neither as a prompt (${why}) nor as a row (${failed})` }
+}
+
+// A desk prompt (#4823 unit 2.2), landed as the module's own pointer is — submitted on an idle
+// session, appended to a running turn — and its landing reported to the agent, whose receipt
+// settles the act. A prompt the agent could not hand over whole is refused, never guessed at.
+async function land($: EngineInterface, session: string, body: unknown) {
+  const p = surface.prompted(body)
+  let landing: surface.Landing
+  if ('refused' in p) landing = { refused: p.refused }
+  else if ((await $.state.get(BUSY)).value) {
+    const failed = await append($, p.text, p.from)
+    landing = failed === undefined ? { landed: 'running-turn' } : { refused: `the running turn did not take it as a row (${failed})` }
+  } else landing = await submit($, p.text, p.from)
+  if (!p.id) {
+    $.ui.log(`2mw2lt: the agent's prompt was not taken, and names no id to say so under: ${'refused' in landing ? landing.refused : ''}`, { to: 'debug' })
+    return
+  }
+  try {
+    const at = agent
+    if (!at) throw new Error('no agent to report to')
+    const r = await $.http.fetch(`${at.base}/steering/surface/landed`,
+      { method: 'POST', headers: agentHeaders(at), body: JSON.stringify({ session, producer: await $.session.id(), id: p.id, ...landing }) })
+    if (!r.ok) throw new Error(`the agent answered ${r.status}: ${r.text.slice(0, 200)}`)
+  } catch (err) {
+    $.ui.log(`2mw2lt: where the desk's prompt ${p.id} landed was not reported: ${String(err)}`, { to: 'debug' })
+  }
 }
 
 // The live view's channel to this machine's agent (#4823, design §6.1): `$.http.fetch` alone, one
@@ -272,8 +319,11 @@ function sendBatch($: EngineInterface) {
         await $.state.set(SURFACE_SEQ, batch[batch.length - 1]!.seq)
         const at = agent
         if (!at) throw new Error('no agent to send to')
+        // The producer is this conversation, whose state keeps the seq: another conversation of the
+        // session's name numbers afresh, and the door tells the two numberings apart by it.
+        const producer = await $.session.id()
         const r = await $.http.fetch(`${at.base}/steering/surface/events`,
-          { method: 'POST', headers: agentHeaders(at), body: JSON.stringify({ session: first.session, events: batch }) })
+          { method: 'POST', headers: agentHeaders(at), body: JSON.stringify({ session: first.session, producer, events: batch }) })
         if (!r.ok) throw new Error(`the agent answered ${r.status}: ${r.text.slice(0, 200)}`)
       } catch (err) {
         surfaceRefused($, `the live view's events were not taken: ${String(err)}`)
@@ -297,13 +347,17 @@ async function pollSurface($: EngineInterface, workspace: string, session: strin
       agent ??= resolved
       // An agent not yet started is retried as one that stopped: its key appears when it starts.
       if (!agent) throw new Error(`no key for the agent serving ${workspace}`)
-      const r = await $.http.fetch(`${agent.base}/steering/surface/poll?session=${encodeURIComponent(session)}&after=${encodeURIComponent(cursor)}`,
+      // The producer, as the events name it: the agent advertises this session's rows only while
+      // the conversation its hold pins is the one polling.
+      const producer = await $.session.id()
+      const r = await $.http.fetch(`${agent.base}/steering/surface/poll?session=${encodeURIComponent(session)}&producer=${encodeURIComponent(producer)}&after=${encodeURIComponent(cursor)}`,
         { headers: agentHeaders(agent) })
       if (gen !== following) return
       if (!r.ok) throw new Error(`the agent answered ${r.status}: ${r.text.slice(0, 200)}`)
-      const answer = JSON.parse(r.text) as { watch?: unknown; cursor?: unknown }
+      const answer = JSON.parse(r.text) as { watch?: unknown; cursor?: unknown; commands?: unknown }
       watching = answer.watch === true
       if (typeof answer.cursor === 'string') cursor = answer.cursor
+      for (const c of Array.isArray(answer.commands) ? answer.commands as surface.Command[] : []) command($, session, c)
       wait = RETRY_MS
       surfaceSaid = ''
     } catch (err) {
@@ -315,6 +369,24 @@ async function pollSurface($: EngineInterface, workspace: string, session: strin
       await new Promise<void>(resolve => { $.clock.after(wait, resolve) })
       wait = Math.min(wait * 2, RETRY_CAP_MS)
     }
+  }
+}
+
+// One of the agent's commands, by its kind. A kind this module does not know is a newer agent's: it
+// is ignored, and said.
+function command($: EngineInterface, session: string, c: surface.Command) {
+  switch (c?.kind) {
+    case 'prompt':
+      void land($, session, c.body).catch(err => $.ui.log(`2mw2lt: the desk's prompt broke: ${String(err)}`, { to: 'debug' }))
+      return
+    case 'emit': {
+      const payload = surface.emitted(c.body)
+      if (typeof payload === 'string') $.ui.log(`2mw2lt: the agent's emit was not taken: ${payload}`, { to: 'debug' })
+      else show($, payload)
+      return
+    }
+    default:
+      $.ui.log(`2mw2lt: ignored the agent's command of kind ${String(JSON.stringify(c?.kind ?? null)).slice(0, 40)}, which this module does not know`, { to: 'debug' })
   }
 }
 
@@ -501,17 +573,50 @@ async function askHolder($: EngineInterface) {
 // with success is the call's error, in its own words.
 async function runSeatCall($: EngineInterface, call: SeatCall): Promise<{ result: string } | { deny: string }> {
   const speaker = ['--provider', 'claude', '--provider-session', await $.session.id()]
-  const answer = (r: { exitCode: number; stdout: string; stderr: string }) => {
-    const words = [r.stdout.trim(), r.stderr.trim()].filter(Boolean).join('\n') || `the client exited ${r.exitCode} and said nothing`
-    return r.exitCode === 0 ? { result: words } : { deny: words }
-  }
   if (call.client === 'card') return answer(await runOwn($, ['python3', script($, 'card.py'), '--lease', ...speaker, ...call.argv]))
   const argv = ['python3', script($, 'lease.py'), ...speaker,
     ...(call.client === 'say' ? ['say'] : call.client === 'reply' ? ['post', '/steering/brain/reply'] : ['post', call.path])]
-  let r = await runOwn($, argv, call.stdin)
-  const again = call.client !== 'post' ? resendId(r.stdout) : null
-  if (again) r = await runOwn($, [...argv, `--retry=${again}`], call.stdin)
-  return answer(r)
+  return answer(call.client === 'post' ? await runOwn($, argv, call.stdin) : await resending($, argv, call.stdin))
+}
+
+const answer = (r: { exitCode: number; stdout: string; stderr: string }): { result: string } | { deny: string } => {
+  const words = [r.stdout.trim(), r.stderr.trim()].filter(Boolean).join('\n') || `the client exited ${r.exitCode} and said nothing`
+  return r.exitCode === 0 ? { result: words } : { deny: words }
+}
+
+async function resending($: EngineInterface, argv: string[], stdin?: string) {
+  const r = await runOwn($, argv, stdin)
+  const again = resendId(r.stdout)
+  return again ? runOwn($, [...argv, `--retry=${again}`], stdin) : r
+}
+
+// The checkpoint tool's call, through checkpoint.py: the text on stdin as the model gave it, and
+// the lessons through a file of their own, since stdin is the text's. `$.fs` has no delete, so the
+// file is made and removed by the host's own mktemp and rm.
+async function runCheckpoint($: EngineInterface, args: Record<string, unknown>): Promise<{ result: string } | { deny: string }> {
+  const call = checkpointCall(args)
+  if ('refused' in call) return { deny: `refused: ${call.refused}` }
+  const session = await sessionOf($)
+  if (!session) return { deny: 'refused: this session is not connected to steering: run /2mw2lt:connect first.' }
+  let learned = ''
+  if (call.learned !== undefined) {
+    const made = await runOwn($, ['mktemp'])
+    learned = made.exitCode === 0 ? made.stdout.trim() : ''
+    if (!learned) return { deny: `refused: no file could be made for the lessons: mktemp exited ${made.exitCode}: ${made.stderr.trim()}` }
+  }
+  try {
+    if (learned) {
+      const why = await $.fs.write(learned, call.learned!).then(() => null, (err: unknown) => String(err))
+      if (why !== null) {
+        $.ui.log(`2mw2lt: the checkpoint's lessons file could not be written: ${why}`, { to: 'debug' })
+        return { deny: 'refused: the lessons could not be written to a file for checkpoint.py; nothing was sent.' }
+      }
+    }
+    return answer(await resending($, ['python3', script($, 'checkpoint.py'), session, call.boundary,
+      ...(learned ? ['--learned-file', learned] : []), ...(call.mirror !== undefined ? ['--mirror', call.mirror] : [])], call.text))
+  } finally {
+    if (learned) await runOwn($, ['rm', '-f', learned]).catch(() => undefined)
+  }
 }
 
 async function sessionOf($: EngineInterface, session?: string): Promise<string | null> {
@@ -852,6 +957,7 @@ export const register: Register = on => {
       description: 'Read the frames waiting for this session, each with its daemon-written from: line. Acknowledges the envelopes it returns.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     })
+    await $.tool.register({ name: 'checkpoint', ...CHECKPOINT_TOOL })
     for (const name of Object.keys(SEAT_TOOLS)) {
       await $.tool.register({ name, description: SEAT_TOOLS[name]!.description, inputSchema: seatSchema(name) })
     }
@@ -861,6 +967,7 @@ export const register: Register = on => {
   })
 
   on('tool.describe', { tool: TOOL }, async ($, e, next) => ({ ...(await next(e)), isDeferred: false }))
+  on('tool.describe', { tool: CHECKPOINT_CALL }, async ($, e, next) => ({ ...(await next(e)), isDeferred: false }))
 
   // The seat's verbs stay behind ToolSearch for a session that does not hold the seat; a holder
   // has them in its list. They move when the seat section does, so the prompt changes once.
@@ -882,6 +989,15 @@ export const register: Register = on => {
     const call = seatCall(tool.replace(/^mcp__2mw2lt__/, ''), args)
     if ('refused' in call) return { deny: `refused: ${call.refused}` }
     return runSeatCall($, call)
+  })
+
+  on('tool.call', { tool: CHECKPOINT_CALL }, async ($, e, next) => {
+    const { tool, tool_use_id: _id, agentId, ...args } = e as unknown as Record<string, unknown> & { tool: string; agentId?: string }
+    const checked = agentId === undefined && next.origin.plugin === 'engine'
+      ? await $.tool.check({ tool, input: args }) : { decision: 'deny' as const }
+    const refused = entryRefusal(agentId, next.origin.plugin, tool, checked, CHECKPOINT_ENTRY)
+    if (refused) return { deny: refused }
+    return runCheckpoint($, args)
   })
 
   on('tool.call', { tool: TOOL }, async ($, e, next) => {

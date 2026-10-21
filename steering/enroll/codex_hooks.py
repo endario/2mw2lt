@@ -16,7 +16,7 @@ from pathlib import Path
 PLUGIN = "2mw2lt@2mw2lt"
 TIMEOUT = 10.0
 REVIEW = "open /hooks in Codex and trust them"
-SCRIPTS = ("codex_observe.py", "delete_guard.py", "trap_guard.py")
+SCRIPTS = ("codex_observe.py", "delete_guard.py", "trap_guard.py", "rebrief.py")
 
 
 def listed(cwd: Path, codex: str = "codex", timeout: float = TIMEOUT) -> dict:

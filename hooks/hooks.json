@@ -9,6 +9,17 @@
             "timeout": 3
           }
         ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -z \"${PLUGIN_ROOT:-}\" ] || [ -n \"${CLAUDE_PROJECT_DIR:-}\" ]; then exit 0; fi; exec python3 \"${PLUGIN_ROOT}/steering/enroll/rebrief.py\"",
+            "timeout": 10,
+            "additionalContextLimit": 0
+          }
+        ]
       }
     ],
     "Stop": [

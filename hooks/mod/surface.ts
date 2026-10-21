@@ -9,7 +9,16 @@ type Append = Args<'session.append'>
 export type Block = { type: 'text' | 'thinking' | 'tool-use' | 'tool-result'; id?: string; text?: string; tool?: string; input?: unknown }
 export type Row = { id?: string; role: 'user' | 'assistant' | 'tool-result' | 'system'; origin: string; blocks: Block[] }
 export type Turn = { state: 'started' | 'completed'; reason?: 'answered' | 'interrupted' | 'error' }
+export type Ask = { id: string; kind: 'permission' | 'question'; tool?: string; options?: string[] }
+export type Settled = { ask: string; by: string; answer?: unknown }
 export type Payload = { kind: 'row' | 'compaction'; row: Row } | { kind: 'turn'; turn: Turn }
+  | { kind: 'ask'; ask: Ask } | { kind: 'ask-settled'; settled: Settled }
+// One of the agent's commands on the poll: a kind and that kind's body. `emit` asks the module to
+// number an event the agent saw, `prompt` to land words from the desk; 2.3 adds its own.
+export type Command = { kind?: unknown; body?: unknown }
+// Where a prompt landed, as the agent's receipt says it (design §8.2): submitted as a new turn,
+// appended to the running one, or appended for the next request with why it started none.
+export type Landing = { landed: 'new-turn' | 'running-turn' | 'queued'; why?: string } | { refused: string }
 export type Event = { v: 1; session: string; seq: number } & (Payload | { kind: 'gap'; gap: { from: number; to: number } })
 
 export const DEFAULT_PORT = '9990'
@@ -61,8 +70,28 @@ export function rowOf(e: Append, stored: { uuid: string; message: Append['messag
   return { id: stored.uuid, role: roleOf(stored.message, e.door), origin: originOf(e.origin), blocks: blocksOf(stored.message.content, tool) }
 }
 
-export const ownRow = (text: string, id?: string): Row =>
-  ({ ...(id ? { id } : {}), role: 'user', origin: 'plugin', blocks: [{ type: 'text', text }] })
+// The event an `emit` asks for: an ask or its settlement, which the agent sees in the session's
+// hooks and the module numbers among its own rows, so the session's events keep one numbering.
+// Anything else is why it was not taken.
+export function emitted(body: unknown): Payload | string {
+  const b = (typeof body === 'object' && body !== null ? body : {}) as { kind?: unknown; ask?: unknown; settled?: unknown }
+  if (b.kind === 'ask' && typeof b.ask === 'object' && b.ask !== null) return { kind: 'ask', ask: b.ask as Ask }
+  if (b.kind === 'ask-settled' && typeof b.settled === 'object' && b.settled !== null) return { kind: 'ask-settled', settled: b.settled as Settled }
+  return `an emit of ${String(JSON.stringify(b.kind ?? null)).slice(0, 40)}, which is no ask or settlement`
+}
+
+// The prompt a `prompt` asks the module to land: its act's id, the text the model reads, which opens
+// with its from: line, and who said it, as its row's origin. Without words or a speaker, why not,
+// and the id when there was one to report it under.
+export function prompted(body: unknown): { id: string; text: string; from: string } | { id?: string; refused: string } {
+  const b = (typeof body === 'object' && body !== null ? body : {}) as { id?: unknown; text?: unknown; from?: unknown }
+  const id = typeof b.id === 'string' && b.id ? b.id : undefined
+  if (id && typeof b.text === 'string' && b.text.trim() && typeof b.from === 'string' && b.from) return { id, text: b.text, from: b.from }
+  return { ...(id ? { id } : {}), refused: 'the agent\'s prompt carried no words or no speaker' }
+}
+
+export const ownRow = (text: string, id?: string, origin = 'plugin'): Row =>
+  ({ ...(id ? { id } : {}), role: 'user', origin, blocks: [{ type: 'text', text }] })
 
 // The compacted conversation opens with its summary.
 export function compactionRow(r: ResultOf['session.compact']): Row | undefined {
