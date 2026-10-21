@@ -14,11 +14,15 @@ export type Settled = { ask: string; by: string; answer?: unknown }
 export type Payload = { kind: 'row' | 'compaction'; row: Row } | { kind: 'turn'; turn: Turn }
   | { kind: 'ask'; ask: Ask } | { kind: 'ask-settled'; settled: Settled }
 // One of the agent's commands on the poll: a kind and that kind's body. `emit` asks the module to
-// number an event the agent saw, `prompt` to land words from the desk; 2.3 adds its own.
+// number an event the agent saw, `prompt` to land words from the desk, `interrupt` to stop its turn.
 export type Command = { kind?: unknown; body?: unknown }
 // Where a prompt landed, as the agent's receipt says it (design §8.2): submitted as a new turn,
 // appended to the running one, or appended for the next request with why it started none.
 export type Landing = { landed: 'new-turn' | 'running-turn' | 'queued'; why?: string } | { refused: string }
+// What an interrupt did, as the agent's receipt says it: the turn stopped, the background tasks
+// the stop left running ended or not with why, whether the turn's end came too late to see them
+// all, and whether the model was told; or why it did not.
+export type Stopping = { interrupted: true; stopped: string[]; unstopped: string[]; unseen: boolean; told: boolean } | { refused: string }
 export type Event = { v: 1; session: string; seq: number } & (Payload | { kind: 'gap'; gap: { from: number; to: number } })
 
 export const DEFAULT_PORT = '9990'
@@ -61,13 +65,15 @@ export function blocksOf(content: readonly { type: string; [field: string]: unkn
 }
 
 // A row the main conversation stored, or undefined for one the view does not show: a subagent's,
-// a message queue record (no row of the conversation), and the module's own, which never come
-// back through its own hook and are emitted where they are made.
+// a message queue record (no row of the conversation), an attachment (the harness's context, an
+// output style or a hook's result, not something said), one with no blocks to draw, and the
+// module's own, which never come back through its own hook and are emitted where they are made.
 export function rowOf(e: Append, stored: { uuid: string; message: Append['message'] }): Row | undefined {
-  if (e.agentId !== undefined || e.door === 'queue') return undefined
+  if (e.agentId !== undefined || e.door === 'queue' || stored.message.type === 'attachment') return undefined
   if (e.origin.kind === 'plugin' && 'name' in e.origin && e.origin.name === '2mw2lt') return undefined
   const tool = e.origin.kind === 'tool' ? e.origin.tool : undefined
-  return { id: stored.uuid, role: roleOf(stored.message, e.door), origin: originOf(e.origin), blocks: blocksOf(stored.message.content, tool) }
+  const blocks = blocksOf(stored.message.content, tool)
+  return blocks.length ? { id: stored.uuid, role: roleOf(stored.message, e.door), origin: originOf(e.origin), blocks } : undefined
 }
 
 // The event an `emit` asks for: an ask or its settlement, which the agent sees in the session's
@@ -90,8 +96,33 @@ export function prompted(body: unknown): { id: string; text: string; from: strin
   return { ...(id ? { id } : {}), refused: 'the agent\'s prompt carried no words or no speaker' }
 }
 
+// The interrupt an `interrupt` asks the module to carry out: its act's id, and who asked, as the
+// from: line names them. Without a speaker, why not, and the id when there was one.
+export function interrupting(body: unknown): { id: string; from: string } | { id?: string; refused: string } {
+  const b = (typeof body === 'object' && body !== null ? body : {}) as { id?: unknown; from?: unknown }
+  const id = typeof b.id === 'string' && b.id ? b.id : undefined
+  if (id && typeof b.from === 'string' && b.from) return { id, from: b.from }
+  return { ...(id ? { id } : {}), refused: 'the agent\'s interrupt named nobody who asked for it' }
+}
+
+// What the model reads after a stop from the desk, under the from: line naming who stopped it: a
+// plugin's abort leaves no interruption marker, and a model never told picks the work up again at
+// its next turn (spike A).
+export function interruptNote(from: string, stopped: number, unstopped: number, unseen = false): string {
+  const ended = stopped === 1 ? ' The command it was running was ended.'
+    : stopped > 1 ? ` The ${stopped} commands it was running were ended.` : ''
+  const left = unstopped === 1 ? ' A command it was running could not be ended and may still be running.'
+    : unstopped > 1 ? ` ${unstopped} commands it was running could not be ended and may still be running.` : ''
+  const unknown = unseen ? ' A command it was running may not have been ended.' : ''
+  return `from: ${from}\n\nYour turn was interrupted from the desk.${ended}${left}${unknown} Do not carry on with it; wait for what you are asked next.`
+}
+
+// The row shows the words without the from: line that opens them: the row's origin already says who
+// spoke, and the model keeps reading the line in the text it was given.
+const FROM_LINE = /^from: [^\n]*\n\n/
+
 export const ownRow = (text: string, id?: string, origin = 'plugin'): Row =>
-  ({ ...(id ? { id } : {}), role: 'user', origin, blocks: [{ type: 'text', text }] })
+  ({ ...(id ? { id } : {}), role: 'user', origin, blocks: [{ type: 'text', text: text.replace(FROM_LINE, '') }] })
 
 // The compacted conversation opens with its summary.
 export function compactionRow(r: ResultOf['session.compact']): Row | undefined {

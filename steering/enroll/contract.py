@@ -2909,8 +2909,8 @@ KnowledgeBriefRecord = typing.TypedDict("KnowledgeBriefRecord", {
     "track": "str",
 })
 
-# LaunchBody is the seat's launch: a floor to place, or the harness to start and how, where when it
-# names a machine or an account, and why. Go bounds each field and requires what the agent cannot start without.
+# LaunchBody is the seat's launch: a model or floor to place, with an optional harness override,
+# where when it names a machine or an account, and why. Go requires what the agent cannot start without.
 LaunchBody = typing.TypedDict("LaunchBody", {
     "harness": "typing.NotRequired[str]",
     "machine": "typing.NotRequired[str | None]",

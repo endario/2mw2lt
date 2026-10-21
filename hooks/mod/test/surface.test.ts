@@ -271,7 +271,65 @@ test('a desk prompt to an idle session starts a turn and is reported submitted',
   const sent = posted(w).find(f => f.url.endsWith('/steering/surface/landed'))!
   expect(sent.headers['X-Steering-Agent-Key']).toBe(AGENT.key)
   // Its row is the speaker's, not the plugin's: the desk says who spoke.
-  expect(sentRows(w)).toEqual([{ role: 'user', origin: FROM, blocks: [{ type: 'text', text: WORDS }] }])
+  expect(sentRows(w)).toEqual([{ role: 'user', origin: FROM, blocks: [{ type: 'text', text: 'list the files' }] }])
+})
+
+// The row shows who spoke by its origin, so the from: line is dropped from its words; the model's
+// text, which is what the session submitted or appended, keeps it.
+test('a desk prompt\'s row drops the from: line and the model keeps it', async ($, on) => {
+  const idle = await (await prompted())($, on)
+  expect(idle.submits).toEqual([WORDS])
+  expect(sentRows(idle).map(r => r.blocks[0].text)).toEqual(['list the files'])
+})
+
+test('a desk prompt appended to a running turn shows no from: line, and the model reads it', async ($, on) => {
+  const w = await (await prompted({}, async $ => { await $.turn.start({ turnId: 't1', text: 'list the files' }) }))($, on)
+  expect(w.appends).toEqual([WORDS])
+  expect(sentRows(w).filter(r => r.origin === FROM).map(r => r.blocks[0].text)).toEqual(['list the files'])
+})
+
+// The transcript's own record of a submitted desk prompt keeps the origin the plugin submitted
+// under, which rowOf leaves to the module's row: the prompt is drawn once.
+test('the stored record of a desk prompt is not drawn a second time', async ($, on) => {
+  const w = await (await prompted())($, on)
+  await $.session.append({ message: { type: 'user', role: 'user', content: [{ type: 'text', text: WORDS }] }, door: 'prompt',
+    origin: { kind: 'plugin', name: '2mw2lt', asUser: true }, uuid: 'stored-1' } as never)
+  await w.clock.advance(50)
+  expect(sentRows(w).map(r => r.blocks[0].text)).toEqual(['list the files'])
+})
+
+// A recorded slice in the shape of machine/internal/surface/claude/testdata/session.jsonl, with the
+// attachments a live session stores beside the conversation (#4823 1b.4): the harness's context is
+// not said by anyone, so it has no row.
+const attachment = (uuid: string, name: string, text: string) => ({ message: { type: 'attachment', name, role: 'user', isMeta: true,
+  content: text ? [{ type: 'text', text }] : [] }, door: 'attachment', origin: { kind: 'engine' }, uuid })
+const slice = [
+  prompt,
+  attachment('a1', 'output_style', '<system-reminder>\nConcise output style is active.\n</system-reminder>'),
+  attachment('a2', 'hook_success', ''),
+  attachment('a3', 'hook_success', 'PreToolUse:Bash hook succeeded'),
+  call,
+  attachment('a4', 'hook_success', ''),
+  result,
+  attachment('a5', 'date_change', 'The date has changed.'),
+]
+
+test('attachments the harness stores beside the conversation are no rows', async ($, on) => {
+  const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true }] })
+  await begin($)
+  await w.clock.settle()
+  for (const row of slice) await $.session.append(row as never)
+  await w.clock.advance(50)
+  expect(events(w).map(e => e.row.id)).toEqual(['u1', 'u2', 'u3'])
+})
+
+test('a stored row with no blocks to draw is never emitted', async ($, on) => {
+  const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true }] })
+  await begin($)
+  await w.clock.settle()
+  await $.session.append({ message: { type: 'user', role: 'user', content: [{ type: 'image', source: {} }] }, door: 'prompt', origin: { kind: 'composer' }, uuid: 'u9' } as never)
+  await w.clock.advance(50)
+  expect(events(w)).toEqual([])
 })
 
 test('a desk prompt to a busy session is appended to the running turn and reported so', async ($, on) => {
@@ -279,7 +337,7 @@ test('a desk prompt to a busy session is appended to the running turn and report
   expect(w.submits).toEqual([])
   expect(landings(w)).toEqual([{ session: 's1', producer: 'ps-1', id: 'prompt-1', landed: 'running-turn' }])
   // The session stored the row, under an id of its own, and that row is the speaker's.
-  expect(sentRows(w).filter(r => r.origin === FROM)).toEqual([{ id: expect.any(String), role: 'user', origin: FROM, blocks: [{ type: 'text', text: WORDS }] }])
+  expect(sentRows(w).filter(r => r.origin === FROM)).toEqual([{ id: expect.any(String), role: 'user', origin: FROM, blocks: [{ type: 'text', text: 'list the files' }] }])
 })
 
 // #7827: after the person's Esc the engine drops every submit until they type again. The words are
@@ -292,7 +350,7 @@ test('a desk prompt after the person\'s Esc is appended for the next request and
   expect(w.submits).toEqual([WORDS])
   expect(landings(w)).toEqual([{ session: 's1', producer: 'ps-1', id: 'prompt-1', landed: 'queued',
     why: 'the session was stopped and nobody has sent input since' }])
-  expect(sentRows(w).filter(r => r.origin === FROM)).toEqual([{ id: expect.any(String), role: 'user', origin: FROM, blocks: [{ type: 'text', text: WORDS }] }])
+  expect(sentRows(w).filter(r => r.origin === FROM)).toEqual([{ id: expect.any(String), role: 'user', origin: FROM, blocks: [{ type: 'text', text: 'list the files' }] }])
 })
 
 test('a desk prompt without a speaker is refused, not landed', async ($, on) => {
@@ -305,4 +363,94 @@ test('a desk prompt without a speaker is refused, not landed', async ($, on) => 
   expect(w.submits).toEqual([])
   expect(w.appends).toEqual([])
   expect(landings(w)).toEqual([{ session: 's1', producer: 'ps-1', id: 'prompt-1', refused: 'the agent\'s prompt carried no words or no speaker' }])
+})
+
+// Unit 2.3: a desk interrupt aborts the running turn, ends what the abort moved to the background,
+// as the person's Esc ends it and an abort does not (spike A), and tells the model who stopped it.
+const deskInterrupt = { kind: 'interrupt', body: { id: 'interrupt-1', from: FROM } }
+const stops = (w: ReturnType<typeof world>) => posted(w).filter(f => f.url.endsWith('/steering/surface/stopped')).map(f => JSON.parse(f.body!))
+const sleeping = (task: string, byAbort: boolean) => ({ stdout: '', stderr: '', interrupted: false, backgroundTaskId: task, ...(byAbort ? { backgroundedByTurnAbort: true } : {}) })
+
+// The poll after the first is answered with the desk's interrupt while turn t1 runs.
+async function interrupting($: any, on: any, opts: { turn?: boolean } = {}) {
+  let second!: (p: { watch: boolean; cursor: string; commands: unknown[] }) => void
+  const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true, cursor: 'c1' }, new Promise(r => { second = r })] })
+  await begin($)
+  await w.clock.settle()
+  if (opts.turn !== false) await $.turn.start({ turnId: 't1', text: 'sleep 40' })
+  second({ watch: true, cursor: 'c1', commands: [deskInterrupt] })
+  await w.clock.settle()
+  return w
+}
+
+// The aborted turn's calls return, and then it ends.
+async function aborted($: any, w: ReturnType<typeof world>, ...results: Record<string, unknown>[]) {
+  for (const r of results) {
+    w.bash = r
+    await $.tool.call({ tool: 'Bash', command: 'sleep 40' } as never)
+  }
+  await $.turn.complete({ turnId: 't1', text: '', answer: '', durationMs: 1, isAborted: true, reason: 'aborted' } as never)
+  await w.clock.settle()
+  await w.clock.advance(50)
+}
+
+test('a desk interrupt stops the turn and what its abort left running, and the model is told', async ($, on) => {
+  const w = await interrupting($, on)
+  expect(w.aborts).toEqual(['t1'])
+  // The second command was run in the background on purpose, and goes on as it does past Esc.
+  await aborted($, w, sleeping('bg-1', true), sleeping('bg-2', false))
+  expect(w.taskStops).toEqual(['bg-1'])
+  const note = `from: ${FROM}\n\nYour turn was interrupted from the desk. The command it was running was ended. Do not carry on with it; wait for what you are asked next.`
+  expect(w.appends).toEqual([note])
+  expect(stops(w)).toEqual([{ session: 's1', producer: 'ps-1', id: 'interrupt-1', interrupted: true, stopped: ['bg-1'], unstopped: [], unseen: false, told: true }])
+})
+
+test('a command the engine will not stop is reported, and the model is told it may still run', async ($, on) => {
+  const w = await interrupting($, on)
+  w.taskStopDeny = 'a hook refused it'
+  await aborted($, w, sleeping('bg-1', true))
+  expect(w.appends[0]).toContain('A command it was running could not be ended and may still be running.')
+  expect(stops(w)).toEqual([{ session: 's1', producer: 'ps-1', id: 'interrupt-1', interrupted: true, stopped: [], unstopped: ['bg-1: a hook refused it'], unseen: false, told: true }])
+})
+
+// A turn whose end does not come within the wait may still have calls returning: what they moved
+// to the background is not seen, and the receipt and the model are told so, counting no command
+// nobody saw.
+test('an aborted turn that does not end within the wait is reported as possibly leaving work', async ($, on) => {
+  const w = await interrupting($, on)
+  await w.clock.advance(3000)
+  await w.clock.settle()
+  expect(stops(w)).toEqual([{ session: 's1', producer: 'ps-1', id: 'interrupt-1', interrupted: true, stopped: [], unstopped: [], unseen: true, told: true }])
+  expect(w.appends).toEqual([`from: ${FROM}\n\nYour turn was interrupted from the desk. A command it was running may not have been ended. Do not carry on with it; wait for what you are asked next.`])
+})
+
+test('a desk interrupt with no turn running is refused, and nothing is aborted', async ($, on) => {
+  const w = await interrupting($, on, { turn: false })
+  await w.clock.advance(50)
+  expect(w.aborts).toEqual([])
+  expect(w.appends).toEqual([])
+  expect(stops(w)).toEqual([{ session: 's1', producer: 'ps-1', id: 'interrupt-1', refused: 'no turn of the session is running' }])
+})
+
+// Under an abort, a process the module's post-Bash hook runs is aborted with the call (a session
+// with no claim asks for its claim path on every call), and the engine then rejected the call,
+// which hid the background task's id from every hook and from the model, so nothing could stop the
+// command (#4823). The test kit skips a throwing hook rather than rejecting, so what is held here is
+// the cause: a call still running in the background has not completed, and triggers none of the
+// module's work.
+test('a Bash call an abort moved to the background triggers none of the module\'s own work', async ($, on) => {
+  const w = world(on, { rounds: [HELD] })
+  w.claimFails = true
+  await begin($)
+  await w.clock.settle()
+  w.runAborted = true
+  w.bash = sleeping('bg-1', true)
+  const got = await $.tool.call({ tool: 'Bash', command: 'sleep 40' } as never)
+  expect(w.abortedRuns).toBe(0)
+  expect((got as { result?: { backgroundTaskId?: string } }).result?.backgroundTaskId).toBe('bg-1')
+  // A command the model ran in the background on purpose is a completed call: it still triggers
+  // the module's work, as a connect run in the background must.
+  w.bash = sleeping('bg-2', false)
+  await $.tool.call({ tool: 'Bash', command: 'sleep 40' } as never)
+  expect(w.abortedRuns).toBe(1)
 })

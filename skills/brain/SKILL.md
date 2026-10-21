@@ -117,7 +117,7 @@ kind turned off is not told, and its standing still reads:
   nothing, which may be hung or gone; `activity` and `last_sign` say which. Close it, drive it, or
   keep it with a reason. A stale wait may still be alive: check before you retire it, and keep a
   wait you trust (a review round, say) with what it waits on.
-- **`session-quiet`**: a worker holding a card ended its turn without saying done 15 minutes ago,
+- **`session-quiet`**: a worker holding a card ended its turn without saying done 20 minutes ago,
   with nothing it waits on open, and has written nothing since. Drive it, or keep it with what it
   waits on.
 - **`session-lapsing`**: its prompt cache lapses within 15 minutes. Resumed after that, it re-reads
@@ -126,20 +126,24 @@ kind turned off is not told, and its standing still reads:
   is kicked itself (`session-kick`, after 10 minutes, at most twice an hour apart); neither is told
   to you.
 - **`session-kept-over`**: its keep's until passed and no work reached it.
-- **`directive-unacknowledged`**, a signal: the session has held a directive for 10
-  minutes (`signals.directive_unacked.*`) without acknowledging it, once per directive. `read_since`
-  says whether it was read after the directive opened: read and not taking it, or perhaps gone. A
-  launch's brief is told as `launch-brief-unheard` instead.
+- **`directive-unacknowledged`**, a signal: the session has held a directive for 15
+  minutes (`signals.directive_unacked.*`) without acknowledging it, once per directive. Routed
+  `escalate`, the default, the session was told at 3 minutes and you hear it only if the directive is
+  still unacknowledged at 15. `read_since` says whether it was read after the directive opened: read
+  and not taking it, or perhaps gone. A launch's brief is told as `launch-brief-unheard` instead.
 - **`card-unbranched`**, a signal: the session has executed its card for 45 minutes
   (`signals.card_unbranched.*`) with no branch claimed for it, however busily it writes, once per
-  engagement, unless it waits on another for that card and the wait is not due. Ask what it has,
-  and to claim its branch and push.
+  engagement, unless it waits on another for that card and the wait is not due. Routed `escalate`,
+  the default, the session was told at 20 minutes and you hear it only if the card still has no
+  branch at 45. Ask what it has, and to claim its branch and push.
 - **`session-unannounced`**, a signal: the session has worked on its card for 10 minutes
   (`signals.session_unannounced.*`) without ever announcing what it is doing at this epoch, however
   busily it writes, once per engagement. Ask it what it is doing; the brief that never asked it to
   announce is the one to fix.
 - **`push-quiet`**, a signal: a card the session executes and has not said done for, merged or not,
-  last moved an hour ago (`signals.push_quiet.*`), once per card and quiet spell. Moved is the
+  last moved 90 minutes ago (`signals.push_quiet.*`), once per card and quiet spell. Routed
+  `escalate`, the default, the session was told at 45 minutes and you hear it only if nothing moved
+  the card since. Moved is the
   session's newest act on it, named in `progress_kind`: a branch claimed, a push heard, a gate it
   commissioned, a checkpoint or an announce bound to the card, a wait for it registered or come due
   (`wait`), or `engaged` when it has done none. A card it waits on another for, before the wait is
@@ -161,9 +165,10 @@ kind turned off is not told, and its standing still reads:
   asked for it stopped standing, so nobody heard its ending (`signals.gate_unheard.*`), once per gate.
   It names the ending's first line, that session, and the card the round was for when it has one.
   Tell the card's executor, or commission the round again for the card.
-- **`need-aged`**, a signal: a session's blocked need has stayed open 4 hours, or a placement need 24
-  hours (`signals.need_aged.*`), once per need. It names its question, and a blocked need's session:
-  answer it, unblock it, or dismiss it.
+- **`need-aged`**, a signal: a session's blocked need has stayed open 2 hours, or a placement need 24
+  hours (`signals.need_aged.*`), once per need. Routed `escalate`, the default, the blocked session
+  was told at an hour and you hear it only if the need is still open at 2. It names its question,
+  and a blocked need's session: answer it, unblock it, or dismiss it.
 - **`account-unspent`**, a signal: an account the team spends resets within 60 minutes with more than
   30% of its scored window left (`signals.account_unspent.*`), once per reset. What is left at the
   reset is lost: place work on it before then.
@@ -188,8 +193,10 @@ kind turned off is not told, and its standing still reads:
   stays low. It names what is free of what. Have it freed before builds there fail: a build cache
   is the usual cause.
 - **`card-closed`**, a signal: a live card's work landed, or every issue it resolves was closed with no
-  branch or closing pull request, 15 minutes ago (`signals.card_closed.*`), once per closing. It names
-  the card's executor and what it resolves still open. A candidate, never concluded for you: conclude
+  branch or closing pull request, an hour ago (`signals.card_closed.*`), once per closing. Routed
+  `escalate`, the default, its executor was told at 15 minutes to say done and record its unit-done,
+  and you hear it only if the card is still live and not left to the keeper. It names the card's
+  executor and what it resolves still open. A candidate, never concluded for you: conclude
   it, or ask its executor what is left.
 - **`card-raised`**, a signal: a session raised its own card's floor (`signals.card_raised.*`), once
   per raise. It names the stage, the floor it came from and went to, and the session's why. Lower it
@@ -708,20 +715,15 @@ worker. Name its floor and let placement choose the account and harness:
 
 ```bash
 say "launch: token @lease floor <rarity> because <why>"
-# Name a harness and model only for a reason the floor cannot express.
-say "launch: token @lease opencode on <node> model <provider/model> thinking <level> because <why>"   # the vendor with room
-say "launch: token @lease opencode model <opencode-go|commandcode>/<model> because <why>"   # on the machine whose account ranks first; the reply says which and why
+# Name a model only for a reason the floor cannot express.
+say "launch: token @lease on <node> model <model> effort <level> because <why>"
+say "launch: token @lease vendor opencode model <model> because <why>"
+say "launch: token @lease vendor commandcode model <model> because <why>"
 ```
-
-Name the agent's own node — normally a session's `machine_id` — or leave it out: name an
-`opencode-go/…` or `commandcode/…` model, and the daemon picks the machine whose account for
-that vendor ranks first, naming the account and the forecast in its reply; name one only to
-override that. With no model, or another provider's, it refuses: nothing it reads is what that
-worker spends.
 
 **Where a launch goes.** Before every launch, read
 `rest.py '/placement?floor=<rarity>&effort=<level>'`, or
-`rest.py '/placement?harness=<harness>&vendor=<vendor>&model=<model>&effort=<level>'` for a named model: the ranked
+`rest.py '/placement?vendor=<vendor>&model=<model>&effort=<level>'` for a named model: the ranked
 machines and accounts with their verdicts, terms and order, the one the platform would choose first,
 and each one a check took out. It places nothing. Its `arbiter_first` is the workspace's
 `placement.arbiter_first` setting, inheriting the team's, which the owner turns on in the console:
@@ -805,27 +807,32 @@ one past `STEERING_MAX_WORKERS` live workers.
 on the ladder, or one rung above when nothing at it has room. Judge the floor for the stage the
 session begins as triage does. Name a model only for a reason the
 ladder cannot see, and give that reason in `because`: the launch is recorded as yours, not the
-platform's. A floor takes no `on`, `vendor` or `account`, since naming the place is naming the model.
-Leave the harness out too: placement chooses a usable harness for the winning account, preferring
-that machine's stated harness for its vendor, and where it states none the vendor's own harness —
-ZCode for Z.ai — before Claude Code (the owner's direction, 2026-10-18). Naming a harness pins the
-launch to it even where the machine prefers another for that vendor, so name `claude` only when the
-work needs Claude Code itself, and say why in `because`. When you name one anyway and the winning
-machine prefers another, the launch's answer says so, as a line to heed next time.
+platform's. A floor takes no `on`, `model` or `account`.
+Leave the harness out for a floor or a named model: placement chooses one for the winning account,
+using the machine's stated harness for that vendor, or the vendor's own before Claude Code.
+Name a harness only to override placement, and say why in `because`. For a floor launch with a
+named harness, the answer says when the winning machine prefers another.
+
+**GLM builder work goes to ZCode**, following the passed soak (#7113).
+GLM on ZCode is not GLM inside Claude Code: `claude vendor zai` runs the latter, at roughly twice
+the quota per task; name it only for a stated reason. #7076
+measured the production key path on 2026-10-16: ZCode spent 0.71–0.75 of the wrapper's credits per
+token and about 0.52 per task. ZCode takes same-turn steering (`protocol.SteersATurn`).
+
 `rest.py '/placement?floor=<rarity>&effort=<level>'` shows the model each account would
 start and how far above the floor it stands, the harness it would start, how that was chosen and
 the command it would run, and passes over `floor-unserved` an account serving no model at it.
 
-An interactive Claude Code session, one a person can watch and type into, is a `launch:` too.
+A session a person can watch and type into is a `launch:` too.
 Its clauses go in this order:
 
 | clause | left out |
 |---|---|
-| `<harness>` | placement chooses with a floor; otherwise required: `claude`, `zcode` or `opencode`. A named one pins the launch even where the machine prefers another for that vendor |
+| `<harness>` | placement chooses; name `claude`, `zcode`, `codex` or `opencode` only as an override |
 | `on <node>` | the daemon places it; not with a floor |
-| `vendor <vendor>` | `anthropic` for `claude`; `any` for every vendor; with a floor, the floor is placed only on that vendor's accounts |
+| `vendor <vendor>` | all eligible vendors; named, only that vendor's accounts |
 | `account <n>` | the best-ranked account; named, that account or a refusal; not with a floor |
-| `model <model>` or `floor <rarity>` | one is required for `claude` and `zcode`; prefer the floor |
+| `model <model>` or `floor <rarity>` | one is required; prefer the floor |
 | `thinking <level>` | the model's own; opencode only |
 | `effort <level>` | the placed model's rarity's: legendary `low`, epic `medium`, rare `high`, uncommon `max` |
 | `window` | headless |
@@ -845,18 +852,20 @@ decision record names both.
 # A floor, effort from the placed model's rung: rare starts at high
 say "launch: token @lease floor rare because a contained fix"
 # A model named, at an effort above epic's medium, since the design is hard
-say "launch: token @lease claude model opus effort high because the ladder cannot see this design's depth"
+say "launch: token @lease vendor anthropic model opus effort high because the ladder cannot see this design's depth"
 # One account, no other in its place
-say "launch: token @lease claude vendor anthropic account 2 model opus effort medium because account 2 holds this card's cache"
-# An intentional harness constraint
-say "launch: token @lease zcode floor uncommon because this work needs ZCode"
+say "launch: token @lease vendor anthropic account 2 model opus effort medium because account 2 holds this card's cache"
+# A named GLM model, with its harness placed
+say "launch: token @lease vendor zai model glm-5.3 because the handover plan names glm-5.3"
 ```
 
 with its `brief:` line sent as above.
 
-`model` is Claude Code's own (`opus`, `opus[1m]`). The daemon picks the best-ranked account of the vendor named
-(`anthropic` when none is; `openai`, `zai`, … or `any`) that some machine has a launcher signed in
-to, and one whose usage it cannot read only after every ranked one, as unknown. `account <n>` starts
+`model` names the vendor's model (`opus`, `opus[1m]`, `glm-5.3`). A harnessless launch without
+`vendor` matches it across the models accounts serve; `vendor <vendor>` restricts placement to
+that vendor's accounts. The daemon picks the best-ranked eligible account with a launchable harness
+serving it, and one whose usage it cannot read only after every ranked one, as unknown.
+`account <n>` starts
 that vendor's account, as the usage frames number it, or refuses; it never falls back to another. On
 Go the number is the one the team gave the account when it was first seen, never a machine's launcher
 name; the launch's answer names it with the account's id and whose it is. A member who names an account by
@@ -867,9 +876,9 @@ machine is refused at once. A launch still waiting is withdrawn with
 `withdraw: token @lease <launch id>`, so it is never placed. Name the vendor
 whenever the model is that vendor's: passed to another vendor's endpoint, a model name may be
 mapped to that vendor's own model without a word. `worker-launched` names the vendor and
-launcher the session runs on; the agent starts it in tmux through that launcher, answers the
-folder-trust prompt, and answers the launch once the session has connected itself. A machine
-offers this only for the launchers its agent.toml declares in `[routing].claude_launchers`. End one with
+launcher the session runs on. For Claude Code, the agent starts it in tmux through that launcher,
+answers the folder-trust prompt, and answers the launch once the session has connected itself; its launchers
+are those the machine's agent.toml declares in `[routing].claude_launchers`. End one with
 `retire: token @lease <tmux session> on <node>`, the `2mw2lt-launch-…` name `worker-launched`
 carries. On a Go workspace a retire names the session and why instead: `retire: token @lease
 <session> [to <successor>] because <reason>`. A card the session still executes open is forfeited,
@@ -888,11 +897,11 @@ interact with it; otherwise leave it out. To show one already running, on the ma
 Never start a harness in a pane yourself, except to rescue a stopped session (below), and never
 set a config directory by hand, or log in, copy or refresh credentials.
 
-A Codex model is launched the same way, on a machine that declares a proxied `openai` launcher,
-since `launch:` has no launcher for the `codex` harness itself:
+An OpenAI model is launched the same way; placement chooses its harness, including native Codex
+where the machine serves it:
 
 ```bash
-say "launch: token @lease claude vendor openai model <model> effort <level> because <why>"
+say "launch: token @lease vendor openai model <model> effort <level> because <why>"
 ```
 
 ## A connected session is yours
@@ -1044,7 +1053,7 @@ never paste it.
 
 ```bash
 say "$(cat <<'LAUNCH'
-launch: token @lease claude [on <node>] vendor <vendor> [account <n>] model <model> effort <level> card <card> because <why>
+launch: token @lease [on <node>] vendor <vendor> [account <n>] model <model> effort <level> card <card> because <why>
 brief: checkpoint <checkpoint id> Continue <card>: the handover checkpoint follows; read it, then the plan it names, and take the tasks it gives <model>.
 LAUNCH
 )"
@@ -1575,10 +1584,10 @@ that are not there already, so they survive this session.
   sha once and pass it as an argument, as `steering/host/deploy.sh` does, then read the served
   sha back. Rehearse a new deploy script under a throwaway label and port, and tell the fleet
   before restarting the orchestrator.
-- **The suite runs on `main` hourly; deploy what it passed.** Sessions merge on their review pass
-  and the guards their change reads, not a full suite each (owner's ruling, 2026-10-08). The CI
-  read dispatches the suite on `main` within the hour of a merge, and a red run is a CI row on your
-  queue naming the commits it began on (documentation/ci/15). Fix forward what it turns red,
+- **The suite runs on every push to `main`; deploy what it passed.** Sessions merge on their
+  review pass and the guards their change reads (owner's ruling, 2026-10-08). Every push to `main`
+  runs the suite (owner's ruling, 2026-10-21), and a red run is a CI row on your queue naming the
+  commits it began on (documentation/ci/16). A release refuses while `main`'s latest run is red. Fix forward what it turns red,
   finding the pull request in those commits; rerun a failure alone before calling it a regression.
   Dispatch `steering.yml` on `main` yourself only to run it again sooner.
 - **Deploy in batches, and not over a gate.** A daemon restart ends every gate run then in

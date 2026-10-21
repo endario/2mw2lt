@@ -23,6 +23,7 @@ const SEAT = { plugin: '2mw2lt', key: 'seat' } as const
 const BULLETIN = { plugin: '2mw2lt', key: 'bulletin' } as const
 const BULLETINS = { plugin: '2mw2lt', key: 'bulletins' } as const
 const UNSETTLED = { plugin: '2mw2lt', key: 'unsettled' } as const
+const TURN = { plugin: '2mw2lt', key: 'turn' } as const
 
 const TOOL = 'mcp__2mw2lt__frames'
 const CHECKPOINT_CALL = 'mcp__2mw2lt__checkpoint'
@@ -247,15 +248,72 @@ async function land($: EngineInterface, session: string, body: unknown) {
     $.ui.log(`2mw2lt: the agent's prompt was not taken, and names no id to say so under: ${'refused' in landing ? landing.refused : ''}`, { to: 'debug' })
     return
   }
+  await report($, 'landed', session, p.id, landing)
+}
+
+// What the module did with one of the agent's commands, told to the agent's route for its kind,
+// whose receipt settles the desk's act.
+async function report($: EngineInterface, route: string, session: string, id: string, outcome: object) {
   try {
     const at = agent
     if (!at) throw new Error('no agent to report to')
-    const r = await $.http.fetch(`${at.base}/steering/surface/landed`,
-      { method: 'POST', headers: agentHeaders(at), body: JSON.stringify({ session, producer: await $.session.id(), id: p.id, ...landing }) })
+    const r = await $.http.fetch(`${at.base}/steering/surface/${route}`,
+      { method: 'POST', headers: agentHeaders(at), body: JSON.stringify({ session, producer: await $.session.id(), id, ...outcome }) })
     if (!r.ok) throw new Error(`the agent answered ${r.status}: ${r.text.slice(0, 200)}`)
   } catch (err) {
-    $.ui.log(`2mw2lt: where the desk's prompt ${p.id} landed was not reported: ${String(err)}`, { to: 'debug' })
+    $.ui.log(`2mw2lt: the desk's act ${id} was not reported ${route}: ${String(err)}`, { to: 'debug' })
   }
+}
+
+// The turn a desk interrupt is stopping: the background tasks its abort left running, gathered as
+// their calls return, and its end, by which every call of it has.
+let stopping: { turn: string; moved: string[]; ended: () => void } | undefined
+// How long an interrupt waits for the aborted turn's end: measured at about 100 ms (#4823).
+const STOP_WAIT_MS = 3000
+
+// A desk interrupt (#4823 unit 2.3, design §6.1), reported to the agent, whose receipt settles the act.
+async function interrupt($: EngineInterface, session: string, body: unknown) {
+  const p = surface.interrupting(body)
+  const { value: turn = '' } = await $.state.get(TURN)
+  const outcome: surface.Stopping = 'refused' in p ? { refused: p.refused }
+    : !turn ? { refused: 'no turn of the session is running' }
+    : stopping ? { refused: 'another interrupt is stopping the turn' }
+    : await stopTurn($, turn, p.from)
+  if (!p.id) {
+    $.ui.log(`2mw2lt: the agent's interrupt was not taken, and names no id to say so under: ${'refused' in outcome ? outcome.refused : ''}`, { to: 'debug' })
+    return
+  }
+  await report($, 'stopped', session, p.id, outcome)
+}
+
+// The running turn aborted; each command the abort moved to the background ended, as the person's
+// Esc ends it and the abort does not; and the model told, since an abort leaves it no marker. A
+// command the model ran in the background on purpose goes on, as it does past Esc.
+async function stopTurn($: EngineInterface, turn: string, from: string): Promise<surface.Stopping> {
+  const s = { turn, moved: [] as string[], ended: () => {} }
+  let over = false
+  const ended = new Promise<void>(resolve => { s.ended = () => { over = true; resolve() } })
+  stopping = s
+  try {
+    await $.turn.abort({ turnId: turn })
+    await Promise.race([ended, $.clock.sleep(STOP_WAIT_MS)])
+  } catch (err) {
+    return { refused: `the engine did not abort the turn: ${String(err)}` }
+  } finally {
+    if (stopping === s) stopping = undefined
+  }
+  const stopped: string[] = []
+  const unstopped: string[] = []
+  // A call still returning past the wait is not seen, so what it moved is not known to be ended.
+  const unseen = !over
+  for (const id of s.moved) {
+    const why = await $.tool.call({ tool: 'TaskStop', task_id: id })
+      .then(r => r.deny ?? (r.isError ? r.text ?? 'it failed' : undefined), err => String(err))
+    if (why === undefined) stopped.push(id)
+    else unstopped.push(`${id}: ${why}`)
+  }
+  const failed = await append($, surface.interruptNote(from, stopped.length, unstopped.length, unseen))
+  return { interrupted: true, stopped, unstopped, unseen, told: failed === undefined }
 }
 
 // The live view's channel to this machine's agent (#4823, design §6.1): `$.http.fetch` alone, one
@@ -378,6 +436,9 @@ function command($: EngineInterface, session: string, c: surface.Command) {
   switch (c?.kind) {
     case 'prompt':
       void land($, session, c.body).catch(err => $.ui.log(`2mw2lt: the desk's prompt broke: ${String(err)}`, { to: 'debug' }))
+      return
+    case 'interrupt':
+      void interrupt($, session, c.body).catch(err => $.ui.log(`2mw2lt: the desk's interrupt broke: ${String(err)}`, { to: 'debug' }))
       return
     case 'emit': {
       const payload = surface.emitted(c.body)
@@ -1079,10 +1140,15 @@ export const register: Register = on => {
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const result = await next(e)
-    // The completed call is a trigger only; its output is never parsed (design D3). A subagent's
-    // command is its own, never the session's: only the parent's loop moves its hold (#5688).
     const { agentId } = e as unknown as { agentId?: string }
-    if (!root || agentId !== undefined || result.deny !== undefined || result.isError) return result
+    const moved = result.deny === undefined && !result.isError ? result.result : undefined
+    const aborted = agentId === undefined && moved?.backgroundedByTurnAbort === true
+    if (aborted && moved?.backgroundTaskId) stopping?.moved.push(moved.backgroundTaskId)
+    // The completed call is a trigger only; its output is never parsed (design D3). A command an
+    // abort moved to the background has not completed, and the work below is aborted with it,
+    // whose throw hid the task from every hook and the model (#4823). A subagent's command
+    // is its own, never the session's: only the parent's loop moves its hold (#5688).
+    if (!root || agentId !== undefined || result.deny !== undefined || result.isError || aborted) return result
     const at = await connected($)
     if (at || invokes(e.command, 'connect')) {
       await startConnected($, at)
@@ -1109,6 +1175,7 @@ export const register: Register = on => {
     if (e.agentId === undefined) show($, { kind: 'turn', turn: { state: 'started' } })
     // A subagent's turn starts inside ours, and the run is the outer turn's.
     await $.state.set(BUSY, true)
+    if (e.agentId === undefined) await $.state.set(TURN, e.turnId)
     if (e.agentId === undefined) await tellBulletins($).catch(err => $.ui.log(`2mw2lt: the bulletin turn broke: ${String(err)}`, { to: 'debug' }))
     return next(e)
   })
@@ -1117,6 +1184,8 @@ export const register: Register = on => {
     if (e.agentId === undefined) {                                 // a subagent's turn ends inside ours
       show($, { kind: 'turn', turn: { state: 'completed', reason: surface.turnReason(e.reason) } })
       await $.state.set(BUSY, false)
+      await $.state.set(TURN, '')
+      if (stopping?.turn === e.turnId) stopping.ended()
       // A turn dead on an API error (a 429) did not read its pointer, and sending it into the
       // same refusal would only be refused again. The frames stay pending, and the next one to
       // arrive is pointed afresh, which a pointer left outstanding would have blocked for good.

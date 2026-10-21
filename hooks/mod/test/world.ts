@@ -60,6 +60,17 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
     // What connect.py last wrote to the session's connect record; empty while it has written none.
     connected: '',
     bashThrows: false,
+    // What a Bash call answers: a command an abort moved to the background carries its task's id.
+    bash: { stdout: '', stderr: '', interrupted: false } as Record<string, unknown>,
+    // Whether a process the module runs is aborted, as a call's is under `$.turn.abort` (#4823), and
+    // how many were.
+    runAborted: false,
+    abortedRuns: 0,
+    // The turns the module aborted, and the background tasks it stopped; a TaskStop the engine
+    // refuses answers taskStopDeny.
+    aborts: [] as string[],
+    taskStops: [] as string[],
+    taskStopDeny: undefined as string | undefined,
     sessionLookupCode: 0,
     retainedName: '',
     holdNextLookup: undefined as Promise<void> | undefined,
@@ -165,6 +176,10 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
   on('fs.write', async ($, e) => { w.writes.push(e); return { value: undefined } })
   on('tool.register', async ($, e) => { w.tools.push(e.name); return { value: { tool: `mcp__2mw2lt__${e.name}` } } })
   on('process.run', async ($, e) => {
+    if (w.runAborted) {
+      w.abortedRuns++
+      throw new Error(`2mw2lt: $.process.run(${e.argv[0]}) aborted, the call interrupted`)
+    }
     w.runs.push([...e.argv])
     w.cwds.push(e.init?.cwd)
     w.envs.push(e.init?.env)
@@ -239,7 +254,13 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
   })
   on('tool.call', { tool: 'Bash' }, (async () => {
     if (w.bashThrows) throw new Error('the engine broke')
-    return { result: { stdout: '', stderr: '', interrupted: false } }
+    return { result: w.bash }
+  }) as never)
+  on('turn.abort', async ($, e) => { w.aborts.push(e.turnId); return { value: undefined } })
+  on('tool.call', { tool: 'TaskStop' }, (async ($: unknown, e: { task_id: string }) => {
+    if (w.taskStopDeny) return { deny: w.taskStopDeny }
+    w.taskStops.push(e.task_id)
+    return { result: { message: `Successfully stopped task: ${e.task_id}`, task_id: e.task_id, task_type: 'local_bash' } }
   }) as never)
   on('ui.log', async ($, e) => {
     w.logs.push(e.text)

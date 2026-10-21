@@ -73,7 +73,15 @@ A card you minted by mistake leaves the plan as `excluded`; retiring it is the b
 Ask by floor: placement chooses the model, account and machine within your bounds. Name the
 harness or the vendor when the unit needs one (a design for Claude, a review away from the
 builder's vendor); placement then chooses only among those, still within your bounds and under your
-ceiling. Name the card by its id or by the issue it resolves, and brief the worker on its own line:
+ceiling.
+
+GLM builder work goes to ZCode after the passed soak (#7113),
+not GLM inside Claude Code: `claude vendor zai` runs the latter, at roughly twice the quota per
+task (#7076). ZCode takes same-turn
+steering (`protocol.SteersATurn`). Name Claude Code itself only for a stated reason the unit needs
+that harness.
+
+Name the card by its id or by the issue it resolves, and brief the worker on its own line:
 
 ```bash
 say "launch: token @lease [<harness>] [vendor <vendor>] floor <rarity> effort <level> card <card id> because <why>

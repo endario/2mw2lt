@@ -70,7 +70,7 @@ _LAUNCH = re.compile(r"^launch:\s*token\s+@lease(?:\s+(?P<harness>[a-z][a-z0-9-]
                      r"|\s+resolves\s+(?P<repo>[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100})#(?P<issue>[1-9][0-9]{0,9}))?"
                      r"(?:\s+notify\s+(?P<notify>[A-Za-z0-9][A-Za-z0-9._-]{0,119}))?"
                      # The harness, named after the clauses, constrains the launch to it; a floor
-                     # left without one is placed by the platform (the owner's direction, 2026-10-18).
+                     # or named model left without one lets placement choose the harness.
                      r"(?:\s+harness\s+(?P<named_harness>[a-z][a-z0-9-]{0,31}))?"
                      r"\s+because\s+(?P<reason>\S.*?)"
                      # The launched session's first directive follows on its own line (doc 192).
@@ -273,10 +273,10 @@ def _go_launch(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
     if m["harness"] and m["named_harness"] and m["harness"] != m["named_harness"]:
         return 2, refusal.use("launch", "a launch names its harness once: bare before its clauses, or as `harness <harness>` after them"), False
     harness = m["named_harness"] or m["harness"]
-    if not harness and not m["floor"]:
-        return 2, refusal.use("launch", "a launch names its harness unless it names a floor"), False
+    if not harness and not (m["model"] or m["floor"]):
+        return 2, refusal.use("launch", "a launch names a model or a floor"), False
     if harness == "claude" and not (m["model"] or m["floor"]):
-        return 2, refusal.use("launch", "a claude launch names its model (as Claude Code takes it) or a floor; its effort, left out, is the placed model's rarity's: legendary low, epic medium, rare high, uncommon max"), False
+        return 2, refusal.use("launch", "a claude launch names its vendor's model or a floor; its effort, left out, is the placed model's rarity's: legendary low, epic medium, rare high, uncommon max"), False
     if m["floor"] and (m["machine"] or m["quoted"] or m["machine_name"] or m["account"]):
         return 2, refusal.use("launch", "a floor is placed by the platform: leave out on and account, or name the model"), False
     body = {k: m[k] for k in ("machine", "machine_name", "vendor", "account", "model", "floor", "thinking", "effort", "notify") if m[k]}

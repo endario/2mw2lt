@@ -335,7 +335,7 @@ Load `/2mw2lt:gate` for the round/ceiling, cancellation, publication and pass-ca
 For coordination migration filenames, follow the repository convention.
 Steering commissions the independent judgment; a queued commission is not a reason to send
 another one. Fix verified findings, push and commission the next round. `ship it` closes the
-gate; mark ready only then, and merge it directly (`/2mw2lt:gate`). Never rebase after a
+gate; mark ready only then, and merge it (`/2mw2lt:gate`). Never rebase after a
 pass: merge `origin/main` into the passed head, resolve conflicts in that merge, push and carry the
 pass rather than commissioning another round. Once `main` has moved, any other commit, a migration
 renumber included, costs a round.

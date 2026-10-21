@@ -168,15 +168,15 @@ request a draft through every round. Before each round and before merging, run t
 guards that read what you changed, chosen with judgment: a full steering suite only when the change
 crosses the tree (the suite runner, a shared fixture or harness, several modules). Run them where
 you choose, locally or on the CI pool with
-[connect's `ci.py`](../connect/SKILL.md#gate-your-work). The suite runs on `main` hourly, and the
-brain fixes forward what it turns red. A guard that fails under load and
+[connect's `ci.py`](../connect/SKILL.md#gate-your-work). The suite runs on every push to `main`,
+and the brain fixes forward what it turns red. A guard that fails under load and
 passes alone is a flake to report, not a reason to hold the merge. Mark it ready only after
 `ship it`, then merge it.
 
 For GitHub state reads and waiting, follow
 [connect's interim GitHub rule](../connect/SKILL.md#interim-github-rule).
 
-Merge it directly once its head holds `2mw2lt/review` and its base is `main`. That status is posted a
+Merge it once its head holds `2mw2lt/review` and its base is `main`. That status is posted a
 sweep after the verdict or the carry, and you are told when it lands: a `say` frame
 `from: forge #<n>` reading `review status posted on <sha>; merge now`. Mark it ready in exactly this
 form, which the workspace allows without a prompt: `gh pr ready -R <repo> <pr number>`. Merge then, not before:
@@ -191,6 +191,10 @@ After that call succeeds, issue the merge as a separate Bash tool call with the 
 ```bash
 gh pr merge -R <repo> <pr number> --squash --match-head-commit <head sha>
 ```
+
+Once `main`'s ruleset requires the merge queue, the same command joins the queue: the queue merges
+after the Steering run on its merge commit passes, and the pass stays pinned to your head, so
+carry it to any head you push as before.
 
 The migration check applies where that script exists. Judge the merged tree: a version collision
 introduced by another branch need not exist in your branch's own tree. If it refuses, rename the
