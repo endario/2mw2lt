@@ -213,24 +213,16 @@ def _positive(name: str, default: int) -> int:
     return value
 
 
-def gate_agent_limit(path: Path = DEFAULT_PATH) -> int:
-    table = capacity(path)
-    return table["agent_limit"] if "agent_limit" in table else _positive("STEERING_GATE_AGENT_LIMIT", 3)
-
-
 def gate_host_limit(path: Path = DEFAULT_PATH) -> int:
     """Every agent on this machine together, not just this one. A host can run several side by
     side, and a per-agent limit bounds none of them jointly, so each fills its own and they
-    oversubscribe one machine's CPU (#1780).
-    Defaulting to the per-agent limit rather than a number of its own: a host running one agent
-    then behaves exactly as it did, and a host running two is held to what one was already
-    allowed instead of twice it."""
+    oversubscribe one machine's CPU (#1780)."""
     table, error = _state(path)
     if "host_limit" in table:
         return table["host_limit"]
     if error is not None and str(path) not in _cache.parsed:
         return 3
-    return _positive("STEERING_GATE_HOST_LIMIT", gate_agent_limit(path))
+    return _positive("STEERING_GATE_HOST_LIMIT", 3)
 
 
 def max_workers(path: Path = DEFAULT_PATH) -> int:
@@ -240,10 +232,7 @@ def max_workers(path: Path = DEFAULT_PATH) -> int:
 
 def gate_drain(path: Path = DEFAULT_PATH) -> str | None:
     """Why this machine takes no new gate run, or None: a gate limit at 0. A running one finishes."""
-    for key, limit in (("agent_limit", gate_agent_limit), ("host_limit", gate_host_limit)):
-        if limit(path) == 0:
-            return f"drained: [capacity].{key} is 0"
-    return None
+    return "drained: [capacity].host_limit is 0" if gate_host_limit(path) == 0 else None
 
 
 def launch_drain(path: Path = DEFAULT_PATH) -> str | None:
@@ -253,8 +242,7 @@ def launch_drain(path: Path = DEFAULT_PATH) -> str | None:
 
 def placement(path: Path = DEFAULT_PATH, review_host: bool | None = None) -> dict:
     """What this machine tells the orchestrator it is for (doc 146 §2.1): its role, its threshold,
-    `host_limit`, `max_workers`, and the gate runs it takes in all (`agent_limit`), which the
-    orchestrator counts per machine. A declared review host is dedicated unless its file says
+    `host_limit` and `max_workers`. A declared review host is dedicated unless its file says
     otherwise."""
     if review_host is None:
         import review_host as review_host_mod
@@ -262,7 +250,7 @@ def placement(path: Path = DEFAULT_PATH, review_host: bool | None = None) -> dic
     table = capacity(path).get("placement", {})
     return {"role": table.get("role", "dedicated" if review_host else "workstation"),
             "soft": float(table.get("soft", 0.75)), "capacity": gate_host_limit(path),
-            "workers": max_workers(path), "agent_limit": gate_agent_limit(path)}
+            "workers": max_workers(path)}
 
 
 def judges_exclude(path: Path = DEFAULT_PATH) -> set[str] | None:

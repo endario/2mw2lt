@@ -2393,6 +2393,18 @@ GateBrief = typing.TypedDict("GateBrief", {
     "rulings": "list[GateRuling] | None",
     "lifted": "GateLifted | None",
     "required_checks": "list[str] | None",
+    "resolution": "typing.NotRequired[GateResolution | None]",
+})
+
+# GateResolution is the patch from Git's replay of the passed change at Source onto Base, from Via
+# in the source's place where a fix after the pass stood there, to the round's head; Paths are the
+# replay's conflict paths (documentation/architecture/go-resolution-review-design.md).
+GateResolution = typing.TypedDict("GateResolution", {
+    "patch": "str",
+    "source": "str",
+    "base": "str",
+    "via": "typing.NotRequired[str]",
+    "paths": "list[str] | None",
 })
 
 # GateContext is what a review is told of its pull request beyond the diff, as its commission
@@ -2403,6 +2415,7 @@ GateContext = typing.TypedDict("GateContext", {
     "rulings": "typing.NotRequired[list[GateRuling] | None]",
     "required_checks": "list[str] | None",
     "knowledge": "typing.NotRequired[str]",
+    "resolution": "typing.NotRequired[GateResolution | None]",
 })
 
 # GatePlanRow is one plan table row whose label names the pull request's unit.

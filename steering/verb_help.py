@@ -179,7 +179,7 @@ TOOLS = {
         {"topic": "workspace", "usage": "<workspace>", "example": "door ."},
     ]},
     "gate": {"verb": "gate", "forms": [
-        {"topic": "review", "usage": _SPEAKER_USAGE + " " + _COMMISSION_USAGE + " <session> review <pr>", "example": "gate violet review 1"},
+        {"topic": "review", "usage": _SPEAKER_USAGE + " " + _COMMISSION_USAGE + " [--resolution] <session> review <pr>", "example": "gate violet review 1"},
         {"topic": "critic", "usage": _SPEAKER_USAGE + " " + _COMMISSION_USAGE + " <session> critic <doc>", "example": "gate violet critic documentation/plan.md"},
         {"topic": "status", "usage": _SPEAKER_USAGE + " <session> status <commission>", "example": "gate violet status 010101010101010101010101"},
         {"topic": "cancel", "usage": _SPEAKER_USAGE + " <session> cancel <commission>", "example": "gate violet cancel 010101010101010101010101"},

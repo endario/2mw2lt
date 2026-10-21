@@ -136,7 +136,11 @@ After `ship it`, never rebase. To bring the branch up to date, merge `origin/mai
 head, resolve any conflicts inside that merge commit, push, and carry. Once `main` has moved, only
 that pure merge carries. A commit of your own before it, a renumbered migration included, is
 refused `serial-not-served` (measured on #5595), as is a rebase that changes anything, and then
-only another round can pass the head. Run `carry` rather than commissioning another round.
+only another round can pass the head. Where a merge adapted the passed change beyond its conflicts,
+`review <pr number> --resolution` commissions that round on the adaptation alone: its reviewer reads
+only what the head changes beyond Git's replay of the pass, and a floor the series asked for steps
+down a rung; sent before GitHub delivers the head it names, it is refused `head-not-observed`, so send
+it again a few seconds later. Run `carry` rather than commissioning another round.
 
 For new coordination migrations, follow the repository convention.
 Resolve duplicate versions before the first round; renaming a migration after a pass costs a round.

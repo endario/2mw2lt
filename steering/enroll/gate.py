@@ -38,16 +38,21 @@ RUNGS = ("uncommon", "rare", "epic", "legendary")
 
 
 def gate_flags(argv: list[str]) -> tuple[list[str], str] | None:
-    """The arguments without `--floor`, `--why`, `--exclude`, `--judge`, `--effort` and `--final`, and
+    """The arguments without `--floor`, `--why`, `--exclude`, `--judge`, `--effort`, `--final` and
+    `--resolution`, and
     what they add to a commission's line (doc 127): the least rarity the round's judge may have and why
     it was asked for (#6499), vendors that wrote the branch though no session held it (doc 161 §6), a
     judge the owner or the brain asked for (5907 slice-2 D3), the effort the round runs at in place of
-    its floor's (#7851), and a round declared final. A floor needs its reason, and a reason its floor;
+    its floor's (#7851), a round declared final, and a round on the resolution alone (#8286). A floor needs its reason, and a reason its floor;
     an effort is named once, by `--effort` or a pin's `@effort`, or both agree."""
-    rest, floor, why, exclude, judge, effort, final = [], "", "", "", "", "", ""
+    rest, floor, why, exclude, judge, effort, final, resolution = [], "", "", "", "", "", "", ""
     it = iter(argv)
     for a in it:
-        if a == "--final":
+        if a == "--resolution":
+            if resolution:
+                return None
+            resolution = " resolution"
+        elif a == "--final":
             if final:
                 return None
             final = " final"
@@ -86,7 +91,7 @@ def gate_flags(argv: list[str]) -> tuple[list[str], str] | None:
     pinned = (parse_judge(judge[len(" judge "):]) or {}).get("effort") if judge else None
     if effort and pinned and pinned != effort[len(" effort "):]:
         return None
-    return rest, floor + why + exclude + judge + effort + final
+    return rest, floor + why + exclude + judge + effort + final + resolution
 
 
 # A judge pin is `<vendor>[/<model>][@<effort>]`: no empty field, no whitespace, nothing past the
@@ -158,9 +163,13 @@ def _settled_refusal(e) -> str:
     if e.code == "not-holding-branch":
         return refusal.refuse(str(e), send=[("taking: branch <name> token <t>",
                                              "to claim the branch this checkout is on, then send this again")])
+    if e.code == "resolution-carries":
+        return refusal.refuse(str(e), send=[("/2mw2lt:gate carry <n>", "since a carry admits this head and costs no round")])
     if e.code == "serial-not-served":
         why = f"{e}: {e.detail}" if e.detail else str(e)
-        return refusal.refuse(why, send=[("gate: review <repo> <branch> pr <n> token <t>",
+        return refusal.refuse(why, send=[("/2mw2lt:gate review <n> --resolution",
+                                          "where a merge adapted the passed change: a round on that adaptation alone"),
+                                         ("gate: review <repo> <branch> pr <n> token <t>",
                                           "to commission a round on this head, and carry its pass once it ships")])
     return refusal.refuse(f"{e}: {e.detail}" if e.detail else str(e), send="/2mw2lt:gate")
 
@@ -202,11 +211,16 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
     judge = re.search(r" judge (\S+)", extra)
     effort = re.search(r" effort (\S+)", extra)
     final = " final" in extra
+    resolution = " resolution" in extra
     rest = extra
-    for piece in (floor[0] if floor else "", why[0] if why else "", f" judge {judge[1]}" if judge else "", effort[0] if effort else "", " final" if final else ""):
+    for piece in (floor[0] if floor else "", why[0] if why else "", f" judge {judge[1]}" if judge else "", effort[0] if effort else "",
+                  " final" if final else "", " resolution" if resolution else ""):
         rest = rest.replace(piece, "", 1)
     if rest.strip():
-        print(f"a {kind} on a Go workspace takes --floor, --why, --judge, --effort and --final only, so far", file=sys.stderr)
+        print(f"a {kind} on a Go workspace takes --floor, --why, --judge, --effort, --final and --resolution only, so far", file=sys.stderr)
+        return 1
+    if resolution and kind != "review":
+        print("--resolution is a review's: a critique reads its whole design", file=sys.stderr)
         return 1
     here = Path.cwd()
     repo = origin_slug(here, timeout=5)
@@ -233,6 +247,10 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
         body = {"repo": repo, "pr": int(what.lstrip("#"))}
         if at:
             body["head"] = at
+        if resolution:
+            # Go proves the resolution at this head, forcing the replay as for a carry, for the
+            # commits this checkout did not make.
+            body.update(scope="resolution", **replayed(here, at))
     if floor:
         body["floor"], body["why"] = floor[1], unquote(why[1])
     if judge:
@@ -388,15 +406,7 @@ def go_carry(ws: Path, session: str, flags, pr: int, retry_id: str | None) -> in
     except Refused as why:
         print(str(why), file=sys.stderr)
         return 1
-    trunk = next((r for r in ("refs/remotes/origin/HEAD", "refs/remotes/origin/main", "refs/heads/main")
-                  if _git(here, "rev-parse", "-q", "--verify", f"{r}^{{commit}}")), None)
-    walked, after = _git_result(here, "rev-list", at, *([f"^{trunk}"] if trunk else []))
-    made = made_here(_git(here, "reflog", "--format=%H %gs", "HEAD"))
-    foreign = [c for c in after.split() if c not in made]
-    equivalent = not walked or not trunk or bool(foreign)
-    body = {"repo": repo, "pr": pr, "head": at, "equivalent": equivalent}
-    if walked and trunk and foreign and len(foreign) <= CARRY_FOREIGN_MAX:
-        body["foreign"] = foreign
+    body = {"repo": repo, "pr": pr, "head": at, **replayed(here, at)}
     this = retry_id or occurrence()
     waited_until = time.monotonic() + CARRY_UNOBSERVED_WAIT
     while True:
@@ -451,6 +461,20 @@ def carry_decided(pr: int, at: str, answer: dict, token: str) -> str:
         if time.monotonic() >= until:
             return f"carried: {said}; its status awaits its decision ({state}): {told}"
         time.sleep(CARRY_DECISION_POLL)
+
+
+def replayed(here: Path, at: str) -> dict:
+    """What a carry or a resolution round tells Go of `at`: `equivalent` unless every commit the branch
+    holds beyond the trunk was made in this checkout, and those it did not make as `foreign`."""
+    trunk = next((r for r in ("refs/remotes/origin/HEAD", "refs/remotes/origin/main", "refs/heads/main")
+                  if _git(here, "rev-parse", "-q", "--verify", f"{r}^{{commit}}")), None)
+    walked, after = _git_result(here, "rev-list", at, *([f"^{trunk}"] if trunk else []))
+    made = made_here(_git(here, "reflog", "--format=%H %gs", "HEAD"))
+    foreign = [c for c in after.split() if c not in made]
+    told = {"equivalent": not walked or not trunk or bool(foreign)}
+    if walked and trunk and foreign and len(foreign) <= CARRY_FOREIGN_MAX:
+        told["foreign"] = foreign
+    return told
 
 
 def made_here(reflog: str) -> set[str]:
