@@ -340,7 +340,12 @@ const BATCH_MS = 5
 const RETRY_MS = 250
 const RETRY_CAP_MS = 5000
 const outbox = new surface.Outbox()
+// A burst of thinking sent per chunk fell behind (spike A): a step's text and thinking leave at most
+// this often, and at the step's end.
+const STREAM_MS = 50
+const streaming = new surface.Streaming()
 let watching = false
+let watches = 0                      // how many watches have begun: a step streams under one alone
 // Whether a turn runs, as the turn hooks last said, before their awaits: a watch beginning reads it
 // without one, so a turn starting meanwhile is not told over. Unknown until one says, after a reload.
 let busyNow: boolean | undefined
@@ -437,6 +442,7 @@ async function pollSurface($: EngineInterface, workspace: string, session: strin
       // A watch beginning has no word of the turn until the next one starts or ends: it is told
       // the turn as it stands.
       if (watching && !was) {
+        watches++
         const stored = busyNow ?? (await $.state.get(BUSY)).value === true
         show($, surface.turnNow(busyNow ?? stored))
       }
@@ -1209,6 +1215,7 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {                                 // a subagent's turn ends inside ours
+      streaming.end()
       show($, { kind: 'turn', turn: { state: 'completed', reason: surface.turnReason(e.reason) } })
       busyNow = false
       await $.state.set(BUSY, false)
@@ -1233,9 +1240,36 @@ export const register: Register = on => {
   })
 
   // One long turn can run from well short of the point to compaction with no turn's end between,
-  // so each of the main thread's requests is measured as it is answered.
+  // so each of the main thread's requests is measured as it is answered. While the session is
+  // watched, the main thread's text and thinking stream to the live view (#8282): each chunk is
+  // passed on as it came, and nothing the mirror does reaches the turn. A piece is taken before it
+  // is passed on, so its block is open before the engine can store the block's row. Only the watch
+  // the step began under is sent any of it, so no view is handed a block from its middle.
   on('turn.step', async function* ($, e, next) {
-    const r = yield* next(e)
+    if (e.agentId === undefined) streaming.begin(e.turnId, e.index)
+    const since = watches
+    const live = () => e.agentId === undefined && watching && watches === since
+    let timer: Timer | undefined
+    const send = () => {
+      timer = undefined
+      if (!live()) return
+      try { for (const p of streaming.send()) show($, p) }
+      catch (err) { $.ui.log(`2mw2lt: the live view's stream broke: ${String(err)}`, { to: 'debug' }) }
+    }
+    const stream = next(e)
+    try {
+      for await (const c of stream) {
+        if (live() && (c.kind === 'text' || c.kind === 'thinking')) {
+          try { if (streaming.take(c) && !timer) timer = $.clock.after(STREAM_MS, send) }
+          catch (err) { $.ui.log(`2mw2lt: the live view's stream broke: ${String(err)}`, { to: 'debug' }) }
+        }
+        yield c
+      }
+    } finally {
+      timer?.cancel()
+      send()
+    }
+    const r = await stream.result
     if (e.agentId === undefined && r.usage) {
       await checkpointIfDue($, tokensOf(r.usage), false).catch(err => $.ui.log(`2mw2lt: the checkpoint check broke: ${String(err)}`, { to: 'debug' }))
     }
@@ -1260,8 +1294,12 @@ export const register: Register = on => {
   on('session.append', async ($, e, next) => {
     const stored = await next(e)
     if (stored.uuid === undefined || surface.ownNote(e)) return stored
+    // A response row takes its streamed block's place, matched whether or not it is shown, so the
+    // rows after it find theirs.
+    const replaces = e.door === 'response' && e.agentId === undefined ? streaming.replaces(stored.message.content) : undefined
     const act = e.door === 'prompt' && surface.ours(e.origin) ? actOf(surface.firstText(stored.message.content)) : undefined
     const payload = watching ? surface.eventOf(e, stored, act) : undefined
+    if (payload?.kind === 'row' && replaces) payload.row.replaces = replaces
     if (payload) show($, payload)
     return stored
   }).catch(($, e, next) => next(e))

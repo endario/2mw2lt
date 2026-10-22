@@ -83,6 +83,8 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
     context,
     usageCalls: 0,
     stepUsage: 0,
+    // The chunks each step streams, in turn; past the last, a step streams none.
+    steps: [] as unknown[][],
     // What seat_section.py answers: 0 with the rulings, 1 for a session that does not hold the seat.
     seat: { code: 1, stdout: '' },
     // What bulletin.py section answers: 0 with the snapshot, 1 for an empty bulletin, 3 for a door
@@ -285,7 +287,7 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
       autoCompactThreshold: c.point, isAutoCompactEnabled: c.point !== undefined, rawMaxTokens: c.raw,
       autocompactSource: c.source, model: c.model } } } } as never
   })
-  on('turn.step', async function* ($, e) { return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage: { model: 'claude-test', input_tokens: 1, output_tokens: 1, cache_read_input_tokens: w.stepUsage - 1, cache_creation_input_tokens: 0 } } as never })
+  on('turn.step', async function* ($, e) { for (const c of w.steps.shift() ?? []) yield c as never; return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage: { model: 'claude-test', input_tokens: 1, output_tokens: 1, cache_read_input_tokens: w.stepUsage - 1, cache_creation_input_tokens: 0 } } as never })
   on('session.end', async ($, e) => ({ sessionId: e.sessionId }))
   on('classic.SessionStart', async () => ({}) as never)
   on('prompt.compose', async () => ({ sections: [{ id: 'intro', text: 'engine', scope: 'shared' as const }] }))

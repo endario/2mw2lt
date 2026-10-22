@@ -53,7 +53,10 @@ def known_parts(root: Path) -> tuple[list[str], list[str]]:
     shards = [s.strip('"') for s in m[1].split(",")] if m else []
     p = subprocess.run(["bash", str(root / ".github/scripts/coordination-chunk.sh"), "--list"],
                        capture_output=True, text=True, timeout=30)
-    return shards, p.stdout.split() if p.returncode == 0 else []
+    chunks = p.stdout.split() if p.returncode == 0 else []
+    # The merge tier is a shard and a chunk a run may name, which `all` never holds (documentation/ci/18);
+    # a workflow from before it refuses the name itself.
+    return shards + ["merge"] * bool(shards), chunks + ["merge"] * bool(chunks)
 
 
 def pushed_head(here: Path, on: str) -> str:

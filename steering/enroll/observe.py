@@ -169,10 +169,11 @@ def main() -> int:
     if ride in (AGENT_REFUSED, AGENT_HELD):
         notice = None  # an agent that took the post is final; the spool and its drain own the rest
     elif ride is not None:
-        said, release = ride
-        claimed = spool.claim(path)
-        if claimed:
-            claimed.unlink()
+        said, release, relaying = ride
+        if not relaying:  # a relay still sending owns the file, and puts it back if it fails
+            claimed = spool.claim(path)
+            if claimed:
+                claimed.unlink()
         keep_release(ws, release)
         notice = received_notice(ws, o, said, time.time())
     else:
@@ -194,12 +195,15 @@ def main() -> int:
 # occurrence again through the door would duplicate a refusal the ledger already keeps. The
 # observation stays spooled, and the drain owns refusals as it always has.
 AGENT_REFUSED = "agent-relay-refused"
-# An agent that took the post but had not answered when this hook's patience ran out. Its relay
-# waits on the door no longer than this hook does, on a warm connection, so a door that slow for
-# the agent is no faster for a cold handshake in what is left of the budget: falling back cost the
-# session two more seconds per hook on the M4's degraded route and raced the relay with a second
-# write of the same occurrence.
+# An agent that took the post but had not answered when this hook's patience ran out: falling back
+# cost the session two more seconds per hook on the M4's degraded route and raced the relay with a
+# second write of the same occurrence.
 AGENT_HELD = "agent-relay-held"
+# The events whose answer is told in the turn that raised them. Every other observation asks the
+# agent not to wait on the door (#8259): its lane sends it in order, and a notice its answer
+# carries reaches the session's next hook of the same event, so a tool call costs no door round
+# trip.
+ANSWERED_IN_TURN = ("UserPromptSubmit",)
 
 
 def agent_send(ws: Path, o: dict, left: float):
@@ -207,14 +211,18 @@ def agent_send(ws: Path, o: dict, left: float):
     workspace, as the reach and turn routes are; None when no agent answered at all, so the
     caller sends to the door as it always has — an agent that answered is final, its 2xx carrying
     the door's answer and anything else AGENT_REFUSED, and one still forwarding when the wait ends
-AGENT_HELD. The loopback is cheap to fail, so an agent
-    that is absent costs the hook milliseconds of its budget, not the send."""
+AGENT_HELD. A 202 is the agent still sending, with the door's last answer to this event. The
+    loopback is cheap to fail, so an agent that is absent costs the hook milliseconds of its
+    budget, not the send."""
     req = local_workspace.agent_request(ws, "/steering/observe", o, timeout=1.0)
     if req is None:
         return None
+    if o.get("event") not in ANSWERED_IN_TURN:
+        req.add_header("Prefer", "respond-async")
     try:
         with send(req, timeout=min(2.0, left)) as r:
-            return answer_in(r)
+            relaying = r.status == 202
+            return (*answer_in(r, unstated=None if relaying else ""), relaying)
     except urllib.error.HTTPError as e:
         record("observe", f"the agent relayed the door's refusal: {failure(e)}", ws)
         return AGENT_REFUSED
@@ -324,12 +332,13 @@ def plugin_notice(ws: Path, o: dict, notice: str | None) -> str | None:
     return "\n".join(x for x in (line, notice) if x) or None
 
 
-def answer_in(r) -> tuple[str | None, str | None]:
+def answer_in(r, unstated: str | None = "") -> tuple[str | None, str | None]:
     """What the daemon told this session about itself in the answer (doc 71), and the release
     the orchestrator runs, as the authorities state it: the release rides the observe answer so
     a hook never spends its budget on a second read for it (#7185). The release is None when the
-    answer could not be read at all, and "" when a readable one names none — this orchestrator
-    states no release, and no cached one is kept to tell against."""
+    answer could not be read at all, and `unstated` when a readable one names none: "" from the
+    door — this orchestrator states no release, and no cached one is kept to tell against — and
+    None from a relay that has not yet heard the door's."""
     try:
         doc = json.loads(r.read() or b"{}")
     except (ValueError, AttributeError, OSError):
@@ -337,7 +346,7 @@ def answer_in(r) -> tuple[str | None, str | None]:
     n = doc.get("notice")
     release = doc.get("release")
     return (n if isinstance(n, str) and n else None,
-            release if isinstance(release, str) else "")
+            release if isinstance(release, str) else unstated)
 
 
 def keep_release(ws: Path, release: str | None) -> None:

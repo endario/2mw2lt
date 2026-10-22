@@ -7,12 +7,15 @@ import type { Args, ResultOf } from 'claude-code'
 type Append = Args<'session.append'>
 
 export type Block = { type: 'text' | 'thinking' | 'tool-use' | 'tool-result'; id?: string; text?: string; tool?: string; input?: unknown; error?: true }
-export type Row = { id?: string; role: 'user' | 'assistant' | 'tool-result' | 'system'; origin: string; act?: string; blocks: Block[] }
+// `replaces` is the key of the streamed block a response row takes the place of (#8282).
+export type Row = { id?: string; role: 'user' | 'assistant' | 'tool-result' | 'system'; origin: string; act?: string; replaces?: string; blocks: Block[] }
 export type Turn = { state: 'started' | 'completed'; reason?: 'answered' | 'interrupted' | 'error' }
 export type Ask = { id: string; kind: 'permission' | 'question'; tool?: string; options?: string[] }
 export type Settled = { ask: string; by: string; answer?: unknown }
+// What one streamed block grew by since the last send. It leaves as written: the block's row is scanned.
+export type Delta = { key: string; block: 'text' | 'thinking'; text: string }
 export type Payload = { kind: 'row' | 'compaction'; row: Row } | { kind: 'turn'; turn: Turn }
-  | { kind: 'ask'; ask: Ask } | { kind: 'ask-settled'; settled: Settled }
+  | { kind: 'ask'; ask: Ask } | { kind: 'ask-settled'; settled: Settled } | { kind: 'delta'; delta: Delta }
 // One of the agent's commands on the poll: a kind and that kind's body. `emit` asks the module to
 // number an event the agent saw, `prompt` to land words from the desk, `interrupt` to stop its turn.
 export type Command = { kind?: unknown; body?: unknown }
@@ -209,6 +212,63 @@ export function agentOf(record: string, env: { port?: string; xdg?: string; home
 
 // The workspace a header names: its common root, percent-encoded as `local_workspace.path_header` does.
 export const workspaceHeader = (root: string) => encodeURIComponent(root).replace(/%2F/g, '/')
+
+type Streamed = { index: number; block: Delta['block']; grown: string; replaced: boolean }
+
+// A step's text and thinking as the session writes them (#8282, design §4), gathered by block
+// between sends. A chunk carries no id its stored row also carries, so a row is matched to its block
+// by order: the harness stores one response row per block, at the block's end and in block order.
+export class Streaming {
+  private step = ''
+  private blocks: Streamed[] = []
+
+  // A step begins: a block of the step before is no row's to replace from now on.
+  begin(turnId: string, index: number) {
+    this.step = `${turnId}/${index}`
+    this.blocks = []
+  }
+
+  // A piece of a block, and whether anything now waits to be sent. An empty piece still opens its
+  // block, whose row must find it in its place.
+  take(c: { kind: 'text' | 'thinking'; index: number; text: string }): boolean {
+    if (!this.step) return false
+    let b = this.blocks.find(b => b.index === c.index)
+    if (!b) this.blocks.push(b = { index: c.index, block: c.kind, grown: '', replaced: false })
+    if (!b.replaced && b.block === c.kind) b.grown += c.text
+    return this.blocks.some(b => b.grown)
+  }
+
+  // One delta per block that grew since the last send, in block order.
+  send(): Payload[] {
+    const out: Payload[] = []
+    for (const b of [...this.blocks].sort((x, y) => x.index - y.index)) {
+      if (!b.grown) continue
+      out.push({ kind: 'delta', delta: { key: `${this.step}/${b.index}`, block: b.block, text: b.grown } })
+      b.grown = ''
+    }
+    return out
+  }
+
+  // The key a response row replaces: the oldest streamed block of the step no row has replaced. None
+  // when no block is open or that block is of another kind than the row's one block: the row is then
+  // drawn as any row is, and the block stays open, so a mismatch costs a block drawn twice until the
+  // turn's end, never a row put in the wrong place. What the block grew by and was not sent goes with
+  // it: the row carries the whole block.
+  replaces(content: readonly { type: string }[]): string | undefined {
+    let open: Streamed | undefined
+    for (const b of this.blocks) if (!b.replaced && (!open || b.index < open.index)) open = b
+    if (!open || content.length !== 1 || content[0]!.type !== open.block) return undefined
+    open.replaced = true
+    open.grown = ''
+    return `${this.step}/${open.index}`
+  }
+
+  // The turn ended: what no row replaced is let go.
+  end() {
+    this.step = ''
+    this.blocks = []
+  }
+}
 
 // The numbering: one seq per event, rising for the session's life, and a gap wherever the reader
 // cannot see what happened, so it re-reads history rather than show a view with a hole in it.

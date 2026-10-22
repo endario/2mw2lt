@@ -25,7 +25,9 @@ from local_workspace import required_workspace_root  # noqa: E402
 from verb_help import error, help_requested, script_help  # noqa: E402
 
 
-RULES = Path("credentialscan/gitleaks.toml")
+# The plugin's own copy, which the mirror packages, never the workspace's: a tenant's repository
+# holds none.
+RULES = HERE.parents[1] / "credentialscan" / "gitleaks.toml"
 
 
 SAY_TEXT_BYTES, SAY_TEXT_CHARS = 4096, 4000
@@ -117,7 +119,7 @@ def main(argv: list[str]) -> int:
     ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
     # A say is speech, and a credential-shaped one is refused here rather than sent to be stored
     # or delivered (#6178). A scanner that cannot run says so; the route still scans.
-    verdict = credential_shaped(text, ws / RULES)
+    verdict = credential_shaped(text, RULES)
     if verdict == "detected":
         print("refused: the text carries a credential-shaped string; it is not sent", file=sys.stderr)
         return 2

@@ -261,7 +261,7 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
         body["final"] = True
     this = retry_id or occurrence()
     print(f"id {this}", file=sys.stderr)
-    uncertain = False
+    uncertain, lever = False, ""
     try:
         answer = session_routes.write("/gates", body, this, session_routes.SESSION_CARRIER, token)
         # An id and a state name a commission; a round it does not answer is left unsaid (#5873).
@@ -273,6 +273,8 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
                 # The queue's face: where it stands and how many wait ahead (#6850).
                 state = f"queued: {answer['priority']}, {answer.get('ahead', 0)} ahead"
             reply = f"commissioned: {answer['id']} {kind}{round_}, {state}{why}"
+            # What frees a commission no judge's room frees, said whole (#7181).
+            lever = answer.get("lever") or ""
         else:
             uncertain, reply = True, refusal.retry("Go answered the commission without naming it")
     except session_routes.Refused as e:
@@ -286,6 +288,8 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
     except session_routes.Unsent as e:
         uncertain, reply = True, refusal.retry(str(e))
     print(display_reply(reply))
+    if lever:
+        print(lever)
     if uncertain:
         # Go answers the same key with the commission it made, or makes it once if it never arrived.
         print(f"the commission may have landed: send it again with --retry={this} to learn which", file=sys.stderr)

@@ -102,6 +102,18 @@ AccountList = typing.TypedDict("AccountList", {
     "vendor_serves_models": "dict[str, list[str] | None] | None",
     "manages_providers": "bool",
     "unnamed": "list[UnnamedDirectory] | None",
+    "removed": "list[RemovedAccount] | None",
+})
+
+# RemovedAccount is one account its owner removed: the team's number and the owner's label for it,
+# when, and how many live machines still read its key.
+RemovedAccount = typing.TypedDict("RemovedAccount", {
+    "vendor": "str",
+    "account_id": "str",
+    "number": "int | None",
+    "label": "str | None",
+    "removed_at": "str",
+    "machines": "int",
 })
 
 # AccountModel is one model a provider offers the team: its id as the accounts' vocabulary holds
@@ -147,6 +159,13 @@ ListedAccountUsage = typing.TypedDict("ListedAccountUsage", {
     "co_owners": "list[AccountCoOwner] | None",
     "concurrency": "AccountConcurrencyUsage",
     "shared": "AccountShared | None",
+    "transferred": "AccountHandedOver | None",
+})
+
+# AccountHandedOver is who handed the account to its owner, by GitHub login where Go holds one, and when.
+AccountHandedOver = typing.TypedDict("AccountHandedOver", {
+    "from_login": "str | None",
+    "at": "str",
 })
 
 # AccountCoOwner is one open share: the login it names, the subject's own once they signed in, and
@@ -377,6 +396,35 @@ AccountShareAnswer = typing.TypedDict("AccountShareAnswer", {
 AccountUnshareAnswer = typing.TypedDict("AccountUnshareAnswer", {
     "id": "str",
     "revoked": "bool",
+})
+
+# AccountTransfer is the body of POST /accounts/transfer: the account's owner hands it to To, a live
+# member of the team named by subject id, which the console reads from the team's roster (#8362).
+AccountTransfer = typing.TypedDict("AccountTransfer", {
+    "vendor": "str",
+    "account_id": "str",
+    "to": "str",
+})
+
+# AccountTransferred is its answer: the account as the team resolves it and its owner now.
+AccountTransferred = typing.TypedDict("AccountTransferred", {
+    "vendor": "str",
+    "account_id": "str",
+    "to": "str",
+})
+
+# AccountRemoval is the body of POST /accounts/remove and POST /accounts/restore: the account's
+# owner removes it from 2mw2lt, or takes the removal back (#8361).
+AccountRemoval = typing.TypedDict("AccountRemoval", {
+    "vendor": "str",
+    "account_id": "str",
+})
+
+# AccountRemoved is their answer: the account as the team resolves it and whether it stands removed.
+AccountRemoved = typing.TypedDict("AccountRemoved", {
+    "vendor": "str",
+    "account_id": "str",
+    "removed": "bool",
 })
 
 # ActionBody asks a machine to act on a session's process: to wake it, set its level, end it,
@@ -765,6 +813,8 @@ SessionReading = typing.TypedDict("SessionReading", {
     "active_at": "typing.NotRequired[str]",
     "step_at": "typing.NotRequired[str]",
     "steps": "typing.NotRequired[bool]",
+    "overflow_at": "typing.NotRequired[str]",
+    "overflows": "typing.NotRequired[bool]",
     "model": "str",
     "vendor": "str",
     "turn": "str",
@@ -4230,19 +4280,34 @@ SessionForgeTokenAnswer = typing.TypedDict("SessionForgeTokenAnswer", {
 })
 
 # SessionEvent is one event of a session's surface (design §5), scanned for credentials on the
-# machine before it left. A page of history carries rows and compactions only, and leaves Seq 0:
-# a seq is a place in the live stream, which the harness's record does not know, so a page is
-# placed by its rows' ids instead.
+# machine before it left, all but a delta's text. A page of history carries rows and compactions
+# only, and leaves Seq 0: a seq is a place in the live stream, which the harness's record does not
+# know, so a page is placed by its rows' ids instead.
 SessionEvent = typing.TypedDict("SessionEvent", {
     "v": "int",
     "session": "str",
     "seq": "int",
     "kind": "str",
     "row": "typing.NotRequired[SessionRow | None]",
+    "delta": "typing.NotRequired[SessionDelta | None]",
     "turn": "typing.NotRequired[SessionTurn | None]",
     "ask": "typing.NotRequired[SessionAsk | None]",
     "settled": "typing.NotRequired[SessionSettled | None]",
     "gap": "typing.NotRequired[SessionGap | None]",
+})
+
+# SessionDelta grows a text or thinking block the session is still writing (#8282): Key names the
+# block, and Parts are the runs of text written of it since its last delta, in order. The row that
+# names Key in Replaces stands in for everything streamed of it.
+SessionDelta = typing.TypedDict("SessionDelta", {
+    "key": "str",
+    "block": "str",
+    "parts": "typing.NotRequired[list[SessionPart] | None]",
+})
+
+# SessionPart is one run of a delta's text.
+SessionPart = typing.TypedDict("SessionPart", {
+    "text": "str",
 })
 
 # SessionTurn is a turn starting or completing; Reason (answered, interrupted, error) says how it
@@ -4281,13 +4346,15 @@ SessionGap = typing.TypedDict("SessionGap", {
 
 # SessionRow is a transcript row: the harness's id for it where it has one, its role, who wrote
 # it (person, console user <handle>, plugin, model or engine) and its blocks. Act is the desk's act
-# that landed it, on a live row of a desk prompt; history has no record of acts.
+# that landed it, on a live row of a desk prompt; history has no record of acts. Replaces is the key
+# of the streamed block a live row stands in for.
 SessionRow = typing.TypedDict("SessionRow", {
     "id": "typing.NotRequired[str]",
     "role": "str",
     "origin": "typing.NotRequired[str]",
     "act": "typing.NotRequired[str]",
     "blocks": "list[SessionBlock] | None",
+    "replaces": "typing.NotRequired[str]",
 })
 
 # SessionBlock is one part of a row: text, thinking, tool-use (Tool and Input) or tool-result. ID
@@ -4628,6 +4695,7 @@ SessionVitals = typing.TypedDict("SessionVitals", {
     "thinking_since": "str | None",
     "step_at": "str | None",
     "steps": "bool",
+    "overflow_at": "str | None",
     "live_until": "str",
 })
 
@@ -6392,8 +6460,11 @@ ROUTES = frozenset({
     "DELETE /w/{workspace}/api/v1/accounts/co-owners/{id}",
     "POST /w/{workspace}/api/v1/accounts/concurrency",
     "POST /w/{workspace}/api/v1/accounts/label",
+    "POST /w/{workspace}/api/v1/accounts/remove",
     "POST /w/{workspace}/api/v1/accounts/reset",
+    "POST /w/{workspace}/api/v1/accounts/restore",
     "POST /w/{workspace}/api/v1/accounts/serve",
+    "POST /w/{workspace}/api/v1/accounts/transfer",
     "POST /w/{workspace}/api/v1/actions",
     "POST /w/{workspace}/api/v1/actions/{action}/cancel",
     "GET /w/{workspace}/api/v1/board",

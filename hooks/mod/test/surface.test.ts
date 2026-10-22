@@ -1,8 +1,9 @@
 import { test, expect } from 'claude-code/testing'
 import { POINTER } from '../frames'
-import { Outbox, agentOf, eventOf, ownNote, OWN_NOTE } from '../surface'
+import { Outbox, Streaming, agentOf, eventOf, ownNote, OWN_NOTE } from '../surface'
 import { SLICE } from './rows-slice'
 import { world, line, begin, never, AGENT } from './world'
+import type { Poll } from './world'
 
 // The live view's half in the module (#4823): what reaches the machine agent, and when.
 
@@ -514,4 +515,175 @@ test('one recorded session maps live to the rows history reads from its transcri
     .filter(p => p !== undefined) as { kind: string; row: { act?: string } }[]
   expect(made.map(({ kind, row: { act, ...row } }) => ({ kind, row }))).toEqual(SLICE.rows as never)
   expect(made.filter(p => p.row.act).map(p => p.row.act)).toEqual(['act-1', 'act-2'])
+})
+
+// #8282: a turn's text and thinking reach the live view as the session writes them, and each block's
+// stored row, which the agent scans, takes its place.
+const think = (index: number, text: string) => ({ kind: 'thinking' as const, index, text })
+const say = (index: number, text: string) => ({ kind: 'text' as const, index, text })
+const deltas = (w: ReturnType<typeof world>) => events(w).filter(e => e.kind === 'delta')
+const step = (index = 0, agentId?: string) => ({ turnId: 't1', index, model: 'claude-test', messageCount: 3, ...(agentId ? { agentId } : {}) })
+const drain = async (it: AsyncIterable<unknown>) => { const got: unknown[] = []; for await (const c of it) got.push(c); return got }
+const response = (uuid: string, block: Record<string, unknown>) => ({ message: { type: 'assistant', role: 'assistant', content: [block] }, door: 'response',
+  origin: { kind: 'model', model: 'claude-test' }, uuid })
+
+// A send is what each block grew by since the last, so the view is sent every byte once and in
+// order; a block that did not grow sends nothing.
+test('a send carries what each block grew by since the last, one delta per block, keyed by turn, step and block', async () => {
+  const s = new Streaming()
+  s.begin('t1', 2)
+  s.take(think(0, 'one ')); s.take(think(0, 'two')); s.take(say(1, 'Hi'))
+  expect(s.send()).toEqual([{ kind: 'delta', delta: { key: 't1/2/0', block: 'thinking', text: 'one two' } },
+    { kind: 'delta', delta: { key: 't1/2/1', block: 'text', text: 'Hi' } }])
+  s.take(say(1, ' there'))
+  expect(s.send()).toEqual([{ kind: 'delta', delta: { key: 't1/2/1', block: 'text', text: ' there' } }])
+  expect(s.send()).toEqual([])
+})
+
+// The harness stores a row per block at the block's end, in block order, and no id ties a row to its
+// chunks: order is the match, so the oldest open block is the one a row replaces.
+test('rows replace their step\'s streamed blocks oldest first, and a row past the last replaces nothing', async () => {
+  const s = new Streaming()
+  s.begin('t1', 0)
+  s.take(think(0, 'plan')); s.take(say(1, 'Done'))
+  expect(s.replaces([{ type: 'thinking' }])).toBe('t1/0/0')
+  expect(s.replaces([{ type: 'text' }])).toBe('t1/0/1')
+  expect(s.replaces([{ type: 'text' }])).toBeUndefined()
+})
+
+// A row of another kind than the oldest open block is not that block's: matching it anyway would put
+// the row in the wrong place, where refusing costs only a block drawn twice until the turn ends.
+test('a row whose kind is not its oldest open block\'s replaces nothing, and the block waits for its own row', async () => {
+  const s = new Streaming()
+  s.begin('t1', 0)
+  s.take(say(0, 'Running it'))
+  expect(s.replaces([{ type: 'tool_use' }])).toBeUndefined()
+  expect(s.replaces([{ type: 'thinking' }])).toBeUndefined()
+  expect(s.replaces([{ type: 'text' }])).toBe('t1/0/0')
+})
+
+// A block of an earlier step never stored its row; a later step's row taking it would be drawn in the
+// earlier step's place. Past the turn's end nothing is gathered at all.
+test('a block of an earlier step is no row\'s to replace, and nothing is gathered past the turn\'s end', async () => {
+  const s = new Streaming()
+  s.begin('t1', 0)
+  s.take(say(0, 'left open'))
+  s.begin('t1', 1)
+  expect(s.replaces([{ type: 'text' }])).toBeUndefined()
+  s.end()
+  expect(s.take(say(0, 'late'))).toBe(false)
+  expect(s.send()).toEqual([])
+})
+
+// Spike A: a thinking burst sent per chunk fell behind to a p95 of 713 ms. Pieces are gathered and
+// leave at most every 50 ms, and what is left leaves at the step's end without waiting out the window.
+test('a watched step\'s pieces leave gathered per block at most every 50 ms, and the rest at the step\'s end', async ($, on) => {
+  const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true, cursor: 'c1' }] })
+  await begin($)
+  await w.clock.settle()
+  await $.turn.start({ turnId: 't1', text: 'go' })
+  w.steps = [[think(0, 'one '), think(0, 'two '), think(0, 'three'), say(1, 'Done'), say(1, '.'), { kind: 'stop', stopReason: 'end_turn', usage: null }]]
+  const it = $.turn.step(step() as never)
+  await it.next(); await it.next()
+  await w.clock.advance(20)
+  await it.next()
+  await w.clock.advance(25)
+  expect(deltas(w)).toEqual([])                         // 45 ms after the first piece: still gathering
+  await w.clock.advance(10)                             // the window's 50, and the batch's 5
+  expect(deltas(w).map(e => e.delta)).toEqual([{ key: 't1/0/0', block: 'thinking', text: 'one two three' }])
+  await drain(it as never)
+  await w.clock.advance(5)                              // the step's end sends at once: only the batch's 5
+  expect(deltas(w).map(e => e.delta)).toEqual([{ key: 't1/0/0', block: 'thinking', text: 'one two three' },
+    { key: 't1/0/1', block: 'text', text: 'Done.' }])
+  expect(events(w).map(e => [e.seq, e.kind])).toEqual([[1, 'turn'], [2, 'turn'], [3, 'delta'], [4, 'delta']])
+})
+
+// What leaves the module is what the engine shows and records: the mirror reads the stream and must
+// never reshape, reorder or drop a piece of it. The kit cannot make the engine's own items, which
+// carry a ref only the engine mints.
+test('every chunk of a watched step reaches the engine unchanged and in order', async ($, on) => {
+  const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true, cursor: 'c1' }] })
+  await begin($)
+  await w.clock.settle()
+  const chunks = [think(0, 'plan'), think(0, ''), say(1, 'Hi'), { kind: 'tool', index: 2, id: 'toolu_1', name: 'Bash' },
+    { kind: 'input', index: 2, json: '{"command":"ls"}' }, { kind: 'stop', stopReason: 'tool_use', usage: null }]
+  w.steps = [chunks.map(c => ({ ...c }))]
+  expect(await drain($.turn.step(step() as never) as never)).toEqual(chunks)
+})
+
+// A subagent runs beside the main thread under its own steps; its words are not the conversation's,
+// and a block keyed into the main step would be drawn among the main thread's.
+test('a subagent\'s step streams nothing to the live view', async ($, on) => {
+  const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true, cursor: 'c1' }] })
+  await begin($)
+  await w.clock.settle()
+  w.steps = [[], [say(0, 'the subagent speaks')]]
+  await drain($.turn.step(step(0) as never) as never)
+  await drain($.turn.step(step(0, 'agent-1') as never) as never)
+  await w.clock.advance(100)
+  expect(deltas(w)).toEqual([])
+})
+
+// Nothing is sent while nobody watches; and a watch that begins mid-step would be handed a block from
+// its middle, so that step sends nothing and the next streams whole.
+test('nothing streams while nobody watches, and a watch begun mid-step gets the next step whole', async ($, on) => {
+  let watch!: (p: Poll) => void
+  const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: false }, new Promise<Poll>(r => { watch = r })] })
+  await begin($)
+  await w.clock.settle()
+  w.steps = [[say(0, 'before '), say(0, 'the watch'), say(0, ' and after')], [say(0, 'Whole')]]
+  const it = $.turn.step(step(0) as never)
+  await it.next()
+  await w.clock.advance(100)
+  expect(posted(w)).toEqual([])
+  watch({ watch: true, cursor: 'c2' })
+  await w.clock.settle()
+  await drain(it as never)
+  await w.clock.advance(100)
+  expect(deltas(w)).toEqual([])
+  await drain($.turn.step(step(1) as never) as never)
+  await w.clock.advance(5)
+  expect(deltas(w).map(e => e.delta)).toEqual([{ key: 't1/1/0', block: 'text', text: 'Whole' }])
+})
+
+// A watch that lapses mid-step and comes back is a new view, even when no piece arrived between: what
+// the block had grown by unsent, and grows by after, would reach it without the block's start.
+test('a watch that lapses mid-step and comes back is sent nothing more of that step', async ($, on) => {
+  let lapse!: (p: Poll) => void, back!: (p: Poll) => void
+  const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true, cursor: 'c1' }, new Promise<Poll>(r => { lapse = r }), new Promise<Poll>(r => { back = r })] })
+  await begin($)
+  await w.clock.settle()
+  w.steps = [[say(0, 'seen'), say(0, ' unsent'), say(0, ' after')]]
+  const it = $.turn.step(step() as never)
+  await it.next()
+  await w.clock.advance(55)
+  await it.next()
+  lapse({ watch: false, cursor: 'c2' })
+  await w.clock.settle()
+  back({ watch: true, cursor: 'c3' })
+  await w.clock.settle()
+  await drain(it as never)
+  await w.clock.advance(100)
+  expect(deltas(w).map(e => e.delta.text)).toEqual(['seen'])
+})
+
+// The desk puts a row naming `replaces` where that block was drawn, in one render; a delta of the
+// block after its row would open it again below the row.
+test('a stored response row names the streamed block it replaces, and no delta of that block follows it', async ($, on) => {
+  const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true, cursor: 'c1' }] })
+  await begin($)
+  await w.clock.settle()
+  await $.turn.start({ turnId: 't1', text: 'go' })
+  w.steps = [[think(0, 'plan'), say(1, 'Running it'), { kind: 'tool', index: 2, id: 'toolu_1', name: 'Bash' }, { kind: 'stop', stopReason: 'tool_use', usage: null }]]
+  const it = $.turn.step(step() as never)
+  await it.next()
+  await $.session.append(response('r1', { type: 'thinking', thinking: 'plan', signature: 's' }) as never)
+  await it.next()
+  await $.session.append(response('r2', { type: 'text', text: 'Running it' }) as never)
+  await it.next()
+  await $.session.append(response('r3', { type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'ls' } }) as never)
+  await drain(it as never)
+  await w.clock.advance(100)
+  expect(rowsOf(w).map(r => [r.id, r.replaces])).toEqual([['r1', 't1/0/0'], ['r2', 't1/0/1'], ['r3', undefined]])
+  expect(deltas(w)).toEqual([])
 })

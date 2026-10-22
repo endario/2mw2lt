@@ -314,7 +314,8 @@ is every account's verdict,
 brought it to the platform, as a `from: console user` line names them, sent when you take the
 seat, when you hold, and whenever any account's verdict or rank moves. An account that reads
 `serves: false` and `excluded:unserving` is one its owner has not enabled for this team, and only
-its owner can. `labels` is `[{"member", "label"}]`: each member's own name for the account, the
+its owner can. One that reads `excluded:removed` its owner removed from 2mw2lt: no team spends it
+until they restore it, so a launch pinned to it is withdrawn `launch-account-removed`. `labels` is `[{"member", "label"}]`: each member's own name for the account, the
 member written as `owner` is. It is the whole fleet every
 time, so the last one is the answer. Every held session, you included, is also sent
 `data: {"kind": "usage", "account", "verdict", "tightest", "incentive", "label"}`: its own account's row
