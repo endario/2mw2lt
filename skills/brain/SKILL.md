@@ -1633,8 +1633,9 @@ that are not there already, so they survive this session.
   will answer. An ask is refused: the owner answers it in the desk.
 - **Check the issue is still open before you brief it.** Search merged pull requests for it
   first. A brief for work that has already landed wastes a session's turn.
-- **Brief a pull request to stay a draft until `ship it`.** Between rounds the session runs its
-  guards where it chooses, locally or on the pool with `ci.py`. After a pass the worker never rebases: it
+- **Brief a pull request to stay a draft until `ship it`.** Between rounds the session spot-runs
+  the tests its change touches and dispatches the parts that read it on the pool with `ci.py`,
+  never the whole suite, which is the nightly's and a release's. After a pass the worker never rebases: it
   merges `origin/main` into the passed head and carries the pass on its own, and once `main` has
   moved any other commit, a migration renumber included, costs a round; a round remains available
   when judgment warrants it. Do not prescribe or skip a round in a directive: the gate skill's

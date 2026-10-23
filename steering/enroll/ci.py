@@ -1,10 +1,12 @@
-"""`ci.py <your session> run …`: run your pushed head's guards on the CI pool, and be told the
-verdict on your stream (documentation/ci/14).
+"""`ci.py <your session> run …`: dispatch the parts of your pushed head's guards that read your
+change to the CI pool, and be told the verdict on your stream (documentation/ci/14).
 
-`run` dispatches `steering.yml` on the branch this checkout is on, narrowed to the parts named, and
-registers a wait for the run with steering. `status` reads a run once; `log` prints a failed run's
-output, cut to one guard's when `--guard` names it. Each goes through `gh` on this machine's own
-credential.
+A dispatch names its parts — shards, chunks, the conformance — and never the whole suite: the
+nightly and a release own that, so `--all` and `all` are refused. The tests your change touches
+you spot-run where you sit (a test file, a `-run` pattern, one guard); the pool takes the parts
+too wide for that and the guards your OS cannot run. `status` reads a run once; `log` prints a
+failed run's output, cut to one guard's when `--guard` names it. Each goes through `gh` on this
+machine's own credential.
 """
 from __future__ import annotations
 
@@ -67,28 +69,29 @@ def pushed_head(here: Path, on: str) -> str:
 
 def parse_run(argv: list[str]) -> dict | str:
     """`run`'s flags as the dispatch's inputs, or why they are malformed. A list is names
-    separated by commas, `all` or `none`; `--all` is the whole suite and takes no other."""
+    separated by commas or `none`; the whole suite — `--all`, or `all` among the names — is the
+    nightly's and a release's, never a dispatch's, whose parts it names (documentation/ci/14)."""
     picked: dict = {}
     it = iter(argv)
     for a in it:
         if a == "--all":
-            picked["all"] = True
-        elif a == "--no-conformance":
-            picked["conformance"] = "false"
+            return "the whole suite is the nightly's and a release's: name the parts your change reads"
+        elif a in ("--conformance", "--no-conformance"):
+            picked["conformance"] = "true" if a == "--conformance" else "false"
         elif a in ("--shards", "--chunks") or a.startswith(("--shards=", "--chunks=")):
             name, _, value = a.partition("=")
             value = value or next(it, "")
             names = value.split(",")
             if not re.fullmatch(r"[a-z0-9-]+(,[a-z0-9-]+)*", value) or name[2:] in picked \
                     or len(names) > 1 and ("all" in names or "none" in names):
-                return f"{name} takes names separated by commas, all or none"
+                return f"{name} takes names separated by commas, or none"
+            if "all" in names:
+                return f"{name} all is the whole suite: name the {name[2:]} your change reads, or none"
             picked[name[2:]] = value
         else:
             return f"run does not take {a}"
-    if picked.get("all") and len(picked) > 1:
-        return "--all is the whole suite and takes no other flag"
     if not picked:
-        return "run needs the parts to run, or --all"
+        return "run needs the parts your change reads: --shards, --chunks or --conformance"
     return picked
 
 
@@ -146,19 +149,19 @@ def run(ws: Path, here: Path, repo: str, session: str, flags, picked: dict, retr
     inputs = {"head": at, "session": session}
     named = []
     for part, known in (("shards", shards), ("chunks", chunks)):
-        asked = picked.get(part, "all")
+        asked = picked.get(part, "none")
         unknown = [n for n in asked.split(",") if n not in ("all", "none") and n not in known]
         if unknown:
             print(f"no such {part[:-1]}: {', '.join(unknown)}; this checkout's are {', '.join(known)}", file=sys.stderr)
             return 1
-        if asked != "all":
-            inputs[part] = asked
+        inputs[part] = asked
         named.append(f"{part} {asked}")
-    if picked.get("conformance"):
-        inputs["conformance"] = "false"
-    else:
+    if picked.get("conformance") == "true":
+        inputs["conformance"] = "true"
         named.append("conformance")
-    if picked.get("shards") == "none" and picked.get("chunks") == "none" and picked.get("conformance"):
+    else:
+        inputs["conformance"] = "false"
+    if picked.get("shards", "none") == "none" and picked.get("chunks", "none") == "none" and picked.get("conformance", "false") != "true":
         print("nothing is selected: no shard, no chunk and no conformance", file=sys.stderr)
         return 1
     try:

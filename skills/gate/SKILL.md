@@ -169,10 +169,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> pr <pr nu
 Opening your card's draft pull request, and editing or commenting on your own, is the owner's
 standing authorization: no one is asked (connect's "Gate your work" has its scope). Keep the pull
 request a draft through every round. Before each round and before merging, run the
-guards that read what you changed, chosen with judgment: a full steering suite only when the change
-crosses the tree (the suite runner, a shared fixture or harness, several modules). Run them where
-you choose, locally or on the CI pool with
-[connect's `ci.py`](../connect/SKILL.md#gate-your-work). The suite runs on every push to `main`,
+guards that read what you changed, chosen with judgment: spot-run the tests your change touches,
+and dispatch the parts that read it on the CI pool with
+[connect's `ci.py`](../connect/SKILL.md#gate-your-work) — a dispatch names its parts and never the
+whole suite, which is the nightly's and a release's. The suite runs on every push to `main`,
 and the brain fixes forward what it turns red. Every guard passes under load: one that
 fails in a loaded run and passes alone is a defect to fix, never a flake to report past. Mark it ready only after
 `ship it`, then merge it.

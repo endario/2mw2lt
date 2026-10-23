@@ -311,23 +311,26 @@ Write a pull request's, comment's or issue's body to a file and pass it with `--
 a body inline whose line starts with `#` is refused before it runs on some launches (#7528).
 
 Push first, keep the pull request draft, and before each round run the guards that read what
-changed, and the full suite when the change warrants one. Where they run is your choice, with no
-rule of size: locally, at once and on your own CPU, the only place before a push; or on the CI pool,
-on your pushed head, leaving your CPU free while it queues and runs. The pool is the only place for
-a guard your OS cannot run: the native Mac shard (`--shards mac`) from Linux, the Linux machine
-tests (the conformance) from a Mac. A failure only a loaded run shows is a defect in that guard, to
-fix: every guard passes under load.
+changed. The tests your change touches you spot-run where you sit — a test file, a `-run` pattern,
+one guard; never a shard, the merge tier or the suite, which belong on the CI box. The parts too
+wide for that, and only the parts your change reads, you dispatch to the pool on your pushed head,
+named. The pool is the only place for a guard your OS cannot run: the native Mac shard
+(`--shards mac`) from Linux, the Linux machine tests (the conformance) from a Mac. The whole suite
+is the nightly's and a release's — `--all` and `all` are refused, and the nightly covers the rest.
+A failure only a loaded run shows is a defect in that guard, to fix: every guard passes under load.
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ci.py" <session> run --shards rest1,mac --chunks none --no-conformance  # or --all
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ci.py" <session> run --shards rest1,mac  # the parts your change reads; --conformance from a Mac
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ci.py" <session> status <run>
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ci.py" <session> log <run> [--guard <label>]
 ```
 
-`run` refuses a head you have not pushed. Its verdict arrives on your stream from `wait <id>`:
+`run` refuses a head you have not pushed, and an omitted part runs none of it. Its verdict arrives
+on your stream from `wait <id>`:
 `passed on <head>`, `failed on <head>: <jobs>: <guards>`, or why it judged nothing; a job no runner
-has taken in 15 minutes is told once, and you decide whether to keep waiting, run it locally or
-`gh run cancel <run> -R <repo>` it. A narrowed run proves nothing for a release; `--all` proves the head.
+has taken in 15 minutes is told once, and you decide whether to keep waiting or
+`gh run cancel <run> -R <repo>` it. A narrowed run proves nothing for a release; the head is
+proven by the queue's group and the nightly, not by any dispatch.
 
 From the branch's worktree:
 

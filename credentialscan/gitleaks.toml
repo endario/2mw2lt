@@ -616,6 +616,14 @@ regexTarget = "match"
 regexes = [
     '''(?i)(?:access(?:ibility|or)|access[_.-]?id|random[_.-]?access|api[_.-]?(?:id|name|version)|rapid|capital|[a-z0-9-]*?api[a-z0-9-]*?:jar:|author|X-MS-Exchange-Organization-Auth|Authentication-Results|(?:credentials?[_.-]?id|withCredentials)|(?:bucket|foreign|hot|idx|natural|primary|pub(?:lic)?|schema|sequence)[_.-]?key|(?:turkey)|key[_.-]?(?:alias|board|code|frame|id|length|mesh|name|pair|press(?:ed)?|ring|selector|signature|size|stone|storetype|word|up|down|left|right)|key[_.-]?vault[_.-]?(?:id|name)|keyVaultToStoreSecrets|key(?:store|tab)[_.-]?(?:file|path)|issuerkeyhash|(?-i:[DdMm]onkey|[DM]ONKEY)|keying|(?:secret)[_.-]?(?:length|name|size)|UserSecretsId|(?:csrf)[_.-]?token|(?:io\.jsonwebtoken[ \t]?:[ \t]?[\w-]+)|(?:api|credentials|token)[_.-]?(?:endpoint|ur[il])|public[_.-]?token|(?:key|token)[_.-]?file|(?-i:(?:[A-Z_]+=\n[A-Z_]+=|[a-z_]+=\n[a-z_]+=)(?:\n|\z))|(?-i:(?:[A-Z.]+=\n[A-Z.]+=|[a-z.]+=\n[a-z.]+=)(?:\n|\z)))''',
 ]
+# 2mw2lt deviation from the vendored rule: what a note names after "token" or "bearer" is usually
+# its ids — hex has one case and a uuid carries its dashes, where a minted draw has neither — and
+# only that context is excepted: the rule's other keywords refuse every shape as before (#8582).
+[[rules.allowlists]]
+regexTarget = "match"
+regexes = [
+    '''(?i)\b(?:token|bearer)\b[^\r\n]{0,8}(?:sess_)?[0-9a-fA-F-]{32,}''',
+]
 stopwords = [
     "000000",
     "6fe4476ee5a1832882e326b506d14126",
@@ -3170,6 +3178,15 @@ id = "steering-token"
 description = "A minted token named in text"
 regex = '''(?i)\btoken\b["'`]?\s*[:=]?\s*["'`]?([a-z0-9_-]{32,})'''
 secretGroup = 1
+# What a note names after "token" is also its ids, in either case: a sha, a request id, a bare or
+# sess_-prefixed session uuid. Hex has one case and a uuid carries its dashes, where a
+# token_urlsafe draw has neither (minted.go's ruling), so those names are not tokens (#8582).
+[[rules.allowlists]]
+regexTarget = "secret"
+regexes = [
+    '''^[0-9a-fA-F]{32,64}$''',
+    '''^(sess_)?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$''',
+]
 
 [[rules]]
 id = "steering-lease"
@@ -3189,3 +3206,11 @@ description = "A bearer credential, in an Authorization header or assigned to a 
 regex = '''(?i)\bbearer(?:[ \t]+|[\w.-]{0,20}["'`]{0,3}[ \t]{0,3}(?::{1,2}=?|=)[ \t"'`=]{0,5})([A-Za-z0-9._~+/=-]{20,})'''
 secretGroup = 1
 entropy = 3.5
+# A bearer name is followed by ids too, in either case, and a uuid's dashes and a hex id's one
+# case are not a credential's shape (#8582).
+[[rules.allowlists]]
+regexTarget = "secret"
+regexes = [
+    '''^[0-9a-fA-F]{32,64}$''',
+    '''^(sess_)?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$''',
+]

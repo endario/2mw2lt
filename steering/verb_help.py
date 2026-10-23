@@ -188,7 +188,7 @@ TOOLS = {
         {"topic": "merge", "usage": _SPEAKER_USAGE + " <session> merge <pr> [--head <sha>]", "example": "gate violet merge 1"},
     ]},
     "ci": {"forms": [
-        {"topic": "run", "usage": _SPEAKER_USAGE + " <session> run [--shards <names>|all|none] [--chunks <names>|all|none] [--no-conformance] | --all [--retry=<id>]", "example": "ci violet run --shards rest1 --chunks none --no-conformance"},
+        {"topic": "run", "usage": _SPEAKER_USAGE + " <session> run [--shards <names>|none] [--chunks <names>|none] [--conformance] [--retry=<id>]", "example": "ci violet run --shards rest1"},
         {"topic": "status", "usage": _SPEAKER_USAGE + " <session> status <run>", "example": "ci violet status 39384922516"},
         {"topic": "log", "usage": _SPEAKER_USAGE + " <session> log <run> [--guard <label>]", "example": "ci violet log 39384922516 --guard lint_test"},
     ]},
