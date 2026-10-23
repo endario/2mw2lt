@@ -136,7 +136,7 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
   on('session.root', async () => ({ value: ROOT }))
   on('session.id', async () => ({ value: w.psession }))
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
-  on('turn.complete', async ($, e) => ({ text: e.text }))
+  on('turn.complete', async ($, e) => ({ text: e.answer ?? e.text }))
   on('fs.read', async ($, e) => {
     if (e.path.endsWith('/.claude-plugin/plugin.json')) {
       w.root = e.path.slice(0, -'/.claude-plugin/plugin.json'.length)

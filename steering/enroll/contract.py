@@ -525,11 +525,18 @@ RehomeReceiptAnswer = typing.TypedDict("RehomeReceiptAnswer", {
     "replayed": "bool",
 })
 
-# PromptBody is a prompt to a live session from the desk: its words, and whether they start a turn
-# (`prompt`) or steer the running one (`steer`).
+# PromptBody carries words that start or steer a turn, or a native harness command.
 PromptBody = typing.TypedDict("PromptBody", {
-    "text": "str",
-    "mode": "str",
+    "text": "typing.NotRequired[str]",
+    "mode": "typing.NotRequired[str]",
+    "command": "typing.NotRequired[PromptCommand | None]",
+    "attachments": "typing.NotRequired[list[str] | None]",
+})
+
+# PromptCommand runs through the harness's command route, not its prompt input.
+PromptCommand = typing.TypedDict("PromptCommand", {
+    "name": "str",
+    "args": "str",
 })
 
 # PromptReceipt is what a machine answers of a prompt it was offered: the prompt, and where it
@@ -554,6 +561,7 @@ PromptReceiptAnswer = typing.TypedDict("PromptReceiptAnswer", {
 # (new-turn, running-turn, queued) and Why the engine's reason for that; Refused is what stopped an
 # act the machine refused.
 ActRead = typing.TypedDict("ActRead", {
+    "attachments": "typing.NotRequired[list[Attachment] | None]",
     "id": "str",
     "kind": "str",
     "state": "str",
@@ -561,6 +569,7 @@ ActRead = typing.TypedDict("ActRead", {
     "landed": "typing.NotRequired[str]",
     "why": "typing.NotRequired[str]",
     "refused": "typing.NotRequired[str]",
+    "result": "typing.NotRequired[str]",
     "winner": "typing.NotRequired[str]",
     "winner_why": "typing.NotRequired[str]",
     "machine": "typing.NotRequired[MachineState | None]",
@@ -673,6 +682,27 @@ AgentCommandsBody = typing.TypedDict("AgentCommandsBody", {
 # AgentCommandsAnswer says whether the list was kept.
 AgentCommandsAnswer = typing.TypedDict("AgentCommandsAnswer", {
     "recorded": "bool",
+})
+
+# CommandsRead is the epoch's latest list, with Stale when the reading names another hash.
+CommandsRead = typing.TypedDict("CommandsRead", {
+    "commands": "list[SlashCommand] | None",
+    "hash": "str",
+    "cut": "int",
+    "stale": "bool",
+})
+
+CommandReceipt = typing.TypedDict("CommandReceipt", {
+    "session": "typing.NotRequired[str]",
+    "uplink": "str",
+    "command": "str",
+    "result": "typing.Any",
+})
+
+CommandReceiptAnswer = typing.TypedDict("CommandReceiptAnswer", {
+    "command": "str",
+    "state": "str",
+    "replayed": "bool",
 })
 
 # AgentInjectionBody is the body of POST /steering/agent/injection: whether the machine may hand
@@ -1019,6 +1049,7 @@ StreamSay = typing.TypedDict("StreamSay", {
     "text": "str",
     "to": "str",
     "hold": "str",
+    "class": "typing.NotRequired[str]",
 })
 
 # StreamRequestSay is a member's request written to the seat's holder as a say, its id the
@@ -1030,6 +1061,7 @@ StreamRequestSay = typing.TypedDict("StreamRequestSay", {
     "text": "str",
     "to": "str",
     "hold": "str",
+    "class": "typing.NotRequired[str]",
     "directive": "str",
 })
 
@@ -1193,6 +1225,9 @@ MachineAction = typing.TypedDict("MachineAction", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "attachments": "typing.NotRequired[list[Attachment] | None]",
+    "name": "typing.NotRequired[str]",
+    "args": "typing.NotRequired[str]",
     "ask": "typing.NotRequired[str]",
     "dialog": "typing.NotRequired[str]",
     "decision": "typing.NotRequired[str]",
@@ -1251,6 +1286,9 @@ StreamWake = typing.TypedDict("StreamWake", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "attachments": "typing.NotRequired[list[Attachment] | None]",
+    "name": "typing.NotRequired[str]",
+    "args": "typing.NotRequired[str]",
     "ask": "typing.NotRequired[str]",
     "dialog": "typing.NotRequired[str]",
     "decision": "typing.NotRequired[str]",
@@ -1294,6 +1332,9 @@ StreamControl = typing.TypedDict("StreamControl", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "attachments": "typing.NotRequired[list[Attachment] | None]",
+    "name": "typing.NotRequired[str]",
+    "args": "typing.NotRequired[str]",
     "ask": "typing.NotRequired[str]",
     "dialog": "typing.NotRequired[str]",
     "decision": "typing.NotRequired[str]",
@@ -1337,6 +1378,9 @@ StreamRehome = typing.TypedDict("StreamRehome", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "attachments": "typing.NotRequired[list[Attachment] | None]",
+    "name": "typing.NotRequired[str]",
+    "args": "typing.NotRequired[str]",
     "ask": "typing.NotRequired[str]",
     "dialog": "typing.NotRequired[str]",
     "decision": "typing.NotRequired[str]",
@@ -1380,6 +1424,9 @@ StreamPark = typing.TypedDict("StreamPark", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "attachments": "typing.NotRequired[list[Attachment] | None]",
+    "name": "typing.NotRequired[str]",
+    "args": "typing.NotRequired[str]",
     "ask": "typing.NotRequired[str]",
     "dialog": "typing.NotRequired[str]",
     "decision": "typing.NotRequired[str]",
@@ -1423,6 +1470,9 @@ StreamPrompt = typing.TypedDict("StreamPrompt", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "attachments": "typing.NotRequired[list[Attachment] | None]",
+    "name": "typing.NotRequired[str]",
+    "args": "typing.NotRequired[str]",
     "ask": "typing.NotRequired[str]",
     "dialog": "typing.NotRequired[str]",
     "decision": "typing.NotRequired[str]",
@@ -1466,6 +1516,9 @@ StreamAnswer = typing.TypedDict("StreamAnswer", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "attachments": "typing.NotRequired[list[Attachment] | None]",
+    "name": "typing.NotRequired[str]",
+    "args": "typing.NotRequired[str]",
     "ask": "typing.NotRequired[str]",
     "dialog": "typing.NotRequired[str]",
     "decision": "typing.NotRequired[str]",
@@ -1509,6 +1562,9 @@ StreamInterrupt = typing.TypedDict("StreamInterrupt", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "attachments": "typing.NotRequired[list[Attachment] | None]",
+    "name": "typing.NotRequired[str]",
+    "args": "typing.NotRequired[str]",
     "ask": "typing.NotRequired[str]",
     "dialog": "typing.NotRequired[str]",
     "decision": "typing.NotRequired[str]",
@@ -1657,6 +1713,27 @@ AgentPlacement = typing.TypedDict("AgentPlacement", {
     "capacity": "int",
     "workers": "typing.NotRequired[int | None]",
     "agent_limit": "typing.NotRequired[int | None]",
+})
+
+# AgentAttachmentBody names one image adopted by an act on the machine's current uplink.
+# Index is required: an omitted index must not silently read the first image.
+AgentAttachmentBody = typing.TypedDict("AgentAttachmentBody", {
+    "uplink": "str",
+    "session": "str",
+    "act": "str",
+    "index": "int | None",
+})
+
+# Attachment is the re-encoded image an upload returns and a prompt keeps after its bytes expire.
+# Its digest is SHA-256 hex; its index in the prompt is the fetch route's zero-based index.
+Attachment = typing.TypedDict("Attachment", {
+    "id": "str",
+    "digest": "str",
+    "media_type": "str",
+    "width": "int",
+    "height": "int",
+    "size": "int",
+    "expires_at": "str",
 })
 
 # NeedRaiseBody is a session's need to the owner (EL4 decision 7): an ask, offering options when
@@ -4323,6 +4400,7 @@ SayBody = typing.TypedDict("SayBody", {
     "occurrence": "str",
     "to": "typing.NotRequired[str]",
     "text": "str",
+    "inform": "typing.NotRequired[bool]",
 })
 
 # SayAnswer is where a say went: `sent` to a session at its epoch, or `unheard`, kept on the
@@ -4379,11 +4457,14 @@ SessionEvent = typing.TypedDict("SessionEvent", {
 
 # SessionDelta grows a text or thinking block the session is still writing (#8282): Key names the
 # block, and Parts are the runs of text written of it since its last delta, in order. The row that
-# names Key in Replaces stands in for everything streamed of it.
+# names Key in Replaces stands in for everything streamed of it. Offset counts UTF-8 bytes before
+# Parts, after Unicode replacement; absent on older producers. Stopped ends emission until the row.
 SessionDelta = typing.TypedDict("SessionDelta", {
     "key": "str",
     "block": "str",
     "parts": "typing.NotRequired[list[SessionPart] | None]",
+    "offset": "typing.NotRequired[int | None]",
+    "stopped": "typing.NotRequired[bool]",
 })
 
 # SessionPart is one run of a delta's text.
@@ -4781,10 +4862,12 @@ SessionVitals = typing.TypedDict("SessionVitals", {
     "live_until": "str",
 })
 
-# SessionContext is the tokens a session's context holds, against the window its harness states;
-# Window is nil when the harness states none, as Claude Code does not. Share is the share of its
-# window the harness itself states the context holds, a whole percent (#7489): ZCode's pane states
-# one, and it is drawn over a share derived from Used, into which a ZCode provider counts the
+# SessionContext is the tokens a session's context holds, against the window its reading states:
+# where its launch set it to compact (#8523), else the window its harness itself resolves, a model's.
+# Window is nil when neither states one, as a Claude Code session no launch pinned does; a client
+# then guesses a nominal one, which is the 200K that read a 400K worker as full. Share is the share
+# of its window the harness itself states the context holds, a whole percent (#7489): ZCode's pane
+# states one, and it is drawn over a share derived from Used, into which a ZCode provider counts the
 # cache; nil when the harness states none.
 SessionContext = typing.TypedDict("SessionContext", {
     "used": "int | None",
@@ -4948,10 +5031,12 @@ DelegationRevokeAnswer = typing.TypedDict("DelegationRevokeAnswer", {
 })
 
 # HostWorkers is how many workers run on a host now, of every team, and the cap it enforces: the
-# one it last applied, which stands while a change waits for its agents.
+# one it last applied, which stands while a change waits for its agents. Unknown is true where a
+# login's census states no observation — a capture that failed — so Used is no count of zero then.
 HostWorkers = typing.TypedDict("HostWorkers", {
     "used": "int",
     "of": "int",
+    "unknown": "typing.NotRequired[bool]",
 })
 
 # SettingBody changes a setting from the version its writer read: value null sets it back to what it
@@ -6690,9 +6775,12 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/sessions",
     "POST /w/{workspace}/api/v1/sessions",
     "GET /w/{workspace}/api/v1/sessions/{session}/acts/{act}",
+    "GET /w/{workspace}/api/v1/sessions/{session}/acts/{act}/attachments/{n}",
     "POST /w/{workspace}/api/v1/sessions/{session}/answers",
+    "POST /w/{workspace}/api/v1/sessions/{session}/attachments",
     "POST /w/{workspace}/api/v1/sessions/{session}/bindings",
     "GET /w/{workspace}/api/v1/sessions/{session}/checkpoints",
+    "GET /w/{workspace}/api/v1/sessions/{session}/commands",
     "POST /w/{workspace}/api/v1/sessions/{session}/detachment",
     "POST /w/{workspace}/api/v1/sessions/{session}/directives",
     "POST /w/{workspace}/api/v1/sessions/{session}/directives/{directive}/acknowledgement",
@@ -6731,8 +6819,10 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/workspace/slug",
     "POST /w/{workspace}/steering/agent/accounts",
     "POST /w/{workspace}/steering/agent/answer",
+    "POST /w/{workspace}/steering/agent/attachment",
     "POST /w/{workspace}/steering/agent/census",
     "GET /w/{workspace}/steering/agent/checkpoint/{session}",
+    "POST /w/{workspace}/steering/agent/command",
     "POST /w/{workspace}/steering/agent/commands",
     "POST /w/{workspace}/steering/agent/control",
     "POST /w/{workspace}/steering/agent/ended",

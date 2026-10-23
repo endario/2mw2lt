@@ -13,7 +13,7 @@ export type Turn = { state: 'started' | 'completed'; reason?: 'answered' | 'inte
 export type Ask = { id: string; kind: 'permission' | 'question'; tool?: string; options?: string[] }
 export type Settled = { ask: string; by: string; answer?: unknown }
 // What one streamed block grew by since the last send. It leaves as written: the block's row is scanned.
-export type Delta = { key: string; block: 'text' | 'thinking'; text: string }
+export type Delta = { key: string; block: 'text' | 'thinking'; text: string; offset: number; stopped?: true }
 export type Payload = { kind: 'row' | 'compaction'; row: Row } | { kind: 'turn'; turn: Turn }
   | { kind: 'ask'; ask: Ask } | { kind: 'ask-settled'; settled: Settled } | { kind: 'delta'; delta: Delta }
 // One of the agent's commands on the poll: a kind and that kind's body. `emit` asks the module to
@@ -22,7 +22,7 @@ export type Payload = { kind: 'row' | 'compaction'; row: Row } | { kind: 'turn';
 export type Command = { kind?: unknown; body?: unknown }
 // What a desk command did (#8432): dispatched as its own turn, waiting for the busy turn to end, or
 // run as a local command with what it resolved to; or why it did not run.
-export type Ran = { landed: 'new-turn' | 'queued'; why?: string } | { landed: 'ran'; result?: string } | { refused: string }
+export type Ran = { landed: 'new-turn' | 'queued' | 'completed'; why?: string } | { landed: 'ran'; result?: string } | { refused: string }
 // Where a prompt landed, as the agent's receipt says it (design §8.2): submitted as a new turn,
 // appended to the running one, or appended for the next request with why it started none.
 export type Landing = { landed: 'new-turn' | 'running-turn' | 'queued'; why?: string } | { refused: string }
@@ -217,7 +217,8 @@ export function agentOf(record: string, env: { port?: string; xdg?: string; home
 // The workspace a header names: its common root, percent-encoded as `local_workspace.path_header` does.
 export const workspaceHeader = (root: string) => encodeURIComponent(root).replace(/%2F/g, '/')
 
-type Streamed = { index: number; block: Delta['block']; grown: string; replaced: boolean }
+type Streamed = { index: number; block: Delta['block']; grown: string; replaced: boolean; offset: number; unseen: boolean; stopped: boolean }
+const utf8 = new TextEncoder()
 
 // A step's text and thinking as the session writes them (#8282, design §4), gathered by block
 // between sends. A chunk carries no id its stored row also carries, so a row is matched to its block
@@ -234,20 +235,23 @@ export class Streaming {
 
   // A piece of a block, and whether anything now waits to be sent. An empty piece still opens its
   // block, whose row must find it in its place.
-  take(c: { kind: 'text' | 'thinking'; index: number; text: string }): boolean {
+  take(c: { kind: 'text' | 'thinking'; index: number; text: string }, watched = true): boolean {
     if (!this.step) return false
     let b = this.blocks.find(b => b.index === c.index)
-    if (!b) this.blocks.push(b = { index: c.index, block: c.kind, grown: '', replaced: false })
-    if (!b.replaced && b.block === c.kind) b.grown += c.text
+    if (!b) this.blocks.push(b = { index: c.index, block: c.kind, grown: '', replaced: false, offset: 0, unseen: false, stopped: false })
+    if (!watched) { b.unseen = true; b.grown = '' }
+    if (!b.replaced && !b.stopped && !b.unseen && b.block === c.kind) b.grown += c.text
     return this.blocks.some(b => b.grown)
   }
 
-  // One delta per block that grew since the last send, in block order.
-  send(): Payload[] {
+  // A final flush also ends emission for blocks still waiting on their rows.
+  send(stopped = false): Payload[] {
     const out: Payload[] = []
     for (const b of [...this.blocks].sort((x, y) => x.index - y.index)) {
-      if (!b.grown) continue
-      out.push({ kind: 'delta', delta: { key: `${this.step}/${b.index}`, block: b.block, text: b.grown } })
+      if (b.replaced || b.unseen || b.stopped || (!b.grown && !stopped)) continue
+      out.push({ kind: 'delta', delta: { key: `${this.step}/${b.index}`, block: b.block, text: b.grown, offset: b.offset, ...(stopped ? { stopped: true } : {}) } })
+      b.offset += utf8.encode(b.grown).length
+      b.stopped = stopped
       b.grown = ''
     }
     return out

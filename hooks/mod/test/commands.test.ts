@@ -138,7 +138,12 @@ test('a busy session\'s command is reported queued at once, and its note waits f
   expect(w.appends).toEqual([NOTE])
   e.answers[0]!({})
   await w.clock.settle()
-  expect(postedTo(w, 'ran').length).toBe(1)             // one report per act
+  expect(postedTo(w, 'ran').at(-1)).toEqual({ session: 's1', producer: 'ps-1', id: 'cmd-1', landed: 'new-turn' })
+  await $.turn.start({ turnId: 'queued-command', text: '' })
+  await $.session.append(echo('queued-echo') as never)
+  await $.turn.complete({ turnId: 'queued-command', answer: '', durationMs: 1, isAborted: false, reason: 'answer' })
+  await w.clock.settle()
+  expect(postedTo(w, 'ran').map(r => r.landed)).toEqual(['queued', 'new-turn', 'completed'])
 })
 
 // A person typing the same command is not the desk's speaker: only the module's own run takes the
@@ -163,6 +168,98 @@ test('a run the engine rejects is refused, naming the engine\'s reason', async (
   expect(postedTo(w, 'ran')).toEqual([{ session: 's1', producer: 'ps-1', id: 'cmd-1',
     refused: expect.stringMatching(/^the engine refused \/u0who: .*no implementation for command\.run/) }])
 })
+
+test('a queued command reports the engine\'s later refusal', async ($, on) => {
+  const { w, e } = await commanded($, on, undefined, async () => { await $.turn.start({ turnId: 'busy', text: 'working' }) })
+  e.fails[0]!(new Error('Unknown command: /u0who'))
+  await w.clock.settle()
+  expect(postedTo(w, 'ran')).toEqual([
+    { session: 's1', producer: 'ps-1', id: 'cmd-1', landed: 'queued', why: 'the session is running a turn; the command runs when it ends' },
+    { session: 's1', producer: 'ps-1', id: 'cmd-1', refused: expect.stringMatching(/^the engine refused \/u0who:/) },
+  ])
+})
+
+test('a prompt command reports completion after its dispatch promise resolved', async ($, on) => {
+  const { w, e } = await commanded($, on)
+  await dispatched($, w)
+  e.answers[0]!({})
+  await w.clock.settle()
+  await $.turn.start({ turnId: 'command-turn', text: '' })
+  await $.session.append(echo('command-echo') as never)
+  await $.turn.complete({ turnId: 'subagent', agentId: 'child', answer: '', durationMs: 1, isAborted: false, reason: 'answer' })
+  expect(postedTo(w, 'ran').length).toBe(1)
+  await $.turn.complete({ turnId: 'command-turn', answer: '', durationMs: 1, isAborted: false, reason: 'answer' })
+  await w.clock.settle()
+  expect(postedTo(w, 'ran')).toEqual([
+    { session: 's1', producer: 'ps-1', id: 'cmd-1', landed: 'new-turn' },
+    { session: 's1', producer: 'ps-1', id: 'cmd-1', landed: 'completed' },
+  ])
+})
+
+test('a failed command completion is retried while the next poll is held', async ($, on) => {
+  const { w, e } = await commanded($, on)
+  await dispatched($, w)
+  e.answers[0]!({})
+  await w.clock.settle()
+  await $.turn.start({ turnId: 'command-turn', text: '' })
+  await $.session.append(echo('command-echo') as never)
+  w.posts.push(503)
+  await $.turn.complete({ turnId: 'command-turn', answer: '', durationMs: 1, isAborted: false, reason: 'answer' })
+  await w.clock.settle()
+  expect(postedTo(w, 'ran').map(r => r.landed)).toEqual(['new-turn', 'completed'])
+  await w.clock.advance(5000)
+  expect(postedTo(w, 'ran').map(r => r.landed)).toEqual(['new-turn', 'completed', 'completed'])
+  await w.clock.advance(5000)
+  expect(postedTo(w, 'ran').length).toBe(3)
+})
+
+test('a reloaded module sends the command receipt its previous instance retained', async ($, on) => {
+  const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: false, cursor: 'c1' }] })
+  engine(on)
+  w.state.set('commandReceipts', [{ session: 's1', id: 'cmd-old', outcome: { landed: 'completed' } }])
+  await begin($)
+  await w.clock.settle()
+  expect(postedTo(w, 'ran')).toEqual([{ session: 's1', producer: 'ps-1', id: 'cmd-old', landed: 'completed' }])
+  expect(w.state.get('commandReceipts')).toEqual([])
+})
+
+test('a failed receipt does not hold back another command\'s receipt', async ($, on) => {
+  const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: false, cursor: 'c1' }], posts: Array(20).fill(503) })
+  engine(on)
+  w.state.set('commandReceipts', [
+    { session: 's1', id: 'cmd-old', outcome: { landed: 'completed' } },
+    { session: 's1', id: 'cmd-next', outcome: { landed: 'ran', result: 'Context usage' } },
+  ])
+  await begin($)
+  await w.clock.settle()
+  expect(postedTo(w, 'ran').some(r => r.id === 'cmd-next' && r.result === 'Context usage')).toBe(true)
+  expect((w.state.get('commandReceipts') as any[]).map(r => r.id)).toEqual(['cmd-old', 'cmd-next'])
+  w.posts.length = 0
+  await w.clock.advance(5000)
+  expect(w.state.get('commandReceipts')).toEqual([])
+})
+
+test('a queued local command reports its result when it runs', async ($, on) => {
+  const { w, e } = await commanded($, on, { id: 'cmd-1', name: 'context', args: '', from: FROM },
+    async () => { await $.turn.start({ turnId: 'busy', text: 'working' }) })
+  e.answers[0]!({ context: ['Context usage'] })
+  await w.clock.settle()
+  expect(postedTo(w, 'ran').map(r => [r.landed, r.result])).toEqual([['queued', undefined], ['ran', 'Context usage']])
+})
+
+for (const reason of ['aborted', 'error'] as const) {
+  test(`a command whose turn ended ${reason} reports a refusal`, async ($, on) => {
+    const { w, e } = await commanded($, on)
+    await dispatched($, w)
+    e.answers[0]!({})
+    await w.clock.settle()
+    await $.turn.start({ turnId: 'failed', text: '' })
+    await $.session.append(echo('failed-echo') as never)
+    await $.turn.complete({ turnId: 'failed', answer: '', durationMs: 1, isAborted: reason === 'aborted', reason })
+    await w.clock.settle()
+    expect(postedTo(w, 'ran').at(-1)).toEqual({ session: 's1', producer: 'ps-1', id: 'cmd-1', refused: `the command's turn ended: ${reason}` })
+  })
+}
 
 test('a command without a speaker is refused, never run', async ($, on) => {
   const { w, e } = await commanded($, on, { id: 'cmd-1', name: 'u0who', args: '' })

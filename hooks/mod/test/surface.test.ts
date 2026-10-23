@@ -533,11 +533,52 @@ test('a send carries what each block grew by since the last, one delta per block
   const s = new Streaming()
   s.begin('t1', 2)
   s.take(think(0, 'one ')); s.take(think(0, 'two')); s.take(say(1, 'Hi'))
-  expect(s.send()).toEqual([{ kind: 'delta', delta: { key: 't1/2/0', block: 'thinking', text: 'one two' } },
-    { kind: 'delta', delta: { key: 't1/2/1', block: 'text', text: 'Hi' } }])
+  expect(s.send()).toEqual([{ kind: 'delta', delta: { key: 't1/2/0', block: 'thinking', text: 'one two', offset: 0 } },
+    { kind: 'delta', delta: { key: 't1/2/1', block: 'text', text: 'Hi', offset: 0 } }])
   s.take(say(1, ' there'))
-  expect(s.send()).toEqual([{ kind: 'delta', delta: { key: 't1/2/1', block: 'text', text: ' there' } }])
+  expect(s.send()).toEqual([{ kind: 'delta', delta: { key: 't1/2/1', block: 'text', text: ' there', offset: 2 } }])
   expect(s.send()).toEqual([])
+})
+
+test('offsets count the UTF-8 bytes carried, not UTF-16 units', async () => {
+  const s = new Streaming()
+  s.begin('t1', 0)
+  s.take(say(0, 'ae😀𐐀'))
+  expect(s.send()).toEqual([{ kind: 'delta', delta: { key: 't1/0/0', block: 'text', text: 'ae😀𐐀', offset: 0 } }])
+  s.take(say(0, '\uD800'))
+  expect(s.send()).toEqual([{ kind: 'delta', delta: { key: 't1/0/0', block: 'text', text: '\uD800', offset: 10 } }])
+  s.take(say(0, '日'))
+  expect(s.send()).toEqual([{ kind: 'delta', delta: { key: 't1/0/0', block: 'text', text: '日', offset: 13 } }])
+})
+
+test('a final flush stops an unreplaced block even when no new text waits', async () => {
+  const s = new Streaming()
+  s.begin('t1', 0)
+  s.take(say(0, 'prefix')); s.send()
+  s.take(think(1, 'replaced')); s.replaces([{ type: 'text' }]); s.replaces([{ type: 'thinking' }])
+  expect(s.send(true)).toEqual([])
+  s.take(say(2, 'next')); s.send()
+  expect(s.send(true)).toEqual([{ kind: 'delta', delta: { key: 't1/0/2', block: 'text', text: '', offset: 4, stopped: true } }])
+  s.take(say(2, 'late'))
+  expect(s.send(true)).toEqual([])
+})
+
+test('an unwatched chunk drops buffered text without reading the chunk text', async () => {
+  const s = new Streaming()
+  s.begin('t1', 0)
+  s.take(say(0, 'buffered'))
+  s.take({ kind: 'text', index: 0, get text(): string { throw new Error('unwatched text was read') } }, false)
+  s.take(say(0, 'tail'), true)
+  expect(s.send(true)).toEqual([])
+})
+
+test('unwatched text never becomes a new block prefix when a watch starts', async () => {
+  const s = new Streaming()
+  s.begin('t1', 0)
+  s.take(say(0, 'unseen'), false)
+  s.take(say(0, ' tail'), true)
+  s.take(say(1, 'whole'), true)
+  expect(s.send(true)).toEqual([{ kind: 'delta', delta: { key: 't1/0/1', block: 'text', text: 'whole', offset: 0, stopped: true } }])
 })
 
 // The harness stores a row per block at the block's end, in block order, and no id ties a row to its
@@ -590,12 +631,13 @@ test('a watched step\'s pieces leave gathered per block at most every 50 ms, and
   await w.clock.advance(25)
   expect(deltas(w)).toEqual([])                         // 45 ms after the first piece: still gathering
   await w.clock.advance(10)                             // the window's 50, and the batch's 5
-  expect(deltas(w).map(e => e.delta)).toEqual([{ key: 't1/0/0', block: 'thinking', text: 'one two three' }])
+  expect(deltas(w).map(e => e.delta)).toEqual([{ key: 't1/0/0', block: 'thinking', text: 'one two three', offset: 0 }])
   await drain(it as never)
   await w.clock.advance(5)                              // the step's end sends at once: only the batch's 5
-  expect(deltas(w).map(e => e.delta)).toEqual([{ key: 't1/0/0', block: 'thinking', text: 'one two three' },
-    { key: 't1/0/1', block: 'text', text: 'Done.' }])
-  expect(events(w).map(e => [e.seq, e.kind])).toEqual([[1, 'turn'], [2, 'turn'], [3, 'delta'], [4, 'delta']])
+  expect(deltas(w).map(e => e.delta)).toEqual([{ key: 't1/0/0', block: 'thinking', text: 'one two three', offset: 0 },
+    { key: 't1/0/0', block: 'thinking', text: '', offset: 13, stopped: true },
+    { key: 't1/0/1', block: 'text', text: 'Done.', offset: 0, stopped: true }])
+  expect(events(w).map(e => [e.seq, e.kind])).toEqual([[1, 'turn'], [2, 'turn'], [3, 'delta'], [4, 'delta'], [5, 'delta']])
 })
 
 // What leaves the module is what the engine shows and records: the mirror reads the stream and must
@@ -624,14 +666,13 @@ test('a subagent\'s step streams nothing to the live view', async ($, on) => {
   expect(deltas(w)).toEqual([])
 })
 
-// Nothing is sent while nobody watches; and a watch that begins mid-step would be handed a block from
-// its middle, so that step sends nothing and the next streams whole.
-test('nothing streams while nobody watches, and a watch begun mid-step gets the next step whole', async ($, on) => {
+// A watch begun mid-step skips its unseen prefix but can draw a later block from zero.
+test('nothing streams while nobody watches, and a watch begun mid-step gets later blocks whole', async ($, on) => {
   let watch!: (p: Poll) => void
   const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: false }, new Promise<Poll>(r => { watch = r })] })
   await begin($)
   await w.clock.settle()
-  w.steps = [[say(0, 'before '), say(0, 'the watch'), say(0, ' and after')], [say(0, 'Whole')]]
+  w.steps = [[say(0, 'before '), say(0, 'the watch'), say(1, 'Later block')], [say(0, 'Whole')]]
   const it = $.turn.step(step(0) as never)
   await it.next()
   await w.clock.advance(100)
@@ -640,15 +681,15 @@ test('nothing streams while nobody watches, and a watch begun mid-step gets the 
   await w.clock.settle()
   await drain(it as never)
   await w.clock.advance(100)
-  expect(deltas(w)).toEqual([])
+  expect(deltas(w).map(e => e.delta)).toEqual([{ key: 't1/0/1', block: 'text', text: 'Later block', offset: 0, stopped: true }])
   await drain($.turn.step(step(1) as never) as never)
   await w.clock.advance(5)
-  expect(deltas(w).map(e => e.delta)).toEqual([{ key: 't1/1/0', block: 'text', text: 'Whole' }])
+  expect(deltas(w).map(e => e.delta)).toEqual([{ key: 't1/0/1', block: 'text', text: 'Later block', offset: 0, stopped: true },
+    { key: 't1/1/0', block: 'text', text: 'Whole', offset: 0, stopped: true }])
 })
 
-// A watch that lapses mid-step and comes back is a new view, even when no piece arrived between: what
-// the block had grown by unsent, and grows by after, would reach it without the block's start.
-test('a watch that lapses mid-step and comes back is sent nothing more of that step', async ($, on) => {
+// Returning watches receive the block's real position, not a new zero for its tail.
+test('a watch that returns mid-step keeps the block offset', async ($, on) => {
   let lapse!: (p: Poll) => void, back!: (p: Poll) => void
   const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true, cursor: 'c1' }, new Promise<Poll>(r => { lapse = r }), new Promise<Poll>(r => { back = r })] })
   await begin($)
@@ -664,7 +705,7 @@ test('a watch that lapses mid-step and comes back is sent nothing more of that s
   await w.clock.settle()
   await drain(it as never)
   await w.clock.advance(100)
-  expect(deltas(w).map(e => e.delta.text)).toEqual(['seen'])
+  expect(deltas(w).map(e => [e.delta.text, e.delta.offset, e.delta.stopped])).toEqual([['seen', 0, undefined], [' unsent after', 4, true]])
 })
 
 // The desk puts a row naming `replaces` where that block was drawn, in one render; a delta of the

@@ -232,6 +232,14 @@ test('envelopes are acked only after the frames tool, once each, and the tool re
   const w = world(on, {
     rounds: [{ lines: [line('e1', 'envelope', true), line('f1', 'say', true)], code: 0, hold: never }],
     recording: `data: ${ENV}\ndata: ${SAID}\n`,
+    // The world carries its agent (#8530): without one the surface poll retries from the 250ms
+    // backoff to its 5s cap, and each retry pays real kit IPC — the .env read that ENOENTs and
+    // three env.gets — so the 600s advance below fires it ~120 times, ~500 round-trips whose wall
+    // clock under a loaded machine took this test past the kit's 5000ms. With the agent the one
+    // poll holds, as it does against a real one, and the advance pays only the claim refresh's
+    // own 60s cadence. A test that means to advance minutes of a world with no agent pays the
+    // same per-retry round-trips and wants its own answer to this.
+    agent: true,
   })
   const acks = () => w.runs.filter(argv => String(argv[1]).endsWith('/steering/enroll/ack.py'))
   await begin($)

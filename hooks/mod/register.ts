@@ -2,6 +2,7 @@ import type { Register, EngineInterface, Timer, HookStream, ProcessSpawnChunk, P
 import { lines, atLeast, pick, invokes, lifecycle, tokensOf, due, owed, framesEntry, obsoleteSeatRefusal, nextSeat, asksSeat, seatCall, seatSchema, resendId, entryRefusal, checkpointCall, CHECKPOINT_ENTRY, CHECKPOINT_TOOL, refusalTurn, capBulletin, sectionRevision, READ_KEPT, POINTER, CHECKPOINT, SEAT_SECTION, BULLETIN_SECTION, SEAT_TOOLS } from './frames'
 import type { Line, SeatCall } from './frames'
 import * as surface from './surface'
+import type { CommandReceipt } from './types'
 
 // The plugin's hooks module (#3872): it holds a connected Claude session's steering stream, wakes
 // the session with a fixed pointer, and hands the frames to the model only as the `frames` tool's
@@ -276,9 +277,55 @@ async function report($: EngineInterface, route: string, session: string, id: st
     const r = await $.http.fetch(`${at.base}/steering/surface/${route}`,
       { method: 'POST', headers: agentHeaders(at), body: JSON.stringify({ session, producer: await $.session.id(), id, ...outcome }) })
     if (!r.ok) throw new Error(`the agent answered ${r.status}: ${r.text.slice(0, 200)}`)
+    return true
   } catch (err) {
     $.ui.log(`2mw2lt: the desk's act ${id} was not reported ${route}: ${String(err)}`, { to: 'debug' })
+    return false
   }
+}
+
+// Unlike live-view batches, command receipts survive a failed send and a module reload.
+const COMMAND_RECEIPTS = { plugin: '2mw2lt', key: 'commandReceipts' } as const
+let commandSending: Promise<void> | undefined
+let commandRetry: Timer | undefined
+
+async function reportCommand($: EngineInterface, session: string, id: string, outcome: surface.Ran) {
+  await locked($, async () => {
+    const { value: pending = [] } = await $.state.get(COMMAND_RECEIPTS)
+    await $.state.set(COMMAND_RECEIPTS, [...pending, { session, id, outcome }])
+  })
+  await sendCommandReceipts($)
+}
+
+function sendCommandReceipts($: EngineInterface): Promise<void> {
+  if (commandSending) return commandSending
+  commandSending = (async () => {
+    const failed = new Set<string>()
+    while (true) {
+      const receipt: CommandReceipt | undefined = await locked($, async () =>
+        (await $.state.get(COMMAND_RECEIPTS)).value?.find(r => !failed.has(r.id)))
+      if (!receipt) return
+      const workspace = workspaceOf()
+      if (!agent && workspace) agent = await agentOf($, workspace)
+      if (!await report($, 'ran', receipt.session, receipt.id, receipt.outcome)) {
+        failed.add(receipt.id)
+        continue
+      }
+      await locked($, async () => {
+        const { value: pending = [] } = await $.state.get(COMMAND_RECEIPTS)
+        const at = pending.findIndex(r => r.id === receipt.id)
+        await $.state.set(COMMAND_RECEIPTS, [...pending.slice(0, at), ...pending.slice(at + 1)])
+      })
+    }
+  })().finally(async () => {
+    commandSending = undefined
+    const pending = await locked($, async () => (await $.state.get(COMMAND_RECEIPTS)).value?.length)
+    if (pending && !commandRetry) commandRetry = $.clock.after(RETRY_CAP_MS, () => {
+      commandRetry = undefined
+      void sendCommandReceipts($)
+    })
+  })
+  return commandSending
 }
 
 // The turn a desk interrupt is stopping: the background tasks its abort left running, gathered as
@@ -335,13 +382,13 @@ async function stopTurn($: EngineInterface, turn: string, from: string): Promise
 // The desk's commands running (#8432), oldest first. Each holds its note until the engine dispatches
 // its command, which this module's prompt.submit hook sees under its own origin: a note appended
 // before the run is read by a busy session's running turn instead (U0, finding 3).
-type Running = { act: string; name: string; note: string; fired: boolean }
+type Running = { act: string; session: string; name: string; note: string; fired: boolean }
 const runs: Running[] = []
 // The acts whose command was dispatched and whose echo row is not stored yet, oldest first.
-const echoing: { act: string; name: string }[] = []
+const echoing: { act: string; session: string; name: string }[] = []
 const ECHOING_KEPT = 8
 // The act whose turn's rows are stored now: from its command's echo row to that turn's end.
-let stamping: string | undefined
+let stamping: { act: string; session: string } | undefined
 // Each command's class, as the agent was last told.
 let classes = new Map<string, surface.Class>()
 
@@ -352,14 +399,14 @@ let classes = new Map<string, surface.Class>()
 async function runCommand($: EngineInterface, session: string, body: unknown) {
   const r = surface.running(body)
   if ('refused' in r) {
-    if (r.id) await report($, 'ran', session, r.id, { refused: r.refused })
+    if (r.id) await reportCommand($, session, r.id, { refused: r.refused })
     else $.ui.log(`2mw2lt: the agent's command was not taken, and names no id to say so under: ${r.refused}`, { to: 'debug' })
     return
   }
-  const run: Running = { act: r.id, name: r.name, note: surface.commandNote(r.from, r.name, r.args), fired: false }
+  const run: Running = { act: r.id, session, name: r.name, note: surface.commandNote(r.from, r.name, r.args), fired: false }
   runs.push(run)
   const busy = (await $.state.get(BUSY)).value === true
-  if (busy) await report($, 'ran', session, r.id, { landed: 'queued', why: 'the session is running a turn; the command runs when it ends' })
+  if (busy) await reportCommand($, session, r.id, { landed: 'queued', why: 'the session is running a turn; the command runs when it ends' })
   let ran: surface.Ran
   try {
     const out = await $.command.run({ command: r.name, args: r.args })
@@ -373,8 +420,7 @@ async function runCommand($: EngineInterface, session: string, body: unknown) {
   } finally {
     runs.splice(runs.indexOf(run), 1)       // a note its dispatch did not append is never read
   }
-  if (busy) $.ui.log(`2mw2lt: the desk's command ${r.id}, reported queued, came to ${JSON.stringify(ran)}`, { to: 'debug' })
-  else await report($, 'ran', session, r.id, ran)
+  await reportCommand($, session, r.id, ran)
 }
 
 // The live view's channel to this machine's agent (#4823, design §6.1): `$.http.fetch` alone, one
@@ -390,7 +436,6 @@ const outbox = new surface.Outbox()
 const STREAM_MS = 50
 const streaming = new surface.Streaming()
 let watching = false
-let watches = 0                      // how many watches have begun: a step streams under one alone
 // Whether a turn runs, as the turn hooks last said, before their awaits: a watch beginning reads it
 // without one, so a turn starting meanwhile is not told over. Unknown until one says, after a reload.
 let busyNow: boolean | undefined
@@ -480,6 +525,7 @@ async function pollSurface($: EngineInterface, workspace: string, session: strin
       agent ??= resolved
       // An agent not yet started is retried as one that stopped: its key appears when it starts.
       if (!agent) throw new Error(`no key for the agent serving ${workspace}`)
+      void sendCommandReceipts($)
       // The producer, as the events name it: the agent advertises this session's rows only while
       // the conversation its hold pins is the one polling.
       const producer = await $.session.id()
@@ -493,7 +539,6 @@ async function pollSurface($: EngineInterface, workspace: string, session: strin
       // A watch beginning has no word of the turn until the next one starts or ends: it is told
       // the turn as it stands.
       if (watching && !was) {
-        watches++
         const stored = busyNow ?? (await $.state.get(BUSY)).value === true
         show($, surface.turnNow(busyNow ?? stored))
       }
@@ -1303,12 +1348,15 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {                                 // a subagent's turn ends inside ours
+      const command = stamping
+      stamping = undefined
       streaming.end()
       show($, { kind: 'turn', turn: { state: 'completed', reason: surface.turnReason(e.reason) } })
       busyNow = false
       await $.state.set(BUSY, false)
       await $.state.set(TURN, '')
-      stamping = undefined
+      if (command) void reportCommand($, command.session, command.act, e.reason === 'answer'
+        ? { landed: 'completed' } : { refused: `the command's turn ended: ${e.reason}` })
       echoing.length = 0                                           // an echo that never came is not the next run's
       if (stopping?.turn === e.turnId) stopping.ended()
       // A plugin reloaded in the turn changes the list.
@@ -1335,31 +1383,29 @@ export const register: Register = on => {
   // so each of the main thread's requests is measured as it is answered. While the session is
   // watched, the main thread's text and thinking stream to the live view (#8282): each chunk is
   // passed on as it came, and nothing the mirror does reaches the turn. A piece is taken before it
-  // is passed on, so its block is open before the engine can store the block's row. Only the watch
-  // the step began under is sent any of it, so no view is handed a block from its middle.
+  // is passed on, so its block is open before the engine can store the block's row. Offsets let a
+  // watch begun mid-step join later blocks without treating a suffix as a beginning.
   on('turn.step', async function* ($, e, next) {
     if (e.agentId === undefined) streaming.begin(e.turnId, e.index)
-    const since = watches
-    const live = () => e.agentId === undefined && watching && watches === since
     let timer: Timer | undefined
-    const send = () => {
+    const send = (stopped = false) => {
       timer = undefined
-      if (!live()) return
-      try { for (const p of streaming.send()) show($, p) }
+      if (e.agentId !== undefined || !watching) return
+      try { for (const p of streaming.send(stopped)) show($, p) }
       catch (err) { $.ui.log(`2mw2lt: the live view's stream broke: ${String(err)}`, { to: 'debug' }) }
     }
     const stream = next(e)
     try {
       for await (const c of stream) {
-        if (live() && (c.kind === 'text' || c.kind === 'thinking')) {
-          try { if (streaming.take(c) && !timer) timer = $.clock.after(STREAM_MS, send) }
+        if (e.agentId === undefined && (c.kind === 'text' || c.kind === 'thinking')) {
+          try { if (streaming.take(c, watching) && !timer) timer = $.clock.after(STREAM_MS, send) }
           catch (err) { $.ui.log(`2mw2lt: the live view's stream broke: ${String(err)}`, { to: 'debug' }) }
         }
         yield c
       }
     } finally {
       timer?.cancel()
-      send()
+      send(true)
     }
     const r = await stream.result
     if (e.agentId === undefined && r.usage) {
@@ -1395,9 +1441,9 @@ export const register: Register = on => {
     if (e.agentId === undefined) {
       const line = e.door === 'command' && surface.ours(e.origin) ? surface.commandLine(surface.firstText(stored.message.content)) : undefined
       const at = line === undefined ? -1 : echoing.findIndex(c => `/${c.name}` === line.split(' ')[0])
-      if (at >= 0) stamping = echoing.splice(at, 1)[0]!.act
+      if (at >= 0) stamping = echoing.splice(at, 1)[0]!
       // A person's own prompt, typed while the turn runs, is theirs: never the desk speaker's.
-      if (act === undefined && e.origin.kind !== 'composer' && e.origin.kind !== 'bridge' && e.origin.kind !== 'sdk') act = stamping
+      if (act === undefined && e.origin.kind !== 'composer' && e.origin.kind !== 'bridge' && e.origin.kind !== 'sdk') act = stamping?.act
     }
     const payload = watching ? surface.eventOf(e, stored, act) : undefined
     if (payload?.kind === 'row' && replaces) payload.row.replaces = replaces
@@ -1411,7 +1457,7 @@ export const register: Register = on => {
     const run = e.command && surface.ours(e.origin) ? runs.find(r => !r.fired && r.name === e.command!.name) : undefined
     if (run) {
       run.fired = true
-      echoing.push({ act: run.act, name: run.name })
+      echoing.push({ act: run.act, session: run.session, name: run.name })
       if (echoing.length > ECHOING_KEPT) echoing.shift()
       await append($, run.note, run.act)
     }
