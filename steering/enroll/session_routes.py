@@ -1303,12 +1303,13 @@ def roster(session: str, token: str, include_gone: bool) -> str:
     return "\n".join(_roster_line(item) for item in items) or "roster: empty"
 
 
-def say(session: str, token: str, occurrence: str, text: str, to: str | None = None) -> str:
+def say(session: str, token: str, occurrence: str, text: str, to: str | None = None, *, inform: bool = False) -> str:
     """The session's say on Go (go-session-say-design.md): to `to`, or to the brain when none is
     named. The occurrence makes a resend the same say. The answer names what happened to the
     words: handed to a stream that stood, or spooled for the session's next hold (#5674). Raises
     `Refused` or `Unsent`."""
-    body = {"occurrence": occurrence, "text": text, **({"to": to} if to else {})}
+    body = {"occurrence": occurrence, "text": text, **({"to": to} if to else {}),
+            **({"inform": True} if inform else {})}
     answer = write(f"/sessions/{session}/says", body, _own_key("say", session, occurrence), SESSION_CARRIER, token)
     if answer.get("state") == "unheard":
         return f"nobody holds the seat; kept on the brain's Needs You as unheard:{answer.get('id')}"

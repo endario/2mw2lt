@@ -58,13 +58,17 @@ hooks awaiting review, tell the person: only they can trust a hook, in Codex's `
 **ZCode:** connect with no flags, as Claude does: the session is named by the binding the
 plugin's hooks publish. The plugin's frames server holds the stream, so arm no hold. A waiting
 frame starts no turn of its own: the plugin points at pending frames only at event boundaries
-(mid-turn, a turn's end, a person's next prompt), and a session whose turn has ended is woken
-by the platform, whose wake turn says `Call mcp__plugin_2mw2lt_frames__frames`. That tool
-returns each frame with its `from:` line and acknowledges what it returned. If the `plugin:`
+(a tool's result mid-turn, a turn's end, a person's next prompt), and a session whose turn has
+ended is woken by the platform, whose wake turn says `Call mcp__plugin_2mw2lt_frames__frames`.
+That tool returns each frame with its `from:` line and acknowledges what it returned. A wake
+typed into a pane whose turn is still working is a same-turn steer, queued for the model's next
+step: a turn inside one long tool call never drains it, since no boundary comes until
+the call returns. What ends such a call is the desk's stop, the Esc the agent types into the
+pane, which cancels the turn and kills its tool; a steer or a frame cannot. If the `plugin:`
 line says the frames server holds no stream yet, restart the session so the plugin loads.
 
 **Claude Code with the plugin's module:** when connect's `plugin:` line ends
-`the plugin holds this session's stream, so arm no hold`, arm nothing. A waiting frame starts a
+`the plugin holds this session's stream, so arm no hold`, arm nothing. A waking frame starts a
 turn, or arrives during one, as `Call mcp__2mw2lt__frames.`, and the tool
 returns each frame with its daemon-written `from:` line, and acknowledges the envelopes it
 returned.
@@ -79,8 +83,8 @@ ws="${STEERING_WORKSPACE:-$(dirname "$(git -C "${CLAUDE_PROJECT_DIR:-.}" rev-par
 python3 "$ws/.claude/steering-launch.py" exec hold --until-event <session>
 ```
 
-When it exits, read its complete frame. For an envelope, acknowledge it, then re-arm the same
-hold **before doing the work**:
+When it exits, read every printed frame, including buffered informs. Acknowledge each envelope,
+then re-arm the same hold **before doing the work**:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ack.py" <session> <directive id>
@@ -223,6 +227,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/say.py" <your session> "<what you
 # to another session, by the name the registry shows
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/say.py" --to <their session> <your session> "<text>"
 ```
+
+For a peer's FYI that needs no new turn, add `--inform` immediately after `say.py`: it waits
+for the recipient's next waking read.
 
 Both go on your own enrollment token, and your name travels with the words. **To reach the brain,
 leave `--to` out**: you need no name. The answer names what happened to the words. `delivered to

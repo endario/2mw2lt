@@ -1,7 +1,7 @@
 // What the module reads and writes as text: hold.py's frame lines, the frame recording, the
 // fixed rows it may append, and the version floor. Nothing here touches `$`.
 
-export type Line = { id: string | null; kind: string; wakes: boolean; hold?: string; session?: string; why?: string; retry?: boolean; remedy?: string }
+export type Line = { id: string | null; kind: string; wakes: boolean; inform?: boolean; hold?: string; session?: string; why?: string; retry?: boolean; remedy?: string }
 
 export const POINTER = 'Call mcp__2mw2lt__frames.'
 export const CHECKPOINT = 'Compaction is near. Write your checkpoint with mcp__2mw2lt__checkpoint now.'
@@ -124,6 +124,14 @@ export const READ_KEPT = 256
 // reopens and the daemon replays frames it holds, so the same id arrives again and again.
 export function owed(id: string | null, pending: readonly string[], read: readonly string[]): id is string {
   return id !== null && !pending.includes(id) && !read.includes(id)
+}
+
+export function pointing(pending: readonly string[], inform: readonly string[]): string[] {
+  return pending.filter(id => !inform.includes(id))
+}
+
+export function quiet(n: number): string | undefined {
+  return n > 0 ? `2mw2lt · ${n} quiet updates` : undefined
 }
 
 export function framesEntry(agentId: string | undefined, origin: string): boolean {

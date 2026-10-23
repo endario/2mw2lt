@@ -78,6 +78,7 @@ class Server:
         self.binding_error: str | None = None
         self.session = ""                    # the enrolment name, once connect mints one
         self.pending: list[str] = []
+        self.inform: list[str] = []
         self.read: list[str] = []
         self.unsettled: list[tuple[list[str], int]] = []   # receipts that did not arrive, and tries
         self.hold_state: dict = {"state": "starting"}
@@ -97,7 +98,8 @@ class Server:
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps({
-            "session": self.session, "pending": self.pending, "read": self.read[-READ_KEPT:],
+            "session": self.session, "pending": self.pending, "inform": self.inform,
+            "read": self.read[-READ_KEPT:],
             "hold": self.hold_state, "at": self.now()}))
         os.chmod(tmp, 0o600)
         os.replace(tmp, path)
@@ -256,12 +258,14 @@ class Server:
                 self._write_ledger()
 
     def _frame(self, noted: dict) -> None:
-        """A waking frame the session has neither been pointed at nor read joins the pending
-        set (the module's `owed`); the hooks answer the pointer from the ledger."""
+        """An unread frame joins the pending set (the module's `owed`); informs remain there
+        without earning a pointer from the hooks."""
         fid = noted.get("id")
         with self.lock:
             if isinstance(fid, str) and fid not in self.pending and fid not in self.read:
                 self.pending.append(fid)
+                if noted.get("inform") is True:
+                    self.inform.append(fid)
                 self._write_ledger()
 
     # -- the keeper: claim refresh, connect watch, hold lifecycle ---------------------
@@ -327,7 +331,7 @@ class Server:
             if self.enrolment_name() == "":
                 with self.lock:
                     self.session = ""
-                    self.pending, self.read = [], []
+                    self.pending, self.inform, self.read = [], [], []
                     self.child_gen += 1        # ends the reader; its lines stop counting
                     self.hold_state = {"state": "stopped", "refusal": "this session "
                                             "disconnected", "remedy": "run /skill 2mw2lt:connect"}
@@ -371,6 +375,7 @@ class Server:
         with self.lock:
             self.unsettled = unsettled
             self.pending = [i for i in self.pending if i not in found]
+            self.inform = [i for i in self.inform if i not in found]
             self.read = (self.read + found)[-READ_KEPT:]
             self._write_ledger()
         if failures:

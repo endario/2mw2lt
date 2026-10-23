@@ -110,6 +110,61 @@ test('an idle session gets one pointer for two waking frames in a row', async ($
   expect(w.appends).toEqual([])
 })
 
+const inform = (id: string) => JSON.stringify({ id, kind: 'say', wakes: true, inform: true }) + '\n'
+
+test('inform-only frames wait under the status line without a pointer or receipt', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [inform('q1'), inform('q1'), inform('q2')], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  expect(w.submits).toEqual([])
+  expect(w.appends).toEqual([])
+  expect(w.state.get('pending')).toEqual(['q1', 'q2'])
+  expect(w.statuses.at(-1)).toBe('2mw2lt · 2 quiet updates')
+  expect(w.runs.some(argv => argv.includes('--read-say'))).toBe(false)
+  expect(w.logs.filter(text => text.startsWith('2mw2lt: pointer covers'))).toEqual([])
+})
+
+test('a waking frame carries its pending inform and clears its status when read', async ($, on) => {
+  const quiet = '{"kind":"say","id":"q1","from":"session peer","text":"FYI","class":"inform"}'
+  const act = '{"kind":"say","id":"f1","from":"session peer","text":"act"}'
+  const w = world(on, {
+    rounds: [{ lines: [inform('q1'), line('f1', 'say', true), line('f2', 'say', true)], code: 0, hold: never }],
+    recording: `data: ${quiet}\ndata: ${act}\ndata: {"kind":"say","id":"f2","text":"act again"}\n`,
+  })
+  await begin($)
+  await w.clock.settle()
+  expect(w.submits).toEqual([POINTER])
+  expect(w.statuses).toContain('2mw2lt · 1 quiet updates')
+  expect(w.logs.filter(text => text.startsWith('2mw2lt: pointer covers'))).toEqual(['2mw2lt: pointer covers 1 inform'])
+  const got = await $.tool.call({ tool: TOOL } as never)
+  expect((got as { result: string }).result).toContain(`${quiet}\n${act}`)
+  expect(w.state.get('pending')).toEqual([])
+  expect(w.state.get('inform')).toEqual([])
+  expect(w.statuses.at(-1)).toBeUndefined()
+})
+
+test('an inform arriving during a frames read stays quiet for the next act', async ($, on) => {
+  let arrive!: () => void
+  const w = world(on, {
+    rounds: [{ lines: [line('f1', 'say', true), new Promise<void>(r => { arrive = r }), inform('q1')], code: 0, hold: never }],
+    recording: `data: ${SAY}\n`,
+  })
+  await begin($)
+  await w.clock.settle()
+  let release!: () => void
+  w.readGate = new Promise<void>(r => { release = r })
+  const reading = $.tool.call({ tool: TOOL } as never)
+  await w.clock.settle()
+  arrive()
+  await w.clock.settle()
+  release()
+  await reading
+  await w.clock.settle()
+  expect(w.submits).toEqual([POINTER])
+  expect(w.state.get('pending')).toEqual(['q1'])
+  expect(w.statuses.at(-1)).toBe('2mw2lt · 1 quiet updates')
+})
+
 test('a frame that does not wake submits nothing', async ($, on) => {
   const w = world(on, { rounds: [{ lines: [line(null, 'usage', false), line('f9', 'say', false)], code: 0, hold: never }] })
   await begin($)

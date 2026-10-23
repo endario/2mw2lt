@@ -46,7 +46,6 @@ from typing import Callable
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
-import action_notice  # noqa: E402
 import holder  # noqa: E402
 from local_workspace import agent_key_file, agent_port, path_header, required_workspace_root, workspace_header  # noqa: E402
 from moments import moment  # noqa: E402
@@ -62,8 +61,8 @@ REOPEN_AFTER = 2.0    # seconds between opens; the loop the skills carried slept
 HOLD_READ = 90.0      # the agent keeps the stream alive every 20s; several missed means dead
 MAX_FRAME_RECORD_BYTES = 64 * 1024
 # The frames `--until-event` ends on. Presence, usage and fleet are state a later frame restates,
-# and `closed` for an uplink is reopened here; a revoked hold is the session's to answer. A say that
-# is an action's routine ending is recorded and read like any other, and ends nothing (#2455).
+# and `closed` for an uplink is reopened here; a revoked hold is the session's to answer.
+# Inform says are buffered by --until-event until another frame wakes it.
 # A room frame says a room has a message the brain has not read (doc 156 §7).
 ACTS = frozenset({"envelope", "say", "seat", "kick", "room"})
 # Except a usage frame moving this session's account to this verdict: the pack-up trigger
@@ -86,6 +85,11 @@ def _frame(line: str) -> dict | None:
     except ValueError:
         return None
     return frame if isinstance(frame, dict) else None
+
+
+def is_inform(line: str) -> bool:
+    frame = _frame(line)
+    return bool(frame) and frame.get("kind") == "say" and frame.get("class") == "inform"
 
 
 def is_usage(line: str) -> bool:
@@ -176,8 +180,6 @@ def acts(line: str, seen: datetime | str | None = None, seated: int | None = Non
     if frame.get("kind") == "usage":
         found = exclusion(line)
         return found is not None and not same_exclusion(found, seen)
-    if frame.get("kind") == "say" and action_notice.routine(frame.get("from"), frame.get("text")):
-        return False
     return frame.get("kind") in ACTS or (frame.get("kind") == "closed" and frame.get("why") == "revoked")
 
 
@@ -545,6 +547,7 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
     wait = REOPEN_AFTER
     seen = last_exclusion(frames)
     seated = last_seat(frames)
+    pending = {}
     recorded = recording(frames)
     if plugin and recorded is None:
         return 1     # `recording` said why; the frames tool would have nothing to read
@@ -587,7 +590,7 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                             # tool receipts a say when it returns it (#7136) — until then the
                             # say stays spooled, which is what tells the platform the session
                             # has not read it.
-                            if not plugin:
+                            if not plugin and not (until and is_inform(line)):
                                 say_read(port, session, raw)
                         if line.startswith(": keepalive") or not line.strip():
                             continue
@@ -613,17 +616,26 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                             # `id` is stamped on every frame the orchestrator hands an agent, of
                             # every kind; a `closed` frame may carry none.
                             kind = frame.get("kind")
-                            sys.stdout.write(json.dumps({"id": frame.get("id"), "kind": kind, "wakes": wakes}) + "\n")
+                            sys.stdout.write(json.dumps({"id": frame.get("id"), "kind": kind, "wakes": wakes,
+                                                         **({"inform": True} if is_inform(line) else {})}) + "\n")
                             sys.stdout.flush()
                             if kind == "closed" and frame.get("why") == "revoked":
                                 return 3
                             continue
+                        if until and is_inform(line):
+                            pending[_frame(line).get("id") or raw] = raw
+                            continue
                         if until and not wakes:
                             print(line, end="", file=sys.stderr, flush=True)
                             continue
+                        if until:
+                            for buffered in pending.values():
+                                sys.stdout.write(buffered.decode(errors="replace"))
                         sys.stdout.write(line)
                         sys.stdout.flush()
                         if until:
+                            for buffered in pending.values():
+                                say_read(port, session, buffered)
                             return 0
             except urllib.error.HTTPError as e:
                 try:

@@ -235,7 +235,7 @@ TOOLS = {
         {"topic": None, "usage": "[--as <harness/account>] [--doing <text>] [--provider <provider>] [--provider-session <id>] [--pid <pid>] [session]", "example": "rotate --current"},
     ]},
     "say": {"verb": "say", "forms": [
-        {"topic": None, "usage": "[--to <peer>] " + _SPEAKER_USAGE + " <session> <text|-> [--retry=<id>]", "example": "say --to amber violet please-review"},
+        {"topic": None, "usage": "[--inform] [--to <peer>] " + _SPEAKER_USAGE + " <session> <text|-> [--retry=<id>]", "example": "say --to amber violet please-review"},
     ]},
     "taking": {"verb": "taking", "forms": [
         {"topic": "issue", "usage": _SPEAKER_USAGE + " <session> <issue>|<owner>/<name>#<issue>", "example": "taking violet 3384"},

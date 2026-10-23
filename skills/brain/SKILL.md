@@ -52,12 +52,19 @@ nothing reaches you until you take it.
 
 ## Hold the stream
 
+A say's class is `act` (the default) or `inform`. An `act` starts a turn; an `inform`
+waits to be read with the next waking frame. A peer selects `inform` with `say.py --inform`.
+The Claude Code module counts pending informs in its quiet status line. Signal classes use
+`signals.<key>.class`, stamped when the say is recorded, so a
+setting change affects future notices. The snapshot, session kick and cache-warm stay `act`.
+
+Reading acknowledges the frames handed over; no reply is owed. When a turn changes nothing the
+owner knows, end with no closing text on Claude Code. Where the harness requires text, emit only
+`NO_REPLY`, with no other text. This ends the turn without an owner-channel reply.
+
 **When connect's `plugin:` line ends `the plugin holds this session's stream, so arm no hold`, arm
-nothing here.** The plugin's module holds one stream for the life of the process and wakes you
-with `Call mcp__2mw2lt__frames.`, which you do. Reading is the acknowledgement: the tool
-acknowledges every frame it returns. A frame that needs nothing (a checkpoint, a card that only
-wants concluding, a peer's FYI) gets no reply and no further tool call, and the turn ends. Never
-answer a frame by speaking to the owner: the owner hears nothing of the mundane. A hold re-armed by hand on
+nothing here.** The plugin's module holds one stream for the life of the process and points at
+waking frames with `Call mcp__2mw2lt__frames.`, which you do. A hold re-armed by hand on
 top of it closes after every frame, and in each gap the brain cannot answer and the fleet loses
 it (#4520). A line that says the module
 holds no stream here may mean this process fetched its plugins before the module existed, and a
@@ -80,11 +87,11 @@ ws="${STEERING_WORKSPACE:-$(dirname "$(git rev-parse --path-format=absolute --gi
 python3 "$ws/.claude/steering-launch.py" exec hold --until-event <session-name>
 ```
 
-It exits 0 once it has printed the first frame you must act on — a say, an envelope, a
-seat frame, `closed` with `why: revoked`, or a usage frame moving your account to `excluded` —
-and passes fleet and other usage frames by on stderr.
-When it completes, read the frame from its output, acknowledge an envelope (an unacknowledged one is handed
-straight back), and start it again before you act on it: while
+It exits 0 on the first waking frame — a non-inform say, an envelope, a seat frame,
+`closed` with `why: revoked`, or a usage frame moving your account to `excluded` — printing
+pending informs before it. Fleet and other usage frames pass by on stderr.
+When it completes, read every printed frame, acknowledge each envelope, then
+start it again before you act: while
 nothing holds, the brain cannot answer you and the board drops you
 (#1283). The newest fleet frame is in the recording below. A harness
 with no background completion holds it without `--until-event` under a Monitor tool call armed
@@ -311,10 +318,7 @@ executor has left the board counts) that the session can carry, and that you hav
 relayed to a session still on the board that has not yet announced it: its account has room. Relay it with
 `relay: token @lease to <session> <the directive, naming the card>`, which needs no
 clearance, and once the session announces the branch, write `card-session <session> executor`.
-If no card fits, do nothing. Never
-report to the owner because a notice arrived. A turn
-that answers a frame changing nothing the owner knows — a notice with nothing to delegate, a
-routine say — is one line at most, and no line when nothing in it is new to them.
+If no card fits, do nothing.
 
 `data: {"kind": "fleet", "accounts": [{"account", "harness", "vendor", "verdict", "tightest", "incentive", "sessions", "owner", "serves", "labels"}]}`
 is every account's verdict,

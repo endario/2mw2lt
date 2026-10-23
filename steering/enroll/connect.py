@@ -221,12 +221,16 @@ def say_invocation(h: harness_mod.Harness, psession: str, session: str) -> str:
             f'--provider-session {psession} {session} "<text>"')
 
 
-def speaker_flags(argv: list[str], also: tuple[str, ...] = ()) -> tuple[dict[str, str], list[str]] | None:
-    """The leading `--flag value` pairs a speaking script takes, and what follows them; None when
-    one is not a flag it takes or has no value."""
+def speaker_flags(argv: list[str], also: tuple[str, ...] = (), switches: tuple[str, ...] = ()) -> tuple[dict[str, str], list[str]] | None:
+    """Leading speaker flags and switches, and what follows; None for malformed flags."""
     args, flags = list(argv), {}
     while args and args[0].startswith("-"):
         flag = args.pop(0)
+        if flag in switches:
+            if flag in flags:
+                return None
+            flags[flag] = "true"
+            continue
         if flag not in SPEAKER_FLAGS + also or flag in flags or not args:
             return None
         value = args.pop(0)

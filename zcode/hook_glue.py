@@ -109,11 +109,13 @@ def main() -> int:
             return 0
         ledger = holder.claim_path(ws, psession).with_suffix(".ledger.json")
         try:
-            pending = json.loads(ledger.read_text()).get("pending") or []
+            state = json.loads(ledger.read_text())
+            pending = state.get("pending") or []
+            inform = state.get("inform") or []
         except (OSError, ValueError):
-            pending = []
+            pending, inform = [], []
         context = notice
-        if pending:
+        if any(fid not in inform for fid in pending):
             context = "\n".join(x for x in (POINTER, notice) if x) or None
         if not context:
             return 0

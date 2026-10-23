@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`say.py [--to <session>] [--provider <harness>] [--provider-session <id>] <session> <text|->`:
+"""`say.py [--inform] [--to <session>] [--provider <harness>] [--provider-session <id>] <session> <text|->`:
 say something on this session's own enrollment token — to the session `--to` names, or to whoever
 holds the steering role. From another machine the untargeted form reaches the seated session, or
 the brain's Needs You when nobody holds the seat, never the resident brain (#3381). A name the
@@ -53,12 +53,12 @@ def credential_shaped(text: str, rules: Path | None) -> str:
     return {10: "detected", 0: "clean"}.get(scan.returncode, "failed")
 
 
-def _on_go(session: str, token: str, this: str, text: str, target: str | None) -> int:
+def _on_go(session: str, token: str, this: str, text: str, target: str | None, inform: bool = False) -> int:
     """The say on a Go workspace's own route: answered there, or refused in its words."""
     import refusal
     import session_routes
     try:
-        print(session_routes.say(session, token, this, text, target))
+        print(session_routes.say(session, token, this, text, target, inform=inform))
         return 0
     except session_routes.Refused as e:
         if (stale := session_routes.outdated(e)) is not None:
@@ -82,7 +82,7 @@ def main(argv: list[str]) -> int:
     if help_requested("say", argv):
         print(script_help("say", topic=argv[0] if len(argv) == 2 else None))
         return 0
-    parsed = speaker_flags(argv, also=("--to",))
+    parsed = speaker_flags(argv, also=("--to",), switches=("--inform",))
     if parsed is None:
         return error("say", "malformed speaker flags")
     flags, args = parsed
@@ -132,7 +132,7 @@ def main(argv: list[str]) -> int:
         return 1
     this = retry_id or occurrence()
     print(f"id {this}", file=sys.stderr)
-    return _on_go(session, token, this, text, target)
+    return _on_go(session, token, this, text, target, inform="--inform" in flags)
 
 
 if __name__ == "__main__":

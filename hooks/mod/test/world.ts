@@ -54,6 +54,7 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
     asUser: [] as boolean[],
     appends: [] as string[],
     logs: [] as string[],
+    statuses: [] as (string | undefined)[],
     psession: 'ps-1',
     claimFails: false,
     compacts: [] as { trigger: string; instructions?: string }[],
@@ -269,6 +270,10 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
     w.taskStops.push(e.task_id)
     return { result: { message: `Successfully stopped task: ${e.task_id}`, task_id: e.task_id, task_type: 'local_bash' } }
   }) as never)
+  on('ui.status', async ($, e) => {
+    w.statuses.push(e.text)
+    return { value: undefined }
+  })
   on('ui.log', async ($, e) => {
     w.logs.push(e.text)
     const appended = /^2mw2lt: appends "(.*)"$/s.exec(e.text)

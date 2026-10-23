@@ -1,5 +1,5 @@
 import type { Register, EngineInterface, Timer, HookStream, ProcessSpawnChunk, ProcessSpawnResult } from 'claude-code'
-import { lines, atLeast, pick, invokes, lifecycle, tokensOf, due, owed, framesEntry, obsoleteSeatRefusal, nextSeat, asksSeat, seatCall, seatSchema, resendId, entryRefusal, checkpointCall, CHECKPOINT_ENTRY, CHECKPOINT_TOOL, refusalTurn, capBulletin, sectionRevision, READ_KEPT, POINTER, CHECKPOINT, SEAT_SECTION, BULLETIN_SECTION, SEAT_TOOLS } from './frames'
+import { lines, atLeast, pick, invokes, lifecycle, tokensOf, due, owed, pointing, quiet, framesEntry, obsoleteSeatRefusal, nextSeat, asksSeat, seatCall, seatSchema, resendId, entryRefusal, checkpointCall, CHECKPOINT_ENTRY, CHECKPOINT_TOOL, refusalTurn, capBulletin, sectionRevision, READ_KEPT, POINTER, CHECKPOINT, SEAT_SECTION, BULLETIN_SECTION, SEAT_TOOLS } from './frames'
 import type { Line, SeatCall } from './frames'
 import * as surface from './surface'
 import type { CommandReceipt } from './types'
@@ -14,6 +14,7 @@ import type { CommandReceipt } from './types'
 
 const BUSY = { plugin: '2mw2lt', key: 'busy' } as const
 const PENDING = { plugin: '2mw2lt', key: 'pending' } as const
+const INFORM = { plugin: '2mw2lt', key: 'inform' } as const
 const READ = { plugin: '2mw2lt', key: 'read' } as const
 const POINTED = { plugin: '2mw2lt', key: 'pointed' } as const
 const APPENDED = { plugin: '2mw2lt', key: 'appended' } as const
@@ -145,6 +146,9 @@ function locked<T>($: EngineInterface, work: () => Promise<T>): Promise<T> {
 async function point($: EngineInterface) {
   const { value: pointed = false } = await $.state.get(POINTED)
   if (pointed) return
+  const { value: pending = [] } = await $.state.get(PENDING)
+  const { value: inform = [] } = await $.state.get(INFORM)
+  $.ui.log(`2mw2lt: pointer covers ${inform.filter(id => pending.includes(id)).length} inform`, { to: 'debug' })
   await $.state.set(POINTED, true)
   const appended = () => locked($, async () => {
     if ((await $.state.get(POINTED)).value) await $.state.set(APPENDED, true)
@@ -164,8 +168,17 @@ async function repoint($: EngineInterface) {
     if ((await $.state.get(BUSY)).value) return            // the next turn's end asks again
     await unpoint($)
     // Nothing is owed a pointer once the module no longer holds the stream.
-    if ((await $.state.get(SESSION)).value && ((await $.state.get(PENDING)).value ?? []).length) await point($)
+    if ((await $.state.get(SESSION)).value && (await pointingNow($, (await $.state.get(PENDING)).value ?? [])).length) await point($)
   })
+}
+
+// Called with the chain held, so returned frames cannot overwrite a newly arrived inform.
+async function pointingNow($: EngineInterface, pending: readonly string[]): Promise<string[]> {
+  const { value: inform = [] } = await $.state.get(INFORM)
+  const held = inform.filter(id => pending.includes(id))
+  if (held.length !== inform.length) await $.state.set(INFORM, held)
+  $.ui.status(quiet(held.length))
+  return pointing(pending, held)
 }
 
 // The pointer is no longer outstanding: the model read the frames, or the session starts over.
@@ -180,7 +193,7 @@ async function refuseFrames($: EngineInterface, pending: readonly string[]) {
   await locked($, async () => {
     await unpoint($)
     const { value: now = [] } = await $.state.get(PENDING)
-    if (now.some(id => !pending.includes(id))) await point($)
+    if ((await pointingNow($, now)).some(id => !pending.includes(id))) await point($)
   })
 }
 
@@ -194,7 +207,7 @@ async function retireStaleSeatFrame($: EngineInterface, seatFrameId: string) {
     const { value: read = [] } = await $.state.get(READ)
     if (!read.includes(seatFrameId)) await $.state.set(READ, [...read, seatFrameId].slice(-READ_KEPT))
     await unpoint($)
-    if (left.length) await point($)
+    if ((await pointingNow($, left)).length) await point($)
   })
 }
 
@@ -974,6 +987,12 @@ async function onLine($: EngineInterface, l: Line, ps: string, session: string, 
       return
     }
     await $.state.set(PENDING, [...pending, l.id])
+    if (l.inform) {
+      const { value: inform = [] } = await $.state.get(INFORM)
+      await $.state.set(INFORM, [...inform, l.id])
+      await pointingNow($, [...pending, l.id])
+      return
+    }
     await point($)
   })
   return
@@ -1279,7 +1298,7 @@ export const register: Register = on => {
       const { value: read = [] } = await $.state.get(READ)
       await $.state.set(READ, [...read, ...readNow].slice(-READ_KEPT))
       await unpoint($)
-      if (left.some(id => !pending.includes(id))) await point($)
+      if ((await pointingNow($, left)).some(id => !pending.includes(id))) await point($)
     })
     const unreported = ackFailures.length ? `\n2mw2lt: the read was not reported, and is sent again on the next frames call: ${ackFailures.join('; ')}` : ''
     return { result: (text || 'Nothing is waiting.') + unreported }
@@ -1470,6 +1489,8 @@ export const register: Register = on => {
     if (root && e.source === 'clear') {
       await locked($, async () => {
         await $.state.set(PENDING, [])
+        await $.state.set(INFORM, [])
+        $.ui.status(undefined)
         await $.state.set(READ, [])                  // a fresh context has read nothing
         await $.state.set(WARNED, false)             // a fresh context is owed its own prompt
         await unpoint($)
