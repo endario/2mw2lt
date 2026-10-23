@@ -268,7 +268,7 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
         answer = session_routes.write("/gates", body, this, session_routes.SESSION_CARRIER, token)
         # An id and a state name a commission; a round it does not answer is left unsaid (#5873).
         if answer.get("id") and answer.get("state"):
-            why = f" ({answer['reason']})" if answer.get("reason") else ""
+            why = f" ({wait_reason(answer['reason'])})" if answer.get("reason") else ""
             round_ = f" round {answer['round']}" if answer.get("round") else ""
             state = answer["state"]
             if state == "queued" and answer.get("priority") is not None:
@@ -355,6 +355,11 @@ def go_read(ws: Path, session: str, flags, kind: str, what: str) -> int:
     return 0
 
 
+def wait_reason(reason: str) -> str:
+    """A floor wait names what is missing, on commissioning and every later status read."""
+    return {"floor-unserved": "no available judge reaches this gate's floor"}.get(reason, reason)
+
+
 def gate_row(r: dict) -> str:
     """One commission as a line: where it stands, its round and the head it judged. A queued one
     answers the queue's face first: its priority and how many wait ahead (#6850)."""
@@ -365,7 +370,7 @@ def gate_row(r: dict) -> str:
     if r.get("verdict"):
         said += f", {r['verdict']}"
     if r.get("why"):
-        said += f" ({r['why']})"
+        said += f" ({wait_reason(r['why'])})"
     if r.get("passed_over"):
         said += "; passed over: " + passed_over(r["passed_over"])
     return said + (f" {r['review']}" if r.get("review") else "")
@@ -377,7 +382,7 @@ def passed_over(by_vendor: dict) -> str:
     for vendor, reasons in sorted(by_vendor.items()):
         for reason in reasons:
             vendors.setdefault(reason, []).append(vendor)
-    return "; ".join(f"{', '.join(v)}: {reason}" for reason, v in sorted(vendors.items()))
+    return "; ".join(f"{', '.join(v)}: {wait_reason(reason)}" for reason, v in sorted(vendors.items()))
 
 
 def gate_read(r: dict) -> str:

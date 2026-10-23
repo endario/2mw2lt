@@ -129,6 +129,12 @@ def name_for(psession: str, taken: dict[str, dict] | None = None,
     return f"{base}-{flat}"
 
 
+def speaks_for(rec: dict, psession: str) -> bool:
+    """Whether this stored record is the one `psession` acts as: the session it was minted for, or
+    for a Codex worker the thread its own processes name (`CODEX_THREAD_ID`)."""
+    return bool(psession) and psession in (rec.get("provider_session"), rec.get("thread"))
+
+
 def minted_name(taken: dict[str, dict], psession: str) -> str | None:
     """The name this workspace already holds a record for this provider session under.
 
@@ -141,7 +147,7 @@ def minted_name(taken: dict[str, dict], psession: str) -> str | None:
     asked or said nothing.
     """
     for name, rec in taken.items():
-        if rec.get("provider_session") == psession:
+        if speaks_for(rec, psession):
             return name
     return None
 
@@ -185,7 +191,7 @@ def own_enrolment(ws: Path, psession: str, session: str | None = None) -> tuple[
                           + (f"; it holds tokens for {', '.join(sorted(known))}" if known else "")
                           + ": run /2mw2lt:connect first")
     minted_for = (known.get(name) or {}).get("provider_session")
-    if minted_for and minted_for != psession:
+    if minted_for and not speaks_for(known[name], psession):
         raise Refused(f"{name} is another session's enrollment ({minted_for}): pass a name of your own")
     if session and name in known and not minted_for and len(known) > 1:
         # Stored by hand, with nothing saying whose it is, beside records that are somebody's.

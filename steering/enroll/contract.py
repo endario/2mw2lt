@@ -5786,6 +5786,13 @@ GoalCreateBody = typing.TypedDict("GoalCreateBody", {
     "title": "str",
     "context": "typing.NotRequired[str]",
     "criteria": "list[CriterionBody] | None",
+    "due": "typing.NotRequired[str | None]",
+})
+
+# GoalScheduleBody moves the goal's expected deadline. It expects no revision, writes none and
+# reopens no judgment.
+GoalScheduleBody = typing.TypedDict("GoalScheduleBody", {
+    "due": "str",
 })
 
 # GoalRevisionBody replaces the goal's title, context and criteria, from the revision it expects.
@@ -5976,6 +5983,7 @@ GoalDTO = typing.TypedDict("GoalDTO", {
     "id": "str",
     "by": "WorkActor",
     "at": "str",
+    "due": "str",
     "current": "GoalRevisionDTO",
     "earlier": "list[GoalRevisionDTO] | None",
     "contributions": "list[ContributionDTO] | None",
@@ -6234,6 +6242,7 @@ GoalExecution = typing.TypedDict("GoalExecution", {
 GoalSummaryDTO = typing.TypedDict("GoalSummaryDTO", {
     "id": "str",
     "at": "str",
+    "due": "str",
     "revision": "int",
     "title": "str",
     "revised_at": "str",
@@ -6612,6 +6621,7 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/goals/{goal}",
     "POST /w/{workspace}/api/v1/goals/{goal}/criteria/{criterion}/judgments",
     "POST /w/{workspace}/api/v1/goals/{goal}/criteria/{criterion}/names",
+    "POST /w/{workspace}/api/v1/goals/{goal}/deadlines",
     "GET /w/{workspace}/api/v1/goals/{goal}/execution",
     "POST /w/{workspace}/api/v1/goals/{goal}/imports",
     "POST /w/{workspace}/api/v1/goals/{goal}/judgments",

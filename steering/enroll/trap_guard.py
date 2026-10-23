@@ -279,6 +279,14 @@ FORGE_VERBS = {
                            {"--edit-last", "--create-if-none", "--delete-last", "--yes"}, True),
     ("issue", "create"): ({"-R", "--repo", "-a", "--assignee", "-b", "--body", "-F", "--body-file", "-l", "--label",
                            "-m", "--milestone", "-p", "--project", "-t", "--title", "-T", "--template", "--recover"}, set(), False),
+    # Sessions perform first (the owner's ruling, 2026-10-23): a worker closes, edits and reads issues
+    # and dispatches a workflow without asking.
+    ("issue", "close"): ({"-R", "--repo", "-c", "--comment", "-r", "--reason"}, set(), True),
+    ("issue", "edit"): ({"-R", "--repo", "-t", "--title", "-b", "--body", "-F", "--body-file", "--add-label",
+                         "--remove-label", "--add-assignee", "--remove-assignee", "-m", "--milestone"}, set(), True),
+    ("issue", "view"): ({"-R", "--repo", "--json", "-q", "--jq"}, {"-c", "--comments"}, True),
+    # Its positional is the workflow's name or file, not a number.
+    ("workflow", "run"): ({"-R", "--repo", "-r", "--ref", "-f", "--raw-field", "-F", "--field"}, {"--json"}, "name"),
 }
 # A verb that passes only with one of these options: a worker opens its pull request as a draft (the
 # owner's ruling, documentation/knowledge/decisions/workers-open-their-own-pull-requests.md).
@@ -341,7 +349,7 @@ def gh_refusal(args: list[str], repo: str, check=None, verbs=FORGE_VERBS, owned=
         arg = args[i]
         flag, glued, value = arg.partition("=")
         if not arg.startswith("-"):
-            if not positional or not arg.isdigit():
+            if not positional or positional is True and not arg.isdigit():
                 return f"forge-flag-not-granted: {arg!r} is no option or number gh {' '.join(verb)} is granted"
             numbers, number = numbers + 1, arg
         elif arg in bools:
