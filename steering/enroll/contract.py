@@ -103,6 +103,7 @@ AccountList = typing.TypedDict("AccountList", {
     "manages_providers": "bool",
     "unnamed": "list[UnnamedDirectory] | None",
     "removed": "list[RemovedAccount] | None",
+    "offers": "OwnershipOffers | None",
 })
 
 # RemovedAccount is one account its owner removed: the team's number and the owner's label for it,
@@ -427,6 +428,23 @@ AccountRemoved = typing.TypedDict("AccountRemoved", {
     "removed": "bool",
 })
 
+# AccountOffer is the body of POST /accounts/offer: the account's owner offers it to a GitHub
+# account by its numeric id and the login the console resolved it to (#8430).
+AccountOffer = typing.TypedDict("AccountOffer", {
+    "vendor": "str",
+    "account_id": "str",
+    "github_id": "int",
+    "login": "str",
+})
+
+# AccountOffered is its answer, the same whoever holds that id: the account as the team resolves it
+# and the login it is offered to. The offer itself is read back from the accounts read's offers.
+AccountOffered = typing.TypedDict("AccountOffered", {
+    "vendor": "str",
+    "account_id": "str",
+    "login": "str",
+})
+
 # ActionBody asks a machine to act on a session's process: to wake it, set its level, end it,
 # resume it under another account, stop it and keep its enrolment, or interrupt its turn.
 ActionBody = typing.TypedDict("ActionBody", {
@@ -627,6 +645,34 @@ ParkReceiptAnswer = typing.TypedDict("ParkReceiptAnswer", {
     "park": "str",
     "state": "str",
     "replayed": "bool",
+})
+
+# SlashCommand is one command a session's harness reports, classed by its adapter (#8432,
+# decisions 3 and 4). Its fields keep the agent's order and none is omitted when empty: the list's
+# hash is taken over encoding/json's marshalling of it, so the agent and coordination marshal the
+# same bytes only while both structs agree field for field.
+SlashCommand = typing.TypedDict("SlashCommand", {
+    "name": "str",
+    "description": "str",
+    "hint": "str",
+    "source": "str",
+    "class": "str",
+})
+
+# AgentCommandsBody is the body of POST /steering/agent/commands: the commands a held session's
+# harness reports now, as its machine cut them to the route's bound. Hash is the SHA-256 hex of
+# Commands as encoding/json marshals them; Cut counts the entries the machine left out.
+AgentCommandsBody = typing.TypedDict("AgentCommandsBody", {
+    "session": "str",
+    "uplink": "str",
+    "hash": "str",
+    "commands": "list[SlashCommand] | None",
+    "cut": "int",
+})
+
+# AgentCommandsAnswer says whether the list was kept.
+AgentCommandsAnswer = typing.TypedDict("AgentCommandsAnswer", {
+    "recorded": "bool",
 })
 
 # AgentInjectionBody is the body of POST /steering/agent/injection: whether the machine may hand
@@ -830,6 +876,7 @@ SessionReading = typing.TypedDict("SessionReading", {
     "pending_frames": "list[str] | None",
     "flight": "typing.NotRequired[ReadingFlight | None]",
     "capabilities": "typing.NotRequired[list[str] | None]",
+    "commands_hash": "typing.NotRequired[str]",
 })
 
 # ReadingFlight is the step a reading says is in flight: the tool and when it began, or the model
@@ -849,9 +896,11 @@ ReadingTokens = typing.TypedDict("ReadingTokens", {
     "cache_creation": "typing.NotRequired[int | None]",
 })
 
-# AgentReadingAnswer says whether the reading was recorded.
+# AgentReadingAnswer says whether the reading was recorded. CommandsWanted is that the reading's
+# commands_hash names no list kept for the session's current epoch, so the agent posts it again.
 AgentReadingAnswer = typing.TypedDict("AgentReadingAnswer", {
     "recorded": "bool",
+    "commands_wanted": "typing.NotRequired[bool]",
 })
 
 # AgentLeavingBody is the body of POST /steering/agent/leaving: what this machine reports left
@@ -1548,9 +1597,14 @@ AgentGateBody = typing.TypedDict("AgentGateBody", {
 # judge left it unresolved, or why it was refused or failed. The verdict is the run's own report,
 # which the gate reads as it was sent; `given` is the answer as the vendor gave it, and `reviewer`
 # the vendor, model and evidence of the run that judged.
+#
+# `draining` rides beside `unavailable`: the machine drains for an update, so the gate waits again
+# with no judge declined (8449 design, decision 3). A door that does not know it reads the
+# unavailable as it always has.
 AgentGateResult = typing.TypedDict("AgentGateResult", {
     "verdict": "typing.NotRequired[typing.Any]",
     "unavailable": "typing.NotRequired[str]",
+    "draining": "typing.NotRequired[bool]",
     "unresolved": "typing.NotRequired[str]",
     "refused": "typing.NotRequired[str]",
     "failed": "typing.NotRequired[str]",
@@ -3455,6 +3509,8 @@ FleetMachine = typing.TypedDict("FleetMachine", {
     "name": "str | None",
     "reported_name": "typing.NotRequired[str | None]",
     "state": "MachineState",
+    "mine": "bool",
+    "linked_at": "str | None",
 })
 
 # MachineState is a machine's liveness as coordination reads it from what its agent already sends
@@ -3666,6 +3722,31 @@ RenewalProgress = typing.TypedDict("RenewalProgress", {
     "status": "str",
     "reason": "str",
     "recheck_at": "int",
+})
+
+# OwnershipOffers is the open offers of one kind a person is party to (#8430): those offered to
+# them, less any they declined, and those they made, which never show a decline.
+OwnershipOffers = typing.TypedDict("OwnershipOffers", {
+    "to_you": "list[OwnershipOffer] | None",
+    "from_you": "list[OwnershipOffer] | None",
+})
+
+# OwnershipOffer is one open offer. Login is the giver's in ToYou and the recipient's as the giver
+# typed it in FromYou. An account offer names the account by Vendor and AccountID.
+OwnershipOffer = typing.TypedDict("OwnershipOffer", {
+    "id": "str",
+    "kind": "str",
+    "vendor": "str",
+    "account_id": "str",
+    "login": "str",
+    "made_at": "str",
+    "lapses_at": "str",
+})
+
+# OfferAnswer is the answer to a party's word on an offer: accepted, declined or withdrawn.
+OfferAnswer = typing.TypedDict("OfferAnswer", {
+    "id": "str",
+    "status": "str",
 })
 
 # InstallationClaimBody connects GitHub for a team: the code GitHub handed back when its owner
@@ -4527,6 +4608,7 @@ ListedSession = typing.TypedDict("ListedSession", {
     "rarity": "str | None",
     "stewards": "list[ListedSteward] | None",
     "capabilities": "list[str] | None",
+    "mine": "bool",
 })
 
 # ListedSteward is one goal a session stewards: its id and its current title.
@@ -6460,6 +6542,7 @@ ROUTES = frozenset({
     "DELETE /w/{workspace}/api/v1/accounts/co-owners/{id}",
     "POST /w/{workspace}/api/v1/accounts/concurrency",
     "POST /w/{workspace}/api/v1/accounts/label",
+    "POST /w/{workspace}/api/v1/accounts/offer",
     "POST /w/{workspace}/api/v1/accounts/remove",
     "POST /w/{workspace}/api/v1/accounts/reset",
     "POST /w/{workspace}/api/v1/accounts/restore",
@@ -6566,6 +6649,9 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/needs",
     "POST /w/{workspace}/api/v1/needs",
     "POST /w/{workspace}/api/v1/needs/{need}/transitions",
+    "POST /w/{workspace}/api/v1/offers/{id}/accept",
+    "POST /w/{workspace}/api/v1/offers/{id}/decline",
+    "POST /w/{workspace}/api/v1/offers/{id}/withdraw",
     "GET /w/{workspace}/api/v1/placement",
     "GET /w/{workspace}/api/v1/placements",
     "POST /w/{workspace}/api/v1/providers/models",
@@ -6637,6 +6723,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/steering/agent/answer",
     "POST /w/{workspace}/steering/agent/census",
     "GET /w/{workspace}/steering/agent/checkpoint/{session}",
+    "POST /w/{workspace}/steering/agent/commands",
     "POST /w/{workspace}/steering/agent/control",
     "POST /w/{workspace}/steering/agent/ended",
     "POST /w/{workspace}/steering/agent/facts",

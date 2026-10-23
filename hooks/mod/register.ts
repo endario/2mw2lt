@@ -41,7 +41,7 @@ const script = ($: EngineInterface, name: string) => `${$.plugin.root}/steering/
 
 // Every row the module writes goes through here, and its text is one of the fixed texts in
 // frames.ts, a desk prompt's words under the from: line naming who said them, or the note of a
-// stop from the desk under that line: a frame's own text reaches the model only as the `frames`
+// stop or a command from the desk under that line: a frame's own text reaches the model only as the `frames`
 // tool's result. Its row is shown here, with the desk's act that landed it, since the module's hook
 // passes its own appends by. A refused append (a plugin above, or a run no plugin may shape) is
 // logged, the hold goes on, and the refusal is returned.
@@ -332,6 +332,51 @@ async function stopTurn($: EngineInterface, turn: string, from: string): Promise
   return { interrupted: true, stopped, unstopped, unseen, told: failed === undefined }
 }
 
+// The desk's commands running (#8432), oldest first. Each holds its note until the engine dispatches
+// its command, which this module's prompt.submit hook sees under its own origin: a note appended
+// before the run is read by a busy session's running turn instead (U0, finding 3).
+type Running = { act: string; name: string; note: string; fired: boolean }
+const runs: Running[] = []
+// The acts whose command was dispatched and whose echo row is not stored yet, oldest first.
+const echoing: { act: string; name: string }[] = []
+const ECHOING_KEPT = 8
+// The act whose turn's rows are stored now: from its command's echo row to that turn's end.
+let stamping: string | undefined
+// Each command's class, as the agent was last told.
+let classes = new Map<string, surface.Class>()
+
+// A desk command (#8432), run through the engine's own command route and reported to the agent,
+// whose receipt settles the act. A busy session queues the run until its turn ends, so that is
+// reported at once. A prompt command resolves at dispatch, before its turn; a local one when it has
+// run, with what it resolved to (U0, finding 1).
+async function runCommand($: EngineInterface, session: string, body: unknown) {
+  const r = surface.running(body)
+  if ('refused' in r) {
+    if (r.id) await report($, 'ran', session, r.id, { refused: r.refused })
+    else $.ui.log(`2mw2lt: the agent's command was not taken, and names no id to say so under: ${r.refused}`, { to: 'debug' })
+    return
+  }
+  const run: Running = { act: r.id, name: r.name, note: surface.commandNote(r.from, r.name, r.args), fired: false }
+  runs.push(run)
+  const busy = (await $.state.get(BUSY)).value === true
+  if (busy) await report($, 'ran', session, r.id, { landed: 'queued', why: 'the session is running a turn; the command runs when it ends' })
+  let ran: surface.Ran
+  try {
+    const out = await $.command.run({ command: r.name, args: r.args })
+    if (run.fired || classes.get(r.name) === 'prompt') ran = { landed: 'new-turn' }
+    else {
+      const result = surface.ranResult(out)
+      ran = { landed: 'ran', ...(result === undefined ? {} : { result }) }
+    }
+  } catch (err) {
+    ran = { refused: `the engine refused /${r.name}: ${String(err)}` }
+  } finally {
+    runs.splice(runs.indexOf(run), 1)       // a note its dispatch did not append is never read
+  }
+  if (busy) $.ui.log(`2mw2lt: the desk's command ${r.id}, reported queued, came to ${JSON.stringify(ran)}`, { to: 'debug' })
+  else await report($, 'ran', session, r.id, ran)
+}
+
 // The live view's channel to this machine's agent (#4823, design §6.1): `$.http.fetch` alone, one
 // ordered send queue out. While nobody watches, nothing is made or
 // sent; rows leave whole, and the agent redacts them.
@@ -354,6 +399,12 @@ let sending: Promise<void> = Promise.resolve()
 let agent: { base: string; key: string; workspace: string } | undefined
 let following = 0
 let surfaceSaid = ''
+// The command list the agent was last told, as sent: told again when it changes. Owed once a poll
+// stands, after a follow or a failed poll, since the agent may be a new one that keeps none.
+let listSent = ''
+let listOwed = true
+let listing = false
+let listSaid = ''
 
 // A refusal on the channel is logged once until it changes or the channel recovers.
 function surfaceRefused($: EngineInterface, why: string) {
@@ -447,18 +498,50 @@ async function pollSurface($: EngineInterface, workspace: string, session: strin
         show($, surface.turnNow(busyNow ?? stored))
       }
       if (typeof answer.cursor === 'string') cursor = answer.cursor
+      if (listOwed) {
+        listOwed = false
+        void tellCommands($, session)
+      }
       for (const c of Array.isArray(answer.commands) ? answer.commands as surface.Command[] : []) command($, session, c)
       wait = RETRY_MS
       surfaceSaid = ''
     } catch (err) {
       if (gen !== following) return
       surfaceRefused($, `the live view's poll failed: ${String(err)}`)
+      listOwed = true
       if (watching && outbox.seq !== undefined) outbox.lost(session, outbox.seq)   // rows go unseen until it answers
       watching = false
       agent = undefined                  // read again: a restarted agent may hold a new key
       await new Promise<void>(resolve => { $.clock.after(wait, resolve) })
       wait = Math.min(wait * 2, RETRY_CAP_MS)
     }
+  }
+}
+
+// The session's slash commands, classed, told the agent when they differ from what it was last told.
+// A refusal is said once until it changes, and the next turn's end tries again.
+async function tellCommands($: EngineInterface, session: string) {
+  if (listing || !session) return
+  listing = true
+  try {
+    const list = surface.classified(await $.command.list())
+    classes = new Map(list.map(c => [c.name, c.class]))
+    const text = JSON.stringify(list)
+    if (text === listSent) return
+    const at = agent
+    if (!at) throw new Error('no agent to tell')
+    const r = await $.http.fetch(`${at.base}/steering/surface/commands`,
+      { method: 'POST', headers: agentHeaders(at), body: JSON.stringify({ session, producer: await $.session.id(), commands: list }) })
+    if (!r.ok) throw new Error(`the agent answered ${r.status}: ${r.text.slice(0, 200)}`)
+    listSent = text
+    listSaid = ''
+  } catch (err) {
+    listSent = ''
+    const why = `the session's commands were not told the agent: ${String(err)}`
+    if (why !== listSaid) $.ui.log(`2mw2lt: ${why}`, { to: 'debug' })
+    listSaid = why
+  } finally {
+    listing = false
   }
 }
 
@@ -471,6 +554,9 @@ function command($: EngineInterface, session: string, c: surface.Command) {
       return
     case 'interrupt':
       void interrupt($, session, c.body).catch(err => $.ui.log(`2mw2lt: the desk's interrupt broke: ${String(err)}`, { to: 'debug' }))
+      return
+    case 'command':
+      void runCommand($, session, c.body).catch(err => $.ui.log(`2mw2lt: the desk's command broke: ${String(err)}`, { to: 'debug' }))
       return
     case 'emit': {
       const payload = surface.emitted(c.body)
@@ -490,6 +576,8 @@ function follow($: EngineInterface, workspace: string, session: string) {
   const gen = ++following
   watching = false
   watched = session
+  listSent = ''
+  listOwed = true
   void pollSurface($, workspace, session, gen).catch(err => $.ui.log(`2mw2lt: the live view's poll ended: ${String(err)}`, { to: 'debug' }))
 }
 
@@ -1047,7 +1135,7 @@ export const register: Register = on => {
     }
     await $.tool.register({
       name: 'frames',
-      description: 'Read the frames waiting for this session, each with its daemon-written from: line. Acknowledges the envelopes it returns.',
+      description: 'Read the frames waiting for this session, each with its daemon-written from: line. Reading is the acknowledgement: what it returns is acknowledged, so a frame that needs nothing gets no reply and no further call.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     })
     await $.tool.register({ name: 'checkpoint', ...CHECKPOINT_TOOL })
@@ -1220,7 +1308,11 @@ export const register: Register = on => {
       busyNow = false
       await $.state.set(BUSY, false)
       await $.state.set(TURN, '')
+      stamping = undefined
+      echoing.length = 0                                           // an echo that never came is not the next run's
       if (stopping?.turn === e.turnId) stopping.ended()
+      // A plugin reloaded in the turn changes the list.
+      void tellCommands($, watched)
       // A turn dead on an API error (a 429) did not read its pointer, and sending it into the
       // same refusal would only be refused again. The frames stay pending, and the next one to
       // arrive is pointed afresh, which a pointer left outstanding would have blocked for good.
@@ -1297,11 +1389,33 @@ export const register: Register = on => {
     // A response row takes its streamed block's place, matched whether or not it is shown, so the
     // rows after it find theirs.
     const replaces = e.door === 'response' && e.agentId === undefined ? streaming.replaces(stored.message.content) : undefined
-    const act = e.door === 'prompt' && surface.ours(e.origin) ? actOf(surface.firstText(stored.message.content)) : undefined
+    let act = e.door === 'prompt' && surface.ours(e.origin) ? actOf(surface.firstText(stored.message.content)) : undefined
+    // A desk command's echo row begins its turn's rows, which carry its act until the turn ends: the
+    // answer's rows are the model's, and only that turn tells them apart (U0, finding 2).
+    if (e.agentId === undefined) {
+      const line = e.door === 'command' && surface.ours(e.origin) ? surface.commandLine(surface.firstText(stored.message.content)) : undefined
+      const at = line === undefined ? -1 : echoing.findIndex(c => `/${c.name}` === line.split(' ')[0])
+      if (at >= 0) stamping = echoing.splice(at, 1)[0]!.act
+      // A person's own prompt, typed while the turn runs, is theirs: never the desk speaker's.
+      if (act === undefined && e.origin.kind !== 'composer' && e.origin.kind !== 'bridge' && e.origin.kind !== 'sdk') act = stamping
+    }
     const payload = watching ? surface.eventOf(e, stored, act) : undefined
     if (payload?.kind === 'row' && replaces) payload.row.replaces = replaces
     if (payload) show($, payload)
     return stored
+  }).catch(($, e, next) => next(e))
+
+  // A desk command's note joins its own turn: appended as the engine dispatches the command, under
+  // this module's origin, never before the run, which a busy session's running turn would read.
+  on('prompt.submit', async ($, e, next) => {
+    const run = e.command && surface.ours(e.origin) ? runs.find(r => !r.fired && r.name === e.command!.name) : undefined
+    if (run) {
+      run.fired = true
+      echoing.push({ act: run.act, name: run.name })
+      if (echoing.length > ECHOING_KEPT) echoing.shift()
+      await append($, run.note, run.act)
+    }
+    return next(e)
   }).catch(($, e, next) => next(e))
 
   // /clear ends this session id without a `session.start` for the next: the hold goes with the old

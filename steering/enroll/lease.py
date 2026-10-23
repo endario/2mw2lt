@@ -187,7 +187,7 @@ def go_say(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         return 2, refusal.use("relay", "malformed relay: invocation"), False
     try:
         said = session_routes.relay(rec["session"], rec["token"], m["target"],
-                                    int(m["epoch"]) if m["epoch"] else None, " ".join(m["text"].split()), key,
+                                    int(m["epoch"]) if m["epoch"] else None, m["text"].strip(), key,
                                     checkpoint=m["checkpoint"] and m["checkpoint"].lower())
     except session_routes.NotSeated as why:
         return 1, GO_NOT_SEATED.format(why=why), False

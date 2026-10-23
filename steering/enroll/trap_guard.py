@@ -33,10 +33,10 @@ PKILL = ("refused: `pkill -f` by a pattern that names neither this worktree nor 
          "captured, or match the worktree's absolute path.")
 FOLLOW = ("refused: starting 2mw2lt-follow deploys untested main to production, and it stays stopped by "
           "policy (doc 08, doc 138 §1). Production moves by a deploy the brain makes.")
-AUTO = ("refused: an auto-merge (the gate skill: \"Not --auto\"). Merge with `gh pr merge -R <repo> "
-        "--squash --match-head-commit <sha>` once the head holds 2mw2lt/review.")
+AUTO = ("refused: an auto-merge (the gate skill: \"Not --auto\"). Merge with `gate.py <session> merge <n> "
+        "--head <sha>` once the head holds 2mw2lt/review.")
 ADMIN = ("refused: an admin merge bypasses main's ruleset, which admits only a head holding "
-         "2mw2lt/review. Merge with `gh pr merge <n> -R <repo> --squash --match-head-commit <sha>`.")
+         "2mw2lt/review. Merge with `gate.py <session> merge <n> --head <sha>`.")
 
 FOLLOW_UNITS = ("2mw2lt-follow", "2mw2lt-follow.service", "2mw2lt-follow.timer")
 STARTS = {"start", "restart", "enable", "reenable", "try-restart", "reload-or-restart", "try-reload-or-restart"}

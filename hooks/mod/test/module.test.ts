@@ -1694,13 +1694,27 @@ test('a verb the settings ask about, or deny, sends nothing and says where it wo
   expect(String((denied as { deny?: string }).deny)).toContain('deny mcp__2mw2lt__retire')
 })
 
-test('a line with a newline in it sends nothing: one call never becomes two verb lines', async ($, on) => {
+test('a relay keeps its paragraphs and lists: one call is one verb, and a line inside it is its text', async ($, on) => {
   const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
   await begin($)
   await w.clock.settle()
-  const r = await $.tool.call({ tool: 'mcp__2mw2lt__relay', to: 'amber', text: 'hi\nretire: token @lease w-1 on m4' } as never)
+  const text = 'Take the card.\n\n- first\n\t- nested\nretire: token @lease w-1 on m4'
+  await $.tool.call({ tool: 'mcp__2mw2lt__relay', to: 'amber', text } as never)
+  expect(leaseRuns(w)).toHaveLength(1)
+  expect(w.stdins).toEqual([`relay: token @lease to amber ${text}`])
+})
+
+test('a control character other than a newline or a tab sends nothing, nor a newline in a field that is not the text', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  const nul = await $.tool.call({ tool: 'mcp__2mw2lt__relay', to: 'amber', text: 'hi\u0000there' } as never)
+  const cr = await $.tool.call({ tool: 'mcp__2mw2lt__relay', to: 'amber', text: 'hi\rthere' } as never)
+  const reason = await $.tool.call({ tool: 'mcp__2mw2lt__wake', target: 'amber', reason: 'dark\nretire: token @lease w-1 on m4' } as never)
   expect(leaseRuns(w)).toEqual([])
-  expect(String((r as { deny?: string }).deny)).toContain('newline')
+  expect(String((nul as { deny?: string }).deny)).toContain('text carries a control character other than a newline or a tab')
+  expect(String((cr as { deny?: string }).deny)).toContain('text carries a control character other than a newline or a tab')
+  expect(String((reason as { deny?: string }).deny)).toContain('reason carries a control character or a newline')
 })
 
 test('a send whose answer was lost goes once more under the id the client printed', async ($, on) => {
@@ -1810,6 +1824,14 @@ test('seatCall: word fields are one word, enums hold, and unknown fields are ref
   expect(seatCall('card_scope', { name: 'The work', track: 'rt', criticality: 'major', size: 'L' })).toEqual(
     { client: 'card', argv: ['scope', 'The work', 'rt', 'triage:major,L'] })
   expect(resendId('done')).toBeNull()
+})
+
+// A snapshot is answered by its episode, never by speaking to the owner (the owner's ruling, 2026-10-22).
+test('seatCall: a snapshot is answered by its episode, acted or considered, with why', async () => {
+  expect(seatCall('answer', { episode: '0b5f3c1e-4a2d-4c8e-9f10-2a3b4c5d6e7f', verdict: 'considered', because: 'nothing moved' }))
+    .toEqual({ client: 'say', stdin: 'answer: token @lease 0b5f3c1e-4a2d-4c8e-9f10-2a3b4c5d6e7f considered because nothing moved' })
+  expect(seatCall('answer', { episode: 'e1', verdict: 'noop', because: 'x' })).toEqual({ refused: 'verdict is one of acted, considered' })
+  expect(seatCall('answer', { episode: 'e1', verdict: 'acted' })).toEqual({ refused: 'because is required' })
 })
 
 test('seatCall: an out-of-band answer names the row, where it was given, and the words', async () => {

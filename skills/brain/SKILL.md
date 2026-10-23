@@ -54,7 +54,10 @@ nothing reaches you until you take it.
 
 **When connect's `plugin:` line ends `the plugin holds this session's stream, so arm no hold`, arm
 nothing here.** The plugin's module holds one stream for the life of the process and wakes you
-with `Call mcp__2mw2lt__frames.`, which you do. A hold re-armed by hand on
+with `Call mcp__2mw2lt__frames.`, which you do. Reading is the acknowledgement: the tool
+acknowledges every frame it returns. A frame that needs nothing (a checkpoint, a card that only
+wants concluding, a peer's FYI) gets no reply and no further tool call, and the turn ends. Never
+answer a frame by speaking to the owner: the owner hears nothing of the mundane. A hold re-armed by hand on
 top of it closes after every frame, and in each gap the brain cannot answer and the fleet loses
 it (#4520). A line that says the module
 holds no stream here may mean this process fetched its plugins before the module existed, and a
@@ -186,7 +189,11 @@ kind turned off is not told, and its standing still reads:
   each session under `resume`, which no wake of the platform's reaches, with `wake:` or a say.
 - **`machine-behind`**, a signal: a machine's agent runs another release than its door states, 15
   minutes after the door began stating it or the machine linked (`signals.machine_behind.*`), once
-  per release. Deploy it there, or see why its follow stopped.
+  per release. An agent that reports its follow names why: its `state`, the work in `held_by`, and
+  the last failed take's reason in `failure`. Deploy it there, or see why its follow stopped.
+- **`update-held`**, a signal: a machine's agent has waited 120 minutes for the work in `held_by` to
+  end before it takes the release its door states (`signals.update_held.*`), once per release. End
+  that work if it is stuck, or let it finish: the next pass takes the release.
 - **`agent-restarted`**, a signal: a machine's agent came back as another process on the release it
   already ran, so no deploy restarted it (`signals.agent_restarted.enabled`). It names when, and the
   work the machine had been given and not settled then, which the restart may have cut off. A restart
@@ -243,7 +250,8 @@ progress, a spent or idle account, a need waiting. Act only where something warr
 is the platform's report, never the owner's word, and it is not news to pass on: do not answer it
 with a status report to the owner. The next one comes when you have received this one.
 
-Answer each snapshot once you have reviewed it, by the `episode` it carries:
+Answer each snapshot once you have reviewed it, by the `episode` it carries, with the plugin's
+`answer` tool or the verb, never through `say`:
 
 ```
 answer: token @lease <episode> acted because <what you did>
@@ -697,6 +705,10 @@ record rather than taking it twice. `note:` and `effort:` keep no record, so the
 say() { printf '%s' "$1" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" say; }
 say "relay: token @lease to <their session> <the directive, with the context it needs>"
 ```
+
+A directive keeps its lines, through `mcp__2mw2lt__relay` as through `say`: write it in paragraphs
+and lists, decisions first, and the session reads it as markdown. A directive sent as one run-on
+line is a wall the session reads past.
 
 **Name the command, never the intent.** A worker acts on the words of the brief and cannot
 ask you what you meant. Where a step has a skill, verb or script, write it as that

@@ -44,7 +44,8 @@ LOG_KEPT = 1 << 20    # the server's log is rotated past this many bytes, one ol
 TOOLS = [{
     "name": "frames",
     "description": "Read the steering frames waiting for this session, each with its "
-                   "daemon-written from: line. Acknowledges the envelopes it returns.",
+                   "daemon-written from: line. Reading is the acknowledgement: what it returns "
+                   "is acknowledged, so a frame that needs nothing gets no reply and no further call.",
     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
 }]
 

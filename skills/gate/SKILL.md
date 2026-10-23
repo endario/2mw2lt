@@ -182,23 +182,25 @@ For GitHub state reads and waiting, follow
 
 Merge it once its head holds `2mw2lt/review` and its base is `main`. That status is posted a
 sweep after the verdict or the carry, and you are told when it lands: a `say` frame
-`from: forge #<n>` reading `review status posted on <sha>; merge now`. Mark it ready in exactly this
-form, which the workspace allows without a prompt: `gh pr ready -R <repo> <pr number>`. Merge then, not before:
+`from: forge #<n>` reading `review status posted on <sha>; merge now`. Merge then, not before:
 
 ```bash
 git fetch origin && merged=$(git merge-tree --write-tree origin/main <head sha>) &&
   .githooks/check-migrations.sh origin/main "$merged"
 ```
 
-After that call succeeds, issue the merge as a separate Bash tool call with the literal head SHA:
+After that call succeeds, merge from the branch's worktree:
 
 ```bash
-gh pr merge -R <repo> <pr number> --squash --match-head-commit <head sha>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> merge <pr number> --head <head sha>
 ```
 
-Where the base branch's ruleset requires a merge queue, the same command joins the queue, which
-merges once the required checks pass on its group's commit. The pass stays pinned to your head, so
-carry it to any head you push as before.
+It marks a draft ready, joins the base's merge queue on exactly that head and reads the entry back
+(`queued at position <p>`); with no queue it squash-merges that head (`merged as <sha>`). A required
+check still to report on the head, as for minutes after a push, answers `not yet:` naming it: declare
+the `wait … for at` it prints and merge again when told. `not merged:` says why it will not. Not `gh
+pr merge`: while a required check has not reported, it exits 0 without enqueuing (#8458). The pass
+stays pinned to your head, so carry it to any head you push as before.
 
 The migration check applies where that script exists. Judge the merged tree: a version collision
 introduced by another branch need not exist in your branch's own tree. If it refuses, rename the

@@ -185,6 +185,7 @@ TOOLS = {
         {"topic": "cancel", "usage": _SPEAKER_USAGE + " <session> cancel <commission>", "example": "gate violet cancel 010101010101010101010101"},
         {"topic": "pr", "usage": _SPEAKER_USAGE + " <session> pr <pr>", "example": "gate violet pr 1"},
         {"topic": "carry", "usage": _SPEAKER_USAGE + " <session> carry <pr> [--retry=<id>]", "example": "gate violet carry 1"},
+        {"topic": "merge", "usage": _SPEAKER_USAGE + " <session> merge <pr> [--head <sha>]", "example": "gate violet merge 1"},
     ]},
     "ci": {"forms": [
         {"topic": "run", "usage": _SPEAKER_USAGE + " <session> run [--shards <names>|all|none] [--chunks <names>|all|none] [--no-conformance] | --all [--retry=<id>]", "example": "ci violet run --shards rest1 --chunks none --no-conformance"},
@@ -293,7 +294,8 @@ _CLIENTS = {
     "checkpoint": ((("checkpoint", "note"),), (("checkpoint", None),)),
     "holds": ((("holds", "branch"),), (("holds", "issue"),)),
     "say": ((("say", None),),), "detach": ((("disconnect", None),),),
-    "gate": tuple((("gate", form["topic"]),) for form in TOOLS["gate"]["forms"]),
+    # A merge speaks to GitHub, not the door.
+    "gate": tuple((("gate", form["topic"]),) for form in TOOLS["gate"]["forms"] if form["topic"] != "merge"),
 }
 
 

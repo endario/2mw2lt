@@ -182,17 +182,19 @@ export function asksSeat(kind: string): boolean {
 // client: a `say` line or a body for lease.py, or card.py's argv, with `@lease` where the token
 // goes. The module never holds the token; the client fills it from the store.
 export type SeatCall = { client: 'say'; stdin: string } | { client: 'reply'; stdin: string } | { client: 'post'; path: string; stdin: string } | { client: 'card'; argv: string[] }
-type Field = { type: 'string' | 'integer' | 'boolean' | 'array'; description: string; word?: boolean; enum?: string[] }
+type Field = { type: 'string' | 'integer' | 'boolean' | 'array'; description: string; word?: boolean; lines?: boolean; enum?: string[] }
 type SeatTool = { description: string; fields: Record<string, Field>; required: string[]; oneOf?: string[]; refuse?: (a: Record<string, unknown>) => string | null; build: (a: Record<string, unknown>) => SeatCall }
 
 const str = (a: Record<string, unknown>, k: string) => String(a[k] ?? '')
 const word = (description: string): Field => ({ type: 'string', description, word: true })
 const text = (description: string): Field => ({ type: 'string', description })
+// A field that keeps its lines: the client reads stdin whole as one verb, so a newline is text.
+const paragraphs = (description: string): Field => ({ type: 'string', description, lines: true })
 
 export const SEAT_TOOLS: Record<string, SeatTool> = {
   relay: {
     description: 'The seat, or a goal\'s steward for a session its launches started: relay a directive to a session. The daemon frames the seat\'s as on the owner\'s behalf, and a steward\'s as its own, within the seat\'s bounds.',
-    fields: { to: word('The session to direct.'), epoch: { type: 'integer', description: 'The session\'s enrolment epoch, when it must be that one.' }, checkpoint: word('A checkpoint\'s id, when the session takes over from it: the daemon hands it the checkpoint\'s text after the directive, so do not paste the text.'), text: text('The directive, naming the card.') },
+    fields: { to: word('The session to direct.'), epoch: { type: 'integer', description: 'The session\'s enrolment epoch, when it must be that one.' }, checkpoint: word('A checkpoint\'s id, when the session takes over from it: the daemon hands it the checkpoint\'s text after the directive, so do not paste the text.'), text: paragraphs('The directive, naming the card. Paragraphs and lists keep their lines, and the session reads it as markdown.') },
     required: ['to', 'text'],
     build: a => ({ client: 'say', stdin: `relay: token @lease to ${str(a, 'to')}${a.epoch !== undefined ? `@${str(a, 'epoch')}` : ''}${a.checkpoint !== undefined ? ` checkpoint ${str(a, 'checkpoint')}` : ''} ${str(a, 'text')}` }),
   },
@@ -285,8 +287,15 @@ export const SEAT_TOOLS: Record<string, SeatTool> = {
     required: ['card', 'session', 'role'],
     build: a => ({ client: 'card', argv: ['session', str(a, 'card'), str(a, 'session'), str(a, 'role')] }),
   },
+  answer: {
+    description: 'Seat only: answer a snapshot or a regroup by its episode once you have reviewed it: acted, saying what you did, or considered, saying why nothing needed you. This is how a snapshot is answered, never by speaking to the owner.',
+    fields: { episode: word('The episode the signal carries.'), verdict: { type: 'string', description: 'What you did with it.', enum: ['acted', 'considered'] },
+              because: text('What you did, or why nothing needed you.') },
+    required: ['episode', 'verdict', 'because'],
+    build: a => ({ client: 'say', stdin: `answer: token @lease ${str(a, 'episode')} ${str(a, 'verdict')} because ${str(a, 'because')}` }),
+  },
   say: {
-    description: 'Seat only: speak to the owner on the Direct line, as the brain: first, again, or about a say they sent. Each call is one message.',
+    description: 'Seat only: speak to the owner on the Direct line, as the brain: first, again, or about a say they sent. Each call is one message. Never to answer a frame: reading one acknowledged it, and a snapshot is answered with the answer tool.',
     fields: { text: text('What you say.'), request: word('The id of the owner\'s say this is about, if it is about one.') },
     required: ['text'],
     build: a => ({ client: 'reply',
@@ -302,8 +311,10 @@ export function seatSchema(name: string) {
 }
 
 // What one call sends, or why it is refused. A control character could end the verb line and start
-// another, and a word field with a space would shift every field after it.
+// another, and a word field with a space would shift every field after it. A field that keeps its
+// lines is the verb's last, which lease.py reads to the end of stdin, so only a newline and a tab pass.
 const CONTROL = /[\u0000-\u001f\u007f]/
+const CONTROL_BUT_LINES = /[\u0000-\u0008\u000b-\u001f\u007f]/
 export function seatCall(name: string, args: Record<string, unknown>): SeatCall | { refused: string } {
   const t = SEAT_TOOLS[name]
   if (!t) return { refused: `no seat tool ${name}` }
@@ -315,7 +326,7 @@ export function seatCall(name: string, args: Record<string, unknown>): SeatCall 
     const values = Array.isArray(v) ? v : [v]
     for (const x of values) {
       const s = String(x)
-      if (CONTROL.test(s)) return { refused: `${k} carries a control character or a newline` }
+      if (f.lines ? CONTROL_BUT_LINES.test(s) : CONTROL.test(s)) return { refused: f.lines ? `${k} carries a control character other than a newline or a tab` : `${k} carries a control character or a newline` }
       if ((f.word || f.type === 'array') && (/\s/.test(s) || s === '')) return { refused: `${k} is one word` }
     }
     if (f.enum && !f.enum.includes(String(v))) return { refused: `${k} is one of ${f.enum.join(', ')}` }

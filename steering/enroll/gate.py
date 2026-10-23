@@ -129,6 +129,8 @@ def main(argv: list[str]) -> int:
         return error("gate", "malformed gate flags")
     argv, extra = split
     parsed = speaker_flags(argv)
+    if parsed and len(parsed[1]) > 1 and parsed[1][1] == "merge":
+        return merge(parsed[1][0], parsed[1][2:], extra or retry_id)
     if parsed is None or len(parsed[1]) != 3 or parsed[1][1] not in ("review", "critic", "status", "cancel", "pr", "carry"):
         return error("gate", "gate requires a supported action and its argument")
     flags, (session, kind, what) = parsed
@@ -387,6 +389,40 @@ def gate_read(r: dict) -> str:
     lines += [f"- {f.get('severity')} {f.get('file')}:{f.get('line')} {f.get('claim')} [{f.get('id')}, {f.get('status')}]"
               for f in result.get("findings") or []]
     return "\n".join(lines)
+
+
+def merge(session: str, argv: list[str], flagged) -> int:
+    """`merge <pr> [--head <sha>]`: merge the pull request, or join its base's merge queue, on the
+    head that holds the pass, through this machine's `gh` (pr_merge, #8458). A required check yet to
+    report is waited for as a `wait`, not a poll: GitHub is every session's shared limit (#4203)."""
+    import datetime
+    import pr_merge
+    if flagged:
+        return error("gate", "gate merge takes only --head <sha>")
+    if len(argv) == 3 and argv[1] == "--head" and re.fullmatch(r"[0-9a-f]{40}", argv[2]):
+        expected = argv[2]
+    elif len(argv) == 1:
+        expected = None
+    else:
+        return error("gate", "gate merge requires a pull request number and at most --head <sha>")
+    if not re.fullmatch(r"#?[1-9][0-9]*", argv[0]):
+        return error("gate", "gate merge requires a pull request number")
+    repo = origin_slug(Path.cwd(), timeout=5)
+    if not repo:
+        print("this checkout's origin names no GitHub repository to merge in", file=sys.stderr)
+        return 1
+    n = int(argv[0].lstrip("#"))
+    try:
+        print(f"#{n}: " + pr_merge.merge(repo, n, expected, say=lambda line: print(line, file=sys.stderr)))
+    except pr_merge.Pending as why:
+        at = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%MZ")
+        print(f"not yet: {why}; it reports minutes after a push. Declare `verb.py wait {session} for at {at}`, "
+              f"and merge again when it tells you", file=sys.stderr)
+        return 75
+    except pr_merge.Refused as why:
+        print(f"not merged: {why}", file=sys.stderr)
+        return 1
+    return 0
 
 
 def go_carry(ws: Path, session: str, flags, pr: int, retry_id: str | None) -> int:

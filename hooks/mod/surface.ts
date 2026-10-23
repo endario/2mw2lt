@@ -17,8 +17,12 @@ export type Delta = { key: string; block: 'text' | 'thinking'; text: string }
 export type Payload = { kind: 'row' | 'compaction'; row: Row } | { kind: 'turn'; turn: Turn }
   | { kind: 'ask'; ask: Ask } | { kind: 'ask-settled'; settled: Settled } | { kind: 'delta'; delta: Delta }
 // One of the agent's commands on the poll: a kind and that kind's body. `emit` asks the module to
-// number an event the agent saw, `prompt` to land words from the desk, `interrupt` to stop its turn.
+// number an event the agent saw, `prompt` to land words from the desk, `interrupt` to stop its turn,
+// `command` to run a slash command.
 export type Command = { kind?: unknown; body?: unknown }
+// What a desk command did (#8432): dispatched as its own turn, waiting for the busy turn to end, or
+// run as a local command with what it resolved to; or why it did not run.
+export type Ran = { landed: 'new-turn' | 'queued'; why?: string } | { landed: 'ran'; result?: string } | { refused: string }
 // Where a prompt landed, as the agent's receipt says it (design §8.2): submitted as a new turn,
 // appended to the running one, or appended for the next request with why it started none.
 export type Landing = { landed: 'new-turn' | 'running-turn' | 'queued'; why?: string } | { refused: string }
@@ -132,7 +136,7 @@ export function eventOf(e: Pick<Append, 'door' | 'origin' | 'agentId'>, stored: 
 }
 
 // Whether a row's origin is this plugin's.
-export const ours = (o: Append['origin']) => o.kind === 'plugin' && 'name' in o && o.name === OWN
+export const ours = (o: { kind: string }) => o.kind === 'plugin' && 'name' in o && o.name === OWN
 
 // Whether a row stored under door and origin is one this module appended itself: it emits those
 // where it makes them, with the act that landed them, and its hook passes them by.
@@ -335,4 +339,77 @@ export class Outbox {
   lost(session: string, from: number) {
     this.owed.set(session, Math.min(this.owed.get(session) ?? from, from))
   }
+}
+
+// A slash command as the agent keeps it (#8432 decision 3), classed here, the one place that knows
+// Claude: `prompt` expands into the model's input, `session` acts on the session's own context,
+// `spend` changes what it costs, and `control` is never run from the desk. `$.command.list()` gives
+// no argument hint, so `hint` is empty.
+export type Class = 'prompt' | 'session' | 'spend' | 'control'
+export type SlashCommand = { name: string; description: string; hint: string; source: string; class: Class }
+
+// Claude's built-ins mix local commands with bundled prompt skills (U0), so each is classed by name.
+// One this map does not name is left out: nothing unclassified reaches the desk.
+export const BUILTIN_CLASS: Readonly<Record<string, Class>> = {
+  // Bundled skills: they expand into the model's input.
+  'code-review': 'prompt', simplify: 'prompt', 'security-review': 'prompt', init: 'prompt', verify: 'prompt',
+  run: 'prompt', 'run-skill-generator': 'prompt', 'deep-research': 'prompt', batch: 'prompt', loop: 'prompt',
+  dataviz: 'prompt', 'artifact-design': 'prompt', 'artifact-diagramming': 'prompt', 'claude-api': 'prompt',
+  'workflow-authoring': 'prompt', 'plugin-authoring': 'prompt',
+  // The session's own context, no wider reach.
+  compact: 'session', context: 'session', review: 'session', usage: 'session', status: 'session', rename: 'session',
+  // What the session costs.
+  model: 'spend', effort: 'spend', fast: 'spend', advisor: 'spend',
+  // What the session may do, where it runs, or whether it does.
+  config: 'control', permissions: 'control', hooks: 'control', plugin: 'control', 'reload-plugins': 'control',
+  'reload-skills': 'control', mcp: 'control', login: 'control', logout: 'control', exit: 'control', sandbox: 'control',
+  'add-dir': 'control', cd: 'control', memory: 'control', plan: 'control', 'auto-mode-setup': 'control',
+  'update-config': 'control', 'fewer-permission-prompts': 'control', doctor: 'control', debug: 'control',
+  clear: 'control', resume: 'control', fork: 'control', branch: 'control', rewind: 'control', background: 'control',
+}
+
+// The list the agent is told: every command not built in is a prompt (a skill, a markdown command,
+// an MCP prompt) unless a built-in holds its name, and a built-in is classed by name, or left out.
+export function classified(list: readonly { name: string; description: string; source: string }[]): SlashCommand[] {
+  const out: SlashCommand[] = []
+  for (const c of list) {
+    const named = Object.prototype.hasOwnProperty.call(BUILTIN_CLASS, c.name) ? BUILTIN_CLASS[c.name] : undefined
+    // A name a built-in holds keeps the built-in's class whoever lists it: a repo's skill named `exit`
+    // must not read as a prompt while the engine may run the built-in under that name.
+    const cls = c.source === 'builtin' || named ? named : 'prompt'
+    if (cls) out.push({ name: c.name, description: c.description, hint: '', source: c.source, class: cls })
+  }
+  return out
+}
+
+// The command a `command` asks the module to run: its act's id, its name and args, and who ran it,
+// as the from: line names them. Without a name or a speaker, why not, and the id when there was one.
+export function running(body: unknown): { id: string; name: string; args: string; from: string } | { id?: string; refused: string } {
+  const b = (typeof body === 'object' && body !== null ? body : {}) as { id?: unknown; name?: unknown; args?: unknown; from?: unknown }
+  const id = typeof b.id === 'string' && b.id ? b.id : undefined
+  if (id && typeof b.name === 'string' && b.name && typeof b.from === 'string' && b.from && (b.args === undefined || typeof b.args === 'string')) {
+    return { id, name: b.name, args: b.args ?? '', from: b.from }
+  }
+  return { ...(id ? { id } : {}), refused: 'the agent\'s command carried no name or no speaker' }
+}
+
+// What the model reads first in a desk command's turn: who ran it, since the command's own text
+// cannot carry a from: line (the engine reads the whole text as the command line).
+export const commandNote = (from: string, name: string, args: string) =>
+  `from: ${from}\n\nThe next command, /${args.trim() ? `${name} ${args.trim()}` : name}, is theirs.`
+
+// The most of a local command's result the agent is handed.
+export const RESULT_MAX = 4096
+
+// What a local command resolved to, as the desk's receipt shows it: its output and the notes it left
+// the model, cut at RESULT_MAX, never inside a surrogate pair; undefined when it left neither.
+export function ranResult(r: { text?: unknown; context?: unknown }): string | undefined {
+  const parts = [typeof r.text === 'string' ? r.text : '', ...(Array.isArray(r.context) ? r.context.filter(c => typeof c === 'string') : [])]
+  let out = parts.filter(p => p.trim()).join('\n\n')
+  if (!out) return undefined
+  if (out.length > RESULT_MAX) {
+    const end = /[\uD800-\uDBFF]/.test(out[RESULT_MAX - 1]!) ? RESULT_MAX - 1 : RESULT_MAX
+    out = out.slice(0, end)
+  }
+  return out
 }
