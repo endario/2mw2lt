@@ -574,7 +574,10 @@ def declare_card(card: str, name: str, anchors: dict, token: str, repo: str = ""
         body["goal"] = goal
     answer = write("/cards", body, _own_key("declare", card, json.dumps(body, sort_keys=True)),
                   SESSION_CARRIER, token)
-    return f"declared: {card}" + (" (replayed)" if answer.get("replayed") else "")
+    line = f"declared: {card}" + (" (replayed)" if answer.get("replayed") else "")
+    if warning := answer.get("warning"):
+        line += f"; warned: {warning}"
+    return line
 
 
 def _join_own_card(session: str, minted: str, anchors: dict, repo: str, token: str,

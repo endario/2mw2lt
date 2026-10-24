@@ -2252,6 +2252,149 @@ CallbackList = typing.TypedDict("CallbackList", {
     "items": "list[Callback] | None",
 })
 
+# CardBriefRead is a card's composed brief: one bounded reading of where a card is, built from
+# what exists and never stored (#4392, #8684 C2). Cut names each cut that fitted the brief under
+# its bound.
+CardBriefRead = typing.TypedDict("CardBriefRead", {
+    "brief": "CardBriefDTO",
+})
+
+# CardBriefDTO is the brief as the wire answers it.
+CardBriefDTO = typing.TypedDict("CardBriefDTO", {
+    "card": "CardBriefCardDTO",
+    "intents": "list[CardBriefIntentDTO] | None",
+    "goals": "list[CardBriefGoalDTO] | None",
+    "blocked_on": "list[CardBriefBlockedDTO] | None",
+    "checkpoint": "typing.NotRequired[CardBriefCheckpointDTO | None]",
+    "branches": "list[CardBriefBranchDTO] | None",
+    "pulls": "list[CardBriefPullDTO] | None",
+    "gate": "typing.NotRequired[CardBriefGateDTO | None]",
+    "executor": "typing.NotRequired[CardBriefExecutorDTO | None]",
+    "budgets": "list[CardBriefBudgetDTO] | None",
+    "cut": "typing.NotRequired[list[str] | None]",
+})
+
+# CardBriefCardDTO is the card the brief is of. Concluded says it stands concluded; Ending is its
+# landing's verdict when it has one.
+CardBriefCardDTO = typing.TypedDict("CardBriefCardDTO", {
+    "id": "str",
+    "name": "str",
+    "state": "str",
+    "major": "bool",
+    "lane": "str",
+    "ending": "typing.NotRequired[str]",
+    "concluded": "bool",
+})
+
+# CardBriefIntentDTO is one of the card's intents, its objective as its maker wrote it, its context
+# clipped to what the brief has room for.
+CardBriefIntentDTO = typing.TypedDict("CardBriefIntentDTO", {
+    "title": "str",
+    "context": "typing.NotRequired[str]",
+})
+
+# CardBriefGoalDTO is a goal the card contributes to, and the working plan's selections of it.
+CardBriefGoalDTO = typing.TypedDict("CardBriefGoalDTO", {
+    "goal": "str",
+    "title": "str",
+    "plan": "int",
+    "roles": "list[CardBriefSelectionDTO] | None",
+})
+
+# CardBriefSelectionDTO is one selection the working plan makes of the card.
+CardBriefSelectionDTO = typing.TypedDict("CardBriefSelectionDTO", {
+    "position": "int",
+    "role": "str",
+    "statement": "str",
+})
+
+# CardBriefBlockedDTO is one fact the card waits on: a need raised on it, or a wait of its
+# executor's that names it.
+CardBriefBlockedDTO = typing.TypedDict("CardBriefBlockedDTO", {
+    "kind": "str",
+    "text": "str",
+    "at": "str",
+})
+
+# CardBriefCheckpointDTO is the card's latest checkpoint: the newest any executor wrote naming the
+# card, whoever's session it rode. Text is its text while the platform keeps it and the reader is
+# shown it; Expired says the platform no longer keeps it, and Note is the pointer form's comment.
+CardBriefCheckpointDTO = typing.TypedDict("CardBriefCheckpointDTO", {
+    "occurrence": "str",
+    "boundary": "str",
+    "at": "str",
+    "by": "str",
+    "session": "str",
+    "text": "typing.NotRequired[str]",
+    "note": "typing.NotRequired[str]",
+    "expired": "bool",
+})
+
+# CardBriefBranchDTO is a branch the card holds.
+CardBriefBranchDTO = typing.TypedDict("CardBriefBranchDTO", {
+    "repo": "str",
+    "branch": "str",
+    "at": "str",
+})
+
+# CardBriefPullDTO is a pull request the card holds, as the plane last observed it and as its
+# repository's merge queue holds it.
+CardBriefPullDTO = typing.TypedDict("CardBriefPullDTO", {
+    "repo": "str",
+    "n": "int",
+    "state": "str",
+    "queued": "bool",
+    "queued_at": "typing.NotRequired[str | None]",
+    "dequeued_at": "typing.NotRequired[str | None]",
+})
+
+# CardBriefGateDTO is the card's gate: how many commissions it has heard, reviews and critiques
+# alike, the newest one's verdict or phase, whether a commission stands open, and whether a lift
+# waives its critique.
+CardBriefGateDTO = typing.TypedDict("CardBriefGateDTO", {
+    "rounds": "int",
+    "latest": "typing.NotRequired[str]",
+    "open": "bool",
+    "waiver": "typing.NotRequired[bool]",
+})
+
+# CardBriefExecutorDTO is the card's live executor as it stands, with its recent words newest
+# first.
+CardBriefExecutorDTO = typing.TypedDict("CardBriefExecutorDTO", {
+    "name": "str",
+    "session": "str",
+    "epoch": "int",
+    "enrolled": "str",
+    "turn": "typing.NotRequired[str | None]",
+    "active_at": "typing.NotRequired[str | None]",
+    "step_at": "typing.NotRequired[str | None]",
+    "work": "typing.NotRequired[str]",
+    "blocked_on": "typing.NotRequired[str]",
+    "done": "typing.NotRequired[str | None]",
+    "last_act": "typing.NotRequired[CardBriefActDTO | None]",
+    "tail": "list[CardBriefSaidDTO] | None",
+})
+
+# CardBriefActDTO is the executor's newest own act at its epoch.
+CardBriefActDTO = typing.TypedDict("CardBriefActDTO", {
+    "kind": "str",
+    "at": "str",
+})
+
+# CardBriefSaidDTO is one word the executor said: an announce's work, a block's blocker, or a
+# done's result.
+CardBriefSaidDTO = typing.TypedDict("CardBriefSaidDTO", {
+    "state": "str",
+    "text": "str",
+    "at": "str",
+})
+
+# CardBriefBudgetDTO is what is left of one act's budget for the card.
+CardBriefBudgetDTO = typing.TypedDict("CardBriefBudgetDTO", {
+    "act": "str",
+    "left": "int",
+})
+
 # CheckoutCensus is one checkout as its machine last read it. A reported checkout is filed under
 # its repository's owner/name with its list of worktrees, empty or not; an unreadable one says why
 # and carries none, absent or null, since it is not the same answer as a checkout that holds none. WorktreesDropped counts those the machine
@@ -4394,13 +4537,22 @@ RegroupList = typing.TypedDict("RegroupList", {
 
 # Releases answers GET /releases (5831-ledger-releases design.md): a page of the workspace's
 # observed releases, newest published first, each with the range of commits it holds over the
-# release before it. The first page also answers each repository's tail, what merged after its
-# newest release, and the pull requests open on its default branch. Next is where the page stopped.
+# release before it, its merged commits marked shipped when a published release's tested content
+# holds them, not merely reachable from a tag (doc 202 D9). The first page also answers each
+# repository's tail, what merged after its newest release, and the pull requests open on its
+# default branch. Next is where the page stopped.
 Releases = typing.TypedDict("Releases", {
     "releases": "list[ReleaseDTO] | None",
     "next": "typing.NotRequired[str]",
     "tails": "list[ReleaseRangeDTO] | None",
     "open": "list[ReleasePullDTO] | None",
+    "red": "typing.NotRequired[list[ReleaseRedDTO] | None]",
+})
+
+# ReleaseRedDTO is a red streak as CI's read states it, and when it was raised.
+ReleaseRedDTO = typing.TypedDict("ReleaseRedDTO", {
+    "question": "str",
+    "since": "str",
 })
 
 # ReleaseDTO is one published release as its repository's read observed it: Release is GitHub's id,
@@ -4414,6 +4566,7 @@ ReleaseDTO = typing.TypedDict("ReleaseDTO", {
     "prerelease": "bool",
     "published_at": "str",
     "commit": "str",
+    "shipped_from": "typing.NotRequired[str]",
     "committed_at": "str",
     "moved_from": "list[str] | None",
     "range": "ReleaseRangeDTO",
@@ -4446,12 +4599,24 @@ ReleaseRangeDTO = typing.TypedDict("ReleaseRangeDTO", {
 
 # ReleasePullDTO is a pull request a release range or the open list names, with the card the keeper
 # joined it to when there is one. MergedAt is absent for one still open.
+#
+# An open one also says where it stands, as the platform observed it: Head and Branch, its head's
+# commit and branch; Review, its newest review round that was not cancelled; Passed, whether a
+# passing review is published on the head it is open at; QueuedAt, when it joined the merge queue
+# on that head, while it waits there; LeftQueueAt, when it left the queue on that head unmerged.
 ReleasePullDTO = typing.TypedDict("ReleasePullDTO", {
     "repository": "str",
     "number": "int",
     "title": "str",
     "merged_at": "str | None",
+    "shipped": "bool",
     "card": "typing.NotRequired[str]",
+    "head": "typing.NotRequired[str]",
+    "branch": "typing.NotRequired[str]",
+    "review": "typing.NotRequired[GateRow | None]",
+    "passed": "typing.NotRequired[bool]",
+    "queued_at": "typing.NotRequired[str | None]",
+    "left_queue_at": "typing.NotRequired[str | None]",
 })
 
 RoomAuthor = typing.TypedDict("RoomAuthor", {
@@ -5984,6 +6149,7 @@ CardAnswer = typing.TypedDict("CardAnswer", {
     "card": "CardDTO",
     "replayed": "bool",
     "position": "int",
+    "warning": "typing.NotRequired[str]",
 })
 
 # CriterionBody is one criterion of a goal's revision, in its order: a criterion of the goal's
@@ -6169,10 +6335,18 @@ CriterionWorkDTO = typing.TypedDict("CriterionWorkDTO", {
     "card": "str",
 })
 
-# PlanDTO is one adopted plan revision. Stale names each pin that no longer holds: "scope" when the
-# goal has revised its criteria since, "policy" when the policy unit has moved or gone. PolicyNow is
-# the policy unit's revision now, the one a plan adopted under it must expect; empty when the unit is
-# no longer an active decision.
+# PlanStale is one pin of an adopted plan that no longer holds: "scope" when the goal has revised
+# its criteria since, "policy" when the policy unit has moved or gone, "retired" when a card the
+# plan still selects has retired, naming each such card by its wire id, in its selections and its
+# criterion work alike (#8682).
+PlanStale = typing.TypedDict("PlanStale", {
+    "kind": "str",
+    "cards": "typing.NotRequired[list[str] | None]",
+})
+
+# PlanDTO is one adopted plan revision. Stale names each pin that no longer holds, as PlanStale.
+# PolicyNow is the policy unit's revision now, the one a plan adopted under it must expect; empty
+# when the unit is no longer an active decision.
 PlanDTO = typing.TypedDict("PlanDTO", {
     "revision": "int",
     "criteria_revision": "int",
@@ -6183,7 +6357,7 @@ PlanDTO = typing.TypedDict("PlanDTO", {
     "cutoff": "str",
     "selections": "list[SelectionDTO] | None",
     "criterion_work": "list[CriterionWorkDTO] | None",
-    "stale": "list[str] | None",
+    "stale": "list[PlanStale] | None",
     "policy_now": "str",
     "by": "WorkActor",
     "at": "str",
@@ -6297,11 +6471,12 @@ GoalExecutionOmitted = typing.TypedDict("GoalExecutionOmitted", {
 
 # GoalExecutionValidity is the working plan's pins as they stand: which no longer hold, where its
 # policy is now, and whether the inputs it was adopted under have moved. Stale describes the plan's
-# scope and policy alone; an empty array says nothing of the inputs, which InputsMoved names
-# separately, and InputsDelta names what moved — the canonical input lines added and removed since
-# adoption, omitted when the plan recorded none or nothing moved (#7012).
+# scope, policy and selected cards alone, each pin as PlanStale; an empty array says nothing of the
+# inputs, which InputsMoved names separately, and InputsDelta names what moved — the canonical input
+# lines added and removed since adoption, omitted when the plan recorded none or nothing moved
+# (#7012).
 GoalExecutionValidity = typing.TypedDict("GoalExecutionValidity", {
-    "stale": "list[str] | None",
+    "stale": "list[PlanStale] | None",
     "policy_now": "str",
     "inputs_moved": "bool",
     "inputs_delta": "typing.NotRequired[GoalPlanInputsDelta | None]",
@@ -6470,7 +6645,7 @@ GoalSummaryDTO = typing.TypedDict("GoalSummaryDTO", {
 PlanSummaryDTO = typing.TypedDict("PlanSummaryDTO", {
     "revision": "int",
     "at": "str",
-    "stale": "list[str] | None",
+    "stale": "list[PlanStale] | None",
 })
 
 # GoalList is a page of the workspace's goals, newest first.
@@ -6791,6 +6966,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/cards",
     "GET /w/{workspace}/api/v1/cards/{card}",
     "POST /w/{workspace}/api/v1/cards/{card}/associations",
+    "GET /w/{workspace}/api/v1/cards/{card}/brief",
     "GET /w/{workspace}/api/v1/cards/{card}/checkpoints",
     "POST /w/{workspace}/api/v1/cards/{card}/conclusion",
     "POST /w/{workspace}/api/v1/cards/{card}/corrections",

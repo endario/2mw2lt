@@ -51,7 +51,8 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
              "a major card owes a spec until a critic-passed knowledge record names it.\n"
              "       `retier` sets a stage's floor (#6499): <floor> is legendary|epic|rare|uncommon; "
              "the executor's own stage only rises, while the seat and the owner re-tier any stage "
-             "either way, each saying why (#7146).\n"
+             "either way, each saying why (#7146) — a lowering also spends the rungs authors asked "
+             "the series at before it (#8671).\n"
              "       `outcome` is the brain's alone (doc 185): each text field is one quoted argument, and a "
              "brief with a reading has the daemon take its baseline as it is written.")
     usage = usage.replace("card.py", prog)

@@ -135,6 +135,11 @@ kind turned off is not told, and its standing still reads:
   with what it runs. A stuck turn that has also gone silent is told as stuck, not again as stale.
   The snapshot's fleet line says every working session's `last step` age, which tells a long turn
   from a hung one.
+- **`session-dead`**: the session is gone for good, not merely silent. `cause` says why:
+  `resume-failed`, its machine answered a wake that no process runs it and resuming it failed (`why`
+  is the machine's words), or `machine-offline`, its machine has been offline 30 minutes while it
+  held nothing there. A dead session is told nothing else. Relaunch its card (`card` names it) on a
+  live machine from its branch and latest checkpoint, or retire it.
 - **`session-quiet`**: a worker holding a card ended its turn without saying done 20 minutes ago,
   with nothing it waits on open, and has written nothing since. Drive it, or keep it with what it
   waits on.
