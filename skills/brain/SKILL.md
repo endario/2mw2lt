@@ -843,6 +843,10 @@ GLM on ZCode is not GLM inside Claude Code: `claude vendor zai` runs the latter,
 the quota per task; name it only for a stated reason. #7076
 measured the production key path on 2026-10-16: ZCode spent 0.71–0.75 of the wrapper's credits per
 token and about 0.52 per task. ZCode takes same-turn steering (`protocol.SteersATurn`).
+The bracketed counter on ZCode's status line (`waiting for model… [32m 37s]`) is the whole turn's
+age, not one request's wait: a turn that steps every few seconds reads the same. Judge a stall by
+the session's `step_at` in `/sessions`, which `session-stuck` already watches, never by that
+counter; on 2026-10-24 reading it as a hung request cost two working turns an Esc.
 
 `rest.py '/placement?floor=<rarity>&effort=<level>'` shows the model each account would
 start and how far above the floor it stands, the harness it would start, how that was chosen and

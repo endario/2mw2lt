@@ -23,7 +23,7 @@ sys.path.insert(0, str(HERE))
 from bind import Refused  # noqa: E402
 from connect import branch, head, speaker_flags, speaking_as  # noqa: E402
 from door import display_reply, occurrence, retry_args  # noqa: E402
-from local_workspace import origin_slug, required_workspace_root  # noqa: E402
+from local_workspace import checkout_slug, required_workspace_root  # noqa: E402
 
 # A reflog subject that records a commit this checkout made, rather than one it was handed by a
 # fetch, a fast-forward or a reset. `HEAD`'s reflog holds each rebase step; a branch's, only the tip.
@@ -225,8 +225,8 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
         print("--resolution is a review's: a critique reads its whole design", file=sys.stderr)
         return 1
     here = Path.cwd()
-    repo = origin_slug(here, timeout=5)
-    own = origin_slug(ws, timeout=5)
+    repo = checkout_slug(here, timeout=5)
+    own = checkout_slug(ws, timeout=5)
     if not repo or own and own != repo:
         print(f"this workspace gates {own}, not {repo}" if repo else "this checkout names no origin to gate", file=sys.stderr)
         return 1
@@ -263,11 +263,18 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
         body["final"] = True
     this = retry_id or occurrence()
     print(f"id {this}", file=sys.stderr)
-    uncertain, lever = False, ""
+    uncertain, lever, request_ended = False, "", False
     try:
         answer = session_routes.write("/gates", body, this, session_routes.SESSION_CARRIER, token)
-        # An id and a state name a commission; a round it does not answer is left unsaid (#5873).
-        if answer.get("id") and answer.get("state"):
+        # Awaiting records the request, not yet a round pinned to an observed head.
+        if answer.get("id") and answer.get("state") == "awaiting":
+            reply = (f"awaiting: {answer['id']} {kind}, waiting to pin the requested head; "
+                     f"no round spent. Read /2mw2lt:gate status {answer['id']}")
+        elif answer.get("id") and answer.get("uncommissioned") and answer.get("state") in ("refused", "cancelled"):
+            request_ended = True
+            why = f" ({wait_reason(answer['reason'])})" if answer.get("reason") else ""
+            reply = f"{answer['state']}: {answer['id']} {kind}, not commissioned; no round spent{why}"
+        elif answer.get("id") and answer.get("state"):
             why = f" ({wait_reason(answer['reason'])})" if answer.get("reason") else ""
             round_ = f" round {answer['round']}" if answer.get("round") else ""
             state = answer["state"]
@@ -295,7 +302,7 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
     if uncertain:
         # Go answers the same key with the commission it made, or makes it once if it never arrived.
         print(f"the commission may have landed: send it again with --retry={this} to learn which", file=sys.stderr)
-    return 1 if reply.startswith("REJECTED") else 0
+    return 1 if request_ended or reply.startswith("REJECTED") else 0
 
 
 # How many pages of a pull request's gates a read walks, so a cursor that repeats cannot loop.
@@ -322,7 +329,7 @@ def go_read(ws: Path, session: str, flags, kind: str, what: str) -> int:
         except ValueError:
             return error("gate", "gate status requires a commission id")
     else:
-        repo = origin_slug(Path.cwd(), timeout=5) or origin_slug(ws, timeout=5)
+        repo = checkout_slug(Path.cwd(), timeout=5) or checkout_slug(ws, timeout=5)
         if not repo:
             print("this checkout names no origin to read gates for", file=sys.stderr)
             return 1
@@ -363,6 +370,10 @@ def wait_reason(reason: str) -> str:
 def gate_row(r: dict) -> str:
     """One commission as a line: where it stands, its round and the head it judged. A queued one
     answers the queue's face first: its priority and how many wait ahead (#6850)."""
+    if r.get("uncommissioned"):
+        said = (f"{r.get('phase')}: {r.get('id')} {r.get('kind')} request "
+                f"at {str(r.get('sha') or '')[:12]}, no round spent")
+        return said + (f" ({wait_reason(r['why'])})" if r.get("why") and r.get("phase") != "awaiting" else "")
     place = ""
     if r.get("phase") == "queued" and r.get("priority"):
         place = f" {r['priority']}, {r.get('ahead', 0)} ahead —"
@@ -412,7 +423,7 @@ def merge(session: str, argv: list[str], flagged) -> int:
         return error("gate", "gate merge requires a pull request number and at most --head <sha>")
     if not re.fullmatch(r"#?[1-9][0-9]*", argv[0]):
         return error("gate", "gate merge requires a pull request number")
-    repo = origin_slug(Path.cwd(), timeout=5)
+    repo = checkout_slug(Path.cwd(), timeout=5)
     if not repo:
         print("this checkout's origin names no GitHub repository to merge in", file=sys.stderr)
         return 1
@@ -439,7 +450,7 @@ def go_carry(ws: Path, session: str, flags, pr: int, retry_id: str | None) -> in
     import session_routes
     here = Path.cwd()
     at = head(here)
-    repo, own = origin_slug(here, timeout=5), origin_slug(ws, timeout=5)
+    repo, own = checkout_slug(here, timeout=5), checkout_slug(ws, timeout=5)
     if not at or not repo:
         print("this checkout names no commit or no origin to carry", file=sys.stderr)
         return 1

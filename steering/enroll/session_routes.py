@@ -364,6 +364,10 @@ def checkpoint(token: str, body: dict) -> tuple[str, bool]:
             return refusal.reconnect("the session's token is not valid"), False
         if not settled(e):
             return refusal.retry(str(e)), True
+        if e.code == "checkpoint-credential":
+            detail = f" ({e.detail})" if e.detail else ""
+            return refusal.resend(f"{e}: the checkpoint text contains credential-shaped content{detail}",
+                                  "remove or reword that content, then send the checkpoint again"), False
         return refusal.use("checkpoint", str(e)), False
     got = answer.get("checkpoint") or {}
     dropped = got.get("dropped") or 0
@@ -534,26 +538,17 @@ def card_repo(ws: Path | None = None) -> str:
     """`owner/name` of the workspace checkout's origin. Go's wire names the repository an anchor
     is in, which the incumbent's door filled in from the workspace's one repository; the client
     names it from the checkout itself, where the branch and the issue numbers come from too."""
-    url = ""
+    from local_workspace import checkout_slug
+    repo = None
     try:
-        url = subprocess.run(["git", "-C", str(ws) if ws else os.getcwd(), "remote", "get-url", "origin"],
-                             capture_output=True, text=True, timeout=5).stdout.strip()
+        repo = checkout_slug(ws if ws is not None else Path.cwd(), timeout=5)
     except (OSError, subprocess.SubprocessError):
         pass
-    for left in ("https://github.com/", "ssh://git@github.com/"):
-        if url.startswith(left):
-            url = url[len(left):]
-    # scp-like, as `git@github.com:` or an ssh config alias such as `github.com-work:` writes it.
-    scp = re.fullmatch(r"(?:[^@/:\s]+@)?[^@/:\s]+:(?P<path>[^/:\s]+/[^/:\s]+)", url)
-    if scp:
-        url = scp["path"]
-    if url.endswith(".git"):
-        url = url[:-len(".git")]
-    if url.count("/") != 1 or not all(url.split("/")):
+    if not repo or not re.fullmatch(r"[^/:\s]+/[^/:\s]+", repo):
         # The origin may embed a credential; its shape is said, never its value.
         raise SystemExit("declare needs the checkout's origin as owner/name to name an anchor's "
                          "repository; this checkout's origin is not in that form")
-    return url
+    return repo
 
 
 def declare_card(card: str, name: str, anchors: dict, token: str, repo: str = "", triage: dict | None = None,
@@ -1032,12 +1027,12 @@ def seat_cancel(session: str, token: str, action: str, key: str) -> str:
 
 
 def seat_action(session: str, token: str, body: dict, key: str) -> str:
-    """The holder asks the machine a session runs on to wake, control, retire, rehome or park it
+    """The holder asks the machine a session runs on to wake, control, retire, rehome, park or interrupt it
     (`POST /actions`), keyed by the line's own key so a rerun after a lost answer is answered from
-    the first. A goal's steward wakes, parks and retires the sessions its launches started. Raises
+    the first. A goal's steward wakes, parks, retires and interrupts the sessions its launches started. Raises
     `NotSeated`, `Refused` or `Unsent`."""
     answer = lent(session, token, lambda _: write("/actions", body, key, SESSION_CARRIER, token))
-    doing = {"wake": "waking", "control": "controlling", "retire": "retiring", "rehome": "rehoming", "park": "parking"}[body["kind"]]
+    doing = {"wake": "waking", "control": "controlling", "retire": "retiring", "rehome": "rehoming", "park": "parking", "interrupt": "interrupting"}[body["kind"]]
     value = f" {body['value']}" if body.get("value") else ""
     # A retire whose machine's credential no longer reaches the workspace is ended by the seat's
     # own command (#7227), not offered to a machine: the answer's state says which happened.

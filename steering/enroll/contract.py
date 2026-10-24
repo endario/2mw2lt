@@ -61,6 +61,44 @@ InvitationDTO = typing.TypedDict("InvitationDTO", {
     "expires_at": "str",
 })
 
+# AccountMatrix is GET /accounts/matrix: what each host the team's machines run on may spend, for
+# every account the team knows (documentation/accounts/machine-account-matrix-design.md, #8609).
+# Cells are keyed as the accounts read keys its rows: vendor and account id.
+AccountMatrix = typing.TypedDict("AccountMatrix", {
+    "hosts": "list[MatrixHost] | None",
+    "cells": "list[MatrixCell] | None",
+})
+
+# MatrixHost is one host, the scope of its own routing.accounts_exclude. Census is how far its
+# counts can be trusted: "fresh", "stale" (older than the no-contact bound, or it names fewer
+# processes than it counted), or "absent".
+MatrixHost = typing.TypedDict("MatrixHost", {
+    "host": "str",
+    "name": "str | None",
+    "census": "str",
+})
+
+# MatrixCell is one account on one host. Held is whether a reading of the account stands there.
+# Forbidden is nil while nothing keeps work off it. Running is the sessions running there now, a
+# forbidden pair's included, and nil where it cannot be known: a census that is not fresh, or an
+# account held on the host whose processes no directory label maps.
+MatrixCell = typing.TypedDict("MatrixCell", {
+    "vendor": "str",
+    "account_id": "str",
+    "host": "str",
+    "held": "bool",
+    "forbidden": "MatrixForbidden | None",
+    "running": "int | None",
+})
+
+# MatrixForbidden says which rule forbids a cell: By is "owner" (the owner stopped the account for
+# the team), "host-vendor" or "host-account" (an entry of the host's routing.accounts_exclude), or
+# "login" (a rule a live login on the host reports itself). Until is when a timed rule ends.
+MatrixForbidden = typing.TypedDict("MatrixForbidden", {
+    "by": "str",
+    "until": "str | None",
+})
+
 # AccountPolicy is a completed read of one native source's self-exclusions, and of what its accounts
 # are for (go-account-purposes-design.md): both are one snapshot, stamped once.
 AccountPolicy = typing.TypedDict("AccountPolicy", {
@@ -452,6 +490,7 @@ ActionBody = typing.TypedDict("ActionBody", {
     "to": "str",
     "value": "typing.NotRequired[str]",
     "reason": "str",
+    "interrupt_working": "typing.NotRequired[bool]",
 })
 
 # ActionAnswer is the action recorded, and its state when answered.
@@ -884,6 +923,8 @@ AgentReadingBody = typing.TypedDict("AgentReadingBody", {
 # Leased is a session its machine launched on the account its launch placed: it names no directory,
 # and forgets any an earlier reading of the epoch named, so the account it spends is the launch's.
 SessionReading = typing.TypedDict("SessionReading", {
+    "management": "typing.NotRequired[ManagementReading | None]",
+    "management_failure": "typing.NotRequired[ManagementFailure | None]",
     "provider_session": "str",
     "observed_at": "str",
     "active_at": "typing.NotRequired[str]",
@@ -3539,6 +3580,15 @@ FleetSource = typing.TypedDict("FleetSource", {
     "offers": "typing.NotRequired[list[FleetOffer] | None]",
     "no_account": "typing.NotRequired[list[FleetNoAccount] | None]",
     "unlaunchable": "typing.NotRequired[list[FleetUnlaunchable] | None]",
+    "key_fingerprint": "typing.NotRequired[str | None]",
+    "session_kit": "typing.NotRequired[FleetSessionKit | None]",
+})
+
+# FleetSessionKit is one machine's session kit — each CLI utility a session's PATH must reach —
+# as its newest census reported it, and which registration said.
+FleetSessionKit = typing.TypedDict("FleetSessionKit", {
+    "tools": "list[KitTool] | None",
+    "registration": "str",
 })
 
 # FleetOffer is one account a machine's launchers can start, and which registration said.
@@ -3606,6 +3656,19 @@ MachineFleetPage = typing.TypedDict("MachineFleetPage", {
     "read_at": "str",
 })
 
+# MachineKeyBody is what an agent posts to /steering/agent/key: its machine's HPKE public key,
+# base64, as hpke.PublicKey.Bytes serializes it.
+MachineKeyBody = typing.TypedDict("MachineKeyBody", {
+    "public_key": "str",
+})
+
+# MachineKeyAnswer says what the door did with the post: the key it holds for the machine, with its
+# fingerprint, which the machine page shows (sha256(pub)[:8]).
+MachineKeyAnswer = typing.TypedDict("MachineKeyAnswer", {
+    "status": "str",
+    "fingerprint": "str",
+})
+
 # MachineRemovalBody is the seat removing a dead machine's registrations from the fleet, with the
 # reason it gives.
 MachineRemovalBody = typing.TypedDict("MachineRemovalBody", {
@@ -3621,8 +3684,58 @@ MachineRemovalAnswer = typing.TypedDict("MachineRemovalAnswer", {
     "replayed": "bool",
 })
 
+# MachineReportAnswer is what the door answers a machine's report with. MachineKey is the census's
+# alone: "held" while the door holds the machine's HPKE public key, "none" while it holds none, so
+# the agent posts it again (key-account-move design §Machine keys); absent when the answering door
+# predates machine keys.
 MachineReportAnswer = typing.TypedDict("MachineReportAnswer", {
     "status": "str",
+    "machine_key": "typing.NotRequired[str]",
+})
+
+# ManagementReading is one whole successful source capture. Missing members are unknown, not
+# retained members of a previous capture. Event times never advance just because capture succeeds.
+ManagementReading = typing.TypedDict("ManagementReading", {
+    "sampled_at": "str",
+    "turn": "typing.NotRequired[ManagementTurn | None]",
+    "step": "typing.NotRequired[ManagementStep | None]",
+    "request": "typing.NotRequired[ManagementRequest | None]",
+})
+
+ManagementTurn = typing.TypedDict("ManagementTurn", {
+    "id": "str",
+    "state": "str",
+    "started_at": "typing.NotRequired[str]",
+    "ended_at": "typing.NotRequired[str]",
+    "outcome": "typing.NotRequired[str]",
+})
+
+ManagementStep = typing.TypedDict("ManagementStep", {
+    "id": "str",
+    "at": "str",
+    "kind": "str",
+    "tool": "typing.NotRequired[str]",
+    "child": "typing.NotRequired[str]",
+})
+
+# ManagementRequest contains measured foreground request facts only. Error text and provider
+# bodies never leave the machine; Reason is a normalized class, Status a numeric HTTP status.
+# RetryAt is the scheduled due time, not the scheduling event's time or proof a retry occurred.
+ManagementRequest = typing.TypedDict("ManagementRequest", {
+    "id": "str",
+    "state": "typing.NotRequired[str]",
+    "started_at": "typing.NotRequired[str]",
+    "attempt": "typing.NotRequired[int | None]",
+    "retry_at": "typing.NotRequired[str]",
+    "delay_ms": "typing.NotRequired[int | None]",
+    "status": "typing.NotRequired[int | None]",
+    "reason": "typing.NotRequired[str]",
+})
+
+# ManagementFailure reports an unsuccessful capture without renewing the last successful one.
+ManagementFailure = typing.TypedDict("ManagementFailure", {
+    "attempted_at": "str",
+    "reason": "str",
 })
 
 # MemberList is GET /api/v1/teams/{team}/members: the team's live members, its owner first, then by
@@ -4438,6 +4551,17 @@ SessionForgeTokenAnswer = typing.TypedDict("SessionForgeTokenAnswer", {
     "fresh_for": "int",
 })
 
+# KitTool is one tool of a machine's session kit as its census reported it (doc 201): the tool's
+# name, the first line of its own version answer, and where it stands — "kit" (the agent's pinned
+# install, linked in), "host" (an install of the machine's own, which the kit never shadows) or
+# "missing". A machine-local fact, as LauncherNoAccount is: it keys nothing and composes with
+# nothing across machines.
+KitTool = typing.TypedDict("KitTool", {
+    "tool": "str",
+    "version": "typing.NotRequired[str]",
+    "origin": "str",
+})
+
 # SessionEvent is one event of a session's surface (design §5), scanned for credentials on the
 # machine before it left, all but a delta's text. A page of history carries rows and compactions
 # only, and leaves Seq 0: a seq is a place in the live stream, which the harness's record does not
@@ -4844,6 +4968,10 @@ OriginVSCode = typing.TypedDict("OriginVSCode", {
 # between (#7465): stated by Claude Code's tool hooks and by a ZCode reading's pane, each nil
 # when neither said.
 SessionVitals = typing.TypedDict("SessionVitals", {
+    "management": "typing.NotRequired[ManagementReading | None]",
+    "management_failure": "typing.NotRequired[ManagementFailure | None]",
+    "management_until": "typing.NotRequired[str | None]",
+    "management_state": "typing.NotRequired[str]",
     "observed_at": "str | None",
     "active_at": "str | None",
     "turn": "str | None",
@@ -5225,6 +5353,7 @@ StampsFrame = typing.TypedDict("StampsFrame", {
     "digest": "str",
     "knowledge": "str",
     "accounts": "str",
+    "bulletin": "str",
 })
 
 # Snapshot is the workspace's state and the cursor that resumes after it, read in one transaction.
@@ -6550,6 +6679,7 @@ WorkerCensusBody = typing.TypedDict("WorkerCensusBody", {
     "checkout": "typing.NotRequired[CheckoutCensus | None]",
     "machine_name": "typing.NotRequired[str | None]",
     "forge_login": "typing.NotRequired[ForgeLogin | None]",
+    "session_kit": "typing.NotRequired[list[KitTool] | None]",
 })
 
 # HarnessSpend is the account an account-free launch of one harness would spend on this machine
@@ -6636,6 +6766,7 @@ ROUTES = frozenset({
     "DELETE /w/{workspace}/api/v1/accounts/co-owners/{id}",
     "POST /w/{workspace}/api/v1/accounts/concurrency",
     "POST /w/{workspace}/api/v1/accounts/label",
+    "GET /w/{workspace}/api/v1/accounts/matrix",
     "POST /w/{workspace}/api/v1/accounts/offer",
     "POST /w/{workspace}/api/v1/accounts/remove",
     "POST /w/{workspace}/api/v1/accounts/reset",
@@ -6836,6 +6967,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/steering/agent/injection",
     "POST /w/{workspace}/steering/agent/interrupt",
     "POST /w/{workspace}/steering/agent/judges",
+    "POST /w/{workspace}/steering/agent/key",
     "POST /w/{workspace}/steering/agent/launch",
     "POST /w/{workspace}/steering/agent/leaving",
     "POST /w/{workspace}/steering/agent/model",

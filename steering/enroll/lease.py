@@ -84,6 +84,7 @@ _BACKLOG = re.compile(r"^backlog:\s*token\s+@lease\s*$")
 _ROSTER = re.compile(r"^roster:\s*token\s+@lease(?P<gone>\s+with\s+gone)?\s*$")
 # The seat's machine actions on Go, each naming the session it acts on.
 _ACTION = {
+    "interrupt": re.compile(r"^interrupt:\s*token\s+@lease\s+(?P<to>\S+)(?P<working>\s+working)?\s+because\s+(?P<reason>\S.*?)\s*$", re.S),
     "wake": re.compile(r"^wake:\s*token\s+@lease\s+(?P<to>\S+)\s+because\s+(?P<reason>\S.*?)\s*$", re.S),
     "control": re.compile(r"^control:\s*token\s+@lease\s+(?P<to>\S+)\s+"
                           r"(?P<value>effort\s+(?:low|medium|high|xhigh|max)|model\s+[a-z][a-z0-9]*(?:-[a-z0-9]+(?:\.[0-9]+)?)+|compact(?:\s+without\s+checkpoint)?)"
@@ -98,6 +99,7 @@ _ACTION = {
     "park": re.compile(r"^park:\s*token\s+@lease\s+(?P<to>\S+)(?:\s+until\s+(?P<until>\S+))?\s+because\s+(?P<reason>\S.*?)\s*$", re.S),
 }
 _ACTION_USAGE = {
+    "interrupt": "interrupt: token @lease <session> [working] because <reason>",
     "wake": "wake: token @lease <session> because <reason>",
     "control": "control: token @lease <session> effort <level> | model <model> | compact [without checkpoint] because <reason>",
     "retire": "retire: token @lease <session> [to <successor>] because <reason>",
@@ -375,13 +377,15 @@ def _go_cancel(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
 
 
 def _go_action(rec: dict, verb: str, line: str, key: str) -> tuple[int, str, bool]:
-    """`wake:`, `control:`, `retire:`, `rehome:` or `park:` on Go: the brain asks the session's machine to act on it."""
+    """`wake:`, `control:`, `retire:`, `rehome:`, `park:` or `interrupt:` on Go: the brain asks the session's machine to act on it."""
     import refusal
     import session_routes
     m = _ACTION[verb].match(line)
     if not m:
         return 2, refusal.use(verb, f"malformed {verb}: on Go it is `{_ACTION_USAGE[verb]}`"), False
     body = {"kind": verb, "to": m["to"], "reason": " ".join(m["reason"].split())}
+    if verb == "interrupt" and m["working"]:
+        body["interrupt_working"] = True
     if verb == "control":
         body["value"] = " ".join(m["value"].split())
     if verb == "rehome":
@@ -399,6 +403,8 @@ def _go_action(rec: dict, verb: str, line: str, key: str) -> tuple[int, str, boo
     except session_routes.Unsent as e:
         return 1, refusal.retry(str(e)), True
     except session_routes.Refused as e:
+        if e.code == "interrupt-working":
+            return 1, f"refused: {e.detail}; use `interrupt: token @lease <session> working because <reason>` to stop it on purpose", False
         if (stale := session_routes.outdated(e)) is not None:
             return 1, stale, False
         if e.code in SEAT_LOST:

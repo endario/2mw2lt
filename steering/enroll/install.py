@@ -295,12 +295,17 @@ def sign_in(console: str, scope: str, invite: str | None = None, login: str | No
             named: bool = False) -> str:
     """A console session from a device grant, held in memory for this run only. `scope` is what
     the /device page shows the person this grant does."""
-    status, got = call("POST", f"{console}/api/auth/device/code",
+    status, got = call("POST", f"{console}/api/auth/device/code?handoff=1",
                        {"client_id": CLIENT, "scope": scope})
     if status != 200 or "device_code" not in got:
         raise Stop(f"the console would not start a sign-in ({status}): {got}")
     page = got.get("verification_uri_complete") or got["verification_uri"]
-    say("sign in", f"open {got['verification_uri']} and enter {got['user_code']}")
+    code = re.sub(r"[^A-Za-z0-9]", "", got["user_code"]).upper()
+    shown = f"{code[:4]}-{code[4:]}" if len(code) == 8 else got["user_code"]
+    lifetime = float(got.get("expires_in") or 1800)
+    interval, deadline = float(got.get("interval") or POLL), time.monotonic() + lifetime
+    say("sign in", f"open {got['verification_uri']}")
+    say("code", f"{shown} (expires in {elapsed(lifetime)})")
     if invite:
         # The approval page says which this invitation is, a team of their own or a seat in another's (doc 176).
         say("invite", "the approval page says whether it makes your own team or joins you to one")
@@ -308,11 +313,20 @@ def sign_in(console: str, scope: str, invite: str | None = None, login: str | No
     who = f"@{login}" if login and (named or not invite) else "the account your invitation is for" if invite else None
     carried = (f"&invite={invite.upper()}" if invite else "") + (f"&login={login}" if login else "") \
         + ("&named=1" if login and named else "")
+    # A copied link must keep the same account constraint as the browser we open. Invitation
+    # codes remain out of a local run's output; SSH's existing manual handoff below carries them.
+    if not invite and page != got["verification_uri"]:
+        say("link", f"{page}{'#' + carried[1:] if carried else ''}")
+    say("", "only continue if you started this request in your terminal")
     if why := unopened():
         # Opened by hand, the page still carries the invitation and the login, never the proof.
         say("", f"(nothing opened: {why}; open {page}{'#' + carried[1:] if carried else ''} in your own browser"
                 + (f", signed in to GitHub as {who}" if who else "") + "; waiting…)")
     else:
+        # A person at a terminal gets time to copy the code. A tool driving install must never
+        # wait for stdin; headless and SSH runs keep their existing handoff and polling.
+        if sys.stdin.isatty():
+            input("            Copy the code, then press Enter to open your browser… ")
         say("", f"(opened in your browser; sign in to GitHub as {who}; waiting…)" if who else "(opened in your browser; waiting…)")
     # Only the browser opened here holds the proof, so only it can end this grant when its sign-in
     # is refused (#3586). It is never printed: a printed proof is as public as the user code.
@@ -321,10 +335,11 @@ def sign_in(console: str, scope: str, invite: str | None = None, login: str | No
     # which lets an invite waiting for that account admit it with no code. A login the person named
     # with --login is marked, so the approval page refuses another account outright (#4015).
     open_page(f"{page}#refusal={refusal_proof(got['device_code'])}{carried}")
-    interval, deadline = float(got.get("interval") or POLL), time.monotonic() + float(got.get("expires_in") or 1800)
     start = told = time.monotonic()
     while time.monotonic() < deadline:
         time.sleep(interval)
+        if time.monotonic() >= deadline:
+            break
         if time.monotonic() - told >= PROGRESS:
             told = time.monotonic()
             say("", f"waiting for the sign-in to be approved ({elapsed(told - start)})")
@@ -337,7 +352,9 @@ def sign_in(console: str, scope: str, invite: str | None = None, login: str | No
         if error == "slow_down":
             interval += 5
         elif error != "authorization_pending":
-            raise Stop(f"sign-in ended: {ended(answer.get('error_description') or error or status, login)}")
+            reason = {"access_denied": "the request was denied; the terminal will stop",
+                      "expired_token": "the code expired; run this again for a fresh code"}.get(error)
+            raise Stop(f"sign-in ended: {ended(answer.get('error_description') or reason or error or status, login)}")
     raise Stop("the sign-in code expired; run this again")
 
 
@@ -458,6 +475,7 @@ def admit_on_go(console: str, token: str, access: dict, repo: str, team: str | N
         raise Stop(f"several of your teams serve {repo}; name one with --team: "
                    + ", ".join(f"{t['name']} ({t['id']})" for t, _ in serving))
     owned = [t for t in teams if t.get("owner")]
+    created = False
     if serving:
         t, w = serving[0]
         say("team", f"{t['name']}{'' if t.get('owner') else ' (you joined it; installing a new repository is its owner’s)'}")
@@ -485,6 +503,7 @@ def admit_on_go(console: str, token: str, access: dict, repo: str, team: str | N
             raise Stop("you are in no team yet, and no team of your own was given to your GitHub account; "
                        "ask the platform's operator for one, or a team's owner for an invitation")
         t, w = create_team(console, token, intents[0], repo)
+        created = True
     workspace_id, address = w.get("workspace_id"), w.get("address")
     if not door_rewrite.is_uuid(workspace_id):
         raise Stop(f"coordination named {w['id']} with no workspace_id ({workspace_id!r}), which this "
@@ -498,6 +517,16 @@ def admit_on_go(console: str, token: str, access: dict, repo: str, team: str | N
         credential.enrol_native(door, console, w["id"], approval["secret"])
     except credential.NoCredential as e:
         raise Stop(f"coordination would not admit this machine: {e}") from None
+    # The browser follows this sign-in's actual admission outcome. A new machine in an existing
+    # one-workspace team must not be asked to name it again. Older consoles have no such route.
+    status, outcome = waited("POST", f"{console}/api/install/admitted", time.monotonic() + 60,
+                            {"repo": repo, "team": t["id"], "created": created}, token)
+    if status not in (200, 404):
+        raise Stop(f"the console could not carry on this install in your browser ({status}): "
+                   f"{outcome.get('error') or status}; run install again to resume")
+    if status == 200 and outcome.get("recorded") is not True:
+        raise Stop("the console did not record this install's outcome, so your browser cannot carry on; "
+                   "run install again to resume")
     return door, workspace_id, t["id"], t.get("owner") is True
 
 

@@ -154,9 +154,33 @@ def origin_slug(anchor: Path, timeout: float | None = None) -> str | None:
     not: the same repository is cloned to a different directory, under a different name,
     on the next machine.
     """
+    return _origin_slug(origin_url(anchor, timeout))
+
+
+def checkout_slug(anchor: Path, timeout: float | None = None) -> str | None:
+    """The checkout's forge repository, or its bound workspace's for a local worker mirror.
+
+    Keep named installation targets on `origin_slug`: a worker's workspace binding must not
+    relabel a local repository an operator is installing separately.
+    """
     remote = origin_url(anchor, timeout)
-    tail = (remote or "").removesuffix(".git").replace(":", "/").rsplit("/", 2)[-2:]
+    if remote and _local_remote(remote):
+        bound = os.environ.get("STEERING_WORKSPACE")
+        return origin_slug(Path(bound), timeout) if bound else None
+    return _origin_slug(remote)
+
+
+def _origin_slug(remote: str | None) -> str | None:
+    if not remote or _local_remote(remote):
+        return None
+    tail = remote.removesuffix(".git").replace(":", "/").rsplit("/", 2)[-2:]
     return "/".join(tail) if len(tail) == 2 and all(tail) else None
+
+
+def _local_remote(remote: str) -> bool:
+    if "://" in remote:
+        return urlsplit(remote).scheme == "file"
+    return remote.startswith(("/", ".")) or ":" not in remote
 
 
 def origin_url(anchor: Path, timeout: float | None = None) -> str | None:

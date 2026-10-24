@@ -1,12 +1,14 @@
 """`ci.py <your session> run …`: dispatch the parts of your pushed head's guards that read your
 change to the CI pool, and be told the verdict on your stream (documentation/ci/14).
 
-A dispatch names its parts — shards, chunks, the conformance — and never the whole suite: the
-nightly and a release own that, so `--all` and `all` are refused. The tests your change touches
-you spot-run where you sit (a test file, a `-run` pattern, one guard); the pool takes the parts
-too wide for that and the guards your OS cannot run. `status` reads a run once; `log` prints a
-failed run's output, cut to one guard's when `--guard` names it. Each goes through `gh` on this
-machine's own credential.
+A merge to `main` runs the merge tier its paths select — the steering job and the Go parts one
+table names — and a push runs scope only, the queue's group standing for it; the whole suite is
+the nightly's and a release's (documentation/ci/18). A dispatch names its parts — shards, chunks,
+the conformance — and never the whole suite, so `--all` and `all` are refused. The tests your
+change touches you spot-run where you sit (a test file, a `-run` pattern, one guard); the pool
+takes the parts too wide for that and the guards your OS cannot run. `status` reads a run once;
+`log` prints a failed run's output, cut to one guard's when `--guard` names it. Each goes through
+`gh` on this machine's own credential.
 """
 from __future__ import annotations
 
@@ -25,7 +27,7 @@ sys.path.insert(0, str(HERE))
 from bind import Refused  # noqa: E402
 from connect import branch, head, speaker_flags, speaking_as  # noqa: E402
 from door import display_reply, occurrence, retry_args  # noqa: E402
-from local_workspace import origin_slug, required_workspace_root  # noqa: E402
+from local_workspace import checkout_slug, required_workspace_root  # noqa: E402
 from verb_help import error, help_requested, script_help  # noqa: E402
 
 WORKFLOW = "steering.yml"
@@ -112,7 +114,7 @@ def main(argv: list[str]) -> int:
     if retry_id is not None and kind != "run":
         return error("ci", f"ci {kind} does not take --retry=<id>")
     here = Path.cwd()
-    repo = origin_slug(here, timeout=5)
+    repo = checkout_slug(here, timeout=5)
     if not repo:
         print("this checkout names no origin to run on", file=sys.stderr)
         return 1

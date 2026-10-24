@@ -42,6 +42,7 @@ _RAW_FORMS = {
     "wake": ["wake: token <lease token> <session> because <reason>"],
     "control": ["control: token <lease token> <session> effort <level> because <reason>", "control: token <lease token> <session> model <model> because <reason>", "control: token <lease token> <session> compact [without checkpoint] because <reason>"],
     "rehome": ["rehome: token <lease token> <session> to [vendor <vendor>] <account> [model <model>] [effort <level>] [compact [without checkpoint]] because <reason>"],
+    "interrupt": ["interrupt: token <lease token> <session> [working] because <reason>"],
     "park": ["park: token <lease token> <session> [until <time or duration>] because <reason>"],
     "keep": ["keep: token <lease token> <session> [until <time or duration>] because <reason>"],
     "unkeep": ["unkeep: token <lease token> <session>"],
@@ -62,7 +63,7 @@ _RAW_FORMS = {
 
 _AUDIENCE = {
     **{verb: "session" for verb in ("announce", "blocked", "wait", "done", "recommend", "ask", "claim", "taking", "declare", "checkpoint", "holds", "enroll", "bind", "ack", "say", "detach", "gate")},
-    **{verb: "seat" for verb in ("note", "launch", "withdraw", "relay", "retire", "card", "effort", "wake", "control", "rehome", "park", "cancel", "keep", "unkeep", "answer", "regroup", "roster", "lift", "authorship", "dispose", "promote", "out-of-band", "backlog")},
+    **{verb: "seat" for verb in ("note", "launch", "withdraw", "relay", "retire", "card", "effort", "wake", "control", "rehome", "park", "interrupt", "cancel", "keep", "unkeep", "answer", "regroup", "roster", "lift", "authorship", "dispose", "promote", "out-of-band", "backlog")},
     "rebind": "operator",
     "supersede": "operator",
 }
@@ -99,6 +100,7 @@ _EXAMPLES = {
     "wake": ["wake: token <lease token> violet because review arrived"],
     "control": ["control: token <lease token> violet effort high because review", "control: token <lease token> violet model opus-5.5 because review", "control: token <lease token> violet compact without checkpoint because context full"],
     "rehome": ["rehome: token <lease token> violet to vendor zai 4 model glm-5.3 effort high compact because account 2 is spent"],
+    "interrupt": ["interrupt: token <lease token> violet working because the plan changed"],
     "park": ["park: token <lease token> violet until 2h because a critic needs its slot"],
     "keep": ["keep: token <lease token> violet until 45m because the review on #5536 lands within the hour"],
     "unkeep": ["unkeep: token <lease token> violet"],
