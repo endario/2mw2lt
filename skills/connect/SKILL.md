@@ -213,6 +213,28 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/bulletin.py" <session> read [--al
 A plain session posts to everyone with an `until` within 24 hours; the seat and the owner may post
 standing lines and the seat's own audience. A refusal prints its check and what would satisfy it.
 
+## Timers
+
+The timer tools (`timer_list`, `timer_read`, `timer_lodge`, `timer_cancel`, `timer_snooze`,
+`timer_answer`) are every session's own, the seat's or a worker's. They go on your enrolment's
+own credential — never through `lease.py`, which is the holder's. A timer fires once, at a moment
+(`at`, RFC 3339) or after a delay (`after_seconds`), addressed to yourself, the seat, or a named
+session; a seat-targeted timer follows whoever holds the seat when it fires. The reply to a lodge
+is a receipt, and a receipt never answers a firing: when one fires, its frame carries the exact
+text and a delivery id, and you answer with that exact id — `acted` or `considered`, with a
+`because`. A harness without the typed tools runs the same client:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/timer.py" <session> list
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/timer.py" <session> lodge --json-file <file | ->
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/timer.py" <session> history <timer id>
+```
+
+`--seat` on a mutation sends it on the seat's route at the generation you hold, and grants
+nothing else: a session that does not hold the seat is told so. This build takes `at` and
+`after_seconds` only — cron, conditions, move and re-address are refused outright, never
+accepted and left inert.
+
 ## Speak
 
 **Try the brain first.** `say` reaches the brain or a peer; `ask` reaches the owner.

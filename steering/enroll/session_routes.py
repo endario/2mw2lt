@@ -473,6 +473,56 @@ def _own_key(*parts: str) -> str:
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:32]
 
 
+def _paged(path: str, limit: int | None, after: str | None) -> str:
+    query = {k: v for k, v in (("limit", limit), ("next", after)) if v is not None}
+    return path + ("?" + urllib.parse.urlencode(query) if query else "")
+
+
+def timer_list(token: str, limit: int | None = None, after: str | None = None) -> dict:
+    """The workspace's timers, a page of them. Raises `Refused` or `Unsent`."""
+    return get(_paged("/timers", limit, after), token)
+
+
+def timer_read(token: str, timer: str) -> dict:
+    """One timer as it stands, with the obligation it carries. Raises `Refused` or `Unsent`."""
+    return get(f"/timers/{timer}", token)
+
+
+def timer_history(token: str, timer: str, limit: int | None = None, after: str | None = None) -> dict:
+    """The firings of one timer, with their legs and any answer, a page of them. Raises `Refused`
+    or `Unsent`."""
+    return get(_paged(f"/timers/{timer}/firings", limit, after), token)
+
+
+def timer_lodge(session: str, token: str, body: dict, key: str, seat: bool = False) -> dict:
+    """A session lodges a timer on its own command route, or — `seat` — the holder lodges one on the
+    seat's route at the generation it holds, which `body` must not name itself. `key` is the
+    command's occurrence, so a retry after a lost answer is answered from the first. Raises
+    `NotSeated`, `Refused` or `Unsent`."""
+    if seat:
+        body = {"generation": seat_generation(session, token), **body}
+        return post(f"/sessions/{session}/seat/timers", body, key, SESSION_CARRIER, token)
+    return post(f"/sessions/{session}/timers", body, key, SESSION_CARRIER, token)
+
+
+def timer_change(session: str, token: str, timer: str, body: dict, key: str, seat: bool = False) -> dict:
+    """A session cancels or snoozes its timer on the change route, or — `seat` — the holder does at
+    the generation it holds. Raises `NotSeated`, `Refused` or `Unsent`."""
+    if seat:
+        body = {"generation": seat_generation(session, token), **body}
+        return post(f"/sessions/{session}/seat/timers/{timer}/changes", body, key, SESSION_CARRIER, token)
+    return post(f"/sessions/{session}/timers/{timer}/changes", body, key, SESSION_CARRIER, token)
+
+
+def timer_answer(session: str, token: str, body: dict, key: str, seat: bool = False) -> dict:
+    """The recipient answers a delivery by its exact id on the answers route, or — `seat` — the
+    holder does at the generation it holds. Raises `NotSeated`, `Refused` or `Unsent`."""
+    if seat:
+        body = {"generation": seat_generation(session, token), **body}
+        return post(f"/sessions/{session}/seat/timers/answers", body, key, SESSION_CARRIER, token)
+    return post(f"/sessions/{session}/timers/answers", body, key, SESSION_CARRIER, token)
+
+
 def seat_acquire(session: str, token: str, vacancy_generation: int) -> dict:
     """The session takes the seat while it is vacant, naming the vacancy it saw
     (go-unit9-authority-wire-design.md). Raises `Refused` or `Unsent`."""

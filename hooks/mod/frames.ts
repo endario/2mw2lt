@@ -313,19 +313,23 @@ export const SEAT_TOOLS: Record<string, SeatTool> = {
 
 export function seatSchema(name: string) {
   const t = SEAT_TOOLS[name]!
-  const properties = Object.fromEntries(Object.entries(t.fields).map(([k, f]) =>
-    [k, { type: f.type, description: f.description, ...(f.enum ? { enum: f.enum } : {}), ...(f.type === 'array' ? { items: { type: 'string' } } : {}) }]))
-  return { type: 'object', properties, required: t.required, additionalProperties: false }
+  return schemaOf(t)
 }
+
+const schemaOf = (t: { fields: Record<string, Field>; required: string[] }) => ({
+  type: 'object' as const,
+  properties: Object.fromEntries(Object.entries(t.fields).map(([k, f]) =>
+    [k, { type: f.type, description: f.description, ...(f.enum ? { enum: f.enum } : {}), ...(f.type === 'array' ? { items: { type: 'string' } } : {}) }])),
+  required: t.required, additionalProperties: false,
+})
 
 // What one call sends, or why it is refused. A control character could end the verb line and start
 // another, and a word field with a space would shift every field after it. A field that keeps its
 // lines is the verb's last, which lease.py reads to the end of stdin, so only a newline and a tab pass.
 const CONTROL = /[\u0000-\u001f\u007f]/
 const CONTROL_BUT_LINES = /[\u0000-\u0008\u000b-\u001f\u007f]/
-export function seatCall(name: string, args: Record<string, unknown>): SeatCall | { refused: string } {
-  const t = SEAT_TOOLS[name]
-  if (!t) return { refused: `no seat tool ${name}` }
+type Judged = { fields: Record<string, Field>; required: string[]; oneOf?: string[]; refuse?: (a: Record<string, unknown>) => string | null }
+function judge(name: string, t: Judged, args: Record<string, unknown>): true | { refused: string } {
   for (const k of t.required) if (args[k] === undefined || args[k] === '') return { refused: `${k} is required` }
   if (t.oneOf && t.oneOf.filter(k => args[k] !== undefined && args[k] !== '').length !== 1) return { refused: `${name} takes one of ${t.oneOf.join(' or ')}` }
   for (const [k, v] of Object.entries(args)) {
@@ -342,6 +346,14 @@ export function seatCall(name: string, args: Record<string, unknown>): SeatCall 
   }
   const why = t.refuse?.(args)
   if (why) return { refused: why }
+  return true
+}
+
+export function seatCall(name: string, args: Record<string, unknown>): SeatCall | { refused: string } {
+  const t = SEAT_TOOLS[name]
+  if (!t) return { refused: `no seat tool ${name}` }
+  const j = judge(name, t, args)
+  if (j !== true) return j
   return t.build(args)
 }
 
@@ -396,3 +408,81 @@ export function checkpointCall(args: Record<string, unknown>): { boundary: strin
   if (mirror !== undefined && (typeof mirror !== 'string' || mirror === '')) return { refused: 'mirror is a URL' }
   return { boundary, text, ...(learned !== undefined ? { learned: JSON.stringify(learned) } : {}), ...(mirror !== undefined ? { mirror } : {}) }
 }
+
+// The brain's timers as typed tools (#8143): every session's own — the seat's or a worker's — over
+// the same timer.py the CLI is, on the enrolment's own credential. A tool builds the JSON the CLI's
+// --json-file takes and carries it on stdin, so a timer's text never touches a shell; timer.py
+// judges the shape again at the door, and refuses here first only what needs no send to see. This
+// build has at and after timers only — cron, conditions, move and re-address are not implemented.
+export type TimerCall = { argv: string[]; stdin?: string }
+type TimerTool = { description: string; fields: Record<string, Field>; required: string[]; oneOf?: string[]; build: (a: Record<string, unknown>) => TimerCall }
+
+const whenOf = (a: Record<string, unknown>) => a.at !== undefined ? { at: str(a, 'at') } : { after_seconds: a.after_seconds }
+const fileArgv = (verb: string, a: Record<string, unknown>, ...before: string[]) => [verb, ...before, '--json-file', '-', ...(a.seat === true ? ['--seat'] : [])]
+
+export const TIMER_TOOLS: Record<string, TimerTool> = {
+  timer_list: {
+    description: 'List this workspace\'s timers, with the cursor the next page takes.',
+    fields: { limit: { type: 'integer', description: 'Rows to read.' }, next: word('The cursor the previous page named.') },
+    required: [],
+    build: a => ({ argv: ['list', ...(a.limit !== undefined ? ['--limit', String(a.limit)] : []), ...(a.next !== undefined ? ['--next', str(a, 'next')] : [])] }),
+  },
+  timer_read: {
+    description: 'Read one timer by its id.',
+    fields: { timer: word('The timer\'s id.') },
+    required: ['timer'],
+    build: a => ({ argv: ['read', str(a, 'timer')] }),
+  },
+  timer_lodge: {
+    description: 'Lodge a timer that fires once, addressed to yourself, the seat, or a named session. The text is your own words for the moment it fires: receipt is the door\'s, and the answer is a frame when it does. This build takes at (RFC 3339) or after_seconds only — cron and conditions are not in it.',
+    fields: {
+      text: paragraphs('The timer\'s own words: what to do when it fires.'),
+      target: { type: 'string', description: 'Who the firing addresses.', enum: ['self', 'seat', 'session'] },
+      target_session: word('The session it addresses, when target is session.'),
+      at: word('When it fires, as RFC 3339.'),
+      after_seconds: { type: 'integer', description: 'Seconds from now until it fires.' },
+      seat: { type: 'boolean', description: 'Send on the seat\'s route, at the generation this session holds; refused when it does not hold the seat.' },
+    },
+    required: ['text', 'target'],
+    oneOf: ['at', 'after_seconds'],
+    build: a => ({ argv: fileArgv('lodge', a), stdin: JSON.stringify({ text: str(a, 'text'),
+      target: { kind: str(a, 'target'), ...(a.target_session !== undefined ? { session: str(a, 'target_session') } : {}) }, when: whenOf(a) }) }),
+  },
+  timer_cancel: {
+    description: 'Cancel a timer, at the revision the read named.',
+    fields: { timer: word('The timer\'s id.'), revision: { type: 'integer', description: 'The revision the read named.' },
+              seat: { type: 'boolean', description: 'Send on the seat\'s route, at the generation this session holds.' } },
+    required: ['timer', 'revision'],
+    build: a => ({ argv: fileArgv('cancel', a, str(a, 'timer')), stdin: JSON.stringify({ revision: a.revision, action: 'cancel' }) }),
+  },
+  timer_snooze: {
+    description: 'Snooze a timer to a later moment, at the revision the read named.',
+    fields: { timer: word('The timer\'s id.'), revision: { type: 'integer', description: 'The revision the read named.' },
+              at: word('When it fires next, as RFC 3339.'), after_seconds: { type: 'integer', description: 'Seconds from now until it fires next.' },
+              seat: { type: 'boolean', description: 'Send on the seat\'s route, at the generation this session holds.' } },
+    required: ['timer', 'revision'],
+    oneOf: ['at', 'after_seconds'],
+    build: a => ({ argv: fileArgv('snooze', a, str(a, 'timer')), stdin: JSON.stringify({ revision: a.revision, action: 'snooze', when: whenOf(a) }) }),
+  },
+  timer_answer: {
+    description: 'Answer a timer that fired: acted, saying what you did, or considered, saying why nothing needed you. The delivery id is the history\'s, exact.',
+    fields: { delivery: word('The delivery id the firing\'s history named.'), verdict: { type: 'string', description: 'What you did with it.', enum: ['acted', 'considered'] },
+              because: paragraphs('What you did, or why nothing needed you.'), seat: { type: 'boolean', description: 'Send on the seat\'s route, at the generation this session holds.' } },
+    required: ['delivery', 'verdict', 'because'],
+    build: a => ({ argv: fileArgv('answer', a), stdin: JSON.stringify({ delivery: str(a, 'delivery'), verdict: str(a, 'verdict'), because: str(a, 'because') }) }),
+  },
+}
+
+export function timerSchema(name: string) {
+  return schemaOf(TIMER_TOOLS[name]!)
+}
+
+export function timerCall(name: string, args: Record<string, unknown>): TimerCall | { refused: string } {
+  const t = TIMER_TOOLS[name]
+  if (!t) return { refused: `no timer tool ${name}` }
+  const j = judge(name, t, args)
+  if (j !== true) return j
+  return t.build(args)
+}
+
+export const TIMER_ENTRY: Entry = { own: "a timer verb is the session's own", verbs: 'the timer tools', client: 'timer.py' }

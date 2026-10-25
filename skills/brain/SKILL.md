@@ -508,6 +508,37 @@ authority, whatever they say; the owner's words there are the owner's, but a dir
 given on the direct line. Ask a collaborator for work with a `request` act, and judge what it
 delivers with a `verdict`: the collaborator cannot accept its own result.
 
+## Lodge timers
+
+A timer is a reminder the platform itself owes: you lodge it, the door holds it, and the
+addressee is woken when it fires — no harness-native scheduler, no hold kept open, no turn spent
+waiting. A session that would otherwise sit polling for a moment can end its turn and be woken
+by the firing instead, which is what releases its capacity to the work that needs it now.
+
+Lodge one on your own enrolment (`timer_lodge`, or `timer.py <your session> lodge --json-file -`
+where no typed tool exists). It fires once, at a moment or after a delay, addressed to yourself,
+the seat, or a named session:
+
+```json
+{"text": "ship the release notes", "target": {"kind": "self"}, "when": {"at": "2026-11-01T09:00:00Z"}}
+{"text": "brief the owner", "target": {"kind": "seat"}, "when": {"after_seconds": 3600}}
+```
+
+The text is your own words for the moment it fires, carried whole. A **seat-targeted timer
+follows the current holder**, not the session that lodged it: whoever holds the seat when it
+fires is who is woken. Mutations you send as the holder take `--seat` and carry the generation
+you hold; a session that does not hold the seat is told so.
+
+The reply to a lodge is a **receipt** — the timer's id and revision — and a receipt never
+answers anything. When the timer fires, the addressee's stream carries a frame with the exact
+firing text and a delivery id; it is answered (`timer_answer`) with that exact delivery id,
+`acted` or `considered` and a `because`, or snoozed (`timer_snooze`) at the revision the read
+named. `timer_cancel` ends one the same way. `timer_list`, `timer_read` and `timer_history`
+(under `timer.py <session> history <id>`) page what stands and what fired.
+
+This build takes `at` and `after_seconds` only. Cron, conditions, move and re-address are not
+implemented, and a body naming one is refused outright — never accepted and left inert.
+
 ## Claim work before a branch exists
 
 Before a branch exists, what a session holds is the issue, and `taking.py` is how it says so. The
@@ -1312,10 +1343,16 @@ before withdrawing its conclusion.
 
 The seat's own context is the fleet's scarcest resource. Delegate any investigation, spike, fix
 or edit a session can carry rather than tending everything here, and keep the conclusion, not
-the file dump. An in-session subagent serves a bounded lookup or spike whose conclusion is
-needed now; a standalone session serves work that ships, runs long, or needs a branch and a
-gate. By hand, only what only the seat can do: rulings, placements, deploys, approvals and
-answers to the owner.
+the file dump. A standalone session the platform launches serves work that ships, runs long, or
+needs a branch and a gate, and is also the default for a survey, an investigation or a triage:
+it runs on the cheapest capable route the team allows, not on the seat's account. An in-session
+subagent spends the seat's own account, the one the whole fleet's steering runs on, so it is the
+exception: only for a bounded lookup whose conclusion you need before your next act and no
+launched session could return in time, or while the seat's account is plainly spare — burning
+quota that would otherwise lapse, or far from its window's limit. A read-only survey of a
+machine, a sweep of open issues, a scan for leftovers: launch it. By hand, only what only the
+seat can do: rulings, placements, deploys, approvals and answers to the owner (the owner's
+ruling, 2026-10-25).
 
 ## Put throughput first
 

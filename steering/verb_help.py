@@ -278,6 +278,20 @@ TOOLS = {
     "readout": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "readout --help"}]},
     "rebrief": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "rebrief --help"},
                                          {"topic": "--keep", "usage": "--keep <session>", "example": "rebrief --keep violet"}]},
+    "timer": {"bare": False, "forms": [
+        {"topic": "list", "usage": "<session> list [--limit <rows>] [--next <cursor>]", "example": "timer violet list"},
+        {"topic": "read", "usage": "<session> read <timer id>", "example": "timer violet read 1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00"},
+        {"topic": "history", "usage": "<session> history <timer id> [--limit <rows>] [--next <cursor>]",
+         "example": "timer violet history 1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00 --limit 50"},
+        {"topic": "lodge", "usage": "<session> lodge --json-file <file | -> [--seat] [--retry=<id>]",
+         "example": "timer violet lodge --json-file timer.json"},
+        {"topic": "cancel", "usage": "<session> cancel <timer id> --json-file <file | -> [--seat] [--retry=<id>]",
+         "example": "timer violet cancel 1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00 --json-file change.json"},
+        {"topic": "snooze", "usage": "<session> snooze <timer id> --json-file <file | -> [--seat] [--retry=<id>]",
+         "example": "timer violet snooze 1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00 --json-file snooze.json"},
+        {"topic": "answer", "usage": "<session> answer --json-file <file | -> [--seat] [--retry=<id>]",
+         "example": "timer violet answer --json-file answer.json"},
+    ]},
 }
 
 EXEMPTIONS = {"outbox": "library", "witness": "library", "probe-stop": "fixture"}

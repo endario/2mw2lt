@@ -1339,6 +1339,31 @@ StreamWake = typing.TypedDict("StreamWake", {
     "always": "typing.NotRequired[bool]",
 })
 
+# StreamAccountExport is a move's export offered to the source machine, by the action it answers:
+# the binding of the move whose account the source holds (key-account-move design §The move 3).
+StreamAccountExport = typing.TypedDict("StreamAccountExport", {
+    "kind": "str",
+    "id": "str",
+    "move": "str",
+    "source": "str",
+    "target": "str",
+    "account": "str",
+    "target_key": "str",
+})
+
+# StreamAccountReceive is a move's receive offered to the target machine, by the action it answers:
+# the binding, and the sealed profile the source's export answered (§The move 5).
+StreamAccountReceive = typing.TypedDict("StreamAccountReceive", {
+    "kind": "str",
+    "id": "str",
+    "move": "str",
+    "source": "str",
+    "target": "str",
+    "account": "str",
+    "target_key": "str",
+    "blob": "str",
+})
+
 # StreamControl is a control, by its id.
 StreamControl = typing.TypedDict("StreamControl", {
     "kind": "str",
@@ -3648,6 +3673,109 @@ EndedLaunch = typing.TypedDict("EndedLaunch", {
     "refused": "str | None",
 })
 
+# MachineAccountMoveBinding is what both the door and the receiving agent name a move by: the move
+# id, the account that moves, the two machines, and the target's public key. The target recomputes
+# it from what it was told and its own identity; a mismatch fails authentication.
+MachineAccountMoveBinding = typing.TypedDict("MachineAccountMoveBinding", {
+    "move": "str",
+    "source": "str",
+    "target": "str",
+    "account": "str",
+    "target_key": "str",
+})
+
+# MachineAccountExportBody is what the door offers a source machine: the binding of the move whose
+# account it holds, and the move's deadline as the action's own.
+MachineAccountExportBody = typing.TypedDict("MachineAccountExportBody", {
+    "move": "str",
+    "source": "str",
+    "target": "str",
+    "account": "str",
+    "target_key": "str",
+})
+
+# MachineAccountExportAnswer is a source machine's answer: the account's profile, packed as a tar
+# and sealed under the target's key. A refusal is the answer's own status, never a blob.
+MachineAccountExportAnswer = typing.TypedDict("MachineAccountExportAnswer", {
+    "status": "str",
+    "blob": "typing.NotRequired[str]",
+    "size": "typing.NotRequired[int]",
+})
+
+# MachineAccountReceiveBody is what the door offers a target machine: the binding, and the sealed
+# profile the source answered.
+MachineAccountReceiveBody = typing.TypedDict("MachineAccountReceiveBody", {
+    "move": "str",
+    "source": "str",
+    "target": "str",
+    "account": "str",
+    "target_key": "str",
+    "blob": "str",
+})
+
+# MachineAccountReceiveAnswer is a target machine's answer: the profile installed and its key
+# account verified equal to the move's, or `present` where it already reports the account.
+MachineAccountReceiveAnswer = typing.TypedDict("MachineAccountReceiveAnswer", {
+    "status": "str",
+})
+
+# AccountMove is the owner asking a missing matrix cell to deploy: the account, and the host that
+# lacks it. The door picks the source and opens the move need the owner then answers.
+AccountMove = typing.TypedDict("AccountMove", {
+    "vendor": "str",
+    "account_id": "str",
+    "host": "str",
+})
+
+# AccountMoved is the need a move ask opened: its id, the two machines it names, and the target's
+# key fingerprint the owner confirms against the one the target itself prints.
+AccountMoved = typing.TypedDict("AccountMoved", {
+    "need": "str",
+    "vendor": "str",
+    "account_id": "str",
+    "source": "str",
+    "target": "str",
+    "fingerprint": "str",
+})
+
+# AccountMoveAnswer is the owner's answer to an open move need.
+AccountMoveAnswer = typing.TypedDict("AccountMoveAnswer", {
+    "need": "str",
+    "accept": "bool",
+})
+
+# AccountMoveAnswered is what the owner's answer did: confirmed, and the export is on its way to
+# the source, or refused.
+AccountMoveAnswered = typing.TypedDict("AccountMoveAnswered", {
+    "status": "str",
+    "move": "typing.NotRequired[str]",
+})
+
+# MachineAccountExportReceipt is the source's answer to its move's export, as the answer route
+# takes it: the uplink the offer rode, the action it names, and the result of the machine's own
+# work — the export's sealed profile or its refusal.
+MachineAccountExportReceipt = typing.TypedDict("MachineAccountExportReceipt", {
+    "uplink": "str",
+    "id": "str",
+    "result": "MachineAccountExportAnswer",
+})
+
+# MachineAccountReceiveReceipt is the target's answer to its move's receive, as the answer route
+# takes it.
+MachineAccountReceiveReceipt = typing.TypedDict("MachineAccountReceiveReceipt", {
+    "uplink": "str",
+    "id": "str",
+    "result": "MachineAccountReceiveAnswer",
+})
+
+# MachineAccountReceiptAnswer is what an account answer's route answers: the action, the state its
+# answer took, and whether it replayed one already recorded.
+MachineAccountReceiptAnswer = typing.TypedDict("MachineAccountReceiptAnswer", {
+    "id": "str",
+    "state": "str",
+    "replayed": "bool",
+})
+
 # MachineSample is one independently ordered machine fact. Value contains the validated JSON value.
 MachineSample = typing.TypedDict("MachineSample", {
     "status": "str",
@@ -5519,6 +5647,7 @@ StampsFrame = typing.TypedDict("StampsFrame", {
     "knowledge": "str",
     "accounts": "str",
     "bulletin": "str",
+    "timers": "str",
 })
 
 # Snapshot is the workspace's state and the cursor that resumes after it, read in one transaction.
@@ -5548,6 +5677,128 @@ TargetingRecord = typing.TypedDict("TargetingRecord", {
 
 TargetingAnswer = typing.TypedDict("TargetingAnswer", {
     "stored": "bool",
+})
+
+# TimerWhen is one absolute time or a duration anchored once by admission.
+TimerWhen = typing.TypedDict("TimerWhen", {
+    "at": "typing.NotRequired[str | None]",
+    "after_seconds": "typing.NotRequired[int | None]",
+})
+
+TimerTarget = typing.TypedDict("TimerTarget", {
+    "kind": "str",
+    "session": "typing.NotRequired[str]",
+})
+
+TimerLodge = typing.TypedDict("TimerLodge", {
+    "text": "str",
+    "target": "TimerTarget",
+    "when": "TimerWhen",
+})
+
+TimerActor = typing.TypedDict("TimerActor", {
+    "session": "str",
+    "epoch": "int",
+})
+
+TimerRecipient = typing.TypedDict("TimerRecipient", {
+    "kind": "str",
+    "session": "typing.NotRequired[str | None]",
+    "epoch": "typing.NotRequired[int | None]",
+})
+
+Timer = typing.TypedDict("Timer", {
+    "id": "str",
+    "revision": "int",
+    "text": "str",
+    "creator": "TimerActor",
+    "target": "TimerRecipient",
+    "shape": "str",
+    "due_at": "str",
+    "state": "str",
+    "pending_firing": "typing.NotRequired[str | None]",
+    "held_until": "typing.NotRequired[str | None]",
+    "created_at": "str",
+    "changed_at": "str",
+})
+
+TimerList = typing.TypedDict("TimerList", {
+    "timers": "list[Timer] | None",
+    "next": "typing.NotRequired[str]",
+})
+
+TimerDelivery = typing.TypedDict("TimerDelivery", {
+    "notice": "str",
+    "recipient": "TimerRecipient",
+    "seat_generation": "typing.NotRequired[int | None]",
+    "state": "str",
+    "delivery": "typing.NotRequired[str | None]",
+    "held_until": "typing.NotRequired[str | None]",
+    "created_at": "str",
+    "settled_at": "typing.NotRequired[str | None]",
+    "ended_why": "typing.NotRequired[str | None]",
+})
+
+TimerFiring = typing.TypedDict("TimerFiring", {
+    "id": "str",
+    "timer": "str",
+    "text": "str",
+    "due_at": "str",
+    "fired_at": "str",
+    "state": "str",
+    "predecessor": "typing.NotRequired[str | None]",
+    "withdrawn_at": "typing.NotRequired[str | None]",
+    "withdrawn_why": "typing.NotRequired[str | None]",
+    "deliveries": "list[TimerDelivery] | None",
+    "answer": "typing.NotRequired[TimerAnswerRecord | None]",
+})
+
+TimerHistory = typing.TypedDict("TimerHistory", {
+    "firings": "list[TimerFiring] | None",
+    "next": "typing.NotRequired[str]",
+})
+
+# SeatTimerLodge carries the generation the seat command must still hold.
+SeatTimerLodge = typing.TypedDict("SeatTimerLodge", {
+    "generation": "int",
+    "text": "str",
+    "target": "TimerTarget",
+    "when": "TimerWhen",
+})
+
+TimerChange = typing.TypedDict("TimerChange", {
+    "revision": "int",
+    "action": "str",
+    "when": "typing.NotRequired[TimerWhen | None]",
+})
+
+SeatTimerChange = typing.TypedDict("SeatTimerChange", {
+    "generation": "int",
+    "revision": "int",
+    "action": "str",
+    "when": "typing.NotRequired[TimerWhen | None]",
+})
+
+TimerAnswer = typing.TypedDict("TimerAnswer", {
+    "delivery": "str",
+    "verdict": "str",
+    "because": "str",
+})
+
+TimerAnswerRecord = typing.TypedDict("TimerAnswerRecord", {
+    "delivery": "str",
+    "verdict": "str",
+    "because": "str",
+    "actor": "TimerActor",
+    "seat_generation": "typing.NotRequired[int | None]",
+    "at": "str",
+})
+
+SeatTimerAnswer = typing.TypedDict("SeatTimerAnswer", {
+    "generation": "int",
+    "delivery": "str",
+    "verdict": "str",
+    "because": "str",
 })
 
 # UnderstudyCastBody is the seat's cast of a model for a rung (4754-night-shift design §2): how
@@ -6942,6 +7193,8 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/accounts/concurrency",
     "POST /w/{workspace}/api/v1/accounts/label",
     "GET /w/{workspace}/api/v1/accounts/matrix",
+    "POST /w/{workspace}/api/v1/accounts/move",
+    "POST /w/{workspace}/api/v1/accounts/move/answer",
     "POST /w/{workspace}/api/v1/accounts/offer",
     "POST /w/{workspace}/api/v1/accounts/remove",
     "POST /w/{workspace}/api/v1/accounts/reset",
@@ -7104,9 +7357,15 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/handover",
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/release",
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/renewal",
+    "POST /w/{workspace}/api/v1/sessions/{session}/seat/timers",
+    "POST /w/{workspace}/api/v1/sessions/{session}/seat/timers/answers",
+    "POST /w/{workspace}/api/v1/sessions/{session}/seat/timers/{timer}/changes",
     "POST /w/{workspace}/api/v1/sessions/{session}/signals/{episode}/answer",
     "POST /w/{workspace}/api/v1/sessions/{session}/status",
     "POST /w/{workspace}/api/v1/sessions/{session}/targeting",
+    "POST /w/{workspace}/api/v1/sessions/{session}/timers",
+    "POST /w/{workspace}/api/v1/sessions/{session}/timers/answers",
+    "POST /w/{workspace}/api/v1/sessions/{session}/timers/{timer}/changes",
     "POST /w/{workspace}/api/v1/sessions/{session}/unkeep",
     "POST /w/{workspace}/api/v1/sessions/{session}/waits",
     "POST /w/{workspace}/api/v1/sessions/{session}/waits/{wait}/cancellation",
@@ -7115,6 +7374,9 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/snapshot",
     "POST /w/{workspace}/api/v1/sources",
     "GET /w/{workspace}/api/v1/stamps",
+    "GET /w/{workspace}/api/v1/timers",
+    "GET /w/{workspace}/api/v1/timers/{timer}",
+    "GET /w/{workspace}/api/v1/timers/{timer}/firings",
     "GET /w/{workspace}/api/v1/tracks",
     "POST /w/{workspace}/api/v1/tracks",
     "GET /w/{workspace}/api/v1/understudies",
@@ -7124,6 +7386,8 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/work/regroups",
     "POST /w/{workspace}/api/v1/workspace/retirement",
     "POST /w/{workspace}/api/v1/workspace/slug",
+    "POST /w/{workspace}/steering/agent/account-export",
+    "POST /w/{workspace}/steering/agent/account-receive",
     "POST /w/{workspace}/steering/agent/accounts",
     "POST /w/{workspace}/steering/agent/answer",
     "POST /w/{workspace}/steering/agent/attachment",
@@ -7185,6 +7449,8 @@ PAGINATION = {
     "GET /w/{workspace}/api/v1/rooms/{room}/messages": {"parameter":"cursor","collection":"items","stop":"head","drop_query":["before"]},
     "GET /w/{workspace}/api/v1/rulings": {"parameter":"next","collection":"rulings"},
     "GET /w/{workspace}/api/v1/sessions/{session}/history": {"parameter":"before","collection":"events"},
+    "GET /w/{workspace}/api/v1/timers": {"parameter":"next","collection":"timers"},
+    "GET /w/{workspace}/api/v1/timers/{timer}/firings": {"parameter":"next","collection":"firings"},
 }
 
 # Every query parameter a route reads, by its pattern: the values it takes, or None for any.
@@ -7218,6 +7484,8 @@ QUERY = {
     "GET /w/{workspace}/api/v1/sessions/{session}/history": {"before": None, "limit": None},
     "GET /w/{workspace}/api/v1/sessions/{session}/live": {"after": None},
     "GET /w/{workspace}/api/v1/snapshot": {"feed": None},
+    "GET /w/{workspace}/api/v1/timers": {"limit": None, "next": None},
+    "GET /w/{workspace}/api/v1/timers/{timer}/firings": {"limit": None, "next": None},
     "GET /w/{workspace}/api/v1/work/regroups": {"state": frozenset({"pending"}), "limit": None},
     "GET /w/{workspace}/steering/agent/stream": {"accepts": frozenset({"policy", "watch", "unwatch", "history"})},
 }

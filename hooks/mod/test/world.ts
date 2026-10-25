@@ -101,6 +101,8 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
     leaseOut: [] as string[],
     // What checkpoint.py answers each run, in turn; past the last, the checkpoint is kept.
     checkpointOut: [] as { code: number; stdout: string; stderr: string }[],
+    // What timer.py answers each run, in turn; past the last, it answers an empty object.
+    timerOut: [] as { code: number; stdout: string; stderr: string }[],
     check: { decision: 'allow' } as { decision: 'allow' | 'ask' | 'deny'; reason?: string },
     polls,
     // What the agent answers each events post, in turn (202 past the last); a promise holds it.
@@ -202,6 +204,11 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
     }
     if (e.argv[0] === 'mktemp') {
       return { value: { exitCode: 0, stdout: '/tmp/tmp.lessons\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    if (String(e.argv[1]).endsWith('/timer.py')) {
+      w.stdins.push(e.init?.stdin)
+      const out = w.timerOut.shift() ?? { code: 0, stdout: '{}\n', stderr: '' }
+      return { value: { exitCode: out.code, stdout: out.stdout, stderr: out.stderr, isStdoutTruncated: false, isStderrTruncated: false } }
     }
     if (String(e.argv[1]).endsWith('/checkpoint.py')) {
       w.stdins.push(e.init?.stdin)

@@ -1,5 +1,5 @@
 import type { Register, EngineInterface, Timer, HookStream, ProcessSpawnChunk, ProcessSpawnResult } from 'claude-code'
-import { lines, atLeast, pick, invokes, lifecycle, tokensOf, due, owed, pointing, quiet, framesEntry, obsoleteSeatRefusal, nextSeat, asksSeat, seatCall, seatSchema, resendId, entryRefusal, checkpointCall, CHECKPOINT_ENTRY, CHECKPOINT_TOOL, refusalTurn, capBulletin, sectionRevision, READ_KEPT, POINTER, CHECKPOINT, SEAT_SECTION, BULLETIN_SECTION, SEAT_TOOLS } from './frames'
+import { lines, atLeast, pick, invokes, lifecycle, tokensOf, due, owed, pointing, quiet, framesEntry, obsoleteSeatRefusal, nextSeat, asksSeat, seatCall, seatSchema, resendId, entryRefusal, checkpointCall, CHECKPOINT_ENTRY, CHECKPOINT_TOOL, refusalTurn, capBulletin, sectionRevision, READ_KEPT, POINTER, CHECKPOINT, SEAT_SECTION, BULLETIN_SECTION, SEAT_TOOLS, TIMER_TOOLS, timerCall, timerSchema, TIMER_ENTRY } from './frames'
 import type { Line, SeatCall } from './frames'
 import * as surface from './surface'
 import type { CommandReceipt } from './types'
@@ -30,6 +30,7 @@ const TURN = { plugin: '2mw2lt', key: 'turn' } as const
 const TOOL = 'mcp__2mw2lt__frames'
 const CHECKPOINT_CALL = 'mcp__2mw2lt__checkpoint'
 const SEAT_TOOL = new RegExp(`^mcp__2mw2lt__(${Object.keys(SEAT_TOOLS).join('|')})$`)
+const TIMER_TOOL = new RegExp(`^mcp__2mw2lt__(${Object.keys(TIMER_TOOLS).join('|')})$`)
 const REFRESH_MS = 60_000
 const REPOINT_MS = 1500
 const STDERR_TAIL = 2000
@@ -1206,6 +1207,9 @@ export const register: Register = on => {
     for (const name of Object.keys(SEAT_TOOLS)) {
       await $.tool.register({ name, description: SEAT_TOOLS[name]!.description, inputSchema: seatSchema(name) })
     }
+    for (const name of Object.keys(TIMER_TOOLS)) {
+      await $.tool.register({ name, description: TIMER_TOOLS[name]!.description, inputSchema: timerSchema(name) })
+    }
     const session = await sessionOf($)       // a resume or reload of a session already connected
     if (session) await start($, session)
     return started
@@ -1213,6 +1217,9 @@ export const register: Register = on => {
 
   on('tool.describe', { tool: TOOL }, async ($, e, next) => ({ ...(await next(e)), isDeferred: false }))
   on('tool.describe', { tool: CHECKPOINT_CALL }, async ($, e, next) => ({ ...(await next(e)), isDeferred: false }))
+  // The timer tools are every session's own — the seat's or a worker's — so they stand in front
+  // for all, unlike the seat's verbs, which wait behind ToolSearch for a holder.
+  on('tool.describe', { tool: TIMER_TOOL }, async ($, e, next) => ({ ...(await next(e)), isDeferred: false }))
 
   // The seat's verbs stay behind ToolSearch for a session that does not hold the seat; a holder
   // has them in its list. They move when the seat section does, so the prompt changes once.
@@ -1243,6 +1250,23 @@ export const register: Register = on => {
     const refused = entryRefusal(agentId, next.origin.plugin, tool, checked, CHECKPOINT_ENTRY)
     if (refused) return { deny: refused }
     return runCheckpoint($, args)
+  })
+
+  // A timer verb goes on the session's own enrolment through timer.py — never lease.py, which a
+  // worker must not borrow. A mutation whose answer was lost goes once more under the id the
+  // client printed, as the seat verbs do.
+  on('tool.call', { tool: TIMER_TOOL }, async ($, e, next) => {
+    const { tool, tool_use_id: _id, agentId, ...args } = e as unknown as Record<string, unknown> & { tool: string; agentId?: string }
+    const checked = agentId === undefined && next.origin.plugin === 'engine'
+      ? await $.tool.check({ tool, input: args }) : { decision: 'deny' as const }
+    const refused = entryRefusal(agentId, next.origin.plugin, tool, checked, TIMER_ENTRY)
+    if (refused) return { deny: refused }
+    const call = timerCall(tool.replace(/^mcp__2mw2lt__/, ''), args)
+    if ('refused' in call) return { deny: `refused: ${call.refused}` }
+    const session = await sessionOf($)
+    if (!session) return { deny: 'refused: this session is not connected to steering: run /2mw2lt:connect first.' }
+    const argv = ['python3', script($, 'timer.py'), session, ...call.argv]
+    return answer(call.stdin !== undefined ? await resending($, argv, call.stdin) : await runOwn($, argv))
   })
 
   on('tool.call', { tool: TOOL }, async ($, e, next) => {

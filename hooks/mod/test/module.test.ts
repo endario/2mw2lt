@@ -1871,6 +1871,87 @@ test('a checkpoint from a session not connected, or at no known boundary, runs n
   expect(checkpointRuns(w)).toEqual([])
 })
 
+// #8143 unit 3: the timer tools are every connected session's own — the seat's or a worker's —
+// over timer.py, never behind the seat-only dispatcher, with the same JSON DTOs the CLI takes.
+const TIMER_TOOLS = ['timer_list', 'timer_read', 'timer_lodge', 'timer_cancel', 'timer_snooze', 'timer_answer']
+const timerRuns = (w: { runs: string[][] }) => w.runs.filter(argv => String(argv[1]).endsWith('/timer.py'))
+
+test('every session has the timer tools in front, the seat or none', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  on('tool.describe', async ($, e) => ({ description: e.description, ...(e.isDeferred ? { isDeferred: e.isDeferred } : {}) }))
+  await begin($)
+  await w.clock.settle()
+  expect(w.state.get('seat') ?? '').toBe('')
+  for (const name of TIMER_TOOLS) expect(w.tools).toContain(name)
+  const described = await $.tool.describe({ tool: 'mcp__2mw2lt__timer_read', description: 'd', isDeferred: true, provider: { plugin: '2mw2lt', tier: 'user' } } as never)
+  expect((described as { isDeferred?: boolean }).isDeferred).toBe(false)
+})
+
+test('a worker reads and lodges timers through timer.py on its own credential, never lease.py', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  w.timerOut = [{ code: 0, stdout: '{"timers": [], "next": ""}\n', stderr: '' },
+                { code: 0, stdout: '{"id": "1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00"}\n', stderr: '' }]
+  await begin($)
+  await w.clock.settle()
+  const read = await $.tool.call({ tool: 'mcp__2mw2lt__timer_read', timer: '1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00' } as never)
+  expect(String((read as { result?: string }).result)).toContain('"timers": []')
+  const lodge = await $.tool.call({ tool: 'mcp__2mw2lt__timer_lodge', text: 'ship the release notes', target: 'self', at: '2026-11-01T09:00:00Z' } as never)
+  expect(String((lodge as { result?: string }).result)).toContain('1b6f6a8e')
+  const runs = timerRuns(w)
+  expect(runs[0]?.slice(1)).toEqual([`${w.root}/steering/enroll/timer.py`, 's1', 'read', '1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00'])
+  expect(runs[1]?.slice(1)).toEqual([`${w.root}/steering/enroll/timer.py`, 's1', 'lodge', '--json-file', '-'])
+  expect(JSON.parse(w.stdins[1] ?? '{}')).toEqual({ text: 'ship the release notes', target: { kind: 'self' }, when: { at: '2026-11-01T09:00:00Z' } })
+  expect(leaseRuns(w)).toEqual([])
+})
+
+test('a timer call that asks for the seat conveys it, but borrows no lease authority', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  w.timerOut = [{ code: 1, stdout: '', stderr: 'refused: this session does not hold the seat (nobody holds the seat)' }]
+  await begin($)
+  await w.clock.settle()
+  const r = await $.tool.call({ tool: 'mcp__2mw2lt__timer_lodge', seat: true, text: 'brief the owner', target: 'seat', after_seconds: 3600 } as never)
+  expect(String((r as { deny?: string }).deny)).toContain('does not hold the seat')
+  expect(timerRuns(w)[0]?.slice(2)).toEqual(['s1', 'lodge', '--json-file', '-', '--seat'])
+  expect(JSON.parse(w.stdins[0] ?? '{}')).toEqual({ text: 'brief the owner', target: { kind: 'seat' }, when: { after_seconds: 3600 } })
+  expect(leaseRuns(w)).toEqual([])
+})
+
+test('a subagent cannot borrow the main loop\'s identity for a timer verb', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  const r = await $.tool.call({ tool: 'mcp__2mw2lt__timer_list', agentId: 'subagent-1' } as never)
+  expect(String((r as { deny?: string }).deny)).toContain('never a subagent\'s')
+  expect(timerRuns(w)).toEqual([])
+})
+
+test('a timer shape the door would refuse is refused at the tool, before the client runs', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  const cron = await $.tool.call({ tool: 'mcp__2mw2lt__timer_lodge', text: 'x', target: 'self', at: '2026-11-01T09:00:00Z', cron: '* * * * *' } as never)
+  const neither = await $.tool.call({ tool: 'mcp__2mw2lt__timer_lodge', text: 'x', target: 'self' } as never)
+  const verdict = await $.tool.call({ tool: 'mcp__2mw2lt__timer_answer', delivery: '2c8e7b9d-4e2f-4a90-8b1c-6d5e4f3a2b10', verdict: 'done', because: 'x' } as never)
+  expect(String((cron as { deny?: string }).deny)).toContain('takes no cron')
+  expect(String((neither as { deny?: string }).deny)).toContain('one of at or after_seconds')
+  expect(String((verdict as { deny?: string }).deny)).toContain('verdict is one of acted, considered')
+  expect(timerRuns(w)).toEqual([])
+})
+
+test('a timer mutation whose answer was lost goes once more under the id the client printed', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  const lost = { code: 1, stdout: 'if it may have been registered, resend with --retry=0123456789abcdef0123\n', stderr: 'id 0123456789abcdef0123\n' }
+  w.timerOut = [lost, { code: 0, stdout: '{"id": "1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00", "state": "cancelled"}\n', stderr: '' }]
+  await begin($)
+  await w.clock.settle()
+  const r = await $.tool.call({ tool: 'mcp__2mw2lt__timer_cancel', timer: '1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00', revision: 2 } as never)
+  const runs = timerRuns(w)
+  expect(runs.length).toBe(2)
+  expect(runs[1]?.[runs[1].length - 1]).toBe('--retry=0123456789abcdef0123')
+  expect(w.stdins[0]).toBe(w.stdins[1])
+  expect(String((r as { result?: string }).result)).toContain('cancelled')
+})
+
 test('seatCall: word fields are one word, enums hold, and unknown fields are refused', async () => {
   expect(seatCall('retire', { worker: 'w 1', node: 'm4' })).toEqual({ refused: 'worker is one word' })
   expect(seatCall('retire', { worker: 'teal', reason: 'the card landed' })).toEqual({ client: 'say', stdin: 'retire: token @lease teal because the card landed' })

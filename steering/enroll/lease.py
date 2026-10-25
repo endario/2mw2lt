@@ -793,6 +793,17 @@ def main(argv: list[str]) -> int:
         code, said = go_post(rec, rest[1], sys.stdin.buffer.read(), retry)
         print(said)
         return code
+    # A timer verb is the same client the enrolment runs (timer.py), on the lease's own enrolment:
+    # every mutation is the seat's, at the generation it holds; a read is the workspace's.
+    if rest[:1] == ["timer"] and len(rest) > 1:
+        if rec is None:
+            print(NONE)
+            return 1
+        import timer
+        sub = list(rest[1:])
+        if sub[0] not in timer.READS and "--seat" not in sub:
+            sub.append("--seat")
+        return timer.run(rec["session"], rec["token"], sub, retry, rec["ws"])
     return error("lease", "say [--retry=<id>], post <path>, or post /steering/brain/reply [--retry=<id>]")
 
 
