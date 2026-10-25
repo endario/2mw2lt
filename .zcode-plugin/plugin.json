@@ -1,6 +1,6 @@
 {
   "name": "2mw2lt",
-  "version": "0.8.89",
+  "version": "0.8.90",
   "description": "Connect your ZCode session to a 2mw2lt workspace: one steering partner that coordinates it with every other session, gates its work with independent review, and keeps what it learns.",
   "hooks": "zcode/hooks/hooks.json",
   "skills": "skills",

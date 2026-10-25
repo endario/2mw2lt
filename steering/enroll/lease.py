@@ -120,8 +120,11 @@ _ANSWER_USAGE = "answer: token @lease <episode> acted because <why>` or `answer:
 # the request id, so `say --retry=<id>` returns the regroup the first send raised or joined.
 _REGROUP = re.compile(r"^regroup:\s*token\s+@lease\s+because\s+(?P<reason>\S.*?)\s*$", re.S)
 _REGROUP_USAGE = "regroup: token @lease because <why reconsider now>"
+# Acts no verb sees (doc 202 D16), recorded by the holder, never by a named actor in the prose.
+_INTERVENED = re.compile(r"^intervened:\s*token\s+@lease\s+(?P<card>[0-9a-f]{24})\s+(?P<cause>\S+)\s+(?P<why>\S.*?)\s*$", re.S)
+_INTERVENED_CAUSES = ("unheard", "stalled", "dead", "conflict", "queue-red", "ceiling", "stale-card", "release-red", "other")
 # Every lease verb `go_say` sends to Go, so a refusal of another names what this client takes.
-GO_VERBS = tuple(sorted({"authorship", "backlog", "cancel", "dispose", "launch", "lift", "out-of-band", "promote", "relay", "roster",
+GO_VERBS = tuple(sorted({"authorship", "backlog", "cancel", "dispose", "intervened", "launch", "lift", "out-of-band", "promote", "relay", "roster",
                          "withdraw", "answer", "regroup", *_ACTION, *_KEEP_USAGE}))
 # The paths `go_post` takes: each is the seat's own command, translated to the route Go serves.
 POST_TARGETS = ("/steering/seat/read", "/steering/brain/reply", "/steering/brain/attach",
@@ -167,6 +170,8 @@ def go_say(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         return _go_answer(rec, line, key)
     if verb == "regroup":
         return _go_regroup(rec, line, key)
+    if verb == "intervened":
+        return _go_intervened(rec, line, key)
     lift = _LIFT.match(line)
     if lift:
         return _go_lift(rec, lift, key)
@@ -488,6 +493,39 @@ def _go_regroup(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
             return 1, refusal.use("regroup", str(e)), False
+        return 1, refusal.retry(str(e)), True
+    return 0, said, False
+
+
+def _go_intervened(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
+    """Record a manual act on a card as the seat, under the line's occurrence for safe retries."""
+    import refusal
+    import session_routes
+    m = _INTERVENED.match(line)
+    if not m:
+        return 2, refusal.use("intervened", "malformed intervened: invocation"), False
+    if m["cause"] not in _INTERVENED_CAUSES:
+        return 2, refusal.use("intervened", f"a cause is one of {', '.join(_INTERVENED_CAUSES)}"), False
+    why = " ".join(m["why"].split())
+    try:
+        bounded = len(why.encode("utf-8")) <= 1000
+    except UnicodeEncodeError:
+        bounded = False
+    if not bounded:
+        return 2, refusal.use("intervened", "a why is at most 1000 UTF-8 bytes"), False
+    try:
+        said = session_routes.intervened(rec["session"], rec["token"], m["card"], m["cause"], why, key)
+    except session_routes.NotSeated as why:
+        return 1, GO_NOT_SEATED.format(why=why), False
+    except session_routes.Unsent as e:
+        return 1, refusal.retry(str(e)), True
+    except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale, False
+        if e.code in SEAT_LOST:
+            return 1, GO_NOT_SEATED.format(why=e), False
+        if session_routes.settled(e):
+            return 1, refusal.use("intervened", str(e)), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 

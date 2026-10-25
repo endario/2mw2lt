@@ -26,7 +26,7 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 from bind import Refused  # noqa: E402
 from connect import branch, head, speaker_flags, speaking_as  # noqa: E402
-from door import display_reply, occurrence, retry_args  # noqa: E402
+from door import display_reply, occurrence, record, retry_args  # noqa: E402
 from local_workspace import checkout_slug, required_workspace_root  # noqa: E402
 from verb_help import error, help_requested, script_help  # noqa: E402
 
@@ -138,6 +138,10 @@ def run(ws: Path, here: Path, repo: str, session: str, flags, picked: dict, retr
     """Dispatch the run on this checkout's pushed head and register its wait."""
     import refusal
     import session_routes
+    if not (here / ".github/scripts/steering-scope.sh").is_file():
+        reason = "this repository has no .github/scripts/steering-scope.sh; pool CI dispatch requires the platform repository's steering workflow"
+        record("ci", reason, ws)
+        return 1
     on, at = branch(here), head(here)
     if not on or not at:
         print("this checkout is on no branch, or no commit", file=sys.stderr)

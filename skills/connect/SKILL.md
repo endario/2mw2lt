@@ -336,8 +336,11 @@ Push first, keep the pull request draft, and before each round run the guards th
 changed. The tests your change touches you spot-run where you sit — a test file, a `-run` pattern,
 one guard; never a shard, the merge tier or the suite, which belong on the CI box. The parts too
 wide for that, and only the parts your change reads, you dispatch to the pool on your pushed head,
-named. The pool is the only place for a guard your OS cannot run: the native Mac shard
-(`--shards mac`) from Linux, the Linux machine tests (the conformance) from a Mac. The whole suite
+named. **Pool dispatch is available only in a repository carrying this platform's steering
+workflow (`.github/scripts/steering-scope.sh`); elsewhere `ci.py run` refuses because that
+workflow is what defines the pool's parts.** The pool is the only place for a guard your OS cannot
+run: the native Mac shard (`--shards mac`) from Linux, the Linux machine tests (the conformance)
+from a Mac. The whole suite
 is the nightly's and a release's — `--all` and `all` are refused, and the nightly covers the rest.
 A failure only a loaded run shows is a defect in that guard, to fix: every guard passes under load.
 

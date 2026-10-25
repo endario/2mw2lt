@@ -76,6 +76,23 @@ MatrixHost = typing.TypedDict("MatrixHost", {
     "host": "str",
     "name": "str | None",
     "census": "str",
+    "census_detail": "typing.NotRequired[MatrixCensusDetail | None]",
+})
+
+# MatrixCensusDetail is the privacy-safe aggregate of a host's worker-login censuses. It names no
+# login, session, account or directory. TakenAt is the oldest version-2 capture.
+MatrixCensusDetail = typing.TypedDict("MatrixCensusDetail", {
+    "reports": "int",
+    "fresh": "int",
+    "stale": "int",
+    "absent": "int",
+    "taken_at": "typing.NotRequired[str | None]",
+    "total": "int",
+    "named": "int",
+    "processless": "int",
+    "gaps": "list[str] | None",
+    "truncated": "bool",
+    "incomplete": "bool",
 })
 
 # MatrixCell is one account on one host. Held is whether a reading of the account stands there.
@@ -105,6 +122,7 @@ AccountPolicy = typing.TypedDict("AccountPolicy", {
     "off_at": "str",
     "off": "dict[str, str | None] | None",
     "uses": "typing.NotRequired[dict[str, list[str] | None] | None]",
+    "declared_uses": "typing.NotRequired[dict[str, list[str] | None] | None]",
 })
 
 AccountReadingsBody = typing.TypedDict("AccountReadingsBody", {
@@ -117,6 +135,7 @@ AccountPolicyBody = typing.TypedDict("AccountPolicyBody", {
     "readings": "list[typing.Any] | None",
     "off": "typing.NotRequired[dict[str, str | None] | None]",
     "uses": "typing.NotRequired[dict[str, list[str] | None] | None]",
+    "declared_uses": "typing.NotRequired[dict[str, list[str] | None] | None]",
     "off_at": "str",
 })
 
@@ -252,6 +271,26 @@ UsageLimit = typing.TypedDict("UsageLimit", {
     "role": "str | None",
     "scope": "str | None",
     "projection": "UsageProjection | None",
+    "waste": "typing.NotRequired[UsageWaste | None]",
+})
+
+# UsageWaste is whether the remaining quota can burn at the best directly observed single-account
+# rate for this provider, plan and window. Its figures are quota fractions, Capability per second.
+UsageWaste = typing.TypedDict("UsageWaste", {
+    "state": "str",
+    "required_peak": "typing.NotRequired[float | None]",
+    "waste_at_near_peak": "typing.NotRequired[float | None]",
+    "minimum_waste_at_true_peak": "typing.NotRequired[float | None]",
+    "capability": "typing.NotRequired[float | None]",
+    "basis": "typing.NotRequired[UsageWasteBasis | None]",
+})
+
+# UsageWasteBasis is the direct evidence behind a capability: its valid positive intervals and span.
+UsageWasteBasis = typing.TypedDict("UsageWasteBasis", {
+    "kind": "str",
+    "observations": "int",
+    "first": "typing.NotRequired[str | None]",
+    "last": "typing.NotRequired[str | None]",
 })
 
 # UsageProjection is unlimited's forecast for a window: AtReset is where use is heading at the
@@ -3375,6 +3414,57 @@ GateBenchShadow = typing.TypedDict("GateBenchShadow", {
     "timeouts_widened": "int",
 })
 
+# InterventionBody records an act no platform verb saw, fenced by the seat's generation.
+# The authenticated carrier supplies the actor, never this body.
+InterventionBody = typing.TypedDict("InterventionBody", {
+    "card": "str",
+    "cause": "str",
+    "why": "str",
+    "generation": "int",
+})
+
+# InterventionAnswer acknowledges the first recording or its replay.
+InterventionAnswer = typing.TypedDict("InterventionAnswer", {
+    "card": "str",
+    "recorded": "bool",
+    "replayed": "bool",
+})
+
+# InterventionActor is the authenticated subject or seated session, not prose attribution.
+InterventionActor = typing.TypedDict("InterventionActor", {
+    "kind": "str",
+    "id": "str",
+})
+
+# InterventionRecord is one non-decision act from the workspace's ledger.
+InterventionRecord = typing.TypedDict("InterventionRecord", {
+    "card": "str",
+    "actor": "InterventionActor",
+    "act": "str",
+    "cause": "str",
+    "why": "str",
+    "at": "str",
+    "action_id": "typing.NotRequired[str | None]",
+})
+
+# InterventionMeasures exposes the facts presently sourced for D17. The rate is null without a
+# denominator. Decisions, release timing, touchless rate, escalations and foreman cost are not yet
+# sourced; their absence is not a measured zero.
+InterventionMeasures = typing.TypedDict("InterventionMeasures", {
+    "since": "str",
+    "until": "str",
+    "interventions": "int",
+    "merged_pull_requests": "int",
+    "by_cause": "dict[str, int] | None",
+    "per_merged_pull_request": "float | None",
+})
+
+# InterventionList is the owner-pulled ledger and its measures for a requested window.
+InterventionList = typing.TypedDict("InterventionList", {
+    "interventions": "list[InterventionRecord] | None",
+    "measures": "InterventionMeasures",
+})
+
 # KeepBody is the seat keeping a session idle on purpose, because it expects work in that
 # session's territory soon: why, and until when, as an RFC 3339 time or a duration from now ("45m",
 # "2h"). A keep has no ceiling; a long one is the brain's call, seen with its reason.
@@ -3519,6 +3609,7 @@ LaunchAnswer = typing.TypedDict("LaunchAnswer", {
     "request": "str",
     "state": "str",
     "reason": "typing.NotRequired[str]",
+    "barred": "typing.NotRequired[list[str] | None]",
     "account": "typing.NotRequired[LaunchAccount | None]",
     "outcome": "str | None",
     "refused": "str | None",
@@ -3544,6 +3635,7 @@ LaunchRead = typing.TypedDict("LaunchRead", {
     "request": "str",
     "state": "str",
     "reason": "typing.NotRequired[str]",
+    "barred": "typing.NotRequired[list[str] | None]",
     "account": "typing.NotRequired[LaunchAccount | None]",
     "outcome": "str | None",
     "refused": "str | None",
@@ -3671,6 +3763,7 @@ EndedLaunch = typing.TypedDict("EndedLaunch", {
     "cause": "str",
     "how": "str",
     "refused": "str | None",
+    "barred": "typing.NotRequired[list[str] | None]",
 })
 
 # MachineAccountMoveBinding is what both the door and the receiving agent name a move by: the move
@@ -3824,6 +3917,7 @@ FleetCensus = typing.TypedDict("FleetCensus", {
     "v": "int",
     "taken_at": "str",
     "total": "int",
+    "processless": "typing.NotRequired[int]",
     "unattributed": "int",
     "complete": "bool",
     "gaps": "list[str] | None",
@@ -7070,6 +7164,7 @@ WorkerCensus = typing.TypedDict("WorkerCensus", {
     "v": "int",
     "taken_at": "str",
     "total": "int",
+    "processless": "typing.NotRequired[int]",
     "unattributed": "int",
     "complete": "bool",
     "gaps": "list[str] | None",
@@ -7284,6 +7379,8 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/intents",
     "GET /w/{workspace}/api/v1/intents/{intent}",
     "POST /w/{workspace}/api/v1/intents/{intent}/disposition",
+    "GET /w/{workspace}/api/v1/interventions",
+    "POST /w/{workspace}/api/v1/interventions",
     "GET /w/{workspace}/api/v1/knowledge/brief",
     "GET /w/{workspace}/api/v1/knowledge/contracts",
     "POST /w/{workspace}/api/v1/knowledge/syncs",
@@ -7468,6 +7565,7 @@ QUERY = {
     "GET /w/{workspace}/api/v1/goals": {"limit": None, "next": None},
     "GET /w/{workspace}/api/v1/goals/{goal}/register": {"limit": None, "next": None},
     "GET /w/{workspace}/api/v1/intents": {"disposition": frozenset({"open"}), "limit": None, "next": None},
+    "GET /w/{workspace}/api/v1/interventions": {"since": None},
     "GET /w/{workspace}/api/v1/knowledge/brief": {"paths": None, "branch": None},
     "GET /w/{workspace}/api/v1/launches/ended": {"before": None},
     "GET /w/{workspace}/api/v1/machines": {"limit": None, "cursor": None},

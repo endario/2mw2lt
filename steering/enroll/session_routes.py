@@ -1126,6 +1126,15 @@ def seat_answer(session: str, token: str, episode: str, body: dict, key: str) ->
     return f"answered: {episode}, {body['verdict']}"
 
 
+def intervened(session: str, token: str, card: str, cause: str, why: str, key: str) -> str:
+    """The holder records an act no verb sees (`POST /interventions`) at its seat generation.
+    `key` is the line's occurrence, so a resend after a lost answer records nothing twice.
+    Raises `NotSeated`, `Refused` or `Unsent`."""
+    body = {"card": card, "cause": cause, "why": why, "generation": seat_generation(session, token)}
+    write("/interventions", body, _own_key("intervention.record", session, key), SESSION_CARRIER, token)
+    return f"intervened: {card} {cause}"
+
+
 def lift(session: str, token: str, kind: str, repo: str, at: int | str, reason: str, key: str) -> str:
     """The holder lifts a gate series one round past its ceiling (`POST /gates/lifts`): a review's
     by its pull request, a critique's by its branch, at the generation it holds. `key` is the line's
