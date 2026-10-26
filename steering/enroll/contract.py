@@ -123,6 +123,7 @@ AccountPolicy = typing.TypedDict("AccountPolicy", {
     "off": "dict[str, str | None] | None",
     "uses": "typing.NotRequired[dict[str, list[str] | None] | None]",
     "declared_uses": "typing.NotRequired[dict[str, list[str] | None] | None]",
+    "native_uses": "typing.NotRequired[dict[str, list[str] | None] | None]",
 })
 
 AccountReadingsBody = typing.TypedDict("AccountReadingsBody", {
@@ -136,6 +137,7 @@ AccountPolicyBody = typing.TypedDict("AccountPolicyBody", {
     "off": "typing.NotRequired[dict[str, str | None] | None]",
     "uses": "typing.NotRequired[dict[str, list[str] | None] | None]",
     "declared_uses": "typing.NotRequired[dict[str, list[str] | None] | None]",
+    "native_uses": "typing.NotRequired[dict[str, list[str] | None] | None]",
     "off_at": "str",
 })
 
@@ -148,6 +150,37 @@ AccountReportResult = typing.TypedDict("AccountReportResult", {
 AccountReportAnswer = typing.TypedDict("AccountReportAnswer", {
     "results": "list[AccountReportResult] | None",
     "policy": "typing.NotRequired[AccountReportResult | None]",
+})
+
+# AccountRule is one standing rule that refuses a candidate's spend intent. Target is the native
+# account, vendor, purpose or model entry the rule matched; it never carries a person or credential.
+AccountRule = typing.TypedDict("AccountRule", {
+    "source": "str",
+    "kind": "str",
+    "target": "str",
+    "scope": "str",
+    "purpose": "typing.NotRequired[str]",
+    "model": "typing.NotRequired[str]",
+    "until": "typing.NotRequired[str | None]",
+    "observed_at": "typing.NotRequired[str | None]",
+    "state": "typing.NotRequired[str]",
+})
+
+# AccountCapability is an observation a candidate lacks for its spend intent, rather than a
+# configured ban. ObservedAt is the report's own time where the source carries one.
+AccountCapability = typing.TypedDict("AccountCapability", {
+    "kind": "str",
+    "target": "str",
+    "observed_at": "typing.NotRequired[str | None]",
+})
+
+# AccountOffering is one model a candidate could or could not spend, with the rule or capability
+# that refused it. A permitted offering does not of itself erase another candidate-level refusal.
+AccountOffering = typing.TypedDict("AccountOffering", {
+    "model": "str",
+    "permitted": "bool",
+    "rule": "typing.NotRequired[AccountRule | None]",
+    "capability": "typing.NotRequired[AccountCapability | None]",
 })
 
 # AccountList is GET /accounts: the team's accounts, each folded across the machines that read it
@@ -195,7 +228,6 @@ ListedAccountUsage = typing.TypedDict("ListedAccountUsage", {
     "vendor_account": "str | None",
     "number": "int | None",
     "harness": "str",
-    "provider": "str",
     "reading": "UsageReading",
     "machines": "list[str] | None",
     "verdict": "AccountVerdict",
@@ -352,7 +384,6 @@ AccountIncentive = typing.TypedDict("AccountIncentive", {
 # UnnamedDirectory is a directory a machine read whose credential names no account.
 UnnamedDirectory = typing.TypedDict("UnnamedDirectory", {
     "harness": "str",
-    "provider": "str",
     "directory": "str",
     "machine": "str",
 })
@@ -1179,11 +1210,10 @@ StreamFleet = typing.TypedDict("StreamFleet", {
 })
 
 # FleetAccount is one account in a fleet frame. Harness is the harness its standing reading came
-# from, and Provider the same, under the name release N+1 drops (#6550); Sessions the names drawing on it.
+# from; Sessions the names drawing on it.
 FleetAccount = typing.TypedDict("FleetAccount", {
     "account": "int | None",
     "harness": "str",
-    "provider": "str",
     "vendor": "str",
     "verdict": "AccountVerdict",
     "tightest": "UsageTightest | None",
@@ -1281,7 +1311,6 @@ MachineAction = typing.TypedDict("MachineAction", {
     "psession": "str",
     "runtime": "str",
     "harness": "str",
-    "provider": "str",
     "node": "str",
     "os_user": "str",
     "reason": "str",
@@ -1330,6 +1359,7 @@ RetireAction = typing.TypedDict("RetireAction", {
     "branches": "typing.NotRequired[list[str] | None]",
     "landed": "typing.NotRequired[list[str] | None]",
     "left": "typing.NotRequired[bool]",
+    "rescue": "typing.NotRequired[list[str] | None]",
 })
 
 # StreamWake is a wake, by the attempt the agent answers with.
@@ -1342,7 +1372,6 @@ StreamWake = typing.TypedDict("StreamWake", {
     "psession": "str",
     "runtime": "str",
     "harness": "str",
-    "provider": "str",
     "node": "str",
     "os_user": "str",
     "reason": "str",
@@ -1413,7 +1442,6 @@ StreamControl = typing.TypedDict("StreamControl", {
     "psession": "str",
     "runtime": "str",
     "harness": "str",
-    "provider": "str",
     "node": "str",
     "os_user": "str",
     "reason": "str",
@@ -1459,7 +1487,6 @@ StreamRehome = typing.TypedDict("StreamRehome", {
     "psession": "str",
     "runtime": "str",
     "harness": "str",
-    "provider": "str",
     "node": "str",
     "os_user": "str",
     "reason": "str",
@@ -1505,7 +1532,6 @@ StreamPark = typing.TypedDict("StreamPark", {
     "psession": "str",
     "runtime": "str",
     "harness": "str",
-    "provider": "str",
     "node": "str",
     "os_user": "str",
     "reason": "str",
@@ -1551,7 +1577,6 @@ StreamPrompt = typing.TypedDict("StreamPrompt", {
     "psession": "str",
     "runtime": "str",
     "harness": "str",
-    "provider": "str",
     "node": "str",
     "os_user": "str",
     "reason": "str",
@@ -1597,7 +1622,6 @@ StreamAnswer = typing.TypedDict("StreamAnswer", {
     "psession": "str",
     "runtime": "str",
     "harness": "str",
-    "provider": "str",
     "node": "str",
     "os_user": "str",
     "reason": "str",
@@ -1643,7 +1667,6 @@ StreamInterrupt = typing.TypedDict("StreamInterrupt", {
     "psession": "str",
     "runtime": "str",
     "harness": "str",
-    "provider": "str",
     "node": "str",
     "os_user": "str",
     "reason": "str",
@@ -1693,6 +1716,7 @@ StreamRetire = typing.TypedDict("StreamRetire", {
     "branches": "typing.NotRequired[list[str] | None]",
     "landed": "typing.NotRequired[list[str] | None]",
     "left": "typing.NotRequired[bool]",
+    "rescue": "typing.NotRequired[list[str] | None]",
 })
 
 # StreamWatch leases a browser's watch of a session this machine holds, by the session's name,
@@ -2903,6 +2927,21 @@ ReceiptSession = typing.TypedDict("ReceiptSession", {
     "epoch": "int",
 })
 
+# GateMergeBody asks that a pull request's passed head be readied and enqueued.
+GateMergeBody = typing.TypedDict("GateMergeBody", {
+    "repo": "str",
+    "pr": "int",
+    "head": "str",
+})
+
+# GateMergeAnswer is the card and head recorded by the native queue command.
+GateMergeAnswer = typing.TypedDict("GateMergeAnswer", {
+    "card": "str",
+    "head": "str",
+    "status": "str",
+    "replayed": "bool",
+})
+
 # GateCarryBody asks that a pull request's passing review be carried to its new head. Equivalent
 # is the author's word that the head is the reviewed change on a new base: it forces a replay and
 # never waives one. Foreign, when the author can name them, are the commits beyond the trunk it did
@@ -4034,6 +4073,87 @@ MachineKeyAnswer = typing.TypedDict("MachineKeyAnswer", {
     "fingerprint": "str",
 })
 
+# MachineRehomeBinding names one session move. Session is the coordination subject,
+# not the enrollment name. Both hops use these fields in this order for HPKE info.
+MachineRehomeBinding = typing.TypedDict("MachineRehomeBinding", {
+    "rehome": "str",
+    "session": "str",
+    "source": "str",
+    "target": "str",
+    "account": "str",
+    "target_key": "str",
+})
+
+# MachineRehomeExportBody is an export hop. Action pins the source process and
+# names the enrollment, epoch, provider conversation and target launch account.
+# The binding is separate so its subject cannot be mistaken for the action's name.
+MachineRehomeExportBody = typing.TypedDict("MachineRehomeExportBody", {
+    "binding": "MachineRehomeBinding",
+    "action": "MachineAction",
+    "deadline": "str",
+})
+
+# MachineRehomeReceiveBody is the target's hop. Its action still names the source
+# process; it is not a target runtime fence. Blob is the opaque export answer.
+MachineRehomeReceiveBody = typing.TypedDict("MachineRehomeReceiveBody", {
+    "binding": "MachineRehomeBinding",
+    "action": "MachineAction",
+    "deadline": "str",
+    "blob": "str",
+})
+
+# StreamRehomeExport offers the source's export hop, whose ID is the receipt's ID.
+StreamRehomeExport = typing.TypedDict("StreamRehomeExport", {
+    "kind": "str",
+    "id": "str",
+    "binding": "MachineRehomeBinding",
+    "action": "MachineAction",
+    "deadline": "str",
+})
+
+# StreamRehomeReceive offers the target's receive hop with the sealed export.
+StreamRehomeReceive = typing.TypedDict("StreamRehomeReceive", {
+    "kind": "str",
+    "id": "str",
+    "binding": "MachineRehomeBinding",
+    "action": "MachineAction",
+    "deadline": "str",
+    "blob": "str",
+})
+
+# MachineRehomeAnswer is a hop's answer. Only an exported answer carries Blob;
+# only that ciphertext crosses the door. Status is exported, resumed, or a named
+# non-secret refusal. The stored answer omits Blob on every path.
+MachineRehomeAnswer = typing.TypedDict("MachineRehomeAnswer", {
+    "status": "str",
+    "blob": "typing.NotRequired[str]",
+    "size": "typing.NotRequired[int]",
+    "cwd": "typing.NotRequired[str]",
+    "compacted": "typing.NotRequired[bool]",
+})
+
+# MachineRehomeReceipt is an export or receive answer on its current uplink.
+MachineRehomeReceipt = typing.TypedDict("MachineRehomeReceipt", {
+    "uplink": "str",
+    "id": "str",
+    "result": "MachineRehomeAnswer",
+})
+
+# MachineRehomeReceiptAnswer identifies the recorded hop, not the session action.
+MachineRehomeReceiptAnswer = typing.TypedDict("MachineRehomeReceiptAnswer", {
+    "id": "str",
+    "state": "str",
+    "replayed": "bool",
+})
+
+# MachineRehomeStatus is visible only to a participating machine. Bound is the
+# target incarnation's qualifying bind, never the machine's claim of startup.
+MachineRehomeStatus = typing.TypedDict("MachineRehomeStatus", {
+    "state": "str",
+    "outcome": "typing.NotRequired[str]",
+    "bound": "bool",
+})
+
 # MachineRemovalBody is the seat removing a dead machine's registrations from the fleet, with the
 # reason it gives.
 MachineRemovalBody = typing.TypedDict("MachineRemovalBody", {
@@ -4095,6 +4215,8 @@ ManagementRequest = typing.TypedDict("ManagementRequest", {
     "delay_ms": "typing.NotRequired[int | None]",
     "status": "typing.NotRequired[int | None]",
     "reason": "typing.NotRequired[str]",
+    "vendor": "typing.NotRequired[str]",
+    "model": "typing.NotRequired[str]",
 })
 
 # ManagementFailure reports an unsuccessful capture without renewing the last successful one.
@@ -4133,13 +4255,14 @@ TeamInvitationList = typing.TypedDict("TeamInvitationList", {
     "invitations": "list[TeamInvitationDTO] | None",
 })
 
-# TeamInvitationDTO is one invitation as its owner sees it. GitHubID and Login are the identity it
-# names, null on a row made before invitations named one; CreatedAt is null where the journal does
+# TeamInvitationDTO is one invitation as its owner sees it. It names either GitHubID and Login or
+# Email, or neither on a legacy row; CreatedAt is null where the journal does
 # not record its issue. UsedBy is the subject that redeemed it.
 TeamInvitationDTO = typing.TypedDict("TeamInvitationDTO", {
     "id": "str",
     "github_id": "int | None",
     "login": "str | None",
+    "email": "typing.NotRequired[str | None]",
     "status": "typing.Literal[\"open\", \"used\", \"revoked\", \"expired\"]",
     "created_at": "str | None",
     "expires_at": "str",
@@ -4492,9 +4615,18 @@ PlacementCandidate = typing.TypedDict("PlacementCandidate", {
     "multiplier": "typing.NotRequired[float | None]",
     "launcher_command": "typing.NotRequired[str]",
     "draw": "typing.NotRequired[PlacementDraw | None]",
+    "waste": "typing.NotRequired[PlacementWaste | None]",
     "binding": "typing.NotRequired[str]",
     "peak": "typing.NotRequired[PlacementPeak | None]",
     "peak_exception": "typing.NotRequired[str]",
+})
+
+# PlacementWaste is the largest-window capacity fact a placement candidate was ranked by.
+PlacementWaste = typing.TypedDict("PlacementWaste", {
+    "window": "str",
+    "resets_at": "typing.NotRequired[str | None]",
+    "state": "str",
+    "waste_at_near_peak": "typing.NotRequired[float | None]",
 })
 
 # PlacementPeak is a candidate's retained peak evidence as its placement reads answer it (#7503):
@@ -4531,6 +4663,7 @@ PlacementTerms = typing.TypedDict("PlacementTerms", {
     "spread": "float",
     "share": "float",
     "dedicated": "float",
+    "on_battery": "typing.NotRequired[float]",
 })
 
 # PlacementFiltered is a candidate a check took out before judging, and the check. NoAccount is
@@ -5114,16 +5247,14 @@ DetachBody = typing.TypedDict("DetachBody", {
 # EnrolSessionBody is an enrolment's body: the session's name and the incarnation it runs in.
 EnrolSessionBody = typing.TypedDict("EnrolSessionBody", {
     "name": "str",
-    "harness": "typing.NotRequired[str]",
-    "provider": "typing.NotRequired[str]",
+    "harness": "str",
     "provider_session": "str",
     "runtime_id": "str",
 })
 
 # IncarnationBody is an observation's body: what a machine saw of one harness process.
 IncarnationBody = typing.TypedDict("IncarnationBody", {
-    "harness": "typing.NotRequired[str]",
-    "provider": "typing.NotRequired[str]",
+    "harness": "str",
     "provider_session": "str",
     "runtime_id": "str",
 })
@@ -5149,8 +5280,7 @@ SessionCredential = typing.TypedDict("SessionCredential", {
 # the usage join; it names no credential. Only a harness that spends an OpenAI login has one: Codex,
 # or Claude Code proxied to such a login.
 BindBody = typing.TypedDict("BindBody", {
-    "harness": "typing.NotRequired[str]",
-    "provider": "typing.NotRequired[str]",
+    "harness": "str",
     "provider_session": "str",
     "runtime_id": "str",
     "account_id": "typing.NotRequired[str]",
@@ -5752,11 +5882,9 @@ Snapshot = typing.TypedDict("Snapshot", {
     "provenance": "SnapshotProvenance",
 })
 
-# TargetingRecord is where a session runs, as its machine observed it. A record names its harness as
-# Harness; Provider is the name this release still takes, and a record is stored with both (#6550).
+# TargetingRecord is where a session runs, as its machine observed it.
 TargetingRecord = typing.TypedDict("TargetingRecord", {
-    "harness": "typing.NotRequired[str]",
-    "provider": "typing.NotRequired[str]",
+    "harness": "str",
     "provider_session": "str",
     "runtime_id": "str",
     "entrypoint": "str",
@@ -6405,8 +6533,15 @@ CardDTO = typing.TypedDict("CardDTO", {
     "conclusion": "typing.NotRequired[ConclusionDTO | None]",
     "board": "BoardDTO",
     "gates": "typing.NotRequired[CardGates | None]",
+    "released": "typing.NotRequired[CardReleased | None]",
     "knowledge": "typing.NotRequired[CardKnowledge | None]",
     "triage": "typing.NotRequired[CardTriage | None]",
+})
+
+# CardReleased is the release that shipped a card's merge: its tag, and when it was published.
+CardReleased = typing.TypedDict("CardReleased", {
+    "tag": "str",
+    "at": "str",
 })
 
 # CardKnowledge is a card's three knowledge stages at the applied knowledge commit.
@@ -6479,6 +6614,20 @@ BoardDTO = typing.TypedDict("BoardDTO", {
     "ending": "typing.NotRequired[str]",
     "executing": "list[str] | None",
     "push": "dict[str, list[PushDTO] | None] | None",
+    "blocked_on": "BlockedOnDTO",
+})
+
+# BlockedOnDTO is a card's blocked-on line as the wire answers it. WaitsOn is one of `worker`,
+# `queue`, `gate`, `foreman`, `seat`, `owner` or `nobody`; What is the step in that party's own
+# terms; Since is when the wait began, absent where the facts date nothing; Line is the two as the
+# desk and the seat read them: `waits on the worker: round 2's findings`. A card read, a card list,
+# a goal reading and the seat's snapshot carry it; a read that folds its cards into an answer of its
+# own — the momentum, the shared board — leaves it unset, so an empty WaitsOn is absent, never a party.
+BlockedOnDTO = typing.TypedDict("BlockedOnDTO", {
+    "waits_on": "str",
+    "what": "str",
+    "since": "typing.NotRequired[str | None]",
+    "line": "str",
 })
 
 # IntentAnswer and CardAnswer are a work command's answer: the resource as it stands after it,
@@ -7201,6 +7350,8 @@ WorkerCensusBody = typing.TypedDict("WorkerCensusBody", {
     "machine_name": "typing.NotRequired[str | None]",
     "forge_login": "typing.NotRequired[ForgeLogin | None]",
     "session_kit": "typing.NotRequired[list[KitTool] | None]",
+    "rehome_protocol": "typing.NotRequired[int]",
+    "rehome_imports": "typing.NotRequired[list[str] | None]",
 })
 
 # HarnessSpend is the account an account-free launch of one harness would spend on this machine
@@ -7353,6 +7504,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/gates/carries",
     "GET /w/{workspace}/api/v1/gates/carries/{carry}",
     "POST /w/{workspace}/api/v1/gates/lifts",
+    "POST /w/{workspace}/api/v1/gates/merges",
     "GET /w/{workspace}/api/v1/gates/stats",
     "GET /w/{workspace}/api/v1/gates/{gate}",
     "POST /w/{workspace}/api/v1/gates/{gate}/cancellation",
@@ -7517,6 +7669,9 @@ ROUTES = frozenset({
     "POST /w/{workspace}/steering/agent/reading",
     "POST /w/{workspace}/steering/agent/received",
     "POST /w/{workspace}/steering/agent/rehome",
+    "POST /w/{workspace}/steering/agent/rehome-export",
+    "POST /w/{workspace}/steering/agent/rehome-receive",
+    "GET /w/{workspace}/steering/agent/rehome/{rehome}",
     "POST /w/{workspace}/steering/agent/release",
     "POST /w/{workspace}/steering/agent/renew",
     "POST /w/{workspace}/steering/agent/retire",

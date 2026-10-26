@@ -267,8 +267,11 @@ def enrol(ws: Path, session: str, provider: str, psession: str, runtime: str) ->
         with os.fdopen(fd, "w") as f:
             f.write(json.dumps(request))
         _durable(pending)
+    body = request["body"]
+    if "provider" in body:   # written before #6550; Go hashes the decoded request, so its key still answers
+        body = {("harness" if k == "provider" else k): v for k, v in body.items()}
     try:
-        answer = post("/sessions", request["body"], request["key"], MACHINE_CARRIER, _machine_token())
+        answer = post("/sessions", body, request["key"], MACHINE_CARRIER, _machine_token())
     except Refused as e:
         if settled(e):
             # Nothing was issued, so the request is not one to recover: the next enrolment is a

@@ -3,7 +3,8 @@
 The gh CLI's merge, on a branch whose ruleset requires a queue, prints only "The merge strategy for
 main is set by the merge queue" and exits 0 without enqueuing while a required check has not
 reported on the head. So this reads the head's required checks first, says which have yet to report
-rather than polling for them, enqueues over GraphQL with the expected head, and confirms the entry.
+rather than polling for them, enqueues through steering's native command with the expected head, and
+confirms the entry.
 """
 from __future__ import annotations
 
@@ -25,8 +26,6 @@ READ = """query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,na
    ... on CheckRun{name status conclusion checkSuite{app{databaseId}}}
    ... on StatusContext{context state}}}}}}}}}}"""
 READY = "mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{isDraft}}}"
-ENQUEUE = ("mutation($id:ID!,$head:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,"
-           "expectedHeadOid:$head}){mergeQueueEntry{position}}}")
 MERGE = ("mutation($id:ID!,$head:GitObjectID!){mergePullRequest(input:{pullRequestId:$id,"
          "expectedHeadOid:$head,mergeMethod:SQUASH}){pullRequest{state}}}")
 
@@ -99,7 +98,7 @@ def queued(repo: dict) -> bool:
 
 
 def merge(slug: str, n: int, expected: str | None, *, say: Callable[[str], None] = print,
-          ask: Callable[..., dict] = graphql) -> str:
+          ask: Callable[..., dict] = graphql, native: Callable[[str, int, str], None]) -> str:
     """Merge #n of `slug`, or join its base's queue, on the head that holds the pass, and say which
     happened as GitHub reads it back; Refused when it did not, Pending when a required check has yet
     to report."""
@@ -119,7 +118,10 @@ def merge(slug: str, n: int, expected: str | None, *, say: Callable[[str], None]
     if verdict == "wait":
         raise Pending(f"{said} has not reported on {head[:12]}")
     into = queued(repo)
-    ask(ENQUEUE if into else MERGE, id=pull["id"], head=head)
+    if into:
+        native(slug, n, head)
+    else:
+        ask(MERGE, id=pull["id"], head=head)
     verdict, said = standing(read(), head)
     if verdict in ("merged", "queued"):
         return said

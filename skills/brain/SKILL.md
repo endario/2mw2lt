@@ -135,6 +135,12 @@ kind turned off is not told, and its standing still reads:
   with what it runs. A stuck turn that has also gone silent is told as stuck, not again as stale.
   The snapshot's fleet line says every working session's `last step` age, which tells a long turn
   from a hung one.
+- **`session-upstream`**: a measured model vendor error ended the turn or holds a scheduled retry,
+  not proof the session broke. `reason`, `status`, `vendor` and `model` name the safe cause when
+  known. A `failed` request waits for another attempt; no automatic retry is implied. A `backoff`
+  request has a measured `retry_at`: let it run. Expired source evidence and an overdue retry with
+  no progress still take the normal stale or stuck path. Re-drive the turn when the vendor recovers,
+  or choose another account; do not retire a session solely for an upstream refusal.
 - **`session-dead`**: the session is gone for good, not merely silent. `cause` says why:
   `resume-failed`, its machine answered a wake that no process runs it and resuming it failed (`why`
   is the machine's words), or `machine-offline`, its machine has been offline 30 minutes while it
@@ -192,9 +198,10 @@ kind turned off is not told, and its standing still reads:
   hours (`signals.need_aged.*`), once per need. Routed `escalate`, the default, the blocked session
   was told at an hour and you hear it only if the need is still open at 2. It names its question,
   and a blocked need's session: answer it, unblock it, or dismiss it.
-- **`account-unspent`**, a signal: an account the team spends resets within 60 minutes with more than
-  30% of its scored window left (`signals.account_unspent.*`), once per reset. What is left at the
-  reset is lost: place work on it before then.
+- **`account-unspent`**, a signal: a serving account's largest window crossed canonical blue, so avoiding
+  waste needs near-peak burn for the rest of the window (`signals.account_unspent.*`), once per
+  workspace/account/reset. Its facts name the plan, window, reset, required peak, expected waste, bottleneck
+  and evidence time. Place eligible work before the reset; blue overrides no guard.
 - **`account-reset`**, a signal from `account <subject>`: an account's spent window rolled over and
   it takes work again (`signals.account_reset.*`), once per reset. `excluded.window` is the window
   that had stopped it. Its sessions are told it too by default, and the platform wakes each whose stream holds; resume
@@ -1021,16 +1028,29 @@ This is the one case where you start a harness yourself; everything else is star
 ## Rehome a stopped session
 
 A Claude Code session that stopped on its limit, or is about to, can continue on another account
-on the same machine with its conversation, name and card:
+on the same machine, or an explicitly named machine, with its conversation, name and card:
 
 ```bash
-say "rehome: token @lease <session> to [vendor <vendor>] <account> [model <model>] [effort <level>] [compact [without checkpoint]] because <why>"
+say "rehome: token @lease <session> to [vendor <vendor>] <account> [machine <name>] [model <model>] [effort <level>] [compact [without checkpoint]] because <why>"
 ```
 
 Name the account as you name it for `launch:`: its number, under its vendor. A move into another
 vendor's home (`vendor zai`, or a proxied launcher's) is named as one, and names the model it
 resumes on in that vendor's own ids (`glm-5.3`, `glm-5.3-flash`); without `model` and `effort` it
 resumes on the launcher's defaults.
+
+`machine <name>` goes after the account; quote a name with spaces. Before asking, read both
+machines' census capabilities (`rehome_protocol: 1`) and the target's `rehome_imports` and launcher
+accounts. An agent without `rehome_protocol: 1` is refused; `machine auto` and `within` are not
+served. No machine, or an explicit source machine, keeps the same-machine path. Cross-machine
+moves require a clean source worktree on a branch whose HEAD matches the branch pushed to `origin`.
+After export, the source transcript stays in manual quarantine, outside automatic same-machine
+recovery. A failed move restores the coordinator's assignment, not the source transcript;
+recovering that copy is manual. `rehomed` requires the resumed session's own bind, not just a
+successful start; `refused` names the check, and `unbound` means no qualifying bind. Deployment and
+the real throwaway-session proof are the seat's decision. Follow the
+rehome runbook for the
+throwaway roundtrip, receipt and bind checks, return preparation and per-leg rollback.
 
 Prefer it to a pack-up whenever an account on that machine has runway. The session must
 be out of its turn: a busy one is refused, and stopping one early is your deliberate call.

@@ -92,6 +92,7 @@ _ACTION = {
     "retire": re.compile(r"^retire:\s*token\s+@lease\s+(?P<to>\S+)(?:\s+to\s+(?P<successor>\S+))?"
                          r"\s+because\s+(?P<reason>\S.*?)\s*$", re.S),
     "rehome": re.compile(r"^rehome:\s*token\s+@lease\s+(?P<to>\S+)\s+to(?:\s+vendor\s+(?P<vendor>\S+))?\s+(?P<account>\S+)"
+                         r"(?:\s+machine\s+(?P<machine>\"[^\"\n]{1,64}\"|'[^'\n]{1,64}'|[^\s\"']{1,64}))?"
                          r"(?:\s+model\s+(?P<model>\S{1,128}))?(?:\s+effort\s+(?P<effort>low|medium|high|xhigh|max))?"
                          r"(?P<compact>\s+compact(?:\s+without\s+checkpoint)?)?"
                          r"\s+because\s+(?P<reason>\S.*?)\s*$", re.S),
@@ -103,7 +104,7 @@ _ACTION_USAGE = {
     "wake": "wake: token @lease <session> because <reason>",
     "control": "control: token @lease <session> effort <level> | model <model> | compact [without checkpoint] because <reason>",
     "retire": "retire: token @lease <session> [to <successor>] because <reason>",
-    "rehome": "rehome: token @lease <session> to [vendor <vendor>] <account> [model <model>] [effort <level>] [compact [without checkpoint]] because <reason>",
+    "rehome": "rehome: token @lease <session> to [vendor <vendor>] <account> [machine <name>] [model <model>] [effort <level>] [compact [without checkpoint]] because <reason>",
     "park": "park: token @lease <session> [until <time or duration>] because <reason>",
 }
 # The seat's keep of a session it leaves idle on purpose, with its plan, and the keep's clearing
@@ -394,7 +395,10 @@ def _go_action(rec: dict, verb: str, line: str, key: str) -> tuple[int, str, boo
     if verb == "control":
         body["value"] = " ".join(m["value"].split())
     if verb == "rehome":
+        if m["machine"] and m["machine"].strip("\"'") == "auto":
+            return 2, refusal.use(verb, "phase 0 names a machine, not auto"), False
         body["value"] = " ".join([*(["vendor", m["vendor"]] if m["vendor"] else []), m["account"],
+                                  *(["machine", m["machine"]] if m["machine"] else []),
                                   *(["model", m["model"]] if m["model"] else []),
                                   *(["effort", m["effort"]] if m["effort"] else []), *(m["compact"] or "").split()])
     if verb == "park" and m["until"]:

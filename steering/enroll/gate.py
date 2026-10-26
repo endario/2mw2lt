@@ -130,7 +130,7 @@ def main(argv: list[str]) -> int:
     argv, extra = split
     parsed = speaker_flags(argv)
     if parsed and len(parsed[1]) > 1 and parsed[1][1] == "merge":
-        return merge(parsed[1][0], parsed[1][2:], extra or retry_id)
+        return merge(parsed[1][0], parsed[1][2:], parsed[0], extra, retry_id)
     if parsed is None or len(parsed[1]) != 3 or parsed[1][1] not in ("review", "critic", "status", "cancel", "pr", "carry"):
         return error("gate", "gate requires a supported action and its argument")
     flags, (session, kind, what) = parsed
@@ -407,14 +407,15 @@ def gate_read(r: dict) -> str:
     return "\n".join(lines)
 
 
-def merge(session: str, argv: list[str], flagged) -> int:
-    """`merge <pr> [--head <sha>]`: merge the pull request, or join its base's merge queue, on the
-    head that holds the pass, through this machine's `gh` (pr_merge, #8458). A required check yet to
-    report is waited for as a `wait`, not a poll: GitHub is every session's shared limit (#4203)."""
+def merge(session: str, argv: list[str], flags, extra: str, retry_id: str | None) -> int:
+    """`merge <pr> [--head <sha>]`: join a base's merge queue through steering's native command, or
+    squash-merge locally when it has no queue, on the head that holds the pass (pr_merge, #8458).
+    A required check yet to report is waited for as a `wait`, not a poll (#4203)."""
     import datetime
     import pr_merge
-    if flagged:
-        return error("gate", "gate merge takes only --head <sha>")
+    import session_routes
+    if extra:
+        return error("gate", "gate merge takes only --head <sha> and --retry=<id>")
     if len(argv) == 3 and argv[1] == "--head" and re.fullmatch(r"[0-9a-f]{40}", argv[2]):
         expected = argv[2]
     elif len(argv) == 1:
@@ -428,13 +429,36 @@ def merge(session: str, argv: list[str], flagged) -> int:
         print("this checkout's origin names no GitHub repository to merge in", file=sys.stderr)
         return 1
     n = int(argv[0].lstrip("#"))
+    this = retry_id or occurrence()
+
+    def native(slug: str, pr: int, head: str) -> None:
+        # A base without a queue never needs the Go workspace, a session token or a native write.
+        ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
+        try:
+            _, token = speaking_as(ws, session, flags)
+        except Refused as why:
+            raise pr_merge.Refused(str(why)) from None
+        print(f"id {this}", file=sys.stderr)
+        answer = session_routes.write("/gates/merges", {"repo": slug, "pr": pr, "head": head}, this,
+                                     session_routes.SESSION_CARRIER, token)
+        if answer.get("status") != "enqueued" or answer.get("head") != head:
+            raise session_routes.Unsent(f"Go answered the native merge without confirming the enqueue of {head[:12]}")
+
     try:
-        print(f"#{n}: " + pr_merge.merge(repo, n, expected, say=lambda line: print(line, file=sys.stderr)))
+        print(f"#{n}: " + pr_merge.merge(repo, n, expected, say=lambda line: print(line, file=sys.stderr), native=native))
     except pr_merge.Pending as why:
         at = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%MZ")
         print(f"not yet: {why}; it reports minutes after a push. Declare `verb.py wait {session} for at {at}`, "
               f"and merge again when it tells you", file=sys.stderr)
         return 75
+    except (session_routes.Refused, session_routes.Unsent) as why:
+        if isinstance(why, session_routes.Refused) and session_routes.settled(why):
+            detail = f"{why}: {why.detail}" if why.detail else str(why)
+            print(f"not merged: {detail}", file=sys.stderr)
+        else:
+            print(f"merge outcome unknown: {why}; the merge may have landed. "
+                  f"Send it again with --retry={this} to learn which", file=sys.stderr)
+        return 1
     except pr_merge.Refused as why:
         print(f"not merged: {why}", file=sys.stderr)
         return 1
