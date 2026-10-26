@@ -63,7 +63,14 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <your session> <bo
 ```
 
 A Claude Code session with the plugin hands the note over with the `mcp__2mw2lt__checkpoint` tool
-(`{boundary, text, learned?, mirror?}`) instead of this command.
+(`{boundary, text, learned?, mirror?}`) instead of this command. A session whose shell has no
+`CLAUDE_PLUGIN_ROOT` — Codex and every harness besides Claude Code — runs the same verb through the
+workspace's stable launcher, the one path every harness shares and a Codex session's grant allows
+without a dialog:
+
+```bash
+python3 <workspace>/.claude/steering-launch.py exec checkpoint <your session> <boundary> --text-file <note file> [--learned-file "$learned"] [--mirror <pull request or issue URL>]
+```
 
 The platform scans the note for credentials and keeps it for the workspace's retention.
 `checkpointed: <checkpoint id> <boundary>` is the answer; `dropped: <n>` names a lesson that

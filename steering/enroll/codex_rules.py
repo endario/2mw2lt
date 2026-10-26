@@ -1,11 +1,12 @@
-"""The owner's standing grant of a worker's own forge writes, as one Codex execpolicy rule (#7940,
-documentation/knowledge/decisions/workers-open-their-own-pull-requests.md).
+"""The owner's standing grants of a worker's own writes, as Codex execpolicy rules (#7940,
+documentation/knowledge/decisions/workers-open-their-own-pull-requests.md; #8571).
 
 Codex approves a command without asking when a `prefix_rule` in a `.rules` file under
 `$CODEX_HOME/rules` allows it, and loads those files only when a session starts. A prefix cannot
-refuse a trailing argument, so the rule grants no `gh` words: it names the workspace's stable
-launcher running the forge verb, which checks every word itself (forge.py). Install writes the file
-and connect refreshes it.
+refuse a trailing argument, so a rule grants no `gh` words: each names the workspace's stable
+launcher running one verb that checks every word itself — `forge` (forge.py), and `checkpoint`
+(checkpoint.py), a worker's own save, which no permission dialog an unattended worker cannot
+answer may stand between (#8571). Install writes the file and connect refreshes it.
 """
 from __future__ import annotations
 
@@ -34,10 +35,14 @@ def launcher(workspace: Path) -> str:
 
 
 def render(workspace: Path) -> str:
-    """The rule granting the forge verb through workspace's launcher."""
-    pattern = json.dumps(["python3", launcher(workspace), "exec", "forge"])
-    why = json.dumps("2mw2lt: the forge verb checks every word of a worker's own pull request and issue writes")
-    return f"prefix_rule(pattern = {pattern}, decision = \"allow\", justification = {why})\n"
+    """The rules granting the direct-run verbs through workspace's launcher."""
+
+    def rule(verb: str, why: str) -> str:
+        pattern = json.dumps(["python3", launcher(workspace), "exec", verb])
+        return f"prefix_rule(pattern = {pattern}, decision = \"allow\", justification = {json.dumps(why)})\n"
+
+    return (rule("forge", "2mw2lt: the forge verb checks every word of a worker's own pull request and issue writes")
+            + rule("checkpoint", "2mw2lt: the checkpoint verb saves a worker's own state on its own enrolment"))
 
 
 def path_for(workspace: Path, home: Path | None = None) -> Path:
@@ -54,9 +59,9 @@ def write(workspace: Path, home: Path | None = None) -> str:
     text = render(workspace)
     try:
         if path.read_text() == text:
-            return f"forge grant: in place, run as python3 {launcher(workspace)} exec forge <gh words>"
+            return f"forge grant: in place, run as python3 {launcher(workspace)} exec forge <gh words> or exec checkpoint <save>"
     except OSError:
         pass
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
-    return f"forge grant: written to {path}, reaches the next session; run as python3 {launcher(workspace)} exec forge <gh words>"
+    return f"forge grant: written to {path}, reaches the next session; run as python3 {launcher(workspace)} exec forge <gh words> or exec checkpoint <save>"

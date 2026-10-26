@@ -11,7 +11,6 @@ import shutil
 import subprocess
 import sys
 import time
-import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -397,13 +396,6 @@ def _codex_shape(rel: Path) -> tuple[bool, str | None]:
     return True, m.group(0) if m else None
 
 
-def _grok_shape(rel: Path) -> tuple[bool, str | None]:
-    """`sessions/<url-encoded cwd>/<session>/updates.jsonl`."""
-    if not (len(rel.parts) == 3 and rel.parts[2] == "updates.jsonl"):
-        return False, None
-    return True, rel.parts[1] if _SESSION_ID.fullmatch(rel.parts[1]) else None
-
-
 def claude_project_dir(workspace: str) -> str:
     """Claude keys a session's transcripts by the directory it runs in, with the separators
     flattened. One implementation: `enroll.encoded_cwd` reads it back, and the encoding is
@@ -428,13 +420,6 @@ def _codex_workspace(fd: int, _rel: Path, workspace: str) -> str | None:
         return "rollout has no readable session_meta"
     if cwd != workspace:
         return f"rollout belongs to workspace {cwd!r}, not {workspace!r}"
-    return None
-
-
-def _grok_workspace(_fd: int, rel: Path, workspace: str) -> str | None:
-    named = urllib.parse.unquote(rel.parts[0])
-    if named != workspace:
-        return f"grok session belongs to workspace {named!r}, not {workspace!r}"
     return None
 
 
@@ -726,8 +711,6 @@ HARNESSES = {h.provider: h for h in (
             shape=_codex_shape, workspace=_codex_workspace,
             delivery="inject", loaded=_codex_loaded,
             reading=_codex_reading, process_kind=_codex_process),
-    Harness("grok", agent="grok", config=".grok", config_env="GROK_HOME", transcript_root="sessions",
-            shape=_grok_shape, workspace=_grok_workspace),
     # Launched enrolled and reached (docs 83, 89).
     Harness("opencode", agent="opencode", config=".local/share/opencode",
             transcript_root="steering-workers",

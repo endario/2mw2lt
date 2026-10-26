@@ -96,17 +96,23 @@ def validate(doc: object, repo: str | None) -> list[str]:
     if ci is not None:
         # The workflows whose red runs on the default branch wake the brain (#4283). Only the
         # default branch is watched: a run on a tag or another branch is not. `hourly` names those
-        # of them the CI read runs there hourly (documentation/ci/15).
+        # of them the CI read runs there hourly (documentation/ci/15); `release` names the one that
+        # cuts a release, which the reconciler dispatches when the cut rule holds and whose red runs
+        # reach the seat as any watched workflow's do (doc 202 D9).
         files = ci.get("workflows") if isinstance(ci, dict) else None
         hourly = ci.get("hourly") if isinstance(ci, dict) else None
-        if not isinstance(ci, dict) or "workflows" not in ci or not set(ci) <= {"workflows", "hourly"}:
-            why.append("`ci` is not an object whose keys are `workflows` and, optionally, `hourly`")
+        release = ci.get("release") if isinstance(ci, dict) else None
+        if not isinstance(ci, dict) or "workflows" not in ci or not set(ci) <= {"workflows", "hourly", "release"}:
+            why.append("`ci` is not an object whose keys are `workflows` and, optionally, `hourly` and `release`")
         elif not (isinstance(files, list) and files and all(isinstance(f, str) and WORKFLOW.fullmatch(f) for f in files)):
             why.append("`ci.workflows` is not a non-empty list of workflow file names such as `steering.yml`, "
                        "each watched on the default branch only")
         elif "hourly" in ci and not (isinstance(hourly, list) and hourly and all(f in files for f in hourly)):
             why.append("`ci.hourly` is not a non-empty list of workflows `ci.workflows` watches, "
                        "each run on the default branch hourly")
+        elif "release" in ci and not (isinstance(release, str) and WORKFLOW.fullmatch(release) and release in files):
+            why.append("`ci.release` is not a workflow file name `ci.workflows` watches — the one that cuts a "
+                       "release, dispatched by the platform and watched for its red runs")
     return why
 
 

@@ -6,7 +6,7 @@ import re
 
 # The vendors a session may name. `STEERING_JUDGE_ORDER` is a machine's own list of the vendors it
 # may offer.
-REVIEWERS = ("glm", "codex", "claude", "grok", "deepseek", "meta", "stealth")
+REVIEWERS = ("glm", "codex", "claude", "deepseek", "meta", "stealth")
 _STATUS = re.compile(r"^gate:\s*status\s+(?P<id>[0-9A-Za-z]{8,40})\s+token\s+\S+\s*$")
 _CANCEL = re.compile(r"^gate:\s*cancel\s+(?P<id>[0-9A-Za-z]{8,40})\s+token\s+\S+\s*$")
 

@@ -65,6 +65,7 @@ InvitationDTO = typing.TypedDict("InvitationDTO", {
 # every account the team knows (documentation/accounts/machine-account-matrix-design.md, #8609).
 # Cells are keyed as the accounts read keys its rows: vendor and account id.
 AccountMatrix = typing.TypedDict("AccountMatrix", {
+    "purpose": "str",
     "hosts": "list[MatrixHost] | None",
     "cells": "list[MatrixCell] | None",
 })
@@ -96,16 +97,31 @@ MatrixCensusDetail = typing.TypedDict("MatrixCensusDetail", {
 })
 
 # MatrixCell is one account on one host. Held is whether a reading of the account stands there.
-# Forbidden is nil while nothing keeps work off it. Running is the sessions running there now, a
-# forbidden pair's included, and nil where it cannot be known: a census that is not fresh, or an
-# account held on the host whose processes no directory label maps.
+# Place folds its live candidates for the matrix's purpose: "missing", "allowed", "limited",
+# "forbidden" or "unavailable". Forbidden is the deprecated coarse fallback for an old console.
+# Running is the sessions running there now, a forbidden pair's included, and nil where it cannot
+# be known: a census that is not fresh, or an account held on the host whose processes no directory
+# label maps.
 MatrixCell = typing.TypedDict("MatrixCell", {
     "vendor": "str",
     "account_id": "str",
     "host": "str",
     "held": "bool",
+    "place": "str",
+    "candidates": "typing.NotRequired[list[MatrixCandidate] | None]",
     "forbidden": "MatrixForbidden | None",
     "running": "int | None",
+})
+
+# MatrixCandidate is one binding's standing decision, without the binding's identity. Offered is
+# whether it can take the selected purpose now; Narrowed says its permitted models are only part of
+# the applicable set. Rules, capabilities and offerings explain that answer independently of it.
+MatrixCandidate = typing.TypedDict("MatrixCandidate", {
+    "offered": "bool",
+    "narrowed": "bool",
+    "rules": "typing.NotRequired[list[AccountRule] | None]",
+    "capabilities": "typing.NotRequired[list[AccountCapability] | None]",
+    "offerings": "typing.NotRequired[list[AccountOffering] | None]",
 })
 
 # MatrixForbidden says which rule forbids a cell: By is "owner" (the owner stopped the account for
@@ -121,9 +137,9 @@ MatrixForbidden = typing.TypedDict("MatrixForbidden", {
 AccountPolicy = typing.TypedDict("AccountPolicy", {
     "off_at": "str",
     "off": "dict[str, str | None] | None",
-    "uses": "typing.NotRequired[dict[str, list[str] | None] | None]",
-    "declared_uses": "typing.NotRequired[dict[str, list[str] | None] | None]",
-    "native_uses": "typing.NotRequired[dict[str, list[str] | None] | None]",
+    "uses": "typing.NotRequired[dict[str, list[str] | None]]",
+    "declared_uses": "typing.NotRequired[dict[str, list[str] | None]]",
+    "native_uses": "typing.NotRequired[dict[str, list[str] | None]]",
 })
 
 AccountReadingsBody = typing.TypedDict("AccountReadingsBody", {
@@ -134,10 +150,10 @@ AccountReadingsBody = typing.TypedDict("AccountReadingsBody", {
 AccountPolicyBody = typing.TypedDict("AccountPolicyBody", {
     "uplink": "str",
     "readings": "list[typing.Any] | None",
-    "off": "typing.NotRequired[dict[str, str | None] | None]",
-    "uses": "typing.NotRequired[dict[str, list[str] | None] | None]",
-    "declared_uses": "typing.NotRequired[dict[str, list[str] | None] | None]",
-    "native_uses": "typing.NotRequired[dict[str, list[str] | None] | None]",
+    "off": "typing.NotRequired[dict[str, str | None]]",
+    "uses": "typing.NotRequired[dict[str, list[str] | None]]",
+    "declared_uses": "typing.NotRequired[dict[str, list[str] | None]]",
+    "native_uses": "typing.NotRequired[dict[str, list[str] | None]]",
     "off_at": "str",
 })
 
@@ -157,7 +173,7 @@ AccountReportAnswer = typing.TypedDict("AccountReportAnswer", {
 AccountRule = typing.TypedDict("AccountRule", {
     "source": "str",
     "kind": "str",
-    "target": "str",
+    "target": "typing.NotRequired[str]",
     "scope": "str",
     "purpose": "typing.NotRequired[str]",
     "model": "typing.NotRequired[str]",
@@ -310,6 +326,10 @@ UsageLimit = typing.TypedDict("UsageLimit", {
 # rate for this provider, plan and window. Its figures are quota fractions, Capability per second.
 UsageWaste = typing.TypedDict("UsageWaste", {
     "state": "str",
+    "trigger": "typing.NotRequired[str]",
+    "reason": "typing.NotRequired[str]",
+    "burn_by": "typing.NotRequired[str | None]",
+    "manual_by": "typing.NotRequired[str]",
     "required_peak": "typing.NotRequired[float | None]",
     "waste_at_near_peak": "typing.NotRequired[float | None]",
     "minimum_waste_at_true_peak": "typing.NotRequired[float | None]",
@@ -379,6 +399,7 @@ AccountIncentive = typing.TypedDict("AccountIncentive", {
     "target": "str | None",
     "scope": "str",
     "route": "str",
+    "trigger": "typing.NotRequired[str]",
 })
 
 # UnnamedDirectory is a directory a machine read whose credential names no account.
@@ -439,6 +460,20 @@ AccountResetStated = typing.TypedDict("AccountResetStated", {
     "vendor": "str",
     "account_id": "str",
     "resets_at": "str | None",
+})
+
+# AccountBurn is the body of POST /accounts/burn: start a targeted manual burn, or stop it.
+AccountBurn = typing.TypedDict("AccountBurn", {
+    "vendor": "str",
+    "account_id": "str",
+    "burn": "bool",
+})
+
+# AccountBurnStated answers with the captured end, null when the burn is stopped.
+AccountBurnStated = typing.TypedDict("AccountBurnStated", {
+    "vendor": "str",
+    "account_id": "str",
+    "burn_by": "str | None",
 })
 
 # AccountConcurrencyUsage is an account's concurrency limit as it binds — the owner's stated cap,
@@ -695,7 +730,7 @@ AnswerBody = typing.TypedDict("AnswerBody", {
     "decision": "str",
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
-    "answers": "typing.NotRequired[dict[str, str] | None]",
+    "answers": "typing.NotRequired[dict[str, str]]",
     "always": "typing.NotRequired[bool]",
 })
 
@@ -1122,7 +1157,7 @@ PartReceipt = typing.TypedDict("PartReceipt", {
     "refused": "list[PolicyRefusal] | None",
     "unknown": "list[str] | None",
     "shadowed": "list[str] | None",
-    "shadowed_values": "typing.NotRequired[dict[str, typing.Any] | None]",
+    "shadowed_values": "typing.NotRequired[dict[str, typing.Any]]",
 })
 
 PolicyRefusal = typing.TypedDict("PolicyRefusal", {
@@ -1342,7 +1377,7 @@ MachineAction = typing.TypedDict("MachineAction", {
     "decision": "typing.NotRequired[str]",
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
-    "answers": "typing.NotRequired[dict[str, str] | None]",
+    "answers": "typing.NotRequired[dict[str, str]]",
     "always": "typing.NotRequired[bool]",
 })
 
@@ -1403,7 +1438,7 @@ StreamWake = typing.TypedDict("StreamWake", {
     "decision": "typing.NotRequired[str]",
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
-    "answers": "typing.NotRequired[dict[str, str] | None]",
+    "answers": "typing.NotRequired[dict[str, str]]",
     "always": "typing.NotRequired[bool]",
 })
 
@@ -1473,7 +1508,7 @@ StreamControl = typing.TypedDict("StreamControl", {
     "decision": "typing.NotRequired[str]",
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
-    "answers": "typing.NotRequired[dict[str, str] | None]",
+    "answers": "typing.NotRequired[dict[str, str]]",
     "always": "typing.NotRequired[bool]",
 })
 
@@ -1518,7 +1553,7 @@ StreamRehome = typing.TypedDict("StreamRehome", {
     "decision": "typing.NotRequired[str]",
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
-    "answers": "typing.NotRequired[dict[str, str] | None]",
+    "answers": "typing.NotRequired[dict[str, str]]",
     "always": "typing.NotRequired[bool]",
 })
 
@@ -1563,7 +1598,7 @@ StreamPark = typing.TypedDict("StreamPark", {
     "decision": "typing.NotRequired[str]",
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
-    "answers": "typing.NotRequired[dict[str, str] | None]",
+    "answers": "typing.NotRequired[dict[str, str]]",
     "always": "typing.NotRequired[bool]",
 })
 
@@ -1608,7 +1643,7 @@ StreamPrompt = typing.TypedDict("StreamPrompt", {
     "decision": "typing.NotRequired[str]",
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
-    "answers": "typing.NotRequired[dict[str, str] | None]",
+    "answers": "typing.NotRequired[dict[str, str]]",
     "always": "typing.NotRequired[bool]",
 })
 
@@ -1653,7 +1688,7 @@ StreamAnswer = typing.TypedDict("StreamAnswer", {
     "decision": "typing.NotRequired[str]",
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
-    "answers": "typing.NotRequired[dict[str, str] | None]",
+    "answers": "typing.NotRequired[dict[str, str]]",
     "always": "typing.NotRequired[bool]",
 })
 
@@ -1698,7 +1733,7 @@ StreamInterrupt = typing.TypedDict("StreamInterrupt", {
     "decision": "typing.NotRequired[str]",
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
-    "answers": "typing.NotRequired[dict[str, str] | None]",
+    "answers": "typing.NotRequired[dict[str, str]]",
     "always": "typing.NotRequired[bool]",
 })
 
@@ -1816,7 +1851,7 @@ AgentModelBody = typing.TypedDict("AgentModelBody", {
 AgentModelResult = typing.TypedDict("AgentModelResult", {
     "answer": "typing.NotRequired[str | None]",
     "error": "typing.NotRequired[str | None]",
-    "invocation": "typing.NotRequired[dict[str, typing.Any] | None]",
+    "invocation": "typing.NotRequired[dict[str, typing.Any]]",
 })
 
 # AgentModelAnswer is the run's receipt as recorded: answer or error.
@@ -2040,7 +2075,7 @@ AgentTarget = typing.TypedDict("AgentTarget", {
     "digest": "str",
     "bytes": "int",
     "pending": "bool",
-    "platforms": "typing.NotRequired[dict[str, AgentPackage] | None]",
+    "platforms": "typing.NotRequired[dict[str, AgentPackage]]",
 })
 
 # AgentPackage is one platform's agent package, checked against its digest and size.
@@ -2927,7 +2962,7 @@ ReceiptSession = typing.TypedDict("ReceiptSession", {
     "epoch": "int",
 })
 
-# GateMergeBody asks that a pull request's passed head be readied and enqueued.
+# GateMergeBody asks that a non-draft pull request's passed head be enqueued.
 GateMergeBody = typing.TypedDict("GateMergeBody", {
     "repo": "str",
     "pr": "int",
@@ -3090,6 +3125,74 @@ FactsPage = typing.TypedDict("FactsPage", {
     "exhausted": "bool",
 })
 
+# ForemanBenchBody asks for one bench run of a route: the harness a model call runs through, and the
+# model, as a model call names them.
+ForemanBenchBody = typing.TypedDict("ForemanBenchBody", {
+    "harness": "str",
+    "model": "str",
+})
+
+# ForemanBenchAnswer is the run asked for, and whether this answer replays the first.
+ForemanBenchAnswer = typing.TypedDict("ForemanBenchAnswer", {
+    "id": "str",
+    "status": "str",
+    "replayed": "bool",
+    "position": "int",
+})
+
+# ForemanRoute is a harness and the model it runs.
+ForemanRoute = typing.TypedDict("ForemanRoute", {
+    "harness": "str",
+    "model": "str",
+})
+
+# ForemanHealth is the foreman's health as its row reads: up until when, or down and why, and how
+# many answers that were not an act it has counted in its window.
+ForemanHealth = typing.TypedDict("ForemanHealth", {
+    "up": "bool",
+    "up_until": "typing.NotRequired[str | None]",
+    "down_why": "typing.NotRequired[str]",
+    "invalid_answers": "int",
+})
+
+# ForemanBench is one bench run: the route, when it was asked, placed and settled, and its score.
+ForemanBench = typing.TypedDict("ForemanBench", {
+    "id": "str",
+    "route": "ForemanRoute",
+    "requested_at": "str",
+    "placed_at": "typing.NotRequired[str | None]",
+    "settled_at": "typing.NotRequired[str | None]",
+    "total": "int",
+    "matched": "int",
+    "invalid": "int",
+    "passed": "typing.NotRequired[bool | None]",
+})
+
+# ForemanInvocation is one invocation as the card's record holds it: the leg it was handed, the
+# route it asked, and what came of its answer.
+ForemanInvocation = typing.TypedDict("ForemanInvocation", {
+    "id": "str",
+    "card": "str",
+    "kind": "str",
+    "route": "ForemanRoute",
+    "state": "str",
+    "act": "typing.NotRequired[str]",
+    "why": "typing.NotRequired[str]",
+    "outcome": "typing.NotRequired[str]",
+    "refused": "typing.NotRequired[str]",
+    "at": "str",
+})
+
+# ForemanStanding is where the workspace's foreman stands: its health, the route the bench chose
+# (none when no route passes), its latest bench runs, newest first, and its latest invocations,
+# newest first.
+ForemanStanding = typing.TypedDict("ForemanStanding", {
+    "health": "ForemanHealth",
+    "route": "typing.NotRequired[ForemanRoute | None]",
+    "benches": "list[ForemanBench] | None",
+    "invocations": "list[ForemanInvocation] | None",
+})
+
 # ForgeLogin is the workspace's pinned login, Account, and its State here, with Why the failing
 # step's words.
 ForgeLogin = typing.TypedDict("ForgeLogin", {
@@ -3130,7 +3233,7 @@ GateRow = typing.TypedDict("GateRow", {
     "review": "str | None",
     "reviewer": "GateReviewer | None",
     "run": "GateRun | None",
-    "passed_over": "typing.NotRequired[dict[str, list[str] | None] | None]",
+    "passed_over": "typing.NotRequired[dict[str, list[str] | None]]",
     "priority": "typing.NotRequired[str]",
     "ahead": "typing.NotRequired[int | None]",
 })
@@ -3228,7 +3331,7 @@ GateRead = typing.TypedDict("GateRead", {
     "review": "str | None",
     "reviewer": "GateReviewer | None",
     "run": "GateRun | None",
-    "passed_over": "typing.NotRequired[dict[str, list[str] | None] | None]",
+    "passed_over": "typing.NotRequired[dict[str, list[str] | None]]",
     "priority": "typing.NotRequired[str]",
     "ahead": "typing.NotRequired[int | None]",
     "result": "GateResult | None",
@@ -4626,6 +4729,7 @@ PlacementWaste = typing.TypedDict("PlacementWaste", {
     "window": "str",
     "resets_at": "typing.NotRequired[str | None]",
     "state": "str",
+    "trigger": "typing.NotRequired[str]",
     "waste_at_near_peak": "typing.NotRequired[float | None]",
 })
 
@@ -6316,7 +6420,7 @@ CardTriage = typing.TypedDict("CardTriage", {
 TriageBody = typing.TypedDict("TriageBody", {
     "criticality": "str",
     "size": "str",
-    "floors": "typing.NotRequired[dict[str, str] | None]",
+    "floors": "typing.NotRequired[dict[str, str]]",
     "why": "typing.NotRequired[str]",
 })
 
@@ -7340,10 +7444,10 @@ WorkerCensusBody = typing.TypedDict("WorkerCensusBody", {
     "interactive": "typing.NotRequired[list[LauncherAccount] | None]",
     "signed_out": "typing.NotRequired[list[LauncherAccount] | None]",
     "spends": "typing.NotRequired[list[HarnessSpend] | None]",
-    "harness_commands": "typing.NotRequired[dict[str, str] | None]",
-    "harness_models": "typing.NotRequired[dict[str, dict[str, list[str] | None] | None] | None]",
+    "harness_commands": "typing.NotRequired[dict[str, str]]",
+    "harness_models": "typing.NotRequired[dict[str, dict[str, list[str] | None] | None]]",
     "launches": "typing.NotRequired[list[str] | None]",
-    "harness_preferences": "typing.NotRequired[dict[str, str] | None]",
+    "harness_preferences": "typing.NotRequired[dict[str, str]]",
     "no_account": "typing.NotRequired[list[LauncherNoAccount] | None]",
     "unlaunchable": "typing.NotRequired[list[HarnessUnlaunchable] | None]",
     "checkout": "typing.NotRequired[CheckoutCensus | None]",
@@ -7434,6 +7538,7 @@ ROUTES = frozenset({
     "POST /forge/hook",
     "GET /healthz",
     "GET /w/{workspace}/api/v1/accounts",
+    "POST /w/{workspace}/api/v1/accounts/burn",
     "POST /w/{workspace}/api/v1/accounts/co-owners",
     "DELETE /w/{workspace}/api/v1/accounts/co-owners/{id}",
     "POST /w/{workspace}/api/v1/accounts/concurrency",
@@ -7495,6 +7600,8 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/dispatches",
     "GET /w/{workspace}/api/v1/events",
     "GET /w/{workspace}/api/v1/facts",
+    "GET /w/{workspace}/api/v1/foreman",
+    "POST /w/{workspace}/api/v1/foreman/bench",
     "GET /w/{workspace}/api/v1/gates",
     "POST /w/{workspace}/api/v1/gates",
     "POST /w/{workspace}/api/v1/gates/abandonments",
@@ -7708,6 +7815,7 @@ PAGINATION = {
 # Every query parameter a route reads, by its pattern: the values it takes, or None for any.
 QUERY = {
     "GET /api/v1/teams/{team}/installations": {"repository": None},
+    "GET /w/{workspace}/api/v1/accounts/matrix": {"purpose": frozenset({"seat", "work", "gate", "model", "understudy"})},
     "GET /w/{workspace}/api/v1/brain/digest": {"limit": None},
     "GET /w/{workspace}/api/v1/brain/transcript": {"limit": None, "cursor": None},
     "GET /w/{workspace}/api/v1/bulletin": {"render": frozenset({"snapshot"}), "mark": frozenset({"1"})},

@@ -5,7 +5,7 @@ frozen where it is invoked, moving under it while a long session runs (#1875) â€
 the stable entry point they exec through:
 
     python3 <workspace>/.claude/steering-launch.py observe|readout        (a hook, reads stdin)
-    python3 <workspace>/.claude/steering-launch.py exec hold|forge [args...]    (a direct run)
+    python3 <workspace>/.claude/steering-launch.py exec hold|forge|checkpoint [args...]    (a direct run)
 
 The account is resolved per invocation from the hook's own payload, or from `CLAUDE_CONFIG_DIR`
 for a direct run, because one workspace is worked by several accounts and each keeps its own
@@ -28,13 +28,17 @@ PLUGIN = "2mw2lt@2mw2lt"
 ENTRY = {"observe": "steering/enroll/observe.py", "readout": "steering/enroll/readout.py",
          "armed": "steering/enroll/armed.py", "hold": "steering/enroll/hold.py",
          "rebrief": "steering/enroll/rebrief.py", "forge": "steering/enroll/forge.py",
-         "decide": "steering/enroll/decide.py"}
+         "decide": "steering/enroll/decide.py", "checkpoint": "steering/enroll/checkpoint.py"}
 # Names `exec` may run directly. Every hook entry point reads a hook's stdin payload and
 # always exits 0 (`main`'s contract, below); running one this way would hang reading a stdin
 # nobody feeds it, or swallow a failure a direct run must surface. `hold` reads no stdin and
 # exits meaningfully on its own, so it is safe to run either way; `forge` is a direct run only, the
-# stable path a Codex session's one prefix rule names (#7940).
-EXEC = frozenset({"hold", "forge"})
+# stable path a Codex session's one prefix rule names (#7940); `checkpoint` likewise â€” the stable
+# path a harness with no `CLAUDE_PLUGIN_ROOT` saves by, which a Codex worker's own rule grants
+# so no dialog it cannot answer stands between (#8571).
+EXEC = frozenset({"hold", "forge", "checkpoint"})
+# A session's own acts a hook event must never fire: `main`'s hook path refuses them.
+DIRECT = frozenset({"forge", "checkpoint"})
 # The pack this file was installed from, written in by `hooks.py install`. A workspace wired
 # from a checkout has no plugin cache to search, and one whose account cannot be resolved has
 # no record to read; either way the pack that installed the launcher is still there.
@@ -132,12 +136,15 @@ def help_text(config: Path, invocation: str, topic: str | None = None) -> str:
     rendered = _render_from_pack(pack, invocation, topic) if pack is not None else None
     if rendered is not None:
         return rendered
-    names = "|".join(e for e in ENTRY if e != "forge")
+    names = "|".join(e for e in ENTRY if e not in DIRECT)
     if topic == "exec":
         lines = [f"usage: {invocation} exec <{'|'.join(sorted(EXEC))}> [args...]",
                  f"example: {invocation} exec hold --current"]
     elif topic in ENTRY:
-        lines = [f"usage: {invocation} {topic}", f"example: {invocation} {topic}"]
+        # A direct-run verb runs only through exec; its help names the form that runs, never the
+        # bare form main refuses as a hook.
+        how = f"exec {topic} [args...]" if topic in DIRECT else topic
+        lines = [f"usage: {invocation} {how}", f"example: {invocation} {how}"]
     else:
         lines = [f"usage: {invocation} <{names}>", f"example: {invocation} observe",
                  f"usage: {invocation} exec <{'|'.join(sorted(EXEC))}> [args...]",
@@ -203,7 +210,7 @@ def main() -> int:
         return 0
     if argv[:1] == ["exec"]:
         return main_exec(argv[1:])
-    if argv[0] not in ENTRY or argv[0] == "forge":
+    if argv[0] not in ENTRY or argv[0] in DIRECT:
         return error(f"unknown command {argv[0]!r}")
     if len(argv) > 1 and argv[0] not in EXEC:
         return error(f"{argv[0]} does not accept arguments")

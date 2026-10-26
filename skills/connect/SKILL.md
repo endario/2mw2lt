@@ -386,6 +386,14 @@ hands its text to whoever the brain directs to take over; it answers `checkpoint
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <session> handover --text-file <note-file>
 ```
 
+A harness whose shell has no `CLAUDE_PLUGIN_ROOT` — Codex, and every harness besides Claude
+Code — runs the same verb through the workspace's stable launcher, which its Codex grant allows
+with no dialog:
+
+```bash
+python3 <workspace>/.claude/steering-launch.py exec checkpoint <session> handover --text-file <note-file>
+```
+
 When your card's plan will hand tasks to other builders, as its brief names them, write it before
 building: under its subject's `plans/<n>/plan.md`, a builder named for each task, a task sized for
 the model that takes it, and commission the critic on it as on a design. Hand nothing over until it

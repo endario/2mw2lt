@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -26,7 +27,7 @@ import verb  # noqa: E402
 from door import OCCURRENCE, occurrence  # noqa: E402
 
 _COMMENT = re.compile(r"https://github\.com/(?P<repo>[^/\s]+/[^/\s]+)/(?:issues|pull)/\d+#issuecomment-(?P<id>\d+)")
-_THREAD = re.compile(r"https://github\.com/(?P<repo>[^/\s]+/[^/\s]+)/(?:issues|pull)/(?P<n>\d+)")
+_THREAD = re.compile(r"https://github\.com/(?P<repo>[^/\s]+/[^/\s]+)/(?P<kind>issues|pull)/(?P<n>\d+)")
 _CHECKPOINT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _NEEDS = {"--learned-file": "a JSON file", "--text-file": "a file", "--mirror": "a URL"}
 _OPTIONS = tuple(_NEEDS)
@@ -49,6 +50,23 @@ def mirror(url: str, text: str) -> str:
     return subprocess.run(["gh", "api", f"repos/{m['repo']}/issues/{m['n']}/comments", "--method", "POST",
                            "--input", "-", "--jq", ".html_url"], input=json.dumps({"body": text}),
                           capture_output=True, text=True, check=True, timeout=30).stdout.strip()
+
+
+def mirror_refusal(url: str, cwd: str | None = None) -> str | None:
+    """Why url names no mirror this session may write, or None when it does: a mirror is a comment,
+    held where the forge verb's comment is held (#7940) — the grant's repository, the session's own
+    pull request — since the prefix rule that grants this verb cannot refuse a trailing argument,
+    so every word lands here instead (#8921). A grant that cannot be judged refuses; a mirror is
+    never assumed."""
+    import trap_guard
+    repo, why = trap_guard.grant_repo_why({"cwd": cwd or os.getcwd()}, os.environ)
+    if repo is None:
+        return f"the mirror cannot be judged: {why}"
+    m = _THREAD.fullmatch(url)
+    if m["repo"] != repo:
+        return f"mirror-not-granted-repo: the grant covers {repo}, not {m['repo']}"
+    owns = trap_guard.pull_refusal if m["kind"] == "pull" else trap_guard.issue_refusal
+    return owns(m["n"], repo, cwd or os.getcwd())
 
 
 from verb_help import error, help_requested, script_help  # noqa: E402
@@ -111,6 +129,8 @@ def main(argv: list[str]) -> int:
     else:
         if "--mirror" in opts and not _THREAD.fullmatch(opts["--mirror"]):
             return error("checkpoint", f"--mirror takes a GitHub pull request or issue URL: {opts['--mirror']}")
+        if "--mirror" in opts and (why := mirror_refusal(opts["--mirror"])) is not None:
+            return error("checkpoint", f"the mirror is not this session's to write: {why}")
         if "--text-file" in opts:
             try:
                 raw = Path(opts["--text-file"]).read_bytes()

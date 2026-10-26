@@ -722,7 +722,7 @@ def forge_grant(ws: Path) -> tuple[str, bool]:
         hooks.refresh_launcher(codex_rules.shared(ws))
         return codex_rules.write(ws), False
     except OSError as e:
-        return f"forge grant: not written, so Codex asks for each pull request write: {e}", True
+        return f"forge grant: not written, so Codex asks before the forge verb and each checkpoint save: {e}", True
 
 
 def main(argv: list[str]) -> int:
