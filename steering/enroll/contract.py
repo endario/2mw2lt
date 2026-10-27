@@ -1091,6 +1091,16 @@ AgentLeavingBody = typing.TypedDict("AgentLeavingBody", {
     "sessions": "typing.NotRequired[list[str] | None]",
 })
 
+# AgentLeavingSubstance is the report without its transport identity: what the leaving command's
+# request key and payload hash are both taken from, as one unambiguous JSON (#8948). A report
+# re-sent on a later uplink generation carries the same substance, so it replays what the first
+# send recorded.
+AgentLeavingSubstance = typing.TypedDict("AgentLeavingSubstance", {
+    "launch": "typing.NotRequired[str]",
+    "runtimes": "typing.NotRequired[list[str] | None]",
+    "sessions": "typing.NotRequired[list[str] | None]",
+})
+
 # AgentLeavingAnswer is the sessions whose standing enrolment the report ended.
 AgentLeavingAnswer = typing.TypedDict("AgentLeavingAnswer", {
     "left": "list[str] | None",
