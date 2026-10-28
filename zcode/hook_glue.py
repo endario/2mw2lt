@@ -97,7 +97,11 @@ def main() -> int:
             ws = None                       # outside a workspace the glue has nothing to say
         if ws is not None:
             try:
-                zcode_binding.publish(ws, psession, str(cwd))
+                proof = None
+                if event == "SessionStart" and os.environ.get("STEERING_MODEL_PROOF"):
+                    proof = {key: payload[key] for key in ("model", "source")
+                             if isinstance(payload.get(key), str) and payload[key].strip()}
+                zcode_binding.publish(ws, psession, str(cwd), proof=proof)
             except Exception:
                 pass                        # the observation below stands on its own
         notice = observe(["--provider", "zcode"], payload)

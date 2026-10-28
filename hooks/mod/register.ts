@@ -38,6 +38,48 @@ const STDERR_TAIL = 2000
 // daemon keeps an unread frame and wakes the session for it, so a lost one is never silent.
 const RECEIPT_TRIES = 3
 
+// A restricted ordinary launch publishes no acceptance until the agent has validated its
+// effective-session evidence. Every model-visible ingress waits on that one marker, bounded by the
+// same absolute deadline the agent used; a refusal never falls back to another delivery path.
+async function proofRefusal($: EngineInterface): Promise<string | undefined> {
+  const dir = await $.env.get('STEERING_MODEL_PROOF')
+  if (!dir) return undefined
+  const launch = await $.env.get('STEERING_MODEL_PROOF_LAUNCH')
+  const deadline = Number(await $.env.get('STEERING_MODEL_PROOF_DEADLINE'))
+  if (!launch || !Number.isFinite(deadline)) return 'the restricted launch has no valid model proof identity or deadline'
+  while (true) {
+    let raw: string | undefined
+    try { raw = String(await $.fs.read(`${dir}/accepted.json`)) } catch { /* not accepted yet */ }
+    if (raw !== undefined) {
+      let held: unknown
+      try { held = JSON.parse(raw) } catch { return 'the model proof acceptance is malformed' }
+      const accepted = held as { launch?: unknown; model?: unknown }
+      if (accepted.launch !== launch || typeof accepted.model !== 'string' || !accepted.model) return 'the model proof acceptance belongs to another launch or names no model'
+      return undefined
+    }
+    const now = await $.clock.now()
+    if (now >= deadline) return "the effective-session-model proof was not accepted before the launch's deadline"
+    await $.clock.sleep(Math.min(25, deadline - now))
+  }
+}
+
+// The compose call is evidence, not a turn. Its hook writes only while this launch-scoped call is
+// in flight, before any restored hold or desk act can reach the spending wrappers above.
+let modelProofCompose: { dir: string; launch: string } | undefined
+async function publishModelProof($: EngineInterface): Promise<void> {
+  const dir = await $.env.get('STEERING_MODEL_PROOF')
+  if (!dir) return
+  const launch = await $.env.get('STEERING_MODEL_PROOF_LAUNCH')
+  if (!launch) {
+    $.ui.log('2mw2lt: model proof compose has no launch identity', { to: 'debug' })
+    return
+  }
+  modelProofCompose = { dir, launch }
+  try { await $.prompt.compose({}) } catch (err) {
+    $.ui.log(`2mw2lt: model proof compose failed: ${String(err)}`, { to: 'debug' })
+  } finally { modelProofCompose = undefined }
+}
+
 // Always this plugin version's own clients, never the launcher: it resolves the recorded install,
 // which may be an older hold.py that refuses `--wake plugin`.
 const script = ($: EngineInterface, name: string) => `${$.plugin.root}/steering/enroll/${name}`
@@ -49,6 +91,11 @@ const script = ($: EngineInterface, name: string) => `${$.plugin.root}/steering/
 // passes its own appends by. A refused append (a plugin above, or a run no plugin may shape) is
 // logged, the hold goes on, and the refusal is returned.
 async function append($: EngineInterface, text: string, act?: string): Promise<string | undefined> {
+  const refused = await proofRefusal($)
+  if (refused) {
+    $.ui.log(`2mw2lt: model proof withheld an append: ${refused}`, { to: 'debug' })
+    return refused
+  }
   $.ui.log(`2mw2lt: appends "${text}"`, { to: 'debug' })
   try {
     const stored = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })
@@ -75,6 +122,12 @@ const own = (ps: string) => ({ CLAUDE_CODE_SESSION_ID: ps })
 
 async function runOwn($: EngineInterface, argv: string[], stdin?: string) {
   return $.process.run(argv, { cwd: root, env: own(await $.session.id()), ...(stdin !== undefined ? { stdin } : {}) })
+}
+
+async function writeProofAtomic($: EngineInterface, path: string, raw: string): Promise<void> {
+  const code = 'import sys;from pathlib import Path;sys.path.insert(0,sys.argv[1]);from atomic_file import write_atomic;write_atomic(Path(sys.argv[2]),sys.stdin.read(),0o600)'
+  const r = await runOwn($, ['python3', '-c', code, `${$.plugin.root}/steering`, path], raw)
+  if (r.exitCode !== 0) throw new Error(`atomic model proof publication failed: ${r.stderr}`)
 }
 
 // hold.py names where a provider session's claim lives; the path is asked once per id, so the
@@ -236,6 +289,11 @@ async function tell($: EngineInterface, text: string, appended?: () => Promise<v
 // labels the turn the plugin's. The submitted row is shown by the module's hook as it is stored,
 // before the submit resolves, under the act its words were submitted with.
 async function submit($: EngineInterface, text: string, act?: string): Promise<surface.Landing> {
+  const refused = await proofRefusal($)
+  if (refused) {
+    $.ui.log(`2mw2lt: model proof withheld a prompt: ${refused}`, { to: 'debug' })
+    return { refused }
+  }
   let why: string
   const waiting = act === undefined ? undefined : { text, act }
   if (waiting) submitted.push(waiting)
@@ -415,6 +473,11 @@ async function runCommand($: EngineInterface, session: string, body: unknown) {
   if ('refused' in r) {
     if (r.id) await reportCommand($, session, r.id, { refused: r.refused })
     else $.ui.log(`2mw2lt: the agent's command was not taken, and names no id to say so under: ${r.refused}`, { to: 'debug' })
+    return
+  }
+  const refused = await proofRefusal($)
+  if (refused) {
+    await reportCommand($, session, r.id, { refused })
     return
   }
   const run: Running = { act: r.id, session, name: r.name, note: surface.commandNote(r.from, r.name, r.args), fired: false }
@@ -1210,6 +1273,7 @@ export const register: Register = on => {
     for (const name of Object.keys(TIMER_TOOLS)) {
       await $.tool.register({ name, description: TIMER_TOOLS[name]!.description, inputSchema: timerSchema(name) })
     }
+    await publishModelProof($)
     const session = await sessionOf($)       // a resume or reload of a session already connected
     if (session) await start($, session)
     return started
@@ -1497,6 +1561,8 @@ export const register: Register = on => {
   // A desk command's note joins its own turn: appended as the engine dispatches the command, under
   // this module's origin, never before the run, which a busy session's running turn would read.
   on('prompt.submit', async ($, e, next) => {
+    const refused = await proofRefusal($)
+    if (refused) return { drop: refused }
     const run = e.command && surface.ours(e.origin) ? runs.find(r => !r.fired && r.name === e.command!.name) : undefined
     if (run) {
       run.fired = true
@@ -1530,6 +1596,12 @@ export const register: Register = on => {
   // lead's prompt and holds no seat.
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e)
+    if (modelProofCompose) {
+      const { dir, launch } = modelProofCompose
+      if (typeof e.model === 'string' && e.model) {
+        await writeProofAtomic($, `${dir}/prompt-compose.json`, JSON.stringify({ launch, session: await $.session.id(), model: e.model }))
+      } else $.ui.log('2mw2lt: model proof compose supplied no effective model', { to: 'debug' })
+    }
     teammate = e.traits.includes('teammate')
     if (teammate) return composed
     const sections = [...composed.sections]

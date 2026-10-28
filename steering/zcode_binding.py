@@ -43,18 +43,37 @@ def _write(path: Path, payload: dict) -> None:
 
 
 def publish(ws: Path, psession: str, cwd: str, pid: int | None = None, at: float | None = None,
-            reap_at: float | None = None, chain=None) -> Path:
+            reap_at: float | None = None, chain=None, proof: dict | None = None) -> Path:
     """Write this session's binding, reaping what has gone stale.
 
     `pid` is the zcode process; the default finds it by walking this process's ancestors — the
     publisher is a hook, a direct child of the session it serves. The reaper keeps the directory
     to live bindings: a stale file is a session that is gone, and leaving it would have the next
-    pid the kernel reuses resolve to it.
+    pid the kernel reuses resolve to it. A restricted SessionStart passes `proof` to replace its
+    model/source/proof_at; later events pass None and preserve those fields while refreshing `at`.
     """
     pid = pid if pid is not None else _zcode_pid(chain)
     path = binding_path(ws, pid)
     now = at if at is not None else time.time()
-    _write(path, {"psession": psession, "cwd": str(cwd), "pid": pid, "at": now})
+    record = {"psession": psession, "cwd": str(cwd), "pid": pid, "at": now}
+    if proof is None:
+        try:
+            prior = json.loads(path.read_text())
+        except (OSError, ValueError, AttributeError):
+            prior = {}
+        if not isinstance(prior, dict):
+            prior = {}
+        for key in ("model", "source", "proof_at"):
+            if key in prior:
+                record[key] = prior[key]
+    else:
+        for key in ("model", "source"):
+            value = proof.get(key)
+            if isinstance(value, str) and value.strip():
+                record[key] = value.strip()
+        proof_at = proof.get("proof_at")
+        record["proof_at"] = proof_at if isinstance(proof_at, (int, float)) and not isinstance(proof_at, bool) else now
+    _write(path, record)
     cutoff = (reap_at if reap_at is not None else now) - BINDING_FRESH
     for old in path.parent.glob("*.binding.json"):
         if old == path:

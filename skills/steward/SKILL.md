@@ -130,6 +130,16 @@ The same verbs are the `mcp__2mw2lt__wake`, `park`, `retire`, `keep` and `unkeep
 with ToolSearch. Changing a session's model or moving it to another account (`control`, `rehome`)
 stays the seat's.
 
+## The foreman drives the goal's cards too
+
+The foreman is the platform's judgement on a card. Within budgets it may drive,
+wake or interrupt the workers your launches started, relaunch a dead one from its checkpoint, and
+re-enqueue or lift on the goal's cards — you need not chase those yourself. It hears the signals
+it owns first, and what it cannot decide — a plan change, placement outside the card, a floor, a
+deploy — it escalates to the seat as a decision row, not to you. After `ship it` the reconciler
+takes the goal's cards' steps as it takes any card's: your workers ready their pull requests, and
+the platform enqueues, merges and concludes from there.
+
 ## Direct them
 
 ```bash

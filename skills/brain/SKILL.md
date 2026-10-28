@@ -118,7 +118,8 @@ Go sends no kick and no presence frame (#5569): the seat is told what moved by s
 say `from: session <id>` naming the session it is about. Every standing kind has its
 `signals.session_<kind>.*` settings (`signals.launch_brief_unheard.*` for the brief), and a
 threshold there moves the standing itself, on the Fleet and in the snapshot as in the signal; a
-kind turned off is not told, and its standing still reads:
+kind turned off is not told, and its standing still reads. Eight of them are the foreman's to
+hear first — see [Read the blocked-on line, the ledger and escalations](#read-the-blocked-on-line-the-ledger-and-escalations):
 
 - **`session-concluded`**: the session said done and holds no work. It is free now: delegate to it.
   `closed_card` names a card whose pull requests all closed unmerged, for you to conclude.
@@ -144,8 +145,10 @@ kind turned off is not told, and its standing still reads:
 - **`session-dead`**: the session is gone for good, not merely silent. `cause` says why:
   `resume-failed`, its machine answered a wake that no process runs it and resuming it failed (`why`
   is the machine's words), or `machine-offline`, its machine has been offline 30 minutes while it
-  held nothing there. A dead session is told nothing else. Relaunch its card (`card` names it) on a
-  live machine from its branch and latest checkpoint, or retire it.
+  held nothing there. A dead session is told nothing else. Its card takes a successor: a relaunch
+  onto it is admitted without a handover checkpoint, the dead engagement is ended `dead`, and its
+  unpushed work is rescued to a `wip/` branch before anything else touches the card. Launch the
+  successor (`card` names it) on a live machine from its branch and latest checkpoint, or retire it.
 - **`session-quiet`**: a worker holding a card ended its turn without saying done 20 minutes ago,
   with nothing it waits on open, and has written nothing since. Drive it, or keep it with what it
   waits on.
@@ -313,7 +316,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post "/session
 
 A session executing a live card reads as waiting, not concluded, even after its branch merged
 (#5588). Once it says done and records a `unit-done` or `exit` checkpoint, the keeper concludes
-the landed card on its next pass; otherwise conclude its card when its unit is done. Each notice is
+the landed card on its next pass, as it does for a landed card whose executor has retired or died;
+conclude a card yourself when its unit is done and its executor still stands without the
+checkpoint. Each notice is
 a suggestion;
 Go wakes and keeps nothing for it. Who you can reach is
 `python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /sessions`, each row with its
@@ -1267,7 +1272,7 @@ you as lines in the `board:` row, each carrying its verb:
 
 | Line | Answer |
 |---|---|
-| `stale` | the card's pull request closed unmerged and no session holds it: `retire` it, citing the closing comment, or `rescope` it to the work that continues |
+| `stale` | a card with no session holding it whose pull requests all closed unmerged, or whose resolving issue another card's pull request closed: `retire` it, citing the closing comment, or `rescope` it to the work that continues |
 | `unattended` | a machine holds a dirty or unpushed branch with no session there: rescue it to a `wip/` branch and push. Never discard it |
 | `stale-pass` | a review passed at a head the pull request has moved past, and no session holds the card or the head has sat 30 minutes past the pass: its author carries the pass or commissions a round |
 | `ceiling` | a gate failed at its round ceiling: build it or decompose it, never another round |
@@ -1333,6 +1338,56 @@ machine's census reports dirty or unconfirmed on origin, with no live session on
 do not delegate new work on it. The risk is stacking on top of an edit in flight that has not
 reached GitHub yet; it clears on its own once that machine reports the branch clean and
 confirmed, or once a session is live there again.
+
+## Read the blocked-on line, the ledger and escalations
+
+A card's life from its pass to released is the platform's to drive: the reconciler takes the
+steps that need no judgement, and the foreman the ones that need judgement but no new direction.
+What reaches you is the reading and the escalations, not the steps.
+
+**Every live card carries its blocked-on line**, machine-written: the one party the card waits on
+and what it waits for — `waits on the worker: round 2's findings`, `waits on the queue: merge
+group 3`, `waits on the foreman: session silent 22m`, `waits on the owner: Needs you row 4f2c`.
+It is on every card read and on each desk row. Read it before you act on a card: it is the
+platform's one answer to where the card stands, and it replaces reconstructing that from five
+signals.
+
+**The ledger records what the brain and the owner still do by hand.** Every non-decision act on a
+card records itself from your verbs — relay, wake, lift, retire, the card writes, a merge or carry
+on another's behalf. An act no verb sees, such as typing into a pane, record yourself:
+
+```bash
+say "intervened: token @lease <card> <cause> <why>"
+```
+
+A cause is one of `unheard`, `stalled`, `dead`, `conflict`, `queue-red`, `ceiling`, `stale-card`,
+`release-red`, `other`. The foreman's acts are counted separately, as its own, never as
+interventions. Read the ledger and its measures — interventions per merged pull request, the
+touchless rate — with `rest.py --lease '/interventions?since=<RFC 3339>'`; the read refuses a
+plain session. The cause standing highest in the ledger is the platform's next piece of work:
+carry it into your next regroup, not a status line.
+
+**After `ship it` the platform merges.** The reconciler enqueues a passed head its author readied
+— a draft it leaves to its author, and it never readies one — merges `main` into a passed head
+that is behind and carries the pass to that merge, re-enqueues a head the queue dequeued for a
+reason outside the entry's change, once per head, and concludes a card whose work landed and whose
+executor is finished, retired or dead, then retires a session that said done, holds no open card,
+and has no keep. A conflict is never resolved by the platform: it goes to the foreman, which
+drives the card's worker to resolve it. Do not brief a worker to hand-merge a behind passed head
+or to conclude a card whose executor has left: those steps are the platform's now.
+
+**The foreman** is the platform's managed judgement on one card. It drives a worker with the step
+the card owes, wakes or interrupts a session silent or stuck past its bound, relaunches a dead
+executor's card from its checkpoint, classifies a red as the change or a flake, lifts one round
+past a ceiling within its budget, and escalates what is not its own. It cannot change a plan,
+place work outside the card, lower a floor, merge without a pass, deploy, or retire a card that
+holds unlanded work — those reach you as they did. Eight signal kinds are its to hear first:
+`session-quiet`, `session-stuck`, `session-stale` on a card holder, `launch-brief-unheard`,
+`frames-unread-stuck`, `pass-stranded` with a conflict, `gate-unheard` and a merge-group dequeue.
+Routed `foreman` they reach you only while the foreman is down, and routed `escalate` they climb
+session, foreman, seat. Its escalation is a decision, not a nudge: what is blocked, what was
+tried, the options, the recommended one and what each leads to. Answer it with the verbs it
+names, then `dispose:` the row as any of yours.
 
 ## Keep the board
 
@@ -1701,11 +1756,12 @@ that are not there already, so they survive this session.
   first. A brief for work that has already landed wastes a session's turn.
 - **Brief a pull request to stay a draft until `ship it`.** Between rounds the session spot-runs
   the tests its change touches and dispatches the parts that read it on the pool with `ci.py`,
-  never the whole suite, which is the nightly's and a release's. After a pass the worker never rebases: it
-  merges `origin/main` into the passed head and carries the pass on its own, and once `main` has
-  moved any other commit, a migration renumber included, costs a round; a round remains available
-  when judgment warrants it. Do not prescribe or skip a round in a directive: the gate skill's
-  rule decides, and a brain that orders one overrides it.
+  never the whole suite, which is the nightly's and a release's. After a pass the worker never
+  rebases: it readies the pull request, and the platform's reconciler merges `origin/main` into
+  the passed head and carries the pass itself when the head is behind, handing a conflict back to
+  the worker to resolve; once `main` has moved, any other commit, a migration renumber included,
+  costs a round; a round remains available when judgment warrants it. Do not prescribe or skip a
+  round in a directive: the gate skill's rule decides, and a brain that orders one overrides it.
 - **Rollout is yours.** Deploying merged work, restarting agents and copying credentials is the
   brain's call (owner's ruling, 2026-09-24); a production action still takes your explicit go,
   not the owner's.

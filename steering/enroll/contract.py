@@ -199,6 +199,24 @@ AccountOffering = typing.TypedDict("AccountOffering", {
     "capability": "typing.NotRequired[AccountCapability | None]",
 })
 
+# SpendPrimary selects the one rule, capability or offering that principally refuses a spend.
+# A nil selector means the decision is offered; no browser-facing reason code duplicates the records.
+SpendPrimary = typing.TypedDict("SpendPrimary", {
+    "set": "str",
+    "index": "int",
+})
+
+# AccountSpend is the public, structured form of a candidate's standing decision.
+AccountSpend = typing.TypedDict("AccountSpend", {
+    "offered": "bool",
+    "narrowed": "bool",
+    "primary": "typing.NotRequired[SpendPrimary | None]",
+    "free_at": "typing.NotRequired[str | None]",
+    "rules": "typing.NotRequired[list[AccountRule] | None]",
+    "capabilities": "typing.NotRequired[list[AccountCapability] | None]",
+    "offerings": "typing.NotRequired[list[AccountOffering] | None]",
+})
+
 # AccountList is GET /accounts: the team's accounts, each folded across the machines that read it
 # with its published verdict (documentation/architecture/go-usage-frames-design.md §4), and the
 # directories a machine read whose credential names no account.
@@ -1314,6 +1332,7 @@ StreamLaunch = typing.TypedDict("StreamLaunch", {
     "thinking": "typing.NotRequired[str]",
     "effort": "typing.NotRequired[str]",
     "window": "typing.NotRequired[bool]",
+    "prove_model": "typing.NotRequired[list[str] | None]",
     "forge": "typing.NotRequired[str]",
     "deadline_at": "typing.NotRequired[str]",
 })
@@ -1375,6 +1394,8 @@ MachineAction = typing.TypedDict("MachineAction", {
     "vendor": "typing.NotRequired[str]",
     "model": "typing.NotRequired[str]",
     "compact": "typing.NotRequired[bool]",
+    "prove_model": "typing.NotRequired[list[str] | None]",
+    "compact_prove_model": "typing.NotRequired[list[str] | None]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1436,6 +1457,8 @@ StreamWake = typing.TypedDict("StreamWake", {
     "vendor": "typing.NotRequired[str]",
     "model": "typing.NotRequired[str]",
     "compact": "typing.NotRequired[bool]",
+    "prove_model": "typing.NotRequired[list[str] | None]",
+    "compact_prove_model": "typing.NotRequired[list[str] | None]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1506,6 +1529,8 @@ StreamControl = typing.TypedDict("StreamControl", {
     "vendor": "typing.NotRequired[str]",
     "model": "typing.NotRequired[str]",
     "compact": "typing.NotRequired[bool]",
+    "prove_model": "typing.NotRequired[list[str] | None]",
+    "compact_prove_model": "typing.NotRequired[list[str] | None]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1551,6 +1576,8 @@ StreamRehome = typing.TypedDict("StreamRehome", {
     "vendor": "typing.NotRequired[str]",
     "model": "typing.NotRequired[str]",
     "compact": "typing.NotRequired[bool]",
+    "prove_model": "typing.NotRequired[list[str] | None]",
+    "compact_prove_model": "typing.NotRequired[list[str] | None]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1596,6 +1623,8 @@ StreamPark = typing.TypedDict("StreamPark", {
     "vendor": "typing.NotRequired[str]",
     "model": "typing.NotRequired[str]",
     "compact": "typing.NotRequired[bool]",
+    "prove_model": "typing.NotRequired[list[str] | None]",
+    "compact_prove_model": "typing.NotRequired[list[str] | None]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1641,6 +1670,8 @@ StreamPrompt = typing.TypedDict("StreamPrompt", {
     "vendor": "typing.NotRequired[str]",
     "model": "typing.NotRequired[str]",
     "compact": "typing.NotRequired[bool]",
+    "prove_model": "typing.NotRequired[list[str] | None]",
+    "compact_prove_model": "typing.NotRequired[list[str] | None]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1686,6 +1717,8 @@ StreamAnswer = typing.TypedDict("StreamAnswer", {
     "vendor": "typing.NotRequired[str]",
     "model": "typing.NotRequired[str]",
     "compact": "typing.NotRequired[bool]",
+    "prove_model": "typing.NotRequired[list[str] | None]",
+    "compact_prove_model": "typing.NotRequired[list[str] | None]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1731,6 +1764,8 @@ StreamInterrupt = typing.TypedDict("StreamInterrupt", {
     "vendor": "typing.NotRequired[str]",
     "model": "typing.NotRequired[str]",
     "compact": "typing.NotRequired[bool]",
+    "prove_model": "typing.NotRequired[list[str] | None]",
+    "compact_prove_model": "typing.NotRequired[list[str] | None]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1805,6 +1840,7 @@ AgentLaunchBody = typing.TypedDict("AgentLaunchBody", {
 AgentLaunchResult = typing.TypedDict("AgentLaunchResult", {
     "session": "typing.NotRequired[str]",
     "refused": "typing.NotRequired[str]",
+    "standing": "typing.NotRequired[AccountSpend | None]",
     "runtimes": "typing.NotRequired[list[str] | None]",
 })
 
@@ -3838,6 +3874,7 @@ LaunchOffer = typing.TypedDict("LaunchOffer", {
     "thinking": "typing.NotRequired[str]",
     "effort": "typing.NotRequired[str]",
     "window": "typing.NotRequired[bool]",
+    "prove_model": "typing.NotRequired[list[str] | None]",
     "forge": "typing.NotRequired[str]",
 })
 
@@ -4243,6 +4280,7 @@ MachineRehomeAnswer = typing.TypedDict("MachineRehomeAnswer", {
     "size": "typing.NotRequired[int]",
     "cwd": "typing.NotRequired[str]",
     "compacted": "typing.NotRequired[bool]",
+    "standing": "typing.NotRequired[AccountSpend | None]",
 })
 
 # MachineRehomeReceipt is an export or receive answer on its current uplink.
@@ -4877,6 +4915,7 @@ Problem = typing.TypedDict("Problem", {
     "title": "typing.NotRequired[str]",
     "detail": "typing.NotRequired[str]",
     "remedy": "typing.Literal[\"reconnect\", \"fix-input\", \"resend\", \"wait\", \"update-plugin\", \"none\"]",
+    "standing": "typing.NotRequired[AccountSpend | None]",
     "wait_seconds": "typing.NotRequired[int]",
     "request": "typing.NotRequired[str]",
 })
@@ -5498,6 +5537,14 @@ SessionStanding = typing.TypedDict("SessionStanding", {
     "keep": "StandingKeep | None",
     "park": "StandingPark | None",
     "cache": "StandingCache | None",
+    "dead": "typing.NotRequired[StandingDead | None]",
+})
+
+# StandingDead is why a session reads dead and since when: the machine's answer for a failed resume,
+# its liveness for a machine offline.
+StandingDead = typing.TypedDict("StandingDead", {
+    "cause": "str",
+    "since": "str",
 })
 
 # StandingPark is the seat's park on a session: its process stopped, its enrolment kept, why — its
@@ -6363,6 +6410,25 @@ WakeDTO = typing.TypedDict("WakeDTO", {
 # WakeList is a collaborator's live wakes in a workspace.
 WakeList = typing.TypedDict("WakeList", {
     "wakes": "list[WakeDTO] | None",
+})
+
+# WakeResumeRequest asks coordination to authorize one delivered wake's contingent process start.
+WakeResumeRequest = typing.TypedDict("WakeResumeRequest", {
+    "uplink": "str",
+    "attempt": "str",
+})
+
+# WakeResumeAuthorization is coordination's decision on a contingent resume of one delivered wake.
+# Account and model are resolved evidence, not values the agent supplies to make a start fit.
+WakeResumeAuthorization = typing.TypedDict("WakeResumeAuthorization", {
+    "attempt": "str",
+    "offered": "bool",
+    "binding": "typing.NotRequired[str]",
+    "vendor": "typing.NotRequired[str]",
+    "account": "typing.NotRequired[str]",
+    "model": "typing.NotRequired[str]",
+    "prove_model": "typing.NotRequired[list[str] | None]",
+    "standing": "typing.NotRequired[AccountSpend | None]",
 })
 
 IntentCreateBody = typing.TypedDict("IntentCreateBody", {
@@ -7452,6 +7518,7 @@ WorkerCensusBody = typing.TypedDict("WorkerCensusBody", {
     "uplink": "str",
     "worker_census": "WorkerCensus",
     "interactive": "typing.NotRequired[list[LauncherAccount] | None]",
+    "profile_offers": "typing.NotRequired[dict[str, list[ProfileOffer] | None] | None]",
     "signed_out": "typing.NotRequired[list[LauncherAccount] | None]",
     "spends": "typing.NotRequired[list[HarnessSpend] | None]",
     "harness_commands": "typing.NotRequired[dict[str, str]]",
@@ -7475,6 +7542,13 @@ HarnessSpend = typing.TypedDict("HarnessSpend", {
     "harness": "str",
     "vendor": "str",
     "account_id": "str",
+})
+
+# ProfileOffer is one native profile's sanitized model association. Profile is a profile name,
+# never its command or path; an empty model list says that profile maps no model.
+ProfileOffer = typing.TypedDict("ProfileOffer", {
+    "profile": "str",
+    "models": "list[str] | None",
 })
 
 # LauncherAccount is an account one of a machine's launchers is signed in to.
@@ -7799,6 +7873,7 @@ ROUTES = frozenset({
     "GET /w/{workspace}/steering/agent/target",
     "POST /w/{workspace}/steering/agent/undelivered",
     "POST /w/{workspace}/steering/agent/wake",
+    "POST /w/{workspace}/steering/agent/wake-resume",
     "GET /w/{workspace}/steering/authorities",
     "POST /w/{workspace}/steering/door",
     "POST /w/{workspace}/steering/observe",

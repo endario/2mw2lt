@@ -20,6 +20,15 @@
             "additionalContextLimit": 0
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -z \"${STEERING_MODEL_PROOF:-}\" ]; then exit 0; fi; for R in \"${PLUGIN_ROOT:-}\" \"${CLAUDE_PLUGIN_ROOT:-}\"; do if [ -n \"$R\" ] && [ -f \"$R/hooks/session_model_proof.py\" ]; then exec python3 \"$R/hooks/session_model_proof.py\"; fi; done; exit 0",
+            "timeout": 3
+          }
+        ]
       }
     ],
     "Stop": [

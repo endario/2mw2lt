@@ -20,6 +20,9 @@ RARITIES = ("legendary", "epic", "rare", "uncommon")
 # credential, so a line the grammar did not match is refused rather than queued as a message
 # for the standup — which reads as success and is how other verbs' malformed lines were lost.
 USAGE_REFUSAL = "not a card verb"
+# What conclude answers a wrong positional form with, naming its three arguments: the whole card
+# usage that a bare USAGE_REFUSAL brings says everything but that (#9002).
+CONCLUDE_FORM = "usage: conclude <card> <by> <evidence> [--branch-is-the-work]"
 STATES = ("card-scoped", "card-branch", "card-unbranch", "card-session", "card-unsession",
           "card-concluded", "card-unconcluded", "card-retired",
           # The keeper's (doc 125 §3), written by the daemon alone.
@@ -430,11 +433,11 @@ def built(verb: str, rest: list[str]) -> tuple[list[dict], str | None]:
         if verb == "unsession" and len(rest) in (2, 3):
             return [_fact("card-unsession", rest[0], session=rest[1],
                           **({"why": rest[2]} if len(rest) == 3 else {}))], None
-        if verb == "conclude" and len(rest) in (3, 4):
-            if len(rest) == 4 and rest[3] != KEEP_BRANCH:
-                return [], USAGE_REFUSAL
-            return [_fact("card-concluded", rest[0], by=rest[1], evidence=rest[2],
-                          **({"kept": True} if len(rest) == 4 else {}))], None
+        if verb == "conclude":
+            if len(rest) in (3, 4) and (len(rest) == 3 or rest[3] == KEEP_BRANCH):
+                return [_fact("card-concluded", rest[0], by=rest[1], evidence=rest[2],
+                              **({"kept": True} if len(rest) == 4 else {}))], None
+            return [], CONCLUDE_FORM
         if verb == "unconclude" and len(rest) in (1, 2):
             return [_fact("card-unconcluded", rest[0], **({"why": rest[1]} if len(rest) == 2 else {}))], None
         if verb == "retire" and len(rest) == 2:

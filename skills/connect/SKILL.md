@@ -143,6 +143,13 @@ answer it in words.
 
 A `say` that is a signal (JSON with a `kind`), from `session`, `account` or `signal <id>`, is about you or an
 account you draw on, routed to you by the workspace. Do its `suggested_act`; do not answer it in words.
+A `card-closed` tell means your card's work has landed. It is a candidate, not a conclusion: say
+done for the card and record your `unit-done`, and the platform concludes the landed card itself.
+
+The foreman may drive you: the platform's judgement on your card reaches you as a directive
+whose `from:` line names the foreman, carrying the step the card owes — the conflict paths, a
+round's findings, the guard that went red. Act on it as its words. It also wakes, interrupts and
+relaunches within budgets, and what it cannot decide it escalates to the seat, not to you.
 
 A `say` from `warm <id>` is the platform refreshing your prompt cache while the brain keeps you.
 End the turn without a word.
@@ -370,10 +377,12 @@ Load `/2mw2lt:gate` for the round/ceiling, cancellation, publication and pass-ca
 For coordination migration filenames, follow the repository convention.
 Steering commissions the independent judgment; a queued commission is not a reason to send
 another one. Fix verified findings, push and commission the next round. `ship it` closes the
-gate; mark ready only then, and merge it (`/2mw2lt:gate`). Never rebase after a
-pass: merge `origin/main` into the passed head, resolve conflicts in that merge, push and carry the
-pass rather than commissioning another round. Once `main` has moved, any other commit, a migration
-renumber included, costs a round.
+gate; mark ready only then, and merge it (`/2mw2lt:gate`). After `ship it` the platform
+owns the merge too: its reconciler enqueues a passed head its author readied, and when `main` has
+moved it merges `origin/main` in and carries the pass itself — a conflict is handed back to you to
+resolve, never resolved by the platform. Never rebase after a pass: the platform's merge of
+`origin/main` into the passed head is the one carry, and any other commit of yours past a pass, a
+migration renumber included, costs a round.
 
 ## Checkpoint and leave
 

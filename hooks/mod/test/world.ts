@@ -26,6 +26,7 @@ export type HoldPoll = { status: number; text: string; hold?: Promise<void> } | 
 
 export function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording = '', keep = 'Keep verbatim: steering session s1; branch b; checkpoint https://github.com/example-org/example-repo/pull/1.\n',
                          agent = false, polls = [] as (Poll | Promise<Poll>)[], posts = [] as (number | Promise<number>)[], holdPolls = [] as (HoldPoll | Promise<HoldPoll>)[], deleteHangs = false, holdRoute = false, enrolled = true, submitRejects = false, submitDrops = false, storesSubmits = false, ackFails = false, readFails = false, engineState = false,
+                         proofEnv = {} as Record<string, string>,
                          // The engine's own answer to `$.session.usage({ breakdown })`: the window it measures
                          // against, the token count it auto-compacts at, and who settled the window.
                          context = { point: 167_000 as number | undefined, raw: 200_000, source: 'auto', model: 'claude-test' } } = {}) {
@@ -37,6 +38,9 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
     submitDrops,
     root: '',
     writes: [] as { path: string; text: string }[],
+    files: new Map<string, string>(),
+    actions: [] as string[],
+    composes: [] as (string | undefined)[],
     tools: [] as string[],
     runs: [] as string[][],
     cwds: [] as (string | undefined)[],
@@ -149,9 +153,10 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
     if (e.path === CLAIM_PATH.replace(/\.json$/, '.connect') && w.connected) return { value: w.connected }
     if (agent && e.path === '/ws/.env') return { value: `OTHER=1\nSTEERING_AGENT_PORT=${AGENT.port}\nSTEERING_AGENT_KEY_FILE=${AGENT.keyFile}\n` }
     if (agent && e.path === AGENT.keyFile && w.agentKey) return { value: `${w.agentKey}\n` }
+    if (w.files.has(e.path)) return { value: w.files.get(e.path)! }
     throw new Error('ENOENT')
   })
-  mock.env(on, { HOME: '/u/owner' })
+  mock.env(on, { HOME: '/u/owner', ...proofEnv })
   on('http.fetch', async ($, e) => {
     const method = e.init?.method ?? 'GET'
     w.fetches.push({ url: e.url, method, headers: { ...e.init?.headers }, body: e.init?.body })
@@ -180,7 +185,12 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
     const r = 'status' in answer ? answer : { status: 200, text: JSON.stringify({ commands: [], cursor: '', ...answer }) }
     return { value: { status: r.status, ok: r.status >= 200 && r.status < 300, headers: {}, text: r.text } }
   })
-  on('fs.write', async ($, e) => { w.writes.push(e); return { value: undefined } })
+  on('fs.write', async ($, e) => {
+    w.writes.push(e)
+    w.files.set(e.path, e.text)
+    w.actions.push(`write:${e.path}`)
+    return { value: undefined }
+  })
   on('tool.register', async ($, e) => { w.tools.push(e.name); return { value: { tool: `mcp__2mw2lt__${e.name}` } } })
   on('process.run', async ($, e) => {
     if (w.runAborted) {
@@ -188,8 +198,15 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
       throw new Error(`2mw2lt: $.process.run(${e.argv[0]}) aborted, the call interrupted`)
     }
     w.runs.push([...e.argv])
+    w.actions.push(`run:${e.argv.join(' ')}`)
     w.cwds.push(e.init?.cwd)
     w.envs.push(e.init?.env)
+    if (e.argv[1] === '-c' && e.argv[2]?.includes('atomic_file')) {
+      const path = e.argv[4]!
+      w.files.set(path, e.init?.stdin ?? '')
+      w.actions.push(`write:${path}`)
+      return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (/\/(lease|card)\.py$/.test(String(e.argv[1]))) {
       w.wireStarted?.()
       if (w.wireGate) await w.wireGate
@@ -242,6 +259,7 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
   })
   on('process.spawn', async function* ($, e) {
     w.spawns.push([...e.argv])
+    w.actions.push(`spawn:${e.argv.join(' ')}`)
     w.envs.push(e.env)
     w.claimsAtSpawn.push(w.writes.filter(write => JSON.parse(write.text).at > 0).length)
     w.cwds.push(e.cwd)
@@ -302,7 +320,11 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
   on('turn.step', async function* ($, e) { for (const c of w.steps.shift() ?? []) yield c as never; return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage: { model: 'claude-test', input_tokens: 1, output_tokens: 1, cache_read_input_tokens: w.stepUsage - 1, cache_creation_input_tokens: 0 } } as never })
   on('session.end', async ($, e) => ({ sessionId: e.sessionId }))
   on('classic.SessionStart', async () => ({}) as never)
-  on('prompt.compose', async () => ({ sections: [{ id: 'intro', text: 'engine', scope: 'shared' as const }] }))
+  on('prompt.compose', async ($, e) => {
+    w.composes.push((e as any).model)
+    w.actions.push(`compose:${(e as any).model}`)
+    return { sections: [{ id: 'intro', text: 'engine', scope: 'shared' as const }] }
+  })
   on('tool.check', async () => w.check as never)
   return w
 }
