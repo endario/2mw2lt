@@ -204,7 +204,11 @@ hear first — see [Read the blocked-on line, the ledger and escalations](#read-
 - **`account-unspent`**, a signal: a serving account's largest window crossed canonical blue, so avoiding
   waste needs near-peak burn for the rest of the window (`signals.account_unspent.*`), once per
   workspace/account/reset. Its facts name the plan, window, reset, required peak, expected waste, bottleneck
-  and evidence time. Place eligible work before the reset; blue overrides no guard.
+  and evidence time. A manual start uses the same kind, once per workspace/account/start, with
+  `trigger: manual-burn`, vendor/account, start, effective end, current sessions and launches placed in
+  the last hour. Place ready, authorized work by vendor before the end, in proportion to capacity
+  that would otherwise be wasted; say when nothing fits. No synthetic load, and neither blue nor a
+  manual burn overrides hold, authorization, serving or eligibility guards.
 - **`account-reset`**, a signal from `account <subject>`: an account's spent window rolled over and
   it takes work again (`signals.account_reset.*`), once per reset. `excluded.window` is the window
   that had stopped it. Its sessions are told it too by default, and the platform wakes each whose stream holds; resume
@@ -270,7 +274,10 @@ names what no reading supplies yet. Start from `changed` and `act_on`, then revi
 what no notice raised: an idle or stuck session, a card nobody executes or that made no visible
 progress, a spent or idle account, a need waiting. Act only where something warrants it. A snapshot
 is the platform's report, never the owner's word, and it is not news to pass on: do not answer it
-with a status report to the owner. The next one comes when you have received this one.
+with a status report to the owner. The next one comes when you have received this one. Active manual
+burns stand in `act_on` and capacity: the account, how long it has burned, its end, current sessions
+and launches placed in this workspace in the last hour. Even after a `considered` answer folds
+`act_on`, capacity repeats the live burn; stop or expiry removes it from subsequent snapshots.
 
 Answer each snapshot once you have reviewed it, by the `episode` it carries, with the plugin's
 `answer` tool or the verb, never through `say`:
@@ -908,7 +915,7 @@ Its clauses go in this order:
 | `<harness>` | placement chooses; name `claude`, `zcode`, `codex` or `opencode` only as an override |
 | `on <node>` | the daemon places it; not with a floor |
 | `vendor <vendor>` | all eligible vendors; named, only that vendor's accounts |
-| `account <n>` | the best-ranked account; named, that account or a refusal; not with a floor |
+| `account <number-or-alias>` | the best-ranked account; named, requires an explicit vendor and pins that account; not with a floor |
 | `model <model>` or `floor <rarity>` | one is required; prefer the floor |
 | `thinking <level>` | the model's own; opencode only |
 | `effort <level>` | the placed model's rarity's: legendary `low`, epic `medium`, rare `high`, uncommon `max` |
@@ -932,6 +939,8 @@ say "launch: token @lease floor rare because a contained fix"
 say "launch: token @lease vendor anthropic model opus effort high because the ladder cannot see this design's depth"
 # One account, no other in its place
 say "launch: token @lease vendor anthropic account 2 model opus effort medium because account 2 holds this card's cache"
+# The same pin by the current team owner's alias
+say "launch: token @lease vendor anthropic account ccr1 model opus effort medium because the owner asked for ccr1"
 # A named GLM model, with its harness placed
 say "launch: token @lease vendor zai model glm-5.3 because the handover plan names glm-5.3"
 ```
@@ -942,12 +951,16 @@ with its `brief:` line sent as above.
 `vendor` matches it across the models accounts serve; `vendor <vendor>` restricts placement to
 that vendor's accounts. The daemon picks the best-ranked eligible account with a launchable harness
 serving it, and one whose usage it cannot read only after every ranked one, as unknown.
-`account <n>` starts
-that vendor's account, as the usage frames number it, or refuses; it never falls back to another. On
-Go the number is the one the team gave the account when it was first seen, never a machine's launcher
-name; the launch's answer names it with the account's id and whose it is. A member who names an account by
-a label ("launch on acme") means the label that `from:` line's member gave it in `labels`; write the
-team's number before `launch:` or `rehome:`, since the wire takes numbers and ids only. `on` names a machine by the name `/machines` shows (`on M4`, `on "M4 Pro"`), as
+`account <number-or-alias>` requires an explicit `vendor <vendor>` and pins that vendor's account;
+it never falls back to another. A number is the stable team number assigned when the account was
+first seen, never a machine's launcher name; the vendor's own account id is also accepted.
+Alias lookup uses only the current team owner's namespace, not the requesting member's or the
+account owner's. Seat reads expose that label as
+`team_owner_label`, shown beside the number as `anthropic#2 (ccr1)`. Renaming or clearing it changes
+neither the number nor a pin already resolved. `launch-account-ambiguous` means the name matches
+more than one account; use its team number instead. A different member naming their own label
+means their entry in `labels`: resolve it to the team's number before launching.
+`on` names a machine by the name `/machines` shows (`on M4`, `on "M4 Pro"`), as
 `/machines` lists it (`m-<id>`), or as `/sessions` names its `machine`, and one naming no live
 machine is refused at once. A launch still waiting is withdrawn with
 `withdraw: token @lease <launch id>`, so it is never placed. Name the vendor
@@ -1039,7 +1052,7 @@ on the same machine, or an explicitly named machine, with its conversation, name
 say "rehome: token @lease <session> to [vendor <vendor>] <account> [machine <name>] [model <model>] [effort <level>] [compact [without checkpoint]] because <why>"
 ```
 
-Name the account as you name it for `launch:`: its number, under its vendor. A move into another
+For `rehome:`, name the account by its stable team number under its vendor. A move into another
 vendor's home (`vendor zai`, or a proxied launcher's) is named as one, and names the model it
 resumes on in that vendor's own ids (`glm-5.3`, `glm-5.3-flash`); without `model` and `effort` it
 resumes on the launcher's defaults.
@@ -1143,7 +1156,7 @@ never paste it.
 
 ```bash
 say "$(cat <<'LAUNCH'
-launch: token @lease [on <node>] vendor <vendor> [account <n>] model <model> effort <level> card <card> because <why>
+launch: token @lease [on <node>] vendor <vendor> [account <number-or-alias>] model <model> effort <level> card <card> because <why>
 brief: checkpoint <checkpoint id> Continue <card>: the handover checkpoint follows; read it, then the plan it names, and take the tasks it gives <model>.
 LAUNCH
 )"

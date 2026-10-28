@@ -1021,7 +1021,12 @@ def seat_launch(session: str, token: str, body: dict, key: str) -> str:
     answer = lent(session, token, lambda _: write("/launches", body, key, SESSION_CARRIER, token))
     account = answer.get("account")
     harness = f" {body['harness']}" if body.get("harness") else ""
-    on = f" on {account['vendor']} account {account['number']} ({account['account_id']}, brought by {account['brought_by']})" if account else ""
+    on = ""
+    if account:
+        name = f"{account['vendor']} account {account['number']}"
+        if label := account.get("team_owner_label"):
+            name = f"{account['vendor']}#{account['number']} ({label})"
+        on = f" on {name} ({account['account_id']}, brought by {account['brought_by']})"
     preferred = answer.get("preferred_harness")
     nudge = (f" — {preferred['machine']} prefers {preferred['harness']} for {preferred['vendor']}"
              "; leave the harness out to let placement choose") if preferred else ""

@@ -279,6 +279,7 @@ ListedAccountUsage = typing.TypedDict("ListedAccountUsage", {
     "stopped_at": "str | None",
     "owner_login": "str | None",
     "label": "str | None",
+    "team_owner_label": "str | None",
     "manages": "bool",
     "co_owners": "list[AccountCoOwner] | None",
     "concurrency": "AccountConcurrencyUsage",
@@ -1261,6 +1262,7 @@ StreamUsage = typing.TypedDict("StreamUsage", {
     "tightest": "UsageTightest | None",
     "incentive": "AccountIncentive | None",
     "label": "str | None",
+    "team_owner_label": "str | None",
 })
 
 # StreamFleet tells the brain every published account of the team (doc 117 §4.1), each with
@@ -1287,6 +1289,7 @@ FleetAccount = typing.TypedDict("FleetAccount", {
     "serves_for": "list[str] | None",
     "serves_models": "list[str] | None",
     "labels": "list[FleetLabel] | None",
+    "team_owner_label": "str | None",
 })
 
 # FleetLabel is one member's name for an account, the member as Owner names one.
@@ -3850,6 +3853,7 @@ LaunchAttempt = typing.TypedDict("LaunchAttempt", {
     "vendor": "str",
     "account": "str",
     "account_number": "int | None",
+    "team_owner_label": "str | None",
     "harness": "str | None",
     "model": "str | None",
     "effort": "str | None",
@@ -3880,6 +3884,7 @@ LaunchAccount = typing.TypedDict("LaunchAccount", {
     "number": "int",
     "account_id": "str",
     "brought_by": "str",
+    "team_owner_label": "str | None",
 })
 
 # LaunchOffer is how the offered launch starts its harness, as the seat asked.
@@ -5703,6 +5708,7 @@ ListedAccount = typing.TypedDict("ListedAccount", {
     "account_id": "str",
     "number": "int | None",
     "label": "str | None",
+    "team_owner_label": "str | None",
 })
 
 # ObservedReport is one model a session's machine observed it run. Vendor is its maker, empty when

@@ -56,8 +56,9 @@ _NEED = re.compile(r"^(?P<verb>dispose|promote):\s*token\s+@lease\s+(?P<item>\S+
 # for good, read whole whatever prose they carry.
 _OUT_OF_BAND = re.compile(r"^out-of-band:\s*token\s+@lease\s+(?P<item>\S+)\s+via\s+(?P<rest>.+)$", re.S)
 # A launch on Go: the machine is the `machine` `GET /sessions` lists, a registration `GET /machines`
-# lists (`m-<id>`), or the name a machine's census reports (quoted when it has a space), and the account the number its team gave
-# it or the vendor's own id, never one machine's launcher.
+# lists (`m-<id>`), or the name a machine's census reports (quoted when it has a space). Within an
+# explicit vendor, the account is its team number, the team owner's label, or the vendor's own id,
+# never one machine's launcher.
 _LAUNCH = re.compile(r"^launch:\s*token\s+@lease(?:\s+(?P<harness>[a-z][a-z0-9-]{0,31}))?"
                      r"(?:\s+on\s+(?:(?:m-)?(?P<machine>[0-9a-f-]{36})|\"(?P<quoted>[^\"\n]{1,64})\"|(?P<machine_name>[^\s\"]{1,64})))?"
                      r"(?:\s+vendor\s+(?P<vendor>[a-z0-9][a-z0-9-]{0,31}))?"
