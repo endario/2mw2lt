@@ -160,7 +160,8 @@ def _commission_id(detail: str) -> str | None:
 
 
 def _settled_refusal(e) -> str:
-    """A refusal Go settled. One branch has a step that repairs it, so it names that."""
+    """A refusal Go settled. One branch has a step that repairs it, so it names that; every branch
+    says the reason Go gave, which `str(e)` carries (#9022)."""
     import refusal
     if e.code == "not-holding-branch":
         return refusal.refuse(str(e), send=[("taking: branch <name> token <t>",
@@ -168,12 +169,11 @@ def _settled_refusal(e) -> str:
     if e.code == "resolution-carries":
         return refusal.refuse(str(e), send=[("/2mw2lt:gate carry <n>", "since a carry admits this head and costs no round")])
     if e.code == "serial-not-served":
-        why = f"{e}: {e.detail}" if e.detail else str(e)
-        return refusal.refuse(why, send=[("/2mw2lt:gate review <n> --resolution",
+        return refusal.refuse(str(e), send=[("/2mw2lt:gate review <n> --resolution",
                                           "where a merge adapted the passed change: a round on that adaptation alone"),
                                          ("gate: review <repo> <branch> pr <n> token <t>",
                                           "to commission a round on this head, and carry its pass once it ships")])
-    return refusal.refuse(f"{e}: {e.detail}" if e.detail else str(e), send="/2mw2lt:gate")
+    return refusal.refuse(str(e), send="/2mw2lt:gate")
 
 
 def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, retry_id: str | None) -> int:
@@ -291,7 +291,7 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
         holding = _commission_id(e.detail) if e.code in ("already-commissioned", "queued-already") else None
         if holding:
             # A first reply that was lost leaves the commission made: Go names it, so its status can be read.
-            reply = refusal.refuse(f"{e} (commission {holding})", send=f"/2mw2lt:gate status {holding}")
+            reply = refusal.refuse(str(e), send=f"/2mw2lt:gate status {holding}")
         else:
             reply = refusal.retry(str(e)) if uncertain else _settled_refusal(e)
     except session_routes.Unsent as e:
@@ -453,8 +453,7 @@ def merge(session: str, argv: list[str], flags, extra: str, retry_id: str | None
         return 75
     except (session_routes.Refused, session_routes.Unsent) as why:
         if isinstance(why, session_routes.Refused) and session_routes.settled(why):
-            detail = f"{why}: {why.detail}" if why.detail else str(why)
-            print(f"not merged: {detail}", file=sys.stderr)
+            print(f"not merged: {why}", file=sys.stderr)
         else:
             print(f"merge outcome unknown: {why}; the merge may have landed. "
                   f"Send it again with --retry={this} to learn which", file=sys.stderr)
@@ -503,12 +502,27 @@ def go_carry(ws: Path, session: str, flags, pr: int, retry_id: str | None) -> in
             # A head pushed a moment ago reaches Go when GitHub delivers it: wait that out under a new
             # key, since Go answers a refused key with the same refusal.
             if e.code == "carry-head-unobserved" and time.monotonic() < waited_until:
-                print(f"waiting for GitHub to deliver {at[:12]} to the gate", file=sys.stderr)
+                drift = observed_head(e.detail)
+                print(f"waiting for GitHub to deliver {at[:12]} to the gate"
+                      + (f", which observes the pull request at {drift[:12]}" if drift and drift != at else ""),
+                      file=sys.stderr)
                 time.sleep(CARRY_UNOBSERVED_POLL)
                 this = occurrence()
                 continue
             uncertain = not session_routes.settled(e)
-            reply = refusal.retry(str(e)) if uncertain else _settled_refusal(e)
+            if not uncertain and e.code == "carry-head" and "holds the pass already" in (e.detail or ""):
+                # The pass already covers this head, most often the platform's own carry of a pure
+                # merge: the thing this send asked for holds, so nothing is refused (#9022).
+                print(display_reply(f"nothing to carry: the pass on #{pr} already covers {at[:12]}"))
+                return 0
+            if not uncertain and e.code == "carry-head-unobserved" and (drift := observed_head(e.detail)) and drift != at:
+                # A checkout the pull request moved past, most often by the platform's pure merge:
+                # the observed head is where the pass sits, so this checkout goes to it (#9022).
+                reply = refusal.refuse(f"your checkout is at {at[:12]}, the pull request is at {drift[:12]}",
+                                       send=[("/2mw2lt:gate carry <n>",
+                                              "once this checkout is fast-forwarded to the pull request's head")])
+            else:
+                reply = refusal.retry(str(e)) if uncertain else _settled_refusal(e)
         except session_routes.Unsent as e:
             uncertain, reply = True, refusal.retry(str(e))
         break
@@ -516,6 +530,19 @@ def go_carry(ws: Path, session: str, flags, pr: int, retry_id: str | None) -> in
     if uncertain:
         print(f"the carry may have landed: send it again with --retry={this} to learn which", file=sys.stderr)
     return 1 if reply.startswith("REJECTED") else 0
+
+
+def observed_head(detail: str) -> str | None:
+    """The pull request's observed head, from a carry-head-unobserved refusal's detail, where Go
+    names it so the client can say how the checkout drifted (#9022). The head the observed-at
+    wording names wins where the detail carries more than one hash, and a hash is 40 hex alone:
+    a longer digest run is not a head, and neither is uppercase."""
+    text = detail or ""
+    named = re.search(r"observed at ([0-9a-f]{40})(?![0-9a-f])", text)
+    if named:
+        return named[1]
+    alone = re.search(r"(?<![0-9a-f])([0-9a-f]{40})(?![0-9a-f])", text)
+    return alone[1] if alone else None
 
 
 def carry_decided(pr: int, at: str, answer: dict, token: str) -> str:

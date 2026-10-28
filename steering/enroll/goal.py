@@ -252,7 +252,7 @@ def submit(held: dict, file: Path) -> int:
             print("\n".join(_moved(held["token"], prepared)))
             print("prepare again once you have reconsidered")
         else:
-            print(f"refused: {e}" + (f": {e.detail}" if e.detail else ""))
+            print(f"refused: {e}")
             print("correct the decision, then prepare it again")
         return 1
     file.unlink(missing_ok=True)

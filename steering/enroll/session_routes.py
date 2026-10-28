@@ -46,12 +46,15 @@ GATEWAY_DOWN = frozenset({502, 503, 504})
 
 
 class Refused(Exception):
-    """Go refused the request. `code`, `field` and `remedy` are its problem's."""
+    """Go refused the request. `code`, `field` and `remedy` are its problem's. The reason Go named,
+    `detail`, rides the message after the request id, so every reader that prints the exception
+    says why, not only the code and ids (#9022)."""
 
     def __init__(self, status: int, code: str, field: str = "", wait: int | None = None, request: str = "",
                  remedy: str = "", detail: str = ""):
         super().__init__(f"refused ({status}): {code}" + (f" [{field}]" if field else "")
-                         + (f" request {request}" if request else ""))
+                         + (f" request {request}" if request else "")
+                         + (f": {detail}" if detail else ""))
         self.status, self.code, self.field, self.wait, self.request = status, code, field, wait, request
         self.remedy = remedy
         # What Go's refusal names beyond its code, where it names one: a commission's id.
@@ -368,8 +371,9 @@ def checkpoint(token: str, body: dict) -> tuple[str, bool]:
         if not settled(e):
             return refusal.retry(str(e)), True
         if e.code == "checkpoint-credential":
-            detail = f" ({e.detail})" if e.detail else ""
-            return refusal.resend(f"{e}: the checkpoint text contains credential-shaped content{detail}",
+            # The refusal's own words say what rides the credential: str(e) already ends with the
+            # line Go named, so no suffix repeats it.
+            return refusal.resend(f"{e}: the checkpoint text contains credential-shaped content",
                                   "remove or reword that content, then send the checkpoint again"), False
         return refusal.use("checkpoint", str(e)), False
     got = answer.get("checkpoint") or {}
