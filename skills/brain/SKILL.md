@@ -1534,9 +1534,13 @@ host's at either — but a host only where its owner is your team's owner (rulin
 standing ruling. A `judgement` change applies at once and stands on the owner's Needs You until
 they acknowledge it.
 
-The rest stays the owner's: `authority` keys are never delegable (`worker_forge`, `retention.days`,
-and on a host `host.label` and `network.proxy`), and neither is the delegation itself, granted and
-revoked in the console. A change outside the grant goes to the owner as an ask, naming the key,
+Who may act below the owner is `access` (`members.write`, `worker_forge`, a host's `host.label`),
+which a grant names on its own line and which, at reach `grantor`, also issues and withdraws the
+team's invitations: `--post --json '{"github_id": <id>, "login": "<login>"}'` (or `'{"email": "<address>"}'`)
+to `/api/v1/teams/<team>/invitations`, and `--delete` to `/api/v1/teams/<team>/invitations/<id>`.
+An invitation admits a member and names no role. The rest stays the owner's: `retention.days` is `authority`
+and never delegable, and so are removing an owner's account, moving or removing the owner's role,
+and the delegation itself, granted and revoked in the console. A change outside the grant goes to the owner as an ask, naming the key,
 the place and the value.
 
 ## Hand work out at the effort it asks for

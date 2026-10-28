@@ -30,10 +30,10 @@ import requestlog  # noqa: E402
 
 MACHINE_CARRIER = "X-Steering-Agent-Credential"
 SESSION_CARRIER = "X-Steering-Session-Credential"
-# A refusal of an invalid token: unknown, expired, or one a detachment revoked, which Go answers
-# alike, so the client cannot tell which, only that the token can no longer act; or a stored token
-# not shaped as one, which can never act. Both are repaired by connecting again.
-INVALID_TOKEN = frozenset({"session-token-locator-read", "session-credential-carrier-shape"})
+# A refusal of an invalid token: unknown or expired, which Go answers alike; one whose epoch was
+# ended (retired, left, swept, or enrolled again elsewhere); or a stored token not shaped as one,
+# which can never act. Each is repaired by connecting again.
+INVALID_TOKEN = frozenset({"session-token-locator-read", "session-credential-ended", "session-credential-carrier-shape"})
 # How long, and how many times, a throttled or unavailable answer is sent again: past either the
 # refusal is reported rather than held, whatever wait Go asked for.
 RETRY_LIMIT = 30.0
