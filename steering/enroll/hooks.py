@@ -274,7 +274,9 @@ def repin(workspace: Path, sender: Path = SENDER) -> Path | None:
 def pack(workspace: Path) -> dict:
     out = {ev: [{"hooks": [handler(workspace, "observe")]}] for ev in sorted(supervision.ADMITTED)}
     out["Stop"].append({"hooks": [handler(workspace, "readout")]})  # doc 30 §3: its own handler, not a branch in the adapter
-    out["Stop"].append({"hooks": [handler(workspace, "armed")]})     # #1506
+    # The re-arm is the plugin's own Stop entry's (doc 203 D10): one gate for the hold and the
+    # announce, carried by every session that loads the plugin — the owner's hand-opened ones
+    # included — where a pack entry reached only workspaces /2mw2lt:install wired (#1506).
     # #4823: decides a dialog from the console while the terminal's own copy stays answerable.
     out["PermissionRequest"].append({"hooks": [handler(workspace, "decide")]})
     # doc 154 §8: a compacted or cleared session is pointed back at its checkpoint.

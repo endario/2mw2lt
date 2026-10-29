@@ -42,6 +42,23 @@ from verb_help import current_args, error, help_requested, script_help  # noqa: 
 
 STALE = ("unknown, detached or stale token", "is not enrolled")
 
+# The onboarding every entry route prints (#9153): the standing rules of this workspace's work,
+# the same block every launch's brief carries, so no brief repeats them. Held one text with the
+# platform's copy by steering's onboarding guard.
+STANDING_RULES = """standing rules — every session, however started, works this way:
+- announce on the first branch claim: verb.py announce <session> as <account> on <branch> doing "<work>"
+- open the work's pull request as a draft and keep it draft through every gate round
+- mark it ready only after the reviewer's ship it
+- spot-run the tests your change touches; dispatch the wider guards through ci.py run, never the whole suite
+- never deploy and never query production
+- push the repository direct when the plugin's public mirror refuses
+- say done with the result and where to see it: verb.py done <session> "<result>\""""
+
+# The knowledge index's own ceiling and tail, as the launch tail's block takes them
+# (coordination's knowledge.BlockMax and its link line).
+KNOWLEDGE_BLOCK_MAX = 3072
+KNOWLEDGE_TAIL = "full brief: rest.py '/knowledge/brief'"
+
 
 def project_dir() -> Path:
     return Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
@@ -689,6 +706,31 @@ def bulletin_snapshot(ws: Path, session: str, psession: str) -> str | None:
     return session_routes.get("/bulletin?render=snapshot&mark=1", token).get("text") or None
 
 
+def knowledge_index(ws: Path, session: str, psession: str) -> str | None:
+    """The workspace's knowledge index, the titles every launch's brief carries (#9153), so a
+    hand-opened or restarted session begins on what a launched one was briefed with: the same
+    fenced block, cut from the end as the launch tail cuts it. None when the workspace keeps
+    none. Raises whatever the read raised; the caller says why on stderr rather than failing a
+    connect that has already bound."""
+    import session_routes  # noqa: E402
+    _, token = own_enrolment(ws, psession, session)
+    every = session_routes.get("/knowledge/brief", token).get("every") or []
+    rows = [f"{u['kind']} {u['id']}" + (f": {u['title']}" if u.get("title") else "")
+            for u in every if u.get("kind") and u.get("id")]
+    keep = []
+    for row in rows:  # a row is kept whole or not at all, as the launch tail's block keeps them
+        keep.append(row)
+        if len(block_of(keep).encode()) > KNOWLEDGE_BLOCK_MAX:  # UTF-8 bytes, as Go's bound is
+            keep.pop()
+            break
+    return block_of(keep) if keep else None
+
+
+def block_of(rows: list[str]) -> str:
+    """The fenced index the launch tail frames its rows with, tail line included."""
+    return "```knowledge\n" + "\n".join(rows) + "\n" + KNOWLEDGE_TAIL + "\n```"
+
+
 def checkpoint_block(ws: Path, session: str, psession: str) -> str | None:
     """The epoch's latest checkpoint, handed back after a restart (#6324 design §5): its text under a
     `checkpoint:` line, or that it expired or where its note is; None when the epoch has none. Raises
@@ -802,7 +844,17 @@ def main(argv: list[str]) -> int:
             print(f"this workspace has no observe hook; run /2mw2lt:install in {ws} to wire it",
                   file=sys.stderr)
             return 1
+    global AGENT_PORT
+    AGENT_PORT = agent_port(ws)
     try:
+        if not h.holds:
+            # A new incarnation's bind revokes the old reach. Check its replacement path first,
+            # but a first enrolment has no reach to lose.
+            port, agent_why = agent_says(AGENT_PORT, ws, session or "this session")
+            if not port and minted_name(records(ws), o.psession or h.whoami()[0]):
+                door.record("connect-agent-preflight-refused", agent_why, ws)
+                print("connect stopped before binding", file=sys.stderr)
+                return 1
         session, answer, rid, psession = connect(ws, session, acct, o.doing, h, o.psession, o.pid)
     except (Refused, Undetermined) as why:
         print(str(why), file=sys.stderr); return 1
@@ -818,6 +870,17 @@ def main(argv: list[str]) -> int:
     print(f"speak: {say_invocation(h, psession, session)}")
     print(repo_line(ws))
     print(card_line(ws, session, psession))
+    # The onboarding, on every entry route alike (#9153): the standing rules first, then the
+    # knowledge index and the bulletin a launch's brief also carries, so a session started any
+    # way is told by the product and not by whoever started it.
+    print(STANDING_RULES)
+    try:
+        index = knowledge_index(ws, session, psession)
+    except Exception as e:
+        index = None
+        print(f"knowledge: unread ({type(e).__name__}: {e})", file=sys.stderr)
+    if index:
+        print(index)
     # The bulletin is shown wherever a session's context is fresh, and connect is the cross-harness
     # moment (design §4). Informational, as the card line is: a door older than the bulletin answers
     # no such route, and a connect that bound stays bound.
@@ -846,13 +909,12 @@ def main(argv: list[str]) -> int:
         why = hand_over_pane(ws, h.provider, psession, rid, pid, project_dir())
         if why:
             print(why, file=sys.stderr)
-    global AGENT_PORT
-    AGENT_PORT = agent_port(ws)
-    port, why = agent_says(AGENT_PORT, ws, session)
+    if h.holds:
+        port, agent_why = agent_says(AGENT_PORT, ws, session)
     if port:
         print(f"STEERING_AGENT_PORT={port}")
-    if why:
-        print(why, file=sys.stderr)
+    if agent_why:
+        print(agent_why, file=sys.stderr)
     if psession and holder.fresh(ws, psession):
         holder.mark_connected(ws, psession)
     holder.sweep(ws, keep=psession)

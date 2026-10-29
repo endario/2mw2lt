@@ -130,7 +130,7 @@ GO_VERBS = tuple(sorted({"authorship", "backlog", "cancel", "dispose", "interven
                          "withdraw", "answer", "regroup", *_ACTION, *_KEEP_USAGE}))
 # The paths `go_post` takes: each is the seat's own command, translated to the route Go serves.
 POST_TARGETS = ("/steering/seat/read", "/steering/brain/reply", "/steering/brain/attach",
-                "/steering/brain/detach", "/steering/push/raise")
+                "/steering/brain/detach", "/steering/push/raise", "/steering/body/speak")
 # `checkpoint <id>` hands the session a checkpoint's text, which the daemon appends at delivery.
 _RELAY = re.compile(r"^relay:\s*token\s+@lease\s+to\s+(?P<target>[^\s@]+)(?:@(?P<epoch>[0-9]{1,9}))?"
                     r"(?:\s+checkpoint\s+(?P<checkpoint>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}))?\s+(?P<text>.+)$", re.S)
@@ -696,6 +696,8 @@ def go_post(rec: dict, target: str, body: bytes, occurrence: str | None = None) 
         return 2, f'refused: a lease post is a JSON object with "lease_token": "{PLACEHOLDER}"'
     if target == "/steering/push/raise":
         return go_raise(rec, obj)
+    if target == "/steering/body/speak":
+        return go_speak(rec, obj)
     if target != "/steering/brain/reply":
         return go_seat(rec, target, obj)
     return go_reply(rec, obj, occurrence)
@@ -772,6 +774,34 @@ def go_raise(rec: dict, obj: dict) -> tuple[int, str]:
             return 1, "refused: this deployment sends no push (push-unconfigured)"
         return 1, f"refused: {e}" if session_routes.settled(e) else refusal.retry(str(e))
     return 0, f"raised: queued for {n} subscribed browser{'' if n == 1 else 's'}"
+
+
+def go_speak(rec: dict, obj: dict) -> tuple[int, str]:
+    """The holder says and shows one short line on the workspace's linked bodies: the brain's own
+    voice in the room, answered with what each body did — never "sent"."""
+    import refusal
+    import session_routes
+    text = obj.get("text")
+    if not isinstance(text, str) or not text.strip():
+        return 2, f'refused: a speak is a JSON object with "lease_token": "{PLACEHOLDER}" and a text'
+    try:
+        answer = session_routes.speak_room(rec["session"], rec["token"], text)
+    except session_routes.NotSeated as why:
+        return 1, GO_NOT_SEATED.format(why=why)
+    except session_routes.Unsent as e:
+        return 1, refusal.retry(str(e))
+    except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale
+        if e.code == "body-none-linked":
+            return 1, "refused: no body is linked to this workspace, so the room can hear nothing (body-none-linked)"
+        return 1, f"refused: {e}" if session_routes.settled(e) else refusal.retry(str(e))
+    lines = []
+    for body in answer.get("bodies") or []:
+        heard = " and ".join(word for word, on in (("said", body.get("said")), ("shown", body.get("shown"))) if on)
+        lines.append(f"not heard: {body['refusal']}" if not heard else heard)
+    what = "; ".join(lines) or "nothing"
+    return 0, f"spoken: {what}"
 
 
 def go_seat(rec: dict, target: str, obj: dict) -> tuple[int, str]:

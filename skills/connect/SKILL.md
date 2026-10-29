@@ -115,6 +115,17 @@ python3 "$ws/.claude/steering-launch.py" exec hold --plugin-state "$CLAUDE_CODE_
 
 ## Work and report
 
+**The standing rules** print at every connect and ride every launch's brief — one text, the
+product's, so no brief repeats them (#9153). Every session, however started, works this way:
+
+- announce on the first branch claim: `verb.py announce <session> as <account> on <branch> doing "<work>"`;
+- open the work's pull request as a draft and keep it draft through every gate round;
+- mark it ready only after the reviewer's `ship it`;
+- spot-run the tests your change touches; dispatch the wider guards through `ci.py run`, never the whole suite;
+- never deploy and never query production;
+- push the repository direct when the plugin's public mirror refuses;
+- say done with the result and where to see it: `verb.py done <session> "<result>"`.
+
 Run issue-taking from the workspace, and branch-taking/announce from the worktree you will
 work in. Use the account from connect's reply:
 

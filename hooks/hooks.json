@@ -40,6 +40,15 @@
             "timeout": 3
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -z \"${CLAUDE_PLUGIN_ROOT:-}\" ]; then exit 0; fi; exec python3 \"${CLAUDE_PLUGIN_ROOT}/steering/enroll/armed.py\"",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PreToolUse": [

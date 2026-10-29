@@ -31,8 +31,8 @@ WAIT_CARD = re.compile(r"--card (?P<card>[0-9a-f]{24}) (?P<rest>.+)", re.S)
 
 
 def wait_card(text: str) -> tuple[str | None, str | None]:
-    """The card a wait names and the wait without it; (None, text) when it names none, and
-    (None, None) for a `--card` that names no card."""
+    """The card a wait or a blocked names and the word without it; (None, text) when it names
+    none, and (None, None) for a `--card` that names no card."""
     if text != "--card" and not text.startswith("--card "):
         return None, text
     m = WAIT_CARD.fullmatch(text)
@@ -80,9 +80,12 @@ def _workspace() -> Path | None:
 
 from verb_help import _invocation as help_invocation, error, help_requested, script_help  # noqa: E402
 
-# An announce on Go: a branch in another of the team's repositories names it (#7517).
-ANNOUNCE = re.compile(r"as (?P<agent>\S+/\S+)(?: on (?P<branch>\S+)(?: in (?P<repo>[^/\s]+/[^/\s]+))?)?"
-                      r"(?: doing (?P<work>.+))?")
+# An announce on Go: a branch in another of the team's repositories names it (#7517). A --card
+# binds the word to that card without a branch (doc 203 D2), and `as` is optional beside one, as
+# the due read's runnable line spells it.
+ANNOUNCE = re.compile(r"(?:--card (?P<card>[0-9a-f]{24}))?"
+                      r"(?:\s*as (?P<agent>\S+/\S+)(?: on (?P<branch>\S+)(?: in (?P<repo>[^/\s]+/[^/\s]+))?)?)?"
+                      r"(?:\s+doing (?P<work>.+))?")
 
 
 def _on_go(ws: Path, verb: str, session: str, text: str, retry_id: str | None) -> int:
@@ -124,13 +127,13 @@ def _on_go(ws: Path, verb: str, session: str, text: str, retry_id: str | None) -
     body: dict = {}
     if verb == "announce":
         m = ANNOUNCE.fullmatch(text)
-        if m is None:
-            print("malformed announce: as <harness>/<account> [on <branch> [in <owner>/<name>]] [doing <text>]",
+        if m is None or (m["agent"] is None and m["card"] is None and m["work"] is None):
+            print("malformed announce: [--card <id>] [as <harness>/<account>] [on <branch> [in <owner>/<name>]] [doing <text>]",
                   file=sys.stderr)
             return 1
         # A branch in another of the team's repositories names it; the checkout's origin otherwise.
         repo = m["repo"] or (session_routes.card_repo(ws) if m["branch"] else "")
-        harness, _, account = m["agent"].partition("/")
+        harness, _, account = (m["agent"] or "").partition("/")
         doing = (m["work"] or "").strip()
         if m["branch"] and not doing:
             # The branch claim: the announce takes the executed card's title as its doing.
@@ -146,7 +149,11 @@ def _on_go(ws: Path, verb: str, session: str, text: str, retry_id: str | None) -
                 return 1
             print(answer)
             return 1 if answer.startswith("REJECTED") else 0
-        body = {"state": "announce", "harness": harness, "account": account}
+        body = {"state": "announce"}
+        if harness:
+            body["harness"], body["account"] = harness, account
+        if m["card"]:
+            body["card"] = m["card"]
         if m["branch"]:
             body["branch"] = m["branch"]
             body["repo"] = repo
@@ -178,16 +185,22 @@ def _on_go(ws: Path, verb: str, session: str, text: str, retry_id: str | None) -
 
 
 def status_body(verb: str, text: str) -> dict | None:
-    """The status route's body for a `done` (`[--card <id>] <result>`) or a `blocked` (`on <what>`);
-    None for a malformed one. A done names the card whose part it finished; unnamed, Go takes the one
-    card the session holds, and refuses when it holds more (doc 199 §3)."""
+    """The status route's body for a `done` (`[--card <id>] <result>`) or a `blocked`
+    (`[--card <id>] on <what>`); None for a malformed one. A done names the card whose part it
+    finished, and a blocked may bind its word to one (doc 203 D2); unnamed, Go takes the one card
+    the session holds, and refuses when it holds more (doc 199 §3)."""
     if verb == "done":
         m = re.fullmatch(r"--card (?P<card>\S+)(?:\s+(?P<what>.*))?", text, re.S)
         if (text == "--card" or text.startswith("--card ")) and m is None:
             return None
         return {"state": "done", "what": (m["what"] or "").strip(), "card": m["card"]} if m else {"state": "done", "what": text}
-    m = re.fullmatch(r"on (?P<what>.+)", text, re.S)
-    return {"state": "blocked", "blocker": m["what"].strip()} if m else None
+    m = re.fullmatch(r"(?:--card (?P<card>\S+)\s+)?on (?P<what>.+)", text, re.S)
+    if m is None:
+        return None
+    body = {"state": "blocked", "blocker": m["what"].strip()}
+    if m["card"]:
+        body["card"] = m["card"]
+    return body
 
 
 def _wait_on_go(ws: Path, session: str, token: str, text: str, retry_id: str | None, said) -> int:
@@ -276,7 +289,10 @@ def main(argv: list[str]) -> int:
     unparsed = False
     if verb in ("announce", "blocked", "wait"):
         import verb_grammar
-        judged = wait_card(text)[1] if verb == "wait" else text
+        # A wait or a blocked names its card the way one always has (doc 200 D8, doc 203 D2):
+        # the prefix comes off before the line is judged, and a `--card` naming no card is
+        # refused with it on.
+        judged = wait_card(text)[1] if verb in ("wait", "blocked") else text
         unparsed = judged is None or verb_grammar.parse_status(line(verb, session, judged)) is None and not (
             verb == "wait" and WAIT_CANCEL.fullmatch(text))
         go_shape = verb == "announce" and ANNOUNCE.fullmatch(text) is not None

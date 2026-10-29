@@ -28,15 +28,18 @@ PLUGIN = "2mw2lt@2mw2lt"
 ENTRY = {"observe": "steering/enroll/observe.py", "readout": "steering/enroll/readout.py",
          "armed": "steering/enroll/armed.py", "hold": "steering/enroll/hold.py",
          "rebrief": "steering/enroll/rebrief.py", "forge": "steering/enroll/forge.py",
-         "decide": "steering/enroll/decide.py", "checkpoint": "steering/enroll/checkpoint.py"}
+         "decide": "steering/enroll/decide.py", "checkpoint": "steering/enroll/checkpoint.py",
+         "verb": "steering/enroll/verb.py"}
 # Names `exec` may run directly. Every hook entry point reads a hook's stdin payload and
 # always exits 0 (`main`'s contract, below); running one this way would hang reading a stdin
 # nobody feeds it, or swallow a failure a direct run must surface. `hold` reads no stdin and
 # exits meaningfully on its own, so it is safe to run either way; `forge` is a direct run only, the
 # stable path a Codex session's one prefix rule names (#7940); `checkpoint` likewise — the stable
 # path a harness with no `CLAUDE_PLUGIN_ROOT` saves by, which a Codex worker's own rule grants
-# so no dialog it cannot answer stands between (#8571).
-EXEC = frozenset({"hold", "forge", "checkpoint"})
+# so no dialog it cannot answer stands between (#8571). `verb` is a direct run too — the
+# stable path a Stop gate's runnable line spells (doc 203 D9), which a session that owes a word
+# can run without hunting for the plugin's cache.
+EXEC = frozenset({"hold", "forge", "checkpoint", "verb"})
 # A session's own acts a hook event must never fire: `main`'s hook path refuses them.
 DIRECT = frozenset({"forge", "checkpoint"})
 # The pack this file was installed from, written in by `hooks.py install`. A workspace wired
@@ -185,6 +188,20 @@ def missing(name: str, config: Path) -> str:
             f"install the 2mw2lt plugin (claude plugin install {PLUGIN})")
 
 
+def plugin_gates_rearm(root: str | None) -> bool:
+    """Whether the plugin at `root` (the one this session loaded) runs the re-arm from its own
+    Stop entry (doc 203 D10), beside which a pack entry would only duplicate it."""
+    if not root:
+        return False
+    try:
+        gates = json.loads((Path(root) / "hooks" / "hooks.json").read_text())
+        stops = gates.get("hooks", {}).get("Stop", [])
+        return any("armed.py" in h.get("command", "") for g in stops if isinstance(g, dict)
+                   for h in g.get("hooks", []) if isinstance(h, dict))
+    except (OSError, ValueError):
+        return False
+
+
 def main_exec(argv: list[str]) -> int:
     """`exec <name> [args...]`: run the current install's `<name>.py` directly, argv and exit
     code passed straight through. Not a hook — nothing here is entitled to swallow a failure
@@ -212,6 +229,12 @@ def main() -> int:
         return main_exec(argv[1:])
     if argv[0] not in ENTRY or argv[0] in DIRECT:
         return error(f"unknown command {argv[0]!r}")
+    # The plugin's own Stop entry owns the re-arm wherever the plugin loaded in this session
+    # carries it (doc 203 D10): a pack entry a workspace wired before it would run armed.py a
+    # second time on one stop. Read from the plugin root this session actually loaded, not the
+    # newest cache — a session on an older plugin has no entry to fire and keeps this one.
+    if argv[0] == "armed" and plugin_gates_rearm(os.environ.get("CLAUDE_PLUGIN_ROOT")):
+        return 0
     if len(argv) > 1 and argv[0] not in EXEC:
         return error(f"{argv[0]} does not accept arguments")
     payload = sys.stdin.buffer.read()

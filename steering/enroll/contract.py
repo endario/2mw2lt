@@ -2240,6 +2240,14 @@ NameAnswer = typing.TypedDict("NameAnswer", {
     "status": "str",
 })
 
+# BodyServingBody is the body of PUT /bodies/serving, which its path names whole: {}.
+BodyServingBody = typing.TypedDict("BodyServingBody", {})
+
+# BodyServingAnswer is how many of the caller's units moved to serve the workspace.
+BodyServingAnswer = typing.TypedDict("BodyServingAnswer", {
+    "moved": "int",
+})
+
 # BrainRequestBody is the body of POST /brain/requests: a member's words to the brain.
 BrainRequestBody = typing.TypedDict("BrainRequestBody", {
     "text": "str",
@@ -4351,6 +4359,29 @@ MachineReportAnswer = typing.TypedDict("MachineReportAnswer", {
     "machine_key": "typing.NotRequired[str]",
 })
 
+# MainMergeCICost is an owner-pulled reading, derived from existing executor writes and GitHub
+# workflow-run events. Counts are observed lower bounds when Complete is false. GitHub's events
+# carry no cancellation cause, so CancelledByMainMerges is unknown, never a measured zero.
+MainMergeCICost = typing.TypedDict("MainMergeCICost", {
+    "since": "str",
+    "until": "str",
+    "started": "int",
+    "cancelled_on_bot_heads": "int",
+    "cancelled_by_main_merges": "int | None",
+    "complete": "bool",
+    "repositories": "list[MainMergeCICostRepo] | None",
+})
+
+# MainMergeCICostRepo states coverage separately for each repository; an unread source never
+# turns into an apparently complete workspace zero. No workflow payload is stored by this read.
+MainMergeCICostRepo = typing.TypedDict("MainMergeCICostRepo", {
+    "repository": "str",
+    "started": "int",
+    "cancelled_on_bot_heads": "int",
+    "complete": "bool",
+    "unread": "bool",
+})
+
 # ManagementReading is one whole successful source capture. Missing members are unknown, not
 # retained members of a previous capture. Event times never advance just because capture succeeds.
 ManagementReading = typing.TypedDict("ManagementReading", {
@@ -4788,6 +4819,7 @@ PlacementCandidate = typing.TypedDict("PlacementCandidate", {
     "multiplier": "typing.NotRequired[float | None]",
     "launcher_command": "typing.NotRequired[str]",
     "draw": "typing.NotRequired[PlacementDraw | None]",
+    "scarcity_bottleneck": "typing.NotRequired[ScarcityBottleneck | None]",
     "waste": "typing.NotRequired[PlacementWaste | None]",
     "binding": "typing.NotRequired[str]",
     "peak": "typing.NotRequired[PlacementPeak | None]",
@@ -4831,6 +4863,7 @@ PlacementVerdict = typing.TypedDict("PlacementVerdict", {
 
 # PlacementTerms are a launch candidate's terms before weighting.
 PlacementTerms = typing.TypedDict("PlacementTerms", {
+    "scarcity": "typing.NotRequired[float]",
     "runway": "float",
     "room": "float",
     "load": "float",
@@ -4886,6 +4919,14 @@ PlacementDrawWindow = typing.TypedDict("PlacementDrawWindow", {
     "last_reading": "typing.NotRequired[str | None]",
     "sample_resets_at": "typing.NotRequired[str | None]",
     "count_basis": "typing.NotRequired[str]",
+})
+
+# ScarcityBottleneck explains a host's most restricted other standing route. Replay uses only the
+# retained numeric scarcity term, never this explanation or today's topology.
+ScarcityBottleneck = typing.TypedDict("ScarcityBottleneck", {
+    "vendor": "str",
+    "model": "str",
+    "homes": "int",
 })
 
 # PlacementDecisions answers a workspace's recorded placement decisions, newest first (#6655): asked
@@ -5232,6 +5273,26 @@ SayReceiptAnswer = typing.TypedDict("SayReceiptAnswer", {
     "session": "str",
     "id": "str",
     "received": "bool",
+})
+
+# DueAnnounce is one engagement's owed announce (doc 203 D3): the card, why a word is owed, and
+# the moment the debt began, which for the initial reason is the engagement's start.
+DueAnnounce = typing.TypedDict("DueAnnounce", {
+    "card": "str",
+    "name": "str",
+    "reason": "str",
+    "since": "str",
+})
+
+# DueRead is the session's own answer to GET /sessions/{session}/due (doc 203 D5): what its
+# engagements owe, what the Stop hook that asked is to do — block the turn's end, tell without
+# blocking, or nothing — and why, in the daemon's text, to which the hook adds only the launcher
+# path it alone knows (D9). Bounded as a checkpoint read is; the daemon decides and logs (D8).
+DueRead = typing.TypedDict("DueRead", {
+    "read_at": "str",
+    "due": "list[DueAnnounce] | None",
+    "answer": "str",
+    "why": "typing.NotRequired[str]",
 })
 
 # SessionForgeTokenRequest asks for the session's GitHub token. It names nothing: the repository
@@ -5903,6 +5964,29 @@ SourceState = typing.TypedDict("SourceState", {
     "expired": "bool",
     "partial": "bool",
     "gaps": "list[str] | None",
+})
+
+# BodySpeakBody is the body of POST /sessions/{session}/body/speaks: the seat's generation and
+# the line the room hears.
+BodySpeakBody = typing.TypedDict("BodySpeakBody", {
+    "generation": "int",
+    "text": "str",
+})
+
+# BodySpoken is what one serving unit did with a speak: which of its say and show were accepted,
+# and, where one was not, the reason it was not.
+BodySpoken = typing.TypedDict("BodySpoken", {
+    "unit": "str",
+    "said": "bool",
+    "shown": "bool",
+    "refusal": "typing.NotRequired[str]",
+})
+
+# BodySpeakAnswer is a speak's answer: the speak and what each linked body did. It never says
+# "sent": a body that heard nothing is answered with its reason.
+BodySpeakAnswer = typing.TypedDict("BodySpeakAnswer", {
+    "speak": "str",
+    "bodies": "list[BodySpoken] | None",
 })
 
 # StatusAnswer answers a status: its state, and for an announce naming a branch what its claim bound,
@@ -7662,6 +7746,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/actions",
     "POST /w/{workspace}/api/v1/actions/{action}/cancel",
     "GET /w/{workspace}/api/v1/board",
+    "PUT /w/{workspace}/api/v1/bodies/serving",
     "GET /w/{workspace}/api/v1/brain/digest",
     "POST /w/{workspace}/api/v1/brain/replies",
     "GET /w/{workspace}/api/v1/brain/requests",
@@ -7754,6 +7839,7 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/knowledge/units/{id}",
     "GET /w/{workspace}/api/v1/ladder",
     "POST /w/{workspace}/api/v1/ladder",
+    "GET /w/{workspace}/api/v1/landing/ci-cost",
     "POST /w/{workspace}/api/v1/launches",
     "GET /w/{workspace}/api/v1/launches/ended",
     "GET /w/{workspace}/api/v1/launches/waiting",
@@ -7802,11 +7888,13 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/sessions/{session}/answers",
     "POST /w/{workspace}/api/v1/sessions/{session}/attachments",
     "POST /w/{workspace}/api/v1/sessions/{session}/bindings",
+    "POST /w/{workspace}/api/v1/sessions/{session}/body/speaks",
     "GET /w/{workspace}/api/v1/sessions/{session}/checkpoints",
     "GET /w/{workspace}/api/v1/sessions/{session}/commands",
     "POST /w/{workspace}/api/v1/sessions/{session}/detachment",
     "POST /w/{workspace}/api/v1/sessions/{session}/directives",
     "POST /w/{workspace}/api/v1/sessions/{session}/directives/{directive}/acknowledgement",
+    "GET /w/{workspace}/api/v1/sessions/{session}/due",
     "POST /w/{workspace}/api/v1/sessions/{session}/forge-token",
     "GET /w/{workspace}/api/v1/sessions/{session}/history",
     "POST /w/{workspace}/api/v1/sessions/{session}/keep",
@@ -7938,6 +8026,7 @@ QUERY = {
     "GET /w/{workspace}/api/v1/intents": {"disposition": frozenset({"open"}), "limit": None, "next": None},
     "GET /w/{workspace}/api/v1/interventions": {"since": None},
     "GET /w/{workspace}/api/v1/knowledge/brief": {"paths": None, "branch": None},
+    "GET /w/{workspace}/api/v1/landing/ci-cost": {"since": None},
     "GET /w/{workspace}/api/v1/launches/ended": {"before": None},
     "GET /w/{workspace}/api/v1/machines": {"limit": None, "cursor": None},
     "GET /w/{workspace}/api/v1/momentum": {"window": frozenset({"30d", "7d", "90d"})},

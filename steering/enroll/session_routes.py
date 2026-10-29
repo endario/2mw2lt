@@ -282,7 +282,14 @@ def enrol(ws: Path, session: str, provider: str, psession: str, runtime: str) ->
             pending.unlink(missing_ok=True)
         raise
     import ack  # noqa: E402
-    ack.store(ws, session, answer["credential"], request["body"]["provider_session"],
+    # The harness the enrollment asked for is recorded with it: a Stop gate reads it to know
+    # whether this harness's turn can be refused at all (doc 203 D6). The key was `provider`
+    # before #6550 and is `harness` since, so an unsettled request written either way records
+    # its harness; an enrolment minted before this carries none and its gate stands down until
+    # the session enrols again.
+    asked = request["body"]
+    ack.store(ws, session, answer["credential"], asked["provider_session"],
+              provider=asked.get("harness") or asked.get("provider"),
               authority="coordination", epoch=answer.get("epoch"))
     # The credential is on disk before the request that recovers it is gone.
     _durable(ack.token_path(ws, session))
@@ -396,6 +403,24 @@ def checkpoint_now(session: str, token: str, timeout: float) -> dict | None:
     except (urllib.error.URLError, OSError, TimeoutError, http.client.HTTPException, ValueError) as e:
         raise Unsent(f"{_base()}: no answer ({e})") from None
     return newest[0] if newest else None
+
+
+def due_now(session: str, token: str, timeout: float) -> dict:
+    """What the session's engagements owe an announce and what its Stop hook is to do (doc 203 D5):
+    one bounded ask of `GET /sessions/{session}/due`, on the session's own enrolment, answered only
+    about itself. Raises `Refused` or `Unsent` as `checkpoint_now` does; a caller with its own
+    stand-downs treats both as no answer."""
+    req = urllib.request.Request(_base() + f"/sessions/{urllib.parse.quote(session, safe='')}/due",
+                                 headers=session_headers(token))
+    try:
+        with door.open_direct(req, timeout) as r:
+            return json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        problem = _problem(e)
+        raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
+                      request=_request(e, problem), remedy=_remedy(problem)) from None
+    except (urllib.error.URLError, OSError, TimeoutError, http.client.HTTPException, ValueError) as e:
+        raise Unsent(f"{_base()}: no answer ({e})") from None
 
 
 def checkpoint_read(session: str, token: str, which: str) -> tuple[str, dict | None]:
@@ -1191,6 +1216,16 @@ def raise_owner(session: str, token: str, title: str, text: str, need: str = "",
     body = {"generation": seat_generation(session, token), "title": title, "text": text,
             **({"need": need} if need else {}), **({"session": about} if about else {})}
     return int(post(f"/sessions/{session}/push/raises", body, uuid.uuid4().hex, SESSION_CARRIER, token)["enqueued"])
+
+
+def speak_room(session: str, token: str, text: str) -> dict:
+    """The holder says and shows one short line on the workspace's linked bodies
+    (`POST /sessions/{session}/body/speaks`) at the generation it holds, answered with what each
+    body did: said, shown, refused with its reason, or no body linked. Each speak is its own: a
+    resend after a lost answer is refused for the window the first spent, never spoken twice.
+    Raises `NotSeated`, `Refused` or `Unsent`."""
+    body = {"generation": seat_generation(session, token), "text": text}
+    return post(f"/sessions/{session}/body/speaks", body, uuid.uuid4().hex, SESSION_CARRIER, token)
 
 
 # A card verb on Go: the work route it posts to, and its body from the verb's own fact

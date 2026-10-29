@@ -109,15 +109,70 @@ def main() -> int:
         # The enrolment minted for *this* provider session, and no other. `own_enrolment` would
         # fall back to a name the workspace holds for somebody else, which in a workspace with
         # more than one session refuses a stranger's turn and names another session's hold.
-        session = minted_name(records(ws), psession)
+        rows = records(ws)
+        session = minted_name(rows, psession)
     except Exception:
         return DONE   # not a workspace, or not a session steering knows: nothing is owed
+    if not session:
+        return DONE
     # The plugin's module holding the stream is a hold too, and asking this session for a
     # second one is refused by the daemon as another carrier (#5334).
-    if not session or holder.fresh(ws, psession) or holding(ws, session):
+    hold = not (holder.fresh(ws, psession) or holding(ws, session))
+    announce = owed_announce(ws, session, minted_provider(rows, session))
+    if hold:
+        why = reason(session, ws) + (f"\n\n{announce['why']}" if announce else "")
+    elif announce:
+        why = announce["why"]
+    else:
         return DONE
-    json.dump({"decision": "block", "reason": reason(session, ws)}, sys.stdout)
+    json.dump({"decision": "block", "reason": why}, sys.stdout)
     return DONE
+
+
+def minted_provider(taken: dict[str, dict], session: str) -> str:
+    """The harness the named session's own record says it enrolled as."""
+    return (taken.get(session) or {}).get("provider") or ""
+
+
+def owed_announce(ws: Path, session: str, harness: str) -> dict | None:
+    """The announce this session's Stop owes (doc 203 D5, D6, D9), or None: one bounded ask of the
+    due read on the session's own enrolment, blocked only where the harness the session enrolled as
+    can have a turn's end refused — the registry's own declaration, generated beside this pack, not
+    a name test. Every stand-down in D8 answers None: no answer within the bound, a refused or
+    malformed one, no enrolment token, a harness without the gate, or an answer that is not a
+    block. The hold is asked first and the announce second by the caller, one reason when both are
+    owed (D10)."""
+    import json as _json
+    import ack
+    import session_routes
+    if not gated_harness(harness):
+        return None
+    try:
+        token = _json.loads(ack.token_path(ws, session).read_text())["token"]
+    except (OSError, ValueError, KeyError):
+        return None
+    try:
+        answer = session_routes.due_now(session, token, 1.5)
+    except Exception:
+        return None   # no answer in the bound, a dead door, a refusal: the turn ends (D8)
+    if not isinstance(answer, dict) or answer.get("answer") != "block" or not answer.get("why"):
+        return None
+    # The daemon's why carries the runnable line as `verb …`; only this hook knows where the
+    # workspace's stable launcher is, so only it spells the command (D9).
+    launcher = hooks.launcher_path(ws)
+    if launcher.is_file():
+        answer["why"] = answer["why"].replace("\n  verb ", f"\n  python3 {shlex.quote(str(launcher))} exec verb ")
+    return answer
+
+
+def gated_harness(harness: str) -> bool:
+    """Whether the registry declares that harness's Stop hook can refuse a turn's end (doc 203
+    D6), read from the generated identity data rather than a name test."""
+    try:
+        named = json.loads((HERE.parent / "harness_identity.json").read_text())
+    except (OSError, ValueError):
+        return False
+    return any(h.get("name") == harness and h.get("turn_end_gate") for h in named.get("harnesses", []))
 
 
 if __name__ == "__main__":

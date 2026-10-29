@@ -493,6 +493,33 @@ subscription's own keys before Go sends it, so the push service carries cipherte
 read — but the notification renders in plaintext on a lock screen anyone near the device
 can see. Write it for that reader.
 
+## Speak to the room
+
+The raise reaches an owner who is not looking. This reaches the room they are sitting in: one
+short line, said aloud and shown, on the workspace's linked bodies — "the release is out",
+"your review is in", a conclusion at the end of a track. Nothing to answer, no need behind it.
+It is the seat's own voice; a worker has no such verb.
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" post /steering/body/speak <<'JSON'
+{"lease_token":"@lease","text":"The release is out."}
+JSON
+```
+
+**The answer is what the body did, never "sent".** Each serving unit answers which of `said` and
+`shown` were accepted and, where one was not, the reason it was not (`body-not-running`,
+`body-unit-unrouted`, `body-not-connected`, a grant that offers no say or show, the service's
+own refusal); with no link the refusal is `no body is linked`. Report that answer as it comes.
+
+**Quiet by default.** The line is spoken below a raise's urgency, so it never covers an open
+need; it stays on the body briefly in place of the glance and then the glance returns. Nothing
+waits on it and nobody owes it an answer.
+
+**The text is capped at 320 characters and spoken aloud in a room anyone may stand in.** Write
+the conclusion itself, in the owner's own room's voice — this is the one channel whose detail is
+the point — but for a listener, not a transcript: no secrets, no tokens, nothing a passer-by
+must not hear.
+
 ## Speak to a session
 
 The brain answers the owner through `brain/reply`, above. To reach a **session** — a question,
@@ -782,7 +809,8 @@ brain is expected to know the plugin's skills well enough to do this: read the s
 belongs to before briefing it. A plain "disconnect" was read on 2026-09-25 as "tidy the
 worktree", and the session stayed enrolled with its Stop hook demanding a hold. For the same
 reason a brief names the issue, the PR, the design doc and its section, and what "done" is to
-report, rather than leaving the worker to find them.
+report, rather than leaving the worker to find them; the standing rules are never among them, for
+every launch and every connect already carries them (#9153).
 
 The daemon opens the text with `from: the brain, session <you>, on the owner's behalf`, so the
 recipient can tell it from the owner's own word, and keeps a `brain-relayed` fact naming the
@@ -874,7 +902,14 @@ LAUNCH
 ```
 
 The daemon keeps it with the launch and hands it to the session the launch starts, under your
-`from:` line, as soon as it has connected, so you relay nothing to it. If it is not
+`from:` line, as soon as it has connected, so you relay nothing to it. The launch
+hands the onboarding after your words, in one order for every harness and every asker (#9153):
+the trailer and working contract a harness without the plugin gets, the standing rules, the
+knowledge index, the bulletin — the same lines the session's own connect prints on a restart or a
+hand opening. **A brief carries what is not standard**: the task, the context the worker cannot
+find, and the session-specific and seasonal items — a pause exception, a deploy state, an owner
+ruling of the day, at most the bulletin lines that bear on this one session. Never write a
+standing rule into a brief: the launch already carries it, and a second copy drifts. If it is not
 taken, you are told `launch-brief-unheard`: the launch was refused or lapsed, or the session has
 not acknowledged it after ten minutes. A launch without a brief that ends without starting a
 session, refused by its machine or withdrawn for any cause but your own withdrawal, is told to you
@@ -1776,14 +1811,11 @@ that are not there already, so they survive this session.
   will answer. An ask is refused: the owner answers it in the desk.
 - **Check the issue is still open before you brief it.** Search merged pull requests for it
   first. A brief for work that has already landed wastes a session's turn.
-- **Brief a pull request to stay a draft until `ship it`.** Between rounds the session spot-runs
-  the tests its change touches and dispatches the parts that read it on the pool with `ci.py`,
-  never the whole suite, which is the nightly's and a release's. After a pass the worker never
-  rebases: it readies the pull request, and the platform's reconciler merges `origin/main` into
-  the passed head and carries the pass itself when the head is behind, handing a conflict back to
-  the worker to resolve; once `main` has moved, any other commit, a migration renumber included,
-  costs a round; a round remains available when judgment warrants it. Do not prescribe or skip a
-  round in a directive: the gate skill's rule decides, and a brain that orders one overrides it.
+- **A brief carries no working rules.** The launch's onboarding carries them — the draft pull
+  request through gate rounds, the spot-run and the pool dispatch (#9153) —
+  so a brief that repeats one is a defect, and a worker that breaks one went against its
+  onboarding, not against your words. Do not prescribe or skip a round in a directive: the gate
+  skill's rule decides, and a brain that orders one overrides it.
 - **Rollout is yours.** Deploying merged work, restarting agents and copying credentials is the
   brain's call (owner's ruling, 2026-09-24); a production action still takes your explicit go,
   not the owner's.

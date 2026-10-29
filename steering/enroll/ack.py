@@ -26,12 +26,16 @@ def token_path(ws: Path, session: str) -> Path:
 
 
 def store(ws: Path, session: str, token: str, provider_session: str | None = None,
-          authority: str | None = None, epoch: int | None = None) -> Path:
+          provider: str | None = None, authority: str | None = None, epoch: int | None = None) -> Path:
     """`provider_session` is what the enrollment was minted for; a reader that has one of its own
-    can then tell a name it derived from a name that merely collided with it. `authority` and
-    `epoch` mark a credential Go issued (`session_routes`)."""
+    can then tell a name it derived from a name that merely collided with it. `provider` is the
+    harness it was minted as, which a Stop gate reads to know whether this harness's turn can be
+    refused at all (doc 203 D6). `authority` and `epoch` mark a credential Go issued
+    (`session_routes`)."""
     p = token_path(ws, session); p.parent.mkdir(parents=True, exist_ok=True)
     rec = {"session": session, "token": token}
+    if provider:
+        rec["provider"] = provider
     if provider_session:
         rec["provider_session"] = provider_session
         # A replacement credential still belongs to the launch's linked thread. Reassigning

@@ -6,7 +6,8 @@
       "session_env": [
         "CLAUDE_CODE_SESSION_ID"
       ],
-      "session_rows": "sessions"
+      "session_rows": "sessions",
+      "turn_end_gate": true
     },
     {
       "name": "codex",
