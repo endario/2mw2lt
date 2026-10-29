@@ -34,6 +34,16 @@ def store(ws: Path, session: str, token: str, provider_session: str | None = Non
     rec = {"session": session, "token": token}
     if provider_session:
         rec["provider_session"] = provider_session
+        # A replacement credential still belongs to the launch's linked thread. Reassigning
+        # the name to another provider session must not inherit that link.
+        try:
+            previous = json.loads(p.read_text())
+        except (OSError, ValueError):
+            previous = None
+        if (isinstance(previous, dict) and previous.get("session") == session
+                and previous.get("provider_session") == provider_session
+                and valid_token(previous.get("thread"))):
+            rec["thread"] = previous["thread"]
     if authority:
         rec["authority"], rec["epoch"] = authority, epoch
     fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -64,6 +74,24 @@ def records(ws: Path) -> dict[str, dict]:
         if isinstance(session, str) and valid_token(token) and token_path(ws, session) == p:
             out[session] = rec
     return out
+
+
+def provider_ids(known: dict[str, dict], psession: str | None) -> tuple[str | None, str | None]:
+    """The enrolled identity and the identity the harness serves, linked by a launch's record.
+
+    Most sessions use one id for both. A worker's job is enrolled before its thread is linked;
+    either id resolves that same pair. Conflicting links cannot pick an identity by file order.
+    """
+    mine = {name: rec for name, rec in known.items()
+            if psession and valid_token(rec.get("provider_session"))
+            and psession in (rec["provider_session"], rec.get("thread"))}
+    enrolled = {rec["provider_session"] for rec in mine.values()}
+    served = {rec["thread"] for rec in mine.values() if valid_token(rec.get("thread"))}
+    if len(enrolled) > 1 or len(served) > 1:
+        raise ValueError(f"conflicting enrollment links for {psession} in {', '.join(sorted(mine))}: "
+                         "repair these stored records before reconnecting")
+    canonical = next(iter(enrolled), psession)
+    return canonical, next(iter(served), canonical)
 
 
 def minted_for(ws: Path, provider_session: object) -> str | None:

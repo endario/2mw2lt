@@ -263,6 +263,7 @@ ListedAccountUsage = typing.TypedDict("ListedAccountUsage", {
     "number": "int | None",
     "harness": "str",
     "reading": "UsageReading",
+    "reading_divergence": "typing.NotRequired[str]",
     "machines": "list[str] | None",
     "verdict": "AccountVerdict",
     "incentive": "AccountIncentive | None",
@@ -316,6 +317,7 @@ UsageReading = typing.TypedDict("UsageReading", {
     "plan": "str | None",
     "credits": "UsageCredits | None",
     "limits": "list[UsageLimit] | None",
+    "budget": "typing.NotRequired[dict[str, typing.Any]]",
 })
 
 # UsageCredits is the spend past an account's windows, as its vendor states it.
@@ -330,6 +332,7 @@ UsageCredits = typing.TypedDict("UsageCredits", {
 # wrote it.
 UsageLimit = typing.TypedDict("UsageLimit", {
     "name": "str",
+    "kind": "typing.NotRequired[str | None]",
     "window_minutes": "float | None",
     "used": "float | None",
     "resets_at": "str | None",

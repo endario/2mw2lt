@@ -29,6 +29,10 @@ from verb_help import current_args, error, help_requested, script_help  # noqa: 
 class Refused(Exception):
     """What the caller should be told, and why nothing was sent."""
 
+    def __init__(self, message: str, *, check: str = "incarnation-refused"):
+        super().__init__(message)
+        self.check = check
+
 
 class Unclaimed(Refused):
     """No harness says this process is its session, and none was named."""
@@ -121,7 +125,8 @@ def incarnation_of(psession: str | None = None, pid: int | None = None,
     the one harness that says this process is its session is asked."""
     provider = provider or identified()
     if provider not in harness.PROVIDERS:
-        raise Refused(f"{provider} is not a provider: one of {', '.join(harness.PROVIDERS)}")
+        raise Refused(f"{provider} is not a provider: one of {', '.join(harness.PROVIDERS)}",
+                      check="incarnation-provider-invalid")
     # Asked of the harness rather than read here: which session this process is, and which
     # process serves it, are facts about the harness and it is the one place that owns them.
     h = harness.of(provider)
@@ -137,16 +142,18 @@ def incarnation_of(psession: str | None = None, pid: int | None = None,
             "--provider-session <this session's id> and --pid <the harness process>"
             if exports else
             f"a {provider} session is not exported to this process: pass --provider-session "
-            f"<the thread id> and --pid <the harness process>")
+            f"<the thread id> and --pid <the harness process>", check="incarnation-session-missing")
     pid = pid or its_pid or (h.harness_pid(psession) if h.harness_pid is not None else None)
     if pid is None:
         # Named per harness rather than by Claude's variable: every self-describing harness
         # reached this branch and was told to look for `CLAUDE_PID`.
         raise Refused(f"no live {provider} harness process for {psession}: "
-                      + "pass --pid <the harness process>, one of\n" + "\n".join(ancestry()))
+                      + "pass --pid <the harness process>, one of\n" + "\n".join(ancestry()),
+                      check="incarnation-process-missing")
     rid = identity(pid, provider)
     if rid is None:
-        raise Refused(f"no runtime id for pid {pid}: it is not the harness process, or this node has no id")
+        raise Refused(f"no runtime id for pid {pid}: it is not the harness process, or this node has no id",
+                      check="incarnation-runtime-missing")
     return psession, rid, int(pid)
 
 

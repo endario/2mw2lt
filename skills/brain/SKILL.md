@@ -233,6 +233,11 @@ hear first — see [Read the blocked-on line, the ledger and escalations](#read-
   (`signals.machine_disk_low.*`), told again as the free share halves past that, and each day it
   stays low. It names what is free of what. Have it freed before builds there fail: a build cache
   is the usual cause.
+- **`machine-overloaded`**, a signal: a machine's five-minute load, per core, has stayed at or past
+  its overload threshold for a sustained spell (`signals.machine_overloaded.*`, 15 minutes by
+  default), once per spell. It names the load, the threshold, and the busiest processes, each with
+  the session it came from where its command line carried a marker (`sess_<id>`). End what loads it
+  before its sessions starve: a session's stray load-test shells are the usual first check.
 - **`card-closed`**, a signal: a live card's work landed, or every issue it resolves was closed with no
   branch or closing pull request, an hour ago (`signals.card_closed.*`), once per closing. Routed
   `escalate`, the default, its executor was told at 15 minutes to say done and record its unit-done,
@@ -887,7 +892,7 @@ one past `STEERING_MAX_WORKERS` live workers.
 on the ladder, or one rung above when nothing at it has room. Judge the floor for the stage the
 session begins as triage does. Name a model only for a reason the
 ladder cannot see, and give that reason in `because`: the launch is recorded as yours, not the
-platform's. A floor takes no `on`, `model` or `account`.
+platform's. A floor takes no `model` or `account`; with `on` it is placed only across that machine's accounts.
 Leave the harness out for a floor or a named model: placement chooses one for the winning account,
 using the machine's stated harness for that vendor, or the vendor's own before Claude Code.
 Name a harness only to override placement, and say why in `because`. For a floor launch with a
@@ -913,7 +918,7 @@ Its clauses go in this order:
 | clause | left out |
 |---|---|
 | `<harness>` | placement chooses; name `claude`, `zcode`, `codex` or `opencode` only as an override |
-| `on <node>` | the daemon places it; not with a floor |
+| `on <node>` | the daemon places it; with a floor, only across that machine's accounts |
 | `vendor <vendor>` | all eligible vendors; named, only that vendor's accounts |
 | `account <number-or-alias>` | the best-ranked account; named, requires an explicit vendor and pins that account; not with a floor |
 | `model <model>` or `floor <rarity>` | one is required; prefer the floor |

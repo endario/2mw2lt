@@ -28,7 +28,7 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 from local_workspace import KEY_HEADER, agent_key, agent_port, origin_slug, required_workspace_root, workspace_header  # noqa: E402
 import door  # noqa: E402
-from ack import token_path, valid_token  # noqa: E402
+from ack import provider_ids, token_path, valid_token  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
 from bind import Refused, Unclaimed, bind, incarnation, incarnation_of, pid_arg, records  # noqa: E402
 from transcript_proof import account_of  # noqa: E402
@@ -251,7 +251,8 @@ def speaking_as(ws: Path, session: str | None, flags: dict[str, str]) -> tuple[s
 def provider_session(flags: dict[str, str]) -> str:
     """The provider session this process runs in, or the one the flags name where no harness
     identifies the process. A harness that does say is not overruled by the flag, and a named
-    provider that is silent while another harness identifies this process does not stand in for it."""
+    provider that is silent while another harness identifies this process does not stand in for it.
+    A launch's linked job and thread are two names for that same session."""
     provider = flags.get("--provider")
     named = flags.get("--provider-session")
     try:
@@ -261,7 +262,21 @@ def provider_session(flags: dict[str, str]) -> str:
             raise
         own = None  # no harness claims this process, so the session it names stands
     if named and own and named != own:
-        raise Refused(f"this harness is session {own}, not {named}: a session speaks only as itself")
+        mismatch = f"this harness is session {own}, not {named}: a session speaks only as itself"
+        try:
+            ws = required_workspace_root(project_dir(), timeout=2.0)
+        except SystemExit as why:
+            door.record("speaker-alias-workspace-unavailable", f"{mismatch}; {why}")
+            raise Refused(mismatch) from None
+        try:
+            known = records(ws)
+            linked = provider_ids(known, named) == provider_ids(known, own)
+        except ValueError as why:
+            door.record("speaker-alias-ambiguous", str(why), ws)
+            raise Refused(str(why)) from None
+        if not linked:
+            door.record("speaker-session-mismatch", mismatch, ws)
+            raise Refused(mismatch)
     if named and not own:
         # A silent named provider is not this process's silence to claim: which harness runs it
         # is a fact of the process, not a flag.
@@ -310,9 +325,24 @@ def enrol(ws: Path, session: str, account: str, doing: str, psession: str,
     try:
         return session_routes.enrol(ws, session, h.provider, psession, rid)["credential"]
     except session_routes.Refused as e:
+        door.record("connect-enrol-refused", str(e), ws)
         raise Refused(session_routes.reconnect(e)) from None
     except session_routes.Unsent as e:
+        door.record("connect-enrol-unsent", str(e), ws)
         raise Refused(f"{e}\nthe enrolment is kept, and the next connect sends it again") from None
+
+
+def connect_incarnation(ws: Path, psession: str | None, pid: int | None,
+                        provider: str) -> tuple[str, str]:
+    """Derive the connecting process, retaining the check that refused the derivation."""
+    try:
+        return incarnation(psession, pid, provider)
+    except Refused as why:
+        door.record("connect-" + why.check, str(why), ws)
+        raise
+    except Undetermined as why:
+        door.record("connect-incarnation-undetermined", str(why), ws)
+        raise
 
 
 def connect(ws: Path, session: str | None, account: str, doing: str,
@@ -325,7 +355,21 @@ def connect(ws: Path, session: str | None, account: str, doing: str,
     holds its workspace explicitly and must not rest on where launchd started it.
     """
     project = project or project_dir()
-    psession, rid = incarnation(psession, pid, h.provider)
+    known = records(ws)
+    if not h.hooks:
+        # The daemon binds the identity the launch enrolled (its job); the descriptor belongs
+        # to the linked thread. Resolve before deriving a runtime, including with no exported id.
+        try:
+            enrolled, served = provider_ids(known, psession or h.whoami()[0])
+        except ValueError as why:
+            door.record("connect-alias-ambiguous", str(why), ws)
+            raise Refused(str(why)) from None
+        psession, rid = connect_incarnation(ws, served, pid, h.provider)
+        if enrolled and enrolled != served:
+            pid = pid or (h.harness_pid(served) if h.harness_pid else None)
+            psession = enrolled
+    else:
+        psession, rid = connect_incarnation(ws, psession, pid, h.provider)
     if not h.hooks:
         # A harness that installs no hook posts no observation, and `bind:` is admitted only
         # for an incarnation the store has seen. This is what stands in (doc 47 §12); it is
@@ -336,9 +380,9 @@ def connect(ws: Path, session: str | None, account: str, doing: str,
         except witness_mod.Unwitnessed as why:
             raise Refused(f"{h.provider} could not be observed here: {why}")
         except OSError as why:
+            door.record("connect-observation-io", str(why), ws)
             raise Refused(f"the observation for {psession} could not be sent: {why}")
     import session_routes  # noqa: E402
-    known = records(ws)
     if session is None and sum(1 for rec in known.values() if rec.get("provider_session") == psession) > 1:
         # Two records minted for this session — a detached name's can outlive it beside the one
         # its next connect wrote — and which is current is the enrolment's own to say, not the
@@ -351,7 +395,9 @@ def connect(ws: Path, session: str | None, account: str, doing: str,
     rec = known.get(session) or {}
     minted_for = rec.get("provider_session")
     if minted_for and minted_for != psession:
-        raise Refused(f"{session} is another session's enrollment ({minted_for}): pass a name of your own")
+        why = f"{session} is another session's enrollment ({minted_for}): pass a name of your own"
+        door.record("connect-session-other", why, ws)
+        raise Refused(why)
     token = rec.get("token")
     if session_routes.pending(ws, session):
         # An enrolment sent and not settled, a rotation's among them, is recovered before the
