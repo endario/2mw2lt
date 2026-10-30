@@ -292,7 +292,8 @@ answer: token @lease <episode> acted because <what you did>
 answer: token @lease <episode> considered because <why nothing needed you>
 ```
 
-Choosing not to act is an answer. The platform records who answered and when, never whether the
+Choosing not to act is an answer, once you have swept the fleet's sessions as
+[Sweep the fleet's sessions](#sweep-the-fleets-sessions) says. The platform records who answered and when, never whether the
 judgment was right. An answer to an older snapshot is recorded and answers nothing newer. Snapshots
 received and left unanswered space the next ones out, and a run of them raises the owner's phone
 and puts the alarm on their Needs You; answering the current snapshot ends both.
@@ -829,9 +830,13 @@ worker. Name its floor and let placement choose the account and harness:
 ```bash
 say "launch: token @lease floor <rarity> because <why>"
 # Name a model only for a reason the floor cannot express.
-say "launch: token @lease on <node> model <model> effort <level> because <why>"
+say "launch: token @lease model <model> effort <level> because <why>"
 say "launch: token @lease vendor opencode model <model> because <why>"
 say "launch: token @lease vendor commandcode model <model> because <why>"
+# OPTIONAL clauses, never part of the usual launch. Each one overrides the platform's
+# placement, so add it only with a stated reason (see "Where a launch goes"):
+#   on <node>      pin the machine        account <n>   pin the account (needs vendor)
+say "launch: token @lease on <node> floor <rarity> because pinned: <the owner's word, or the fact the platform cannot see>"
 ```
 
 **Where a launch goes.** Before every launch, read
@@ -844,13 +849,18 @@ and each one a check took out. It places nothing. Its `arbiter_first` is the wor
 - **On:** launch unpinned, with no `on` and no `account`, and the platform places it. Otherwise
   name a machine or
   an account only when the owner names one for a reason the platform cannot see, and give that
-  reason in `because`. Correct a placement after the launch rather than steering it beforehand:
+  reason in `because`, opening it `pinned:`. A pin is for one launch: never copy one from the
+  last launch file, a checkpoint or a memory, and never write "pin X workers to Y" as a standing
+  rule, because that is how every session piles onto one host. A defect on a machine (a cage
+  that cannot write a lock, a proxy that is down) is no reason to pin around it: the pin hides
+  the defect and loads one host. Say it on the issue, fix it, and let the platform place the
+  launch. If the read's `chosen` is already the machine you would name, there is nothing to pin. Correct a placement after the launch rather than steering it beforehand:
   `rehome:` the session to another account on its machine, or retire it and launch again. Say on the
   issue what the platform missed, since a fact it lacks is a gap to close in the product.
 - **Off:** you choose where work goes, and the read gives the platform's pick beside yours. Put both
   in the launch's `because`, so the trial compares your pick with the platform's actual one.
 
-To choose, spread the fleet. Read `/machines` for each host's `readings.load` (one, five, fifteen
+When it is **off**, spread the fleet yourself. Read `/machines` for each host's `readings.load` (one, five, fifteen
 against `logical_cores`), `readings.memory` and `worker_census`, and `/sessions` for what each host
 already runs. Send work to the host with the most room, not the one you are on: the machine the
 owner works at often carries the seat, their interactive sessions and CI runners, so fill it last.
@@ -978,9 +988,9 @@ say "launch: token @lease floor rare because a contained fix"
 # A model named, at an effort above epic's medium, since the design is hard
 say "launch: token @lease vendor anthropic model opus effort high because the ladder cannot see this design's depth"
 # One account, no other in its place
-say "launch: token @lease vendor anthropic account 2 model opus effort medium because account 2 holds this card's cache"
+say "launch: token @lease vendor anthropic account 2 model opus effort medium because pinned: account 2 holds this card's cache"
 # The same pin by the current team owner's alias
-say "launch: token @lease vendor anthropic account ccr1 model opus effort medium because the owner asked for ccr1"
+say "launch: token @lease vendor anthropic account ccr1 model opus effort medium because pinned: the owner asked for ccr1"
 # A named GLM model, with its harness placed
 say "launch: token @lease vendor zai model glm-5.3 because the handover plan names glm-5.3"
 ```
@@ -1041,6 +1051,31 @@ you launched, the owner's VS Code window, a terminal (the owner, 2026-10-08). Ac
 would on one you launched. Raise the owner only when you do not recognise the session or what it
 is doing. "It isn't one I launched" is not a reason to leave it, nor to ask the
 owner to press a key in it.
+
+## Sweep the fleet's sessions
+
+Sessions are the brain's to keep alive and honest; no other party does it (the owner's ruling,
+2026-10-30). Every snapshot, and every `session-*` or `machine-offline` signal, is a prompt to
+sweep, not to skim. Walk each session in the snapshot's fleet section and the machines section, and
+for each one that is not plainly healthy, act in that turn:
+
+| What you see | Act |
+|---|---|
+| waiting, quiet or `turn completed` long ago, no `wait` registered | drive it with its next piece, or ask what it holds; never leave it idle |
+| its card landed (`card-closed`, a merged pull request, `done`) | conclude the card, then retire the session |
+| `offline`, or its machine `historical` or `offline` | `machine-offline` playbook: re-home the cards, retire the stranded sessions |
+| stopped by an error, or its process died | [rescue](#rescue-a-session-an-error-has-stopped), or `wake:` it |
+| a retire answered `retire-refused` (uncommitted work) | have the worker save the work to a branch and clean its worktree, then retire again |
+| a machine runs a process or tmux session no enrolled session owns (zombie), or its agent stays `draining` far past 30 minutes | find who holds it (`grep follow:` in the agent log, `ps`, `tmux -L 2mw2lt-launch ls`), end it by hand if the owner's sessions are not involved, and file the platform gap |
+
+Checking a retire means looking: after `retire`, confirm the enrolment ended and that the process and
+its tmux session are gone on that machine. A retire that left them is a defect to fix by hand now
+and to file, never a thing to leave.
+
+`considered` on a snapshot is an answer only when the sweep found nothing to do; it names what you
+checked. A session line that needs action and was answered `considered` is the failure this section
+exists to prevent. The owner's own sessions, and any you do not recognise, are raised to the owner
+and never retired on your word.
 
 ## Wake a session that has gone dark
 
@@ -1196,11 +1231,14 @@ never paste it.
 
 ```bash
 say "$(cat <<'LAUNCH'
-launch: token @lease [on <node>] vendor <vendor> [account <number-or-alias>] model <model> effort <level> card <card> because <why>
+launch: token @lease vendor <vendor> model <model> effort <level> card <card> because <why>
 brief: checkpoint <checkpoint id> Continue <card>: the handover checkpoint follows; read it, then the plan it names, and take the tasks it gives <model>.
 LAUNCH
 )"
 ```
+
+`on <node>` and `account <number-or-alias>` are optional here as everywhere: leave them out unless
+you pin for a stated reason, as under "Start a worker".
 
 In `card`'s place, `resolves <owner>/<name>#<n>` names the card by the issue it resolves: the one
 live card resolving it, refused `card-absent` when none does (scope one first), `card-ambiguous`

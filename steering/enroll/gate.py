@@ -408,9 +408,8 @@ def gate_read(r: dict) -> str:
 
 
 def merge(session: str, argv: list[str], flags, extra: str, retry_id: str | None) -> int:
-    """`merge <pr> [--head <sha>]`: join a base's merge queue through steering's native command, or
-    squash-merge locally when it has no queue, on the head that holds the pass (pr_merge, #8458).
-    A required check yet to report is waited for as a `wait`, not a poll (#4203)."""
+    """`merge <pr> [--head <sha>]`: use the workspace's effective landing policy.
+    A local required check yet to report is waited for as a `wait`, not a poll (#4203)."""
     import datetime
     import pr_merge
     import session_routes
@@ -431,21 +430,32 @@ def merge(session: str, argv: list[str], flags, extra: str, retry_id: str | None
     n = int(argv[0].lstrip("#"))
     this = retry_id or occurrence()
 
-    def native(slug: str, pr: int, head: str) -> None:
-        # A base without a queue never needs the Go workspace, a session token or a native write.
-        ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
-        try:
-            _, token = speaking_as(ws, session, flags)
-        except Refused as why:
-            raise pr_merge.Refused(str(why)) from None
+    def native(slug: str, pr: int, head: str) -> str:
         print(f"id {this}", file=sys.stderr)
         answer = session_routes.write("/gates/merges", {"repo": slug, "pr": pr, "head": head}, this,
                                      session_routes.SESSION_CARRIER, token)
-        if answer.get("status") != "enqueued" or answer.get("head") != head:
-            raise session_routes.Unsent(f"Go answered the native merge without confirming the enqueue of {head[:12]}")
+        if not isinstance(answer, dict) or answer.get("status") not in ("merged", "enqueued") or answer.get("head") != head:
+            raise session_routes.Unsent(f"Go answered the native merge without confirming the landing of {head[:12]}")
+        return answer["status"]
 
     try:
-        print(f"#{n}: " + pr_merge.merge(repo, n, expected, say=lambda line: print(line, file=sys.stderr), native=native))
+        ws = required_workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
+        _, token = speaking_as(ws, session, flags)
+        # A retry must reach the native receipt even if policy changed or its read is unavailable.
+        route = {"native_only": True}
+        if retry_id is None:
+            try:
+                listed = session_routes.get("/settings", token)
+            except (session_routes.Refused, session_routes.Unsent) as why:
+                raise pr_merge.Refused(f"landing.integration_ci could not be read: {why}") from None
+            rows = listed.get("settings") if isinstance(listed, dict) else None
+            policies = [row.get("value") for row in rows
+                        if isinstance(row, dict) and row.get("key") == "landing.integration_ci"] if isinstance(rows, list) else []
+            if len(policies) != 1 or policies[0] not in ("required", "skip"):
+                raise pr_merge.Refused("settings did not name an effective required or skip value for landing.integration_ci")
+            route = {"integration_ci": policies[0]}
+        print(f"#{n}: " + pr_merge.merge(repo, n, expected, say=lambda line: print(line, file=sys.stderr),
+                                       native=native, **route))
     except pr_merge.Pending as why:
         at = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%MZ")
         print(f"not yet: {why}; it reports minutes after a push. Declare `verb.py wait {session} for at {at}`, "
@@ -458,7 +468,7 @@ def merge(session: str, argv: list[str], flags, extra: str, retry_id: str | None
             print(f"merge outcome unknown: {why}; the merge may have landed. "
                   f"Send it again with --retry={this} to learn which", file=sys.stderr)
         return 1
-    except pr_merge.Refused as why:
+    except (Refused, pr_merge.Refused) as why:
         print(f"not merged: {why}", file=sys.stderr)
         return 1
     return 0

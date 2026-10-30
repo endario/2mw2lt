@@ -941,17 +941,16 @@ AgentUndeliveredAnswer = typing.TypedDict("AgentUndeliveredAnswer", {
     "requeued": "bool",
 })
 
-# AgentEndedBody is the body of POST /steering/agent/ended: the sessions of this machine's launch
-# records whose tmux session still runs, asked whether their enrolment has ended (#8257). Leaving
-# is the other direction: a record whose process is gone ends its enrolment.
+# AgentEndedBody asks which named sessions or discovered runtimes ended on this machine.
+# Runtime candidates require an ended epoch in this workspace; an unknown process grants no cleanup.
 AgentEndedBody = typing.TypedDict("AgentEndedBody", {
     "uplink": "str",
-    "sessions": "list[str] | None",
+    "sessions": "typing.NotRequired[list[str] | None]",
+    "runtimes": "typing.NotRequired[list[str] | None]",
 })
 
-# AgentEndedAnswer is the asked sessions whose last enrolment, held on the asking machine, has
-# ended, each as the question named it, with when and why. A session not named still stands, stands
-# on another machine, ran last in a process that has enrolled again, or is not this workspace's.
+# AgentEndedAnswer names ended epochs on the asking machine in this workspace.
+# A missing candidate grants no cleanup permission.
 AgentEndedAnswer = typing.TypedDict("AgentEndedAnswer", {
     "ended": "list[EndedSession] | None",
 })
@@ -2246,6 +2245,57 @@ BodyServingBody = typing.TypedDict("BodyServingBody", {})
 # BodyServingAnswer is how many of the caller's units moved to serve the workspace.
 BodyServingAnswer = typing.TypedDict("BodyServingAnswer", {
     "moved": "int",
+})
+
+# BodyList is the caller's units for the desk's bar (documentation/embodiment/indicator.md).
+# Reached is false on a deployment that reaches no body, which shows no icon.
+BodyList = typing.TypedDict("BodyList", {
+    "reached": "bool",
+    "bodies": "list[BodyDTO] | None",
+})
+
+# BodyDTO is one unit: whether it serves the workspace read, or another, and its body's state as
+# the deployment last heard it, with the check that says why where it is failing.
+BodyDTO = typing.TypedDict("BodyDTO", {
+    "unit": "str",
+    "label": "str",
+    "detail": "bool",
+    "here": "bool",
+    "serving": "bool",
+    "state": "str",
+    "check": "typing.NotRequired[str]",
+    "expires_at": "typing.NotRequired[str | None]",
+})
+
+# BodyUnitBody is the body of PUT /bodies/{unit}: the owner's label and detail for the unit, each
+# left as it is when absent.
+BodyUnitBody = typing.TypedDict("BodyUnitBody", {
+    "label": "typing.NotRequired[str | None]",
+    "detail": "typing.NotRequired[bool | None]",
+})
+
+# BodyUnitAnswer names the unit set.
+BodyUnitAnswer = typing.TypedDict("BodyUnitAnswer", {
+    "unit": "str",
+})
+
+# BodyUnpairBody is the body of POST /bodies/{unit}/unpair, which its path names whole: {}.
+BodyUnpairBody = typing.TypedDict("BodyUnpairBody", {})
+
+# BodyUnpairAnswer is how the service said the unit's grant ended.
+BodyUnpairAnswer = typing.TypedDict("BodyUnpairAnswer", {
+    "ended_by": "str",
+})
+
+# BodyClaimBody is the body of POST /bodies/claim: the pairing code the owner read from the unit.
+BodyClaimBody = typing.TypedDict("BodyClaimBody", {
+    "code": "str",
+})
+
+# BodyClaimAnswer names the unit the code paired, and when its grant expires.
+BodyClaimAnswer = typing.TypedDict("BodyClaimAnswer", {
+    "unit": "str",
+    "expires_at": "typing.NotRequired[str | None]",
 })
 
 # BrainRequestBody is the body of POST /brain/requests: a member's words to the brain.
@@ -6140,6 +6190,7 @@ StampsFrame = typing.TypedDict("StampsFrame", {
     "accounts": "str",
     "bulletin": "str",
     "timers": "str",
+    "bodies": "str",
 })
 
 # Snapshot is the workspace's state and the cursor that resumes after it, read in one transaction.
@@ -7746,7 +7797,11 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/actions",
     "POST /w/{workspace}/api/v1/actions/{action}/cancel",
     "GET /w/{workspace}/api/v1/board",
+    "GET /w/{workspace}/api/v1/bodies",
+    "POST /w/{workspace}/api/v1/bodies/claim",
     "PUT /w/{workspace}/api/v1/bodies/serving",
+    "PUT /w/{workspace}/api/v1/bodies/{unit}",
+    "POST /w/{workspace}/api/v1/bodies/{unit}/unpair",
     "GET /w/{workspace}/api/v1/brain/digest",
     "POST /w/{workspace}/api/v1/brain/replies",
     "GET /w/{workspace}/api/v1/brain/requests",

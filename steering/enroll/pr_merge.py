@@ -2,13 +2,12 @@
 
 The gh CLI's merge, on a branch whose ruleset requires a queue, prints only "The merge strategy for
 main is set by the merge queue" and exits 0 without enqueuing while a required check has not
-reported on the head. So this reads the head's required checks first, says which have yet to report
-rather than polling for them, enqueues through steering's native command with the expected head, and
-confirms the entry.
+reported on the head.
 """
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from typing import Callable
 
@@ -25,6 +24,8 @@ READ = """query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,na
   commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){nodes{__typename
    ... on CheckRun{name status conclusion checkSuite{app{databaseId}}}
    ... on StatusContext{context state}}}}}}}}}}"""
+HEAD_READ = """query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){
+ pullRequest(number:$n){headRefOid}}}"""
 READY = "mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{isDraft}}}"
 MERGE = ("mutation($id:ID!,$head:GitObjectID!){mergePullRequest(input:{pullRequestId:$id,"
          "expectedHeadOid:$head,mergeMethod:SQUASH}){pullRequest{state}}}")
@@ -98,11 +99,22 @@ def queued(repo: dict) -> bool:
 
 
 def merge(slug: str, n: int, expected: str | None, *, say: Callable[[str], None] = print,
-          ask: Callable[..., dict] = graphql, native: Callable[[str, int, str], None]) -> str:
-    """Merge #n of `slug`, or join its base's queue, on the head that holds the pass, and say which
-    happened as GitHub reads it back; Refused when it did not, Pending when a required check has yet
-    to report."""
+          ask: Callable[..., dict] = graphql, native: Callable[[str, int, str], str], integration_ci: str = "required",
+          native_only: bool = False) -> str:
+    """Merge #n of `slug`, or join its base's queue, on the head that holds the pass; the opt-in
+    delegates admission to the native command. Refused when it did not, Pending when a required
+    check has yet to report."""
     owner, name = slug.split("/", 1)
+    if native_only or integration_ci == "skip":
+        head = expected
+        if not head:
+            repo = ask(HEAD_READ, owner=owner, name=name, n=n).get("repository") or {}
+            head = (repo.get("pullRequest") or {}).get("headRefOid")
+            if not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head):
+                raise Refused("GitHub did not name the pull request's head for native admission")
+        # Readying here would precede the native command's actor/draft admission.
+        status = native(slug, n, head)
+        return f"{'merged from' if status == 'merged' else 'enqueued on'} {head[:12]}"
     read = lambda: ask(READ, owner=owner, name=name, n=n)["repository"]  # noqa: E731
     repo = read()
     verdict, said = standing(repo, expected)
