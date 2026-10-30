@@ -1855,6 +1855,21 @@ AgentLaunchAnswer = typing.TypedDict("AgentLaunchAnswer", {
     "status": "str",
 })
 
+# AgentLaunchRuntimesBody is the body of POST /steering/agent/launch-runtimes: the runtimes the
+# machine's agent started for the launch offer Launch names, signed before the session can enrol
+# from them (#9255). The agent types the session's connect only after the door took this.
+AgentLaunchRuntimesBody = typing.TypedDict("AgentLaunchRuntimesBody", {
+    "launch": "str",
+    "uplink": "str",
+    "runtimes": "list[str] | None",
+})
+
+# AgentLaunchRuntimesAnswer is the signing as recorded.
+AgentLaunchRuntimesAnswer = typing.TypedDict("AgentLaunchRuntimesAnswer", {
+    "launch": "str",
+    "status": "str",
+})
+
 # AgentGateBody is the body of POST /steering/agent/gate: the machine's answer to one offered gate
 # run, by the commission and run the offer named.
 AgentGateBody = typing.TypedDict("AgentGateBody", {
@@ -5747,6 +5762,7 @@ RetireRecord = typing.TypedDict("RetireRecord", {
 # Tmux and VSCode are nil where no current record says the session runs there.
 SessionOrigin = typing.TypedDict("SessionOrigin", {
     "launched_by": "OriginLauncher | None",
+    "provenance": "str",
     "tmux": "OriginTmux | None",
     "vscode": "OriginVSCode | None",
 })
@@ -5756,6 +5772,7 @@ SessionOrigin = typing.TypedDict("SessionOrigin", {
 OriginLauncher = typing.TypedDict("OriginLauncher", {
     "kind": "str",
     "session": "typing.NotRequired[str]",
+    "launch": "typing.NotRequired[str]",
 })
 
 # OriginTmux is the pane a session runs in, and whether a window was on its tmux session when the
@@ -8015,6 +8032,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/steering/agent/judges",
     "POST /w/{workspace}/steering/agent/key",
     "POST /w/{workspace}/steering/agent/launch",
+    "POST /w/{workspace}/steering/agent/launch-runtimes",
     "POST /w/{workspace}/steering/agent/leaving",
     "POST /w/{workspace}/steering/agent/model",
     "GET /w/{workspace}/steering/agent/package/{sha}",
