@@ -2024,6 +2024,13 @@ NeedDTO = typing.TypedDict("NeedDTO", {
     "promoted": "typing.NotRequired[NeedPromoted | None]",
     "ruling": "typing.NotRequired[str]",
     "return": "typing.NotRequired[NeedReturn | None]",
+    "origin": "typing.NotRequired[NeedOrigin | None]",
+})
+
+NeedOrigin = typing.TypedDict("NeedOrigin", {
+    "kind": "str",
+    "source": "str",
+    "id": "str",
 })
 
 NeedOptionDTO = typing.TypedDict("NeedOptionDTO", {
@@ -3269,6 +3276,7 @@ ForemanBenchAnswer = typing.TypedDict("ForemanBenchAnswer", {
 ForemanRoute = typing.TypedDict("ForemanRoute", {
     "harness": "str",
     "model": "str",
+    "effort": "typing.NotRequired[str]",
 })
 
 # ForemanHealth is the foreman's health as its row reads: up until when, or down and why, and how
@@ -3297,15 +3305,84 @@ ForemanBench = typing.TypedDict("ForemanBench", {
 # route it asked, and what came of its answer.
 ForemanInvocation = typing.TypedDict("ForemanInvocation", {
     "id": "str",
-    "card": "str",
+    "card": "ForemanCard | None",
+    "source": "str",
     "kind": "str",
+    "seen": "ForemanSeen",
     "route": "ForemanRoute",
     "state": "str",
     "act": "typing.NotRequired[str]",
     "why": "typing.NotRequired[str]",
-    "outcome": "typing.NotRequired[str]",
-    "refused": "typing.NotRequired[str]",
+    "fields": "ForemanFields",
+    "outcome": "str",
+    "refused": "typing.NotRequired[ForemanRefused | None]",
+    "need": "typing.NotRequired[ForemanNeed | None]",
     "at": "str",
+})
+
+ForemanCard = typing.TypedDict("ForemanCard", {
+    "id": "str",
+    "name": "str",
+})
+
+ForemanSeen = typing.TypedDict("ForemanSeen", {
+    "kind": "str",
+    "brief_bytes": "int",
+    "handed_by": "str",
+})
+
+ForemanRefused = typing.TypedDict("ForemanRefused", {
+    "check": "typing.Literal[\"answer-too-long\", \"answer-not-json\", \"answer-unknown-key\", \"answer-not-an-act\", \"foreman-fence-invalid\", \"foreman-act-unadmitted\", \"foreman-session-not-executing\", \"foreman-head-unpassed\", \"foreman-pull-not-the-cards\", \"foreman-act-unbudgeted\", \"foreman-key-invalid\", \"foreman-session-invalid\", \"foreman-head-invalid\", \"foreman-key-reused\", \"card-absent\", \"card-retired\", \"card-concluded\", \"leg-not-held\", \"call-unanswered\"] | None",
+    "detail": "str",
+})
+
+ForemanFields = typing.TypedDict("ForemanFields", {
+    "step": "typing.NotRequired[str]",
+    "session": "typing.NotRequired[str]",
+    "red": "typing.NotRequired[ForemanRed | None]",
+    "escalation": "typing.NotRequired[ForemanEscalation | None]",
+})
+
+ForemanRed = typing.TypedDict("ForemanRed", {
+    "verdict": "str",
+    "guard": "str",
+    "run": "int",
+    "url": "typing.NotRequired[str]",
+    "card": "typing.NotRequired[str]",
+})
+
+ForemanEscalation = typing.TypedDict("ForemanEscalation", {
+    "blocked": "str",
+    "tried": "str",
+    "options": "list[NeedOptionDTO] | None",
+    "recommended": "str",
+})
+
+ForemanNeed = typing.TypedDict("ForemanNeed", {
+    "id": "str",
+    "state": "str",
+    "audience": "str",
+    "disposition": "typing.NotRequired[ForemanDisposition | None]",
+})
+
+ForemanDisposition = typing.TypedDict("ForemanDisposition", {
+    "kind": "str",
+    "reason": "str",
+    "by": "WorkActor",
+    "at": "str",
+})
+
+ForemanBudget = typing.TypedDict("ForemanBudget", {
+    "budget": "str",
+    "spent": "int",
+    "limit": "int",
+    "window_minutes": "int",
+    "resets_at": "str | None",
+})
+
+ForemanActivity = typing.TypedDict("ForemanActivity", {
+    "entries": "list[ForemanInvocation] | None",
+    "next": "typing.NotRequired[str]",
 })
 
 # ForemanStanding is where the workspace's foreman stands: its health, the route the bench chose
@@ -3322,7 +3399,8 @@ ForemanStanding = typing.TypedDict("ForemanStanding", {
 # reads them (D10): the card's own record of the foreman's decisions on it — ForemanStanding holds
 # only the workspace's latest, so it cannot stand in for a card's own week.
 ForemanInvocationList = typing.TypedDict("ForemanInvocationList", {
-    "invocations": "list[ForemanInvocation] | None",
+    "entries": "list[ForemanInvocation] | None",
+    "budgets": "list[ForemanBudget] | None",
 })
 
 # ForgeLogin is the workspace's pinned login, Account, and its State here, with Why the failing
@@ -4552,6 +4630,24 @@ TeamInvitationDTO = typing.TypedDict("TeamInvitationDTO", {
 InvitationRevokeAnswer = typing.TypedDict("InvitationRevokeAnswer", {
     "id": "str",
     "replayed": "bool",
+})
+
+# ModelKeyBody is write-only. Its value is never part of an answer or event.
+ModelKeyBody = typing.TypedDict("ModelKeyBody", {
+    "key": "str",
+})
+
+# ModelKey is the public metadata of a sealed workspace credential.
+ModelKey = typing.TypedDict("ModelKey", {
+    "provider": "str",
+    "revision": "int",
+    "hint": "str",
+    "set_by": "str",
+    "set_at": "str",
+})
+
+ModelKeyRemoval = typing.TypedDict("ModelKeyRemoval", {
+    "removed": "bool",
 })
 
 # Momentum answers GET /momentum: where the workspace's live work is stuck, how its gates are
@@ -6215,6 +6311,7 @@ StampsFrame = typing.TypedDict("StampsFrame", {
     "bulletin": "str",
     "timers": "str",
     "bodies": "str",
+    "foreman": "str",
 })
 
 # Snapshot is the workspace's state and the cursor that resumes after it, read in one transaction.
@@ -7907,6 +8004,7 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/events",
     "GET /w/{workspace}/api/v1/facts",
     "GET /w/{workspace}/api/v1/foreman",
+    "GET /w/{workspace}/api/v1/foreman/activity",
     "POST /w/{workspace}/api/v1/foreman/bench",
     "GET /w/{workspace}/api/v1/gates",
     "POST /w/{workspace}/api/v1/gates",
@@ -7962,6 +8060,9 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/machine-renewals",
     "GET /w/{workspace}/api/v1/machines",
     "POST /w/{workspace}/api/v1/machines/{machine}/removal",
+    "DELETE /w/{workspace}/api/v1/model-keys/{provider}",
+    "GET /w/{workspace}/api/v1/model-keys/{provider}",
+    "PUT /w/{workspace}/api/v1/model-keys/{provider}",
     "GET /w/{workspace}/api/v1/momentum",
     "POST /w/{workspace}/api/v1/names",
     "GET /w/{workspace}/api/v1/needs",
@@ -8109,6 +8210,7 @@ PAGINATION = {
     "GET /w/{workspace}/api/v1/brain/transcript": {"parameter":"cursor","collection":"items","stop":"head"},
     "GET /w/{workspace}/api/v1/cards": {"parameter":"next","collection":"cards","if_query":"state"},
     "GET /w/{workspace}/api/v1/facts": {"parameter":"cursor","collection":"items","stop":"exhausted","drop_query":["before","latest"]},
+    "GET /w/{workspace}/api/v1/foreman/activity": {"parameter":"before","collection":"entries"},
     "GET /w/{workspace}/api/v1/gates": {"parameter":"next","collection":"items"},
     "GET /w/{workspace}/api/v1/goals": {"parameter":"next","collection":"goals"},
     "GET /w/{workspace}/api/v1/goals/{goal}/register": {"parameter":"next","collection":"rows"},
@@ -8134,6 +8236,7 @@ QUERY = {
     "GET /w/{workspace}/api/v1/cards": {"state": frozenset({"live", "concluded"}), "track": None, "branch": None, "pull": None, "limit": None, "next": None},
     "GET /w/{workspace}/api/v1/events": {"cursor": None},
     "GET /w/{workspace}/api/v1/facts": {"limit": None, "state": None, "resource": None, "session": None, "ulid": None, "cursor": None, "before": None, "latest": frozenset({"1"})},
+    "GET /w/{workspace}/api/v1/foreman/activity": {"filter": frozenset({"acted", "seat", "refused", "sweeps"}), "before": None, "limit": None},
     "GET /w/{workspace}/api/v1/gates": {"repo": None, "pr": None, "phase": None, "vendor": None, "limit": None, "next": None},
     "GET /w/{workspace}/api/v1/gates/analysis": {"window": frozenset({"24h", "30d", "7d", "all"}), "kind": frozenset({"review"})},
     "GET /w/{workspace}/api/v1/goals": {"limit": None, "next": None},
