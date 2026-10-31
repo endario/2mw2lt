@@ -6898,6 +6898,39 @@ CardDTO = typing.TypedDict("CardDTO", {
     "released": "typing.NotRequired[CardReleased | None]",
     "knowledge": "typing.NotRequired[CardKnowledge | None]",
     "triage": "typing.NotRequired[CardTriage | None]",
+    "relaunch": "typing.NotRequired[CardRelaunch | None]",
+    "rescue": "typing.NotRequired[CardRescue | None]",
+    "red": "typing.NotRequired[CardRed | None]",
+})
+
+# CardRelaunch is a relaunch in flight (doc 202 D5, D6): the card's recovery lease, fired by its
+# Trigger — a dead or stale executor, the foreman, or the seat — taken At and lapsing at Until. The
+# foreman's relaunch, when it is the foreman's, has reached State: `rescuing` the old executor's
+# work, `placing` a successor, or `placed` and waiting for its session to take the card.
+CardRelaunch = typing.TypedDict("CardRelaunch", {
+    "trigger": "str",
+    "state": "typing.NotRequired[str]",
+    "at": "str",
+    "until": "str",
+})
+
+# CardRescue is a rescue of the card's unpushed work: the wip/ branch it was committed and pushed
+# to, and when the engagement that ended closed on it.
+CardRescue = typing.TypedDict("CardRescue", {
+    "branch": "str",
+    "at": "str",
+})
+
+# CardRed is a red the foreman classified (doc 202 D11, E2): the Verdict it answered — `change`, the
+# worker's to fix, or `flake`, the guard's defect — the Guard it names, the Run that found it with
+# its URL, how the carrying ended in Outcome (`acted`, `escalated` or `budget-spent`), and when.
+CardRed = typing.TypedDict("CardRed", {
+    "verdict": "str",
+    "guard": "str",
+    "run": "int",
+    "url": "typing.NotRequired[str]",
+    "outcome": "str",
+    "at": "str",
 })
 
 # CardReleased is the release that shipped a card's merge: its tag, and when it was published.
