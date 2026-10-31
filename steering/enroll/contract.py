@@ -3318,6 +3318,13 @@ ForemanStanding = typing.TypedDict("ForemanStanding", {
     "invocations": "list[ForemanInvocation] | None",
 })
 
+# ForemanInvocationList is one card's invocations, newest first to its latest fifty, as its drill
+# reads them (D10): the card's own record of the foreman's decisions on it — ForemanStanding holds
+# only the workspace's latest, so it cannot stand in for a card's own week.
+ForemanInvocationList = typing.TypedDict("ForemanInvocationList", {
+    "invocations": "list[ForemanInvocation] | None",
+})
+
 # ForgeLogin is the workspace's pinned login, Account, and its State here, with Why the failing
 # step's words.
 ForgeLogin = typing.TypedDict("ForgeLogin", {
@@ -7682,6 +7689,7 @@ CensusRuntime = typing.TypedDict("CensusRuntime", {
     "harness": "str",
     "runtime_id": "str",
     "directory": "typing.NotRequired[str]",
+    "claimed": "typing.NotRequired[bool]",
 })
 
 # WorkerCensusBody is the native census body before admission binds its uplink. Interactive is the
@@ -7841,6 +7849,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/cards/{card}/disengagements",
     "POST /w/{workspace}/api/v1/cards/{card}/dissociations",
     "POST /w/{workspace}/api/v1/cards/{card}/engagements",
+    "GET /w/{workspace}/api/v1/cards/{card}/foreman",
     "POST /w/{workspace}/api/v1/cards/{card}/links",
     "POST /w/{workspace}/api/v1/cards/{card}/retirement",
     "POST /w/{workspace}/api/v1/cards/{card}/revival",

@@ -201,8 +201,13 @@ def _clients_refuse(door: str) -> str | None:
 
 @contextlib.contextmanager
 def _locked(p: Path):
-    """The credential's own lock, which a renewal takes, so the copy is never of a half-renewed file."""
-    fd = os.open(p.with_suffix(".lock"), os.O_WRONLY | os.O_CREAT, 0o600)
+    """The credential's own lock, which a renewal takes, so the copy is never of a half-renewed
+    file. A symlink planted there is refused, as a renewal refuses one (#9212): this directory is
+    one a worker can write, and the link must open or create nothing outside it."""
+    try:
+        fd = credential.open_lock(p)
+    except credential.NoCredential as e:
+        raise OSError(str(e)) from None    # both callers keep their entry and say why
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
         yield

@@ -9,6 +9,7 @@ run as the same OS user and read the same file.
 """
 from __future__ import annotations
 
+import errno
 import fcntl
 import hashlib
 import json
@@ -67,6 +68,19 @@ def _held(p: Path) -> dict:
 def _write(p: Path, d: dict) -> None:
     p.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     spool.write_atomic(p, json.dumps(d), mode=0o600)
+
+
+def open_lock(p: Path) -> int:
+    """The lock a renewal of the enrolment at `p` takes, opened refusing to follow a symlink: this
+    directory is one a worker can write (#9211), and a lock planted as a symlink would otherwise
+    open, or create, a file outside it (#9212). `ELOOP` is that refusal."""
+    try:
+        return os.open(p.with_suffix(".lock"), os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise NoCredential(f"the credential lock {p.with_suffix('.lock')} is a symbolic link, "
+                               "which a renewal never follows: remove it") from e
+        raise
 
 
 def entry_for(url: str) -> Path | None:
@@ -165,7 +179,7 @@ def current(p: Path, clock=time.time) -> str:
         return _native_current(p, d, clock)
     if _fresh(d, clock):
         return d["credential"]
-    lock = os.open(p.with_suffix(".lock"), os.O_WRONLY | os.O_CREAT, 0o600)
+    lock = open_lock(p)
     try:
         fcntl.flock(lock, fcntl.LOCK_EX)
         d = _held(p)                 # another process may have renewed or moved it while this one waited
@@ -387,7 +401,7 @@ def _native_fresh(d: dict, clock) -> bool:
 def _native_current(p: Path, d: dict, clock) -> str:
     if _native_fresh(d, clock):
         return d["credential"]
-    lock = os.open(p.with_suffix(".lock"), os.O_WRONLY | os.O_CREAT, 0o600)
+    lock = open_lock(p)
     try:
         fcntl.flock(lock, fcntl.LOCK_EX)
         d = _held(p)
