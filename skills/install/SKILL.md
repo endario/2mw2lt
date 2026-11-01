@@ -261,6 +261,16 @@ next, in one pass:
 On macOS the agent is loaded into the login's background session when nobody of that login is at
 the screen, so it keeps running with nobody logged in.
 
+## The foreman's key
+
+The foreman works as installed, answering on the fleet: sessions' machines. To run it on a hosted
+model instead, the workspace needs one thing — the owner's key. The team's owner sets an OpenAI API
+key in the console's workspace settings, under **Foreman**. The key is write-only: the desk shows
+only its last four characters and when it was set, and a key OpenAI refuses reads on the desk as
+failed or revoked, with the vendor's status. One workspace's key pays for that workspace's calls
+and nothing else. With the key standing, the seat benches a managed route; until a bench passes,
+the foreman keeps answering on the fleet.
+
 ## Uninstall
 
 ```bash
