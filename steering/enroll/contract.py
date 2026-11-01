@@ -3302,7 +3302,7 @@ ForemanKey = typing.TypedDict("ForemanKey", {
 ForemanHealth = typing.TypedDict("ForemanHealth", {
     "up": "bool",
     "up_until": "typing.NotRequired[str | None]",
-    "down": "typing.NotRequired[typing.Literal[\"never-beat\", \"beat-lapsed\", \"no-route\", \"invalid-answers\", \"key-refused\", \"quota\", \"paced\", \"route-gone\"]]",
+    "down": "typing.NotRequired[typing.Literal[\"never-beat\", \"beat-lapsed\", \"no-route\", \"invalid-answers\", \"key-refused\", \"quota\", \"paced\", \"route-gone\", \"request-refused\"]]",
     "paused_until": "typing.NotRequired[str | None]",
     "down_why": "typing.NotRequired[str]",
     "invalid_answers": "int",
@@ -4392,6 +4392,7 @@ FleetOffer = typing.TypedDict("FleetOffer", {
     "account_id": "str",
     "unrouted": "typing.NotRequired[bool]",
     "registration": "str",
+    "unserving": "typing.NotRequired[bool]",
 })
 
 # FleetNoAccount is one launcher a machine's census said offers nothing, its one cause, since
@@ -7935,6 +7936,7 @@ LauncherAccount = typing.TypedDict("LauncherAccount", {
     "account_id": "str",
     "command": "typing.NotRequired[str]",
     "unrouted": "typing.NotRequired[bool]",
+    "unserving": "typing.NotRequired[bool]",
 })
 
 # LauncherNoAccount is a launcher of the machine's that offers no account, with its one cause as
