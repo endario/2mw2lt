@@ -1452,7 +1452,12 @@ say "intervened: token @lease <card> <cause> <why>"
 ```
 
 A cause is one of `unheard`, `stalled`, `dead`, `conflict`, `queue-red`, `ceiling`, `stale-card`,
-`release-red`, `other`. The foreman's acts are counted separately, as its own, never as
+`release-red`, `other`. Name the standing the act answered: a hand dispatch of the release
+workflow after a red run records `release-red`, a hand re-enqueue after the queue dropped the head
+`queue-red`. The verbs name these themselves where the platform holds the standing (#9352): a
+relay, retire or other act on a session records the unheard, stalled or dead standing its subject
+held, a replacement launch the death it released, a carry, enqueue or squash the merge-group red
+still standing for the pass. The foreman's acts are counted separately, as its own, never as
 interventions. Read the ledger and its measures — interventions per merged pull request, the
 touchless rate — with `rest.py --lease '/interventions?since=<RFC 3339>'`; the read refuses a
 plain session. The cause standing highest in the ledger is the platform's next piece of work:

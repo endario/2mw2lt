@@ -3332,7 +3332,7 @@ ForemanSeen = typing.TypedDict("ForemanSeen", {
 })
 
 ForemanRefused = typing.TypedDict("ForemanRefused", {
-    "check": "typing.Literal[\"answer-too-long\", \"answer-not-json\", \"answer-unknown-key\", \"answer-not-an-act\", \"foreman-fence-invalid\", \"foreman-act-unadmitted\", \"foreman-session-not-executing\", \"foreman-head-unpassed\", \"foreman-pull-not-the-cards\", \"foreman-act-unbudgeted\", \"foreman-key-invalid\", \"foreman-session-invalid\", \"foreman-head-invalid\", \"foreman-key-reused\", \"card-absent\", \"card-retired\", \"card-concluded\", \"leg-not-held\", \"call-unanswered\"] | None",
+    "check": "typing.Literal[\"answer-too-long\", \"answer-not-json\", \"answer-unknown-key\", \"answer-not-an-act\", \"foreman-fence-invalid\", \"foreman-act-unadmitted\", \"foreman-session-not-executing\", \"foreman-head-unpassed\", \"foreman-pull-not-the-cards\", \"foreman-act-unbudgeted\", \"foreman-key-invalid\", \"foreman-session-invalid\", \"foreman-head-invalid\", \"foreman-key-reused\", \"card-absent\", \"card-retired\", \"card-concluded\", \"leg-not-held\", \"call-unanswered\", \"foreman-calls-spent\"] | None",
     "detail": "str",
 })
 
@@ -3393,6 +3393,46 @@ ForemanStanding = typing.TypedDict("ForemanStanding", {
     "route": "typing.NotRequired[ForemanRoute | None]",
     "benches": "list[ForemanBench] | None",
     "invocations": "list[ForemanInvocation] | None",
+    "now": "ForemanNow",
+    "usage": "ForemanUsage",
+    "today": "ForemanToday",
+    "to_seat_open": "int",
+})
+
+# ForemanNow is what the foreman is doing now, and the invocations still open.
+ForemanNow = typing.TypedDict("ForemanNow", {
+    "state": "typing.Literal[\"calling\", \"sweeping\", \"idle\", \"paused\", \"down\"]",
+    "legs": "list[ForemanLeg] | None",
+})
+
+# ForemanLeg is one invocation still open: the card it is on, the exception it was handed, and
+# since when.
+ForemanLeg = typing.TypedDict("ForemanLeg", {
+    "invocation": "str",
+    "card": "ForemanCard",
+    "kind": "str",
+    "since": "str",
+})
+
+# ForemanUsage is what the workspace's key has answered.
+ForemanUsage = typing.TypedDict("ForemanUsage", {
+    "month": "ForemanTokens",
+})
+
+# ForemanTokens sums the calls that reported their tokens, in the calendar month, UTC.
+ForemanTokens = typing.TypedDict("ForemanTokens", {
+    "input_tokens": "int",
+    "output_tokens": "int",
+    "calls": "int",
+})
+
+# ForemanToday is the UTC day's invocations: acted on its own authority, gone to the seat, refused
+# admission, counted by check, and answered with no act.
+ForemanToday = typing.TypedDict("ForemanToday", {
+    "acted": "int",
+    "to_seat": "int",
+    "refused": "dict[str, int] | None",
+    "invalid": "int",
 })
 
 # ForemanInvocationList is one card's invocations, newest first to its latest fifty, as its drill

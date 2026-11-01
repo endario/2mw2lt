@@ -28,10 +28,6 @@ import supervision  # noqa: E402
 import verb_help  # noqa: E402
 from local_workspace import (common_root, origin_slug,  # noqa: E402
                        workspace_root)
-import door as door_mod  # noqa: E402
-from door import door  # noqa: E402
-import urllib.error  # noqa: E402
-import urllib.request  # noqa: E402
 
 SENDER = HERE / "observe.py"
 READOUT = HERE / "readout.py"
@@ -395,6 +391,9 @@ def authorities(base: str, wid: str | None = None) -> dict:
     back 502 — read as an older daemon, which wired an authority as a plain repository,
     tokens and all.
     """
+    import door as door_mod  # noqa: E402
+    import urllib.error  # noqa: E402
+    import urllib.request  # noqa: E402
     root, _ = door_mod.split(base)
     # A remote credential is scoped to one `/w/<id>` and discovers only that authority.
     # Never fall back from a qualified probe to the root: that would turn a missing or wrong
@@ -579,6 +578,7 @@ def hooks_install(workspace: Path, local: bool | None = None, planned: dict | No
     own tokens, so copying the daemon's in would be handing it another authority's — which
     is the shape the daemon refuses to start with.
     """
+    from door import door  # noqa: E402
     if local is None:
         local = not door()[1]
     if planned is None:
@@ -637,6 +637,7 @@ def main(argv: list[str]) -> int:
     workspace = rest[0] if rest else None
     ws = Path(workspace or os.getcwd()).resolve()
     if action == "show":
+        from door import door  # noqa: E402
         doc = load(settings_path(ws))
         hooks = doc.get("hooks", {})
         packs = {p for entries in hooks.values() for e in entries for p in wired_by(e)}

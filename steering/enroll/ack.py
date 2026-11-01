@@ -12,7 +12,6 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 from local_workspace import required_workspace_root  # noqa: E402
-from door import display_reply  # noqa: E402
 
 
 def valid_token(value: object) -> bool:
@@ -147,6 +146,7 @@ def main(argv: list[str]) -> int:
         print(e, file=sys.stderr); return 1
     if reply.startswith("already acknowledged:"):
         print(reply); return 0
+    from door import display_reply  # noqa: E402
     print("acked" if reply.startswith("acked:") else f"not acked: {display_reply(reply, 200)}")
     return 0 if reply.startswith("acked:") else 1
 

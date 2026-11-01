@@ -15,30 +15,41 @@ import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
-import json
 import os
 import re
 import shlex
 import time
-import urllib.error
-import urllib.request
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 from local_workspace import KEY_HEADER, agent_key, agent_port, origin_slug, required_workspace_root, workspace_header  # noqa: E402
-import door  # noqa: E402
 from ack import provider_ids, token_path, valid_token  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
 from bind import Refused, Unclaimed, bind, incarnation, incarnation_of, pid_arg, records  # noqa: E402
-from transcript_proof import account_of  # noqa: E402
 import machine_harness as harness_mod  # noqa: E402
 from process_probe import Undetermined  # noqa: E402
 import hooks  # noqa: E402
 import checkout_binding  # noqa: E402
 import holder  # noqa: E402
-import witness as witness_mod  # noqa: E402
 from verb_help import current_args, error, help_requested, script_help  # noqa: E402
+
+# What this module's import does not pay for (#9342): `door` (with urllib, ssl and http.client
+# behind it), `account_of` and `witness` ride only the paths that use them, imported at the
+# point of use. `door` and `account_of` are reached from outside as `connect.<name>` too, so
+# this seam hands the same module object to that reach as the point-of-use imports see — which
+# preserves mutating the shared module's attributes (`connect.door.get = …`), not rebinding
+# `connect.door` itself: the point-of-use `import door` would still see the real module.
+def __getattr__(name: str):
+    if name == "door":
+        import door  # noqa: E402
+        value = globals()["door"] = door
+        return value
+    if name == "account_of":
+        from transcript_proof import account_of  # noqa: E402
+        value = globals()["account_of"] = account_of
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 STALE = ("unknown, detached or stale token", "is not enrolled")
 
@@ -108,6 +119,7 @@ def account(o: Options, h: harness_mod.Harness) -> str:
     """Derived, not asked for: the configuration directory in use is which account this is, and
     it is the same value the brain derives for a local session (#139). `--as` and
     `STEERING_ACCOUNT` stay as overrides for a harness that keeps no account in a directory."""
+    from transcript_proof import account_of
     a = o.named or os.environ.get("STEERING_ACCOUNT", "").strip() \
         or account_of(h.config_dir(), h.provider)
     return f"{h.agent}/{a}" if a and "/" not in a else a
@@ -279,6 +291,7 @@ def provider_session(flags: dict[str, str]) -> str:
             raise
         own = None  # no harness claims this process, so the session it names stands
     if named and own and named != own:
+        import door
         mismatch = f"this harness is session {own}, not {named}: a session speaks only as itself"
         try:
             ws = required_workspace_root(project_dir(), timeout=2.0)
@@ -335,6 +348,7 @@ def head(project: Path | None = None) -> str:
 
 def enrol(ws: Path, session: str, account: str, doing: str, psession: str,
           h: harness_mod.Harness, project: Path | None = None, rid: str | None = None) -> str:
+    import door  # noqa: E402
     import session_routes  # noqa: E402
     # Go takes the name and the incarnation; account, branch and work are not enrolment's
     # (go-c5-session-client-design.md, "What C5 does not build").
@@ -352,6 +366,7 @@ def enrol(ws: Path, session: str, account: str, doing: str, psession: str,
 def connect_incarnation(ws: Path, psession: str | None, pid: int | None,
                         provider: str) -> tuple[str, str]:
     """Derive the connecting process, retaining the check that refused the derivation."""
+    import door  # noqa: E402
     try:
         return incarnation(psession, pid, provider)
     except Refused as why:
@@ -371,6 +386,7 @@ def connect(ws: Path, session: str | None, account: str, doing: str,
     an argument rather than the ambient one because the agent enrolling a worker of its own
     holds its workspace explicitly and must not rest on where launchd started it.
     """
+    import door  # noqa: E402
     project = project or project_dir()
     known = records(ws)
     if not h.hooks:
@@ -392,6 +408,7 @@ def connect(ws: Path, session: str | None, account: str, doing: str,
         # for an incarnation the store has seen. This is what stands in (doc 47 §12); it is
         # refused rather than skipped, because a bind that follows would be refused anyway and
         # would say the wrong thing about why.
+        import witness as witness_mod  # noqa: E402
         try:
             witness_mod.witness(ws, h, psession, rid)
         except witness_mod.Unwitnessed as why:
@@ -522,6 +539,9 @@ def serving(port: str, timeout: float = 2.0) -> list[str] | None:
     "nothing here" is to start one — dangerous exactly when the diagnosis is this one, transient
     kind of wrong (#1690).
     """
+    import door  # noqa: E402
+    import json  # noqa: E402
+    import urllib.request  # noqa: E402
     for attempt in range(RETRIES + 1):
         try:
             with door.send(urllib.request.Request(f"http://127.0.0.1:{port}/status"), timeout=timeout) as r:
@@ -589,6 +609,10 @@ def reached(session: str, psession: str, workspace: Path | None = None) -> str:
     connect above it has already succeeded, and a session told its connect failed re-runs it,
     which mints a new epoch and orphans the reach this was trying to make.
     """
+    import door  # noqa: E402
+    import json  # noqa: E402
+    import urllib.error  # noqa: E402
+    import urllib.request  # noqa: E402
     body = json.dumps({"session": session, "provider_session": psession}).encode()
     url = f"http://127.0.0.1:{AGENT_PORT}/steering/reach"
     req = urllib.request.Request(url, data=body, method="POST",
@@ -628,6 +652,8 @@ def plugin_line(provider: str | None, mine_file: Path = HERE.parent.parent / "ve
 
     A plugin is fetched once and then runs as it was: Codex ran 0.5.88 for weeks while the
     orchestrator moved on, and nothing said so. None when this copy names no version."""
+    import door  # noqa: E402
+    import json  # noqa: E402
     try:
         mine = mine_file.read_text().strip()
     except OSError:
@@ -758,6 +784,8 @@ def repo_line(ws: Path) -> str:
     same source install resolved. Written back only when the workspace serves this checkout's own
     `origin` — the mismatch install refuses (#2618) is not persisted here — so the readers that
     come after this one read the file alone (#4282)."""
+    import door  # noqa: E402
+    import json  # noqa: E402
     try:
         code, body = door.get("/steering/authorities", timeout=5)
         if code != 200:
@@ -852,6 +880,7 @@ def main(argv: list[str]) -> int:
             # but a first enrolment has no reach to lose.
             port, agent_why = agent_says(AGENT_PORT, ws, session or "this session")
             if not port and minted_name(records(ws), o.psession or h.whoami()[0]):
+                import door  # noqa: E402
                 door.record("connect-agent-preflight-refused", agent_why, ws)
                 print("connect stopped before binding", file=sys.stderr)
                 return 1

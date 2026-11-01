@@ -18,7 +18,6 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
-import codex_proxy  # noqa: E402
 import machine_harness as harness  # noqa: E402
 from process_probe import Undetermined  # noqa: E402
 import runtime_id  # noqa: E402
@@ -164,6 +163,7 @@ def account_identity(provider: str) -> str | None:
     The bearer credential stays in Codex's auth file.  Its opaque account identifier is already
     the key usage readings carry, and is the only part a bind needs to make a cross-node join.
     """
+    import codex_proxy  # noqa: E402
     if provider == "claude":
         return codex_proxy.proxied_account(os.environ.get("ANTHROPIC_BASE_URL"))
     if provider != "codex":
