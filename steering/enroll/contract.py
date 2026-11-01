@@ -3418,6 +3418,20 @@ ForemanStanding = typing.TypedDict("ForemanStanding", {
     "usage": "ForemanUsage",
     "today": "ForemanToday",
     "to_seat_open": "int",
+    "scope": "ForemanScope | None",
+})
+
+# ForemanScope is the cut by act on one route (seen.md D28): the acts the platform carries itself,
+# and the cases it hands to the seat with why.
+ForemanScope = typing.TypedDict("ForemanScope", {
+    "carries": "list[str] | None",
+    "seat": "list[ForemanSeatCase] | None",
+})
+
+# ForemanSeatCase is one case the foreman hands to the seat, and why.
+ForemanSeatCase = typing.TypedDict("ForemanSeatCase", {
+    "case": "typing.Literal[\"wake\", \"interrupt\", \"relaunch\", \"classify-red\", \"drive-on-stuck\", \"credential\", \"migration-edit\", \"unbenched-signal\"]",
+    "why": "typing.Literal[\"not-carried\", \"unreliable\", \"ruled\", \"unbenched\"]",
 })
 
 # ForemanNow is what the foreman is doing now, and the invocations still open.
