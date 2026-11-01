@@ -3279,11 +3279,31 @@ ForemanRoute = typing.TypedDict("ForemanRoute", {
     "effort": "typing.NotRequired[str]",
 })
 
+# ForemanStandingRoute adds the chosen route's current eligibility to its identity.
+ForemanStandingRoute = typing.TypedDict("ForemanStandingRoute", {
+    "harness": "str",
+    "model": "str",
+    "effort": "typing.NotRequired[str]",
+    "kind": "typing.Literal[\"managed\", \"fleet\"]",
+    "bench": "typing.Literal[\"passed\", \"failed\", \"none\"]",
+})
+
+# ForemanKey is safe model-key metadata; key material never crosses this wire.
+ForemanKey = typing.TypedDict("ForemanKey", {
+    "provider": "str",
+    "state": "typing.Literal[\"present\", \"refused\", \"absent\"]",
+    "hint": "typing.NotRequired[str]",
+    "set_at": "typing.NotRequired[str | None]",
+    "vendor_status": "typing.NotRequired[str]",
+})
+
 # ForemanHealth is the foreman's health as its row reads: up until when, or down and why, and how
 # many answers that were not an act it has counted in its window.
 ForemanHealth = typing.TypedDict("ForemanHealth", {
     "up": "bool",
     "up_until": "typing.NotRequired[str | None]",
+    "down": "typing.NotRequired[typing.Literal[\"never-beat\", \"beat-lapsed\", \"no-route\", \"invalid-answers\", \"key-refused\", \"quota\", \"paced\", \"route-gone\"]]",
+    "paused_until": "typing.NotRequired[str | None]",
     "down_why": "typing.NotRequired[str]",
     "invalid_answers": "int",
 })
@@ -3390,7 +3410,8 @@ ForemanActivity = typing.TypedDict("ForemanActivity", {
 # newest first.
 ForemanStanding = typing.TypedDict("ForemanStanding", {
     "health": "ForemanHealth",
-    "route": "typing.NotRequired[ForemanRoute | None]",
+    "key": "typing.NotRequired[ForemanKey | None]",
+    "route": "typing.NotRequired[ForemanStandingRoute | None]",
     "benches": "list[ForemanBench] | None",
     "invocations": "list[ForemanInvocation] | None",
     "now": "ForemanNow",
