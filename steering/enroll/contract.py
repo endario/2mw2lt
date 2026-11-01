@@ -5744,7 +5744,10 @@ SessionList = typing.TypedDict("SessionList", {
 # what the session last said, at the epoch it said it, or nil when it has said nothing. Observed is
 # what its machine saw this epoch run, newest first. Cards are the live cards it executes at this
 # epoch, by wire id, first engaged first; CardsDone are those of them it said done for, its part
-# finished (doc 199 §3). Presence is the basis of the hold it stands on,
+# finished (doc 199 §3). CardsBlockedOn are those cards' blocked-on lines (doc 202 D4,
+# work.BlockedOn), aligned with Cards, so one session's row says what it waits on — the gate its
+# round runs on, the queue its pull request sits in — as the board's card rows do; empty where it
+# executes no live card. Presence is the basis of the hold it stands on,
 # "stream" or "reach", or nil when none stands; DetachedSince is since when no uplink has carried
 # that hold, or nil while one does. Vitals is this epoch's latest reading, nil before its first.
 # MachineState is the liveness of the session's own machine login, apart from its presence: a
@@ -5765,6 +5768,7 @@ ListedSession = typing.TypedDict("ListedSession", {
     "observed": "list[ObservedReport] | None",
     "cards": "list[str] | None",
     "cards_done": "list[str] | None",
+    "cards_blocked_on": "list[BlockedOnDTO] | None",
     "account": "ListedAccount | None",
     "vitals": "SessionVitals | None",
     "origin": "SessionOrigin",

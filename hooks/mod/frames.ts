@@ -190,7 +190,10 @@ export function asksSeat(kind: string): boolean {
 // client: a `say` line or a body for lease.py, or card.py's argv, with `@lease` where the token
 // goes. The module never holds the token; the client fills it from the store.
 export type SeatCall = { client: 'say'; stdin: string } | { client: 'reply'; stdin: string } | { client: 'post'; path: string; stdin: string } | { client: 'card'; argv: string[] }
-type Field = { type: 'string' | 'integer' | 'boolean' | 'array'; description: string; word?: boolean; lines?: boolean; enum?: string[] }
+// `max` is the bound the door's own validation holds the field to, told here in characters so a
+// call over it is refused at the tool, naming the field the model wrote, never the wire name
+// Go's body gives it (#9362).
+type Field = { type: 'string' | 'integer' | 'boolean' | 'array'; description: string; word?: boolean; lines?: boolean; enum?: string[]; max?: number }
 type SeatTool = { description: string; fields: Record<string, Field>; required: string[]; oneOf?: string[]; refuse?: (a: Record<string, unknown>) => string | null; build: (a: Record<string, unknown>) => SeatCall }
 
 const str = (a: Record<string, unknown>, k: string) => String(a[k] ?? '')
@@ -219,13 +222,10 @@ export const SEAT_TOOLS: Record<string, SeatTool> = {
     build: a => ({ client: 'say', stdin: `out-of-band: token @lease ${str(a, 'item')} via ${str(a, 'channel')}: ${str(a, 'words')}` }),
   },
   retire: {
-    description: 'The seat, or a goal\'s steward for a session its launches started: retire a session, ending its process and its enrolment. Refused while it has unpublished work. A Go workspace takes the reason; the incumbent takes the node.',
-    fields: { worker: word('The worker\'s session.'), node: word('The machine it runs on, on the incumbent.'), reason: text('Why, on a Go workspace.') },
-    required: ['worker'],
-    oneOf: ['node', 'reason'],
-    build: a => ({ client: 'say', stdin: a.node !== undefined
-      ? `retire: token @lease ${str(a, 'worker')} on ${str(a, 'node')}`
-      : `retire: token @lease ${str(a, 'worker')} because ${str(a, 'reason')}` }),
+    description: 'The seat, or a goal\'s steward for a session its launches started: retire a session, ending its process and its enrolment. Refused while it has unpublished work. The line is the Go form, `retire: <session> because <reason>`, so the reason is required; the incumbent\'s `on <node>` form is not one this client sends.',
+    fields: { worker: word('The worker\'s session.'), reason: text('Why it is retired.') },
+    required: ['worker', 'reason'],
+    build: a => ({ client: 'say', stdin: `retire: token @lease ${str(a, 'worker')} because ${str(a, 'reason')}` }),
   },
   wake: {
     description: 'The seat, or a goal\'s steward for a session its launches started: wake a session that has gone dark.',
@@ -298,7 +298,7 @@ export const SEAT_TOOLS: Record<string, SeatTool> = {
   answer: {
     description: 'Seat only: answer a snapshot or a regroup by its episode once you have reviewed it: acted, saying what you did, or considered, saying why nothing needed you. This is how a snapshot is answered, never by speaking to the owner.',
     fields: { episode: word('The episode the signal carries.'), verdict: { type: 'string', description: 'What you did with it.', enum: ['acted', 'considered'] },
-              because: text('What you did, or why nothing needed you.') },
+              because: { type: 'string', description: 'What you did, or why nothing needed you, in at most 500 characters.', max: 500 } },
     required: ['episode', 'verdict', 'because'],
     build: a => ({ client: 'say', stdin: `answer: token @lease ${str(a, 'episode')} ${str(a, 'verdict')} because ${str(a, 'because')}` }),
   },
@@ -319,7 +319,8 @@ export function seatSchema(name: string) {
 const schemaOf = (t: { fields: Record<string, Field>; required: string[] }) => ({
   type: 'object' as const,
   properties: Object.fromEntries(Object.entries(t.fields).map(([k, f]) =>
-    [k, { type: f.type, description: f.description, ...(f.enum ? { enum: f.enum } : {}), ...(f.type === 'array' ? { items: { type: 'string' } } : {}) }])),
+    [k, { type: f.type, description: f.description, ...(f.enum ? { enum: f.enum } : {}), ...(f.max ? { maxLength: f.max } : {}),
+          ...(f.type === 'array' ? { items: { type: 'string' } } : {}) }])),
   required: t.required, additionalProperties: false,
 })
 
@@ -340,6 +341,7 @@ function judge(name: string, t: Judged, args: Record<string, unknown>): true | {
       const s = String(x)
       if (f.lines ? CONTROL_BUT_LINES.test(s) : CONTROL.test(s)) return { refused: f.lines ? `${k} carries a control character other than a newline or a tab` : `${k} carries a control character or a newline` }
       if ((f.word || f.type === 'array') && (/\s/.test(s) || s === '')) return { refused: `${k} is one word` }
+      if (f.max && [...s].length > f.max) return { refused: `${k} is at most ${f.max} characters` }
     }
     if (f.enum && !f.enum.includes(String(v))) return { refused: `${k} is one of ${f.enum.join(', ')}` }
     if (f.type === 'integer' && !Number.isInteger(v)) return { refused: `${k} is a whole number` }

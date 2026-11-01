@@ -1,7 +1,7 @@
 import type { On } from 'claude-code'
 import { register } from '../register'
 import { test, expect } from 'claude-code/testing'
-import { lines, atLeast, pick, invokes, lifecycle, nextSeat, asksSeat, seatCall, entryRefusal, framesEntry, obsoleteSeatRefusal, resendId, capBulletin, sectionRevision, POINTER, CHECKPOINT, SEAT_SECTION, BULLETIN_SECTION } from '../frames'
+import { lines, atLeast, pick, invokes, lifecycle, nextSeat, asksSeat, seatCall, seatSchema, entryRefusal, framesEntry, obsoleteSeatRefusal, resendId, capBulletin, sectionRevision, POINTER, CHECKPOINT, SEAT_SECTION, BULLETIN_SECTION } from '../frames'
 import { world, line, begin, never, MESSAGE, TOOL, FRAME_PATH, CLAIM_PATH, ROOT, AGENT } from './world'
 import type { HoldPoll } from './world'
 
@@ -1749,9 +1749,9 @@ test('a verb the settings ask about, or deny, sends nothing and says where it wo
   await begin($)
   await w.clock.settle()
   w.check = { decision: 'ask', reason: 'Claude requested permissions to use mcp__2mw2lt__retire' }
-  const asked = await $.tool.call({ tool: 'mcp__2mw2lt__retire', worker: 'w-1', node: 'm4' } as never)
+  const asked = await $.tool.call({ tool: 'mcp__2mw2lt__retire', worker: 'w-1', reason: 'its card landed' } as never)
   w.check = { decision: 'deny' }
-  const denied = await $.tool.call({ tool: 'mcp__2mw2lt__retire', worker: 'w-1', node: 'm4' } as never)
+  const denied = await $.tool.call({ tool: 'mcp__2mw2lt__retire', worker: 'w-1', reason: 'its card landed' } as never)
   expect(leaseRuns(w)).toEqual([])
   expect(String((asked as { deny?: string }).deny)).toContain('lease.py in Bash')
   expect(String((denied as { deny?: string }).deny)).toContain('deny mcp__2mw2lt__retire')
@@ -1953,11 +1953,10 @@ test('a timer mutation whose answer was lost goes once more under the id the cli
 })
 
 test('seatCall: word fields are one word, enums hold, and unknown fields are refused', async () => {
-  expect(seatCall('retire', { worker: 'w 1', node: 'm4' })).toEqual({ refused: 'worker is one word' })
+  expect(seatCall('retire', { worker: 'w 1', reason: 'done' })).toEqual({ refused: 'worker is one word' })
   expect(seatCall('retire', { worker: 'teal', reason: 'the card landed' })).toEqual({ client: 'say', stdin: 'retire: token @lease teal because the card landed' })
-  expect(seatCall('retire', { worker: 'w-1', node: 'm4' })).toEqual({ client: 'say', stdin: 'retire: token @lease w-1 on m4' })
-  expect(seatCall('retire', { worker: 'teal' })).toEqual({ refused: 'retire takes one of node or reason' })
-  expect(seatCall('retire', { worker: 'teal', node: 'm4', reason: 'done' })).toEqual({ refused: 'retire takes one of node or reason' })
+  expect(seatCall('retire', { worker: 'teal' })).toEqual({ refused: 'reason is required' })
+  expect(seatCall('retire', { worker: 'teal', node: 'm4', reason: 'done' })).toEqual({ refused: 'retire takes no node' })
   expect(seatCall('card_session', { card: 'c', session: 's', role: 'boss' })).toEqual({ refused: 'role is one of executor, planned' })
   expect(seatCall('dispose', { item: 'i', reason: 'r', token: 'x' })).toEqual({ refused: 'dispose takes no token' })
   expect(seatCall('relay', { to: 'amber', epoch: 3, text: 'go' })).toEqual({ client: 'say', stdin: 'relay: token @lease to amber@3 go' })
@@ -1971,11 +1970,18 @@ test('seatCall: word fields are one word, enums hold, and unknown fields are ref
 })
 
 // A snapshot is answered by its episode, never by speaking to the owner (the owner's ruling, 2026-10-22).
+// The why is bounded at the tool, at the 500 characters the door's own validation holds, so a call
+// over it is refused here naming because, never sent to come back as the wire's disposition (#9362).
 test('seatCall: a snapshot is answered by its episode, acted or considered, with why', async () => {
   expect(seatCall('answer', { episode: '0b5f3c1e-4a2d-4c8e-9f10-2a3b4c5d6e7f', verdict: 'considered', because: 'nothing moved' }))
     .toEqual({ client: 'say', stdin: 'answer: token @lease 0b5f3c1e-4a2d-4c8e-9f10-2a3b4c5d6e7f considered because nothing moved' })
   expect(seatCall('answer', { episode: 'e1', verdict: 'noop', because: 'x' })).toEqual({ refused: 'verdict is one of acted, considered' })
   expect(seatCall('answer', { episode: 'e1', verdict: 'acted' })).toEqual({ refused: 'because is required' })
+  expect(seatCall('answer', { episode: 'e1', verdict: 'acted', because: 'x'.repeat(500) }).stdin)
+    .toBe('answer: token @lease e1 acted because ' + 'x'.repeat(500))
+  expect(seatCall('answer', { episode: 'e1', verdict: 'acted', because: 'x'.repeat(501) }))
+    .toEqual({ refused: 'because is at most 500 characters' })
+  expect(seatSchema('answer').properties.because).toMatchObject({ maxLength: 500 })
 })
 
 test('seatCall: an out-of-band answer names the row, where it was given, and the words', async () => {
