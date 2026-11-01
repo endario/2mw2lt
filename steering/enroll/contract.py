@@ -3337,6 +3337,7 @@ ForemanInvocation = typing.TypedDict("ForemanInvocation", {
     "outcome": "str",
     "refused": "typing.NotRequired[ForemanRefused | None]",
     "need": "typing.NotRequired[ForemanNeed | None]",
+    "seat": "typing.NotRequired[ForemanSeatCase | None]",
     "at": "str",
 })
 
