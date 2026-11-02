@@ -48,17 +48,24 @@ GATEWAY_DOWN = frozenset({502, 503, 504})
 class Refused(Exception):
     """Go refused the request. `code`, `field` and `remedy` are its problem's. The reason Go named,
     `detail`, rides the message after the request id, so every reader that prints the exception
-    says why, not only the code and ids (#9022)."""
+    says why, not only the code and ids (#9022). `title` is the sentence the server's refusal
+    catalogue carries (doc 206): when it arrives, the message leads with the server's words —
+    what was refused and what would succeed — and the code rides in brackets, so matchers and
+    greps still find it. A client composes no remedy of its own for a refusal that carries one."""
 
     def __init__(self, status: int, code: str, field: str = "", wait: int | None = None, request: str = "",
-                 remedy: str = "", detail: str = ""):
-        super().__init__(f"refused ({status}): {code}" + (f" [{field}]" if field else "")
+                 remedy: str = "", detail: str = "", title: str = ""):
+        super().__init__(f"refused ({status}): " + (title or code)
+                         + (f" [{code}]" if title and code != title else "")
+                         + (f" [{field}]" if field else "")
                          + (f" request {request}" if request else "")
                          + (f": {detail}" if detail else ""))
         self.status, self.code, self.field, self.wait, self.request = status, code, field, wait, request
         self.remedy = remedy
         # What Go's refusal names beyond its code, where it names one: a commission's id.
         self.detail = detail
+        # The server's sentence, where its catalogue carries one (doc 206); empty when it does not.
+        self.title = title
 
 
 def reconnect(e: Refused, reason: str | None = None) -> str:
@@ -162,9 +169,11 @@ def post(path: str, body: dict, key: str, carrier: str, token: str, timeout: flo
                     continue
             wait_seconds = problem.get("wait_seconds")
             detail = problem.get("detail")
+            title = problem.get("title")
             raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
                           wait_seconds if isinstance(wait_seconds, int) else None, _request(e, problem), _remedy(problem),
-                          detail if isinstance(detail, str) and len(detail) <= 200 else "") from None
+                          detail if isinstance(detail, str) and len(detail) <= 200 else "",
+                          title if isinstance(title, str) else "") from None
         except (urllib.error.URLError, OSError, TimeoutError, http.client.HTTPException, ValueError) as e:
             if (wait := again(f"no answer ({e})")) is not None:
                 time.sleep(wait)
@@ -363,6 +372,7 @@ def checkpoint(token: str, body: dict) -> tuple[str, bool]:
     resend under the occurrence settles."""
     kept = {"text": body["text"]} if "text" in body else {"note": body["note"], "note_sha256": body["note_sha256"]}
     sent = {"occurrence": body["id"], "boundary": body["boundary"], **kept,
+            **({"card": body["card"]} if body.get("card") else {}),
             **({"learned": body["learned"]} if body.get("learned") else {})}
     try:
         answer = write("/checkpoints", sent, body["id"], SESSION_CARRIER, token)
@@ -639,10 +649,18 @@ def declare_card(card: str, name: str, anchors: dict, token: str, repo: str = ""
     a minted id whose declaration is the same one with that card. The key is the declaration's own,
     so a retry after a lost answer never mints a second card. `repo` names the anchors'
     repository, as `card_repo` reads it; `goal`, a birth's `{id, why, source?}`, contributes the
-    card to its goal in the same command (#7005). A card `session` already executes that carries
-    every anchor is joined instead of declared beside (#7634): its triage is the declaration's, and
-    a goal, which joins a card only by an edge, is refused naming it. Raises `Refused` or `Unsent`."""
-    if session and anchors:
+    card to its goal in the same command (#7005). A card `session` already executes is joined
+    instead of declared beside — the one the declaration names (`--card`), the one carrying every
+    named anchor, or, when none are named, the one live card it executes (#7634, #9509, #9568: an
+    anchor-less declaration is how the take's card was twinned, and a named one how the scoped
+    card was refused `card-exists` where its issue should have anchored it): its triage is the
+    declaration's, and a goal, which joins a card only by an edge, is refused naming it — save on
+    a named card, where the goal's declaration falls to the post and a resend of its birth is
+    answered replayed. Raises `Refused` or `Unsent`."""
+    if session:
+        named = next((c for c in executing_cards(session, token) if c["id"] == card), None) if card else None
+        if named is not None and not goal:
+            return _anchor_own_card(named, session, anchors, repo, token, triage)
         joined = _join_own_card(session, card, anchors, repo, token, triage, goal)
         if joined:
             return joined
@@ -664,29 +682,67 @@ def declare_card(card: str, name: str, anchors: dict, token: str, repo: str = ""
 
 def _join_own_card(session: str, minted: str, anchors: dict, repo: str, token: str,
                    triage: dict | None, goal: dict | None) -> str:
-    """The line for a declaration that joined the live card `session` already executes with every
-    anchor it names, or "" when there is none to join. The card a retry of this very declaration
-    minted is no card to join: it falls through to the post, which Go answers replayed."""
+    """The line for a declaration that joined the live card `session` already executes — the one
+    carrying every anchor it names, or, when it names none, the only one — or "" when there is
+    none to join. The card a retry of this very declaration minted is no card to join: it falls
+    through to the post, which Go answers replayed."""
     wanted = {(verb, n) for verb, ns in anchors.items() for n in ns}
-    held = [c for c in executing_cards(session, token) if c["id"] != minted and wanted <= {
-        (a.get("verb"), a.get("n")) for a in c.get("anchors") or []
-        if not a.get("ended") and str(a.get("repo")).lower() == repo.lower()}]
+    held = [c for c in executing_cards(session, token) if c["id"] != minted]
+    if wanted:
+        held = [c for c in held if wanted <= {
+            (a.get("verb"), a.get("n")) for a in c.get("anchors") or []
+            if not a.get("ended") and str(a.get("repo")).lower() == repo.lower()}]
     if not held:
         return ""
     ids = ", ".join(c["id"] for c in held)
     if len(held) > 1:
+        if not wanted:
+            return refusal.refuse(f"not declared: {session} already executes {len(held)} live cards ({ids}); "
+                                  f"an anchor-less declaration cannot say which is the work's card",
+                                  hand_to=("the brain", f"say: {session} token <t> which of {ids} does the new work belong to, "
+                                                       f"or have it declared with its issue's resolves:<n>"))
         return refusal.refuse(f"not declared: {session} already executes {len(held)} live cards carrying these anchors ({ids})",
                               hand_to=("the brain", f"say: {session} token <t> which of {ids} is my card for these anchors"))
     joined = held[0]["id"]
     if goal:
-        return refusal.refuse(f"not declared: {session} already executes {joined}, which carries these anchors; "
+        return refusal.refuse(f"not declared: {session} already executes {joined}, which {'carries these anchors' if wanted else 'is the only live card it executes'}; "
                               f"a goal joins a card by an edge: edge.py {session} link {joined} part-of {goal['id']} <why>",
                               send="/2mw2lt:connect")
     if triage:
         write(f"/cards/{joined}/triage",
               {**triage, "why": f"declared by {session} on the card it already executes"},
               _own_key("declare.triage", joined, triage["criticality"], triage["size"]), SESSION_CARRIER, token)
-    return f"bound: {joined}, the card {session} already executes for these anchors"
+    return f"bound: {joined}, the card {session} already executes for these anchors" if wanted else \
+        f"bound: {joined}, the only live card {session} executes"
+
+
+def _anchor_own_card(card: dict, session: str, anchors: dict, repo: str, token: str,
+                     triage: dict | None) -> str:
+    """The line for a declaration naming the live card `session` executes: the card keeps its name
+    and the declaration's anchors it lacks are added to it, its triage set — the executor's way to
+    give a live card an issue after the fact (#9568: the scoped card the worker executes gains the
+    issue filed for it, where the same declaration was refused `card-exists` and a take minted a
+    twin beside it). A resend of the declaration that minted the card lands here too, its anchors
+    already carried; one carrying a goal never does — it falls to the post, which answers a resend
+    of the goal's birth replayed. Each anchor's send is its own request, not keyed from its body:
+    an anchor the seat ended and a later declaration restores must add again, not answer the first
+    send from the record."""
+    joined = card["id"]
+    wanted = {(verb, n) for verb, ns in anchors.items() for n in ns}
+    have = {(a.get("verb"), a.get("n")) for a in card.get("anchors") or []
+            if not a.get("ended") and str(a.get("repo")).lower() == repo.lower()}
+    added = sorted(wanted - have)
+    for verb, n in added:
+        write(f"/cards/{joined}/associations", {"anchor": {"verb": verb, "repo": repo, "n": n}},
+              uuid.uuid4().hex, SESSION_CARRIER, token)
+    if triage:
+        write(f"/cards/{joined}/triage",
+              {**triage, "why": f"declared by {session} on the card it already executes"},
+              _own_key("declare.triage", joined, triage["criticality"], triage["size"]), SESSION_CARRIER, token)
+    if added:
+        return f"bound: {joined}, the card {session} executes, which now carries " + \
+            ", ".join(f"{verb} {repo}#{n}" for verb, n in added)
+    return f"bound: {joined}, the card {session} already executes"
 
 
 def edge_card(card: str, unlink: bool, kind: str, to: dict, why: str, token: str,
@@ -920,15 +976,18 @@ def claim_issue(session: str, token: str, repo: str, n: int, key: str = "") -> s
     rather than minting a duplicate beside it (#6846, #7188). Taking a card from its present
     executor is the seat's or the owner's, never a claim's (Go's `card-executed`), so a card
     another session executes is named with its executor for the brain to place, and with several
-    live cards resolving the issue the claim names them and refuses, guessing none. Only when no
-    live card resolves the issue does the claim declare one with `resolves:<n>`, named for the
-    issue and the session its executor; the declared card's id and
-    key are the claim's own, so a rerun after a lost answer is answered from the first rather
+    live cards resolving the issue the claim names them and refuses, guessing none. When no live
+    card resolves the issue, the one card the session executes that no live anchor places — the
+    seat's scoped card, whose issue was filed only after (#9568) — gains the issue's anchor instead
+    of a twin minted beside it; several such cards are named and none guessed, and a card an anchor
+    already places keeps its issue, the claim minting the new work's own card. The declared card's
+    id and key are the claim's own, so a rerun after a lost answer is answered from the first rather
     than minting a second permanent card. A take is keyed by its invocation (`key`, the occurrence
     id), never by the pair: a take, the seat's disengagement and a take again are three commands,
     and a permanent key would replay the first and report a binding that no longer stands. Raises
     `Refused` or `Unsent`."""
-    resolving = issue_cards(live_cards(token), repo, n)
+    cards = list(live_cards(token))
+    resolving = issue_cards(cards, repo, n)
     mine = next((c for c in resolving if _executing(c, session)), None)
     if mine:
         return f"bound: {mine['id']}, the live card of {repo}#{n}, which {session} already executes"
@@ -947,6 +1006,18 @@ def claim_issue(session: str, token: str, repo: str, n: int, key: str = "") -> s
         ids = ", ".join(c["id"] for c in resolving)
         return refusal.refuse(f"not taken: {len(resolving)} live cards resolve {repo}#{n} ({ids})",
                               hand_to=("the brain", f"say: {session} token <t> which of {ids} do I take for {repo}#{n}"))
+    unplaced = [c for c in cards if _executing(c, session)
+                and not any(not a.get("ended") for a in c.get("anchors") or [])]
+    if len(unplaced) > 1:
+        ids = ", ".join(c["id"] for c in unplaced)
+        return refusal.refuse(f"not taken: {session} executes {len(unplaced)} live cards no anchor places ({ids}); "
+                              f"the issue's card among them is not for a take to guess",
+                              hand_to=("the brain", f"say: {session} token <t> which of {ids} does {repo}#{n} belong to"))
+    if unplaced:
+        held = unplaced[0]
+        write(f"/cards/{held['id']}/associations", {"anchor": {"verb": "resolves", "repo": repo, "n": n}},
+              _own_key("claim.anchor", session, held["id"], repo, str(n), key), SESSION_CARRIER, token)
+        return f"bound: {held['id']}, the card {session} executes, now resolving {repo}#{n}"
     card = _own_key("claim.card", session, repo, str(n))[:24]
     body = {"id": card, "name": f"{repo}#{n}",
             "anchors": [{"verb": "resolves", "repo": repo, "n": n}]}

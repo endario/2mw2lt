@@ -77,9 +77,10 @@ def main(argv: list[str]) -> int:
     # The brain's ruling, 2026-10-08: no separate claim primitive on Go. A branch claim is an
     # announce, whose doing defaults to the executed card's title; an issue claim engages the
     # session on the issue's one live card when no session executes it, names the card and its
-    # executor for the brain to place when one does, names the several and refuses, and only else
-    # declares a card with resolves:<n>, this session its executor, whose id is the claim's own so
-    # a rerun after a lost answer replays instead of minting a second card (#6846, #7188).
+    # executor for the brain to place when one does, names the several and refuses, anchors the
+    # one card the session executes that no anchor places (#9568), and only else declares a card
+    # with resolves:<n>, this session its executor, whose id is the claim's own so a rerun after a
+    # lost answer replays instead of minting a second card (#6846, #7188).
     import refusal as refusal_mod
     try:
         _, token = speaking_as(ws, session, flags)

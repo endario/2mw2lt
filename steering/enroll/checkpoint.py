@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""`checkpoint.py <session> <boundary> [--text-file <f>] [--learned-file <f.json>] [--mirror <url>]
-[--retry=<id>]`: record this session's checkpoint (doc 154 §5), on its stored token, with its text
-read from the file or stdin; the platform keeps the text (#6324). `--mirror` posts the same text as
-a comment on a pull request or issue, only once the platform has scanned and kept it.
+"""`checkpoint.py <session> <boundary> [--card <wire id>] [--text-file <f>] [--learned-file <f.json>]
+[--mirror <url>] [--retry=<id>]`: record this session's checkpoint (doc 154 §5), on its stored token,
+with its text read from the file or stdin; the platform keeps the text (#6324). `--mirror` posts the
+same text as a comment on a pull request or issue, only once the platform has scanned and kept it.
+`--card` names the card the checkpoint is of, by its wire id: the handover a launch takes a card
+over by (#9295), which the session must execute.
 
 `checkpoint.py <session> read [latest|<id>]` prints a checkpoint's text as this session is shown it.
 
@@ -29,7 +31,8 @@ from door import OCCURRENCE, occurrence  # noqa: E402
 _COMMENT = re.compile(r"https://github\.com/(?P<repo>[^/\s]+/[^/\s]+)/(?:issues|pull)/\d+#issuecomment-(?P<id>\d+)")
 _THREAD = re.compile(r"https://github\.com/(?P<repo>[^/\s]+/[^/\s]+)/(?P<kind>issues|pull)/(?P<n>\d+)")
 _CHECKPOINT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
-_NEEDS = {"--learned-file": "a JSON file", "--text-file": "a file", "--mirror": "a URL"}
+_CARD_ID = re.compile(r"[0-9a-f]{24}")
+_NEEDS = {"--learned-file": "a JSON file", "--text-file": "a file", "--mirror": "a URL", "--card": "a card's wire id"}
 _OPTIONS = tuple(_NEEDS)
 
 
@@ -113,6 +116,8 @@ def main(argv: list[str]) -> int:
     session, boundary, note = (*argv, None) if len(argv) == 2 else argv
     if boundary not in {"spec-settled", "unit-done", "context", "handover", "exit"}:
         return error("checkpoint", f"unknown checkpoint boundary {boundary!r}")
+    if "--card" in opts and not _CARD_ID.fullmatch(opts["--card"]):
+        return error("checkpoint", f"--card takes a card's 24-hex wire id: {opts['--card']}")
     learned: list = []
     if "--learned-file" in opts:
         try:
@@ -143,6 +148,8 @@ def main(argv: list[str]) -> int:
         if why := checkpoint_grammar.text_refusal(raw):
             return error("checkpoint", why)
         kept = {"text": raw.decode("utf-8")}
+    if "--card" in opts:
+        kept = {"card": opts["--card"], **kept}
     probe = {"id": retry or "0" * 32, "boundary": boundary, **kept, "learned": learned}
     parsed = checkpoint_grammar.parse(f"checkpoint: {session} token <t> json {json.dumps(probe)}")
     if isinstance(parsed, str):

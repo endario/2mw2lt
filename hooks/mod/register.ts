@@ -916,7 +916,8 @@ async function runCheckpoint($: EngineInterface, args: Record<string, unknown>):
       }
     }
     return answer(await resending($, ['python3', script($, 'checkpoint.py'), session, call.boundary,
-      ...(learned ? ['--learned-file', learned] : []), ...(call.mirror !== undefined ? ['--mirror', call.mirror] : [])], call.text))
+      ...(learned ? ['--learned-file', learned] : []), ...(call.mirror !== undefined ? ['--mirror', call.mirror] : []),
+      ...(call.card !== undefined ? ['--card', call.card] : [])], call.text))
   } finally {
     if (learned) await runOwn($, ['rm', '-f', learned]).catch(() => undefined)
   }

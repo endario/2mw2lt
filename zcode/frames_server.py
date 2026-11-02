@@ -84,6 +84,8 @@ class Server:
         self.hold_state: dict = {"state": "starting"}
         self.child_gen = 0
         self.stopping = threading.Event()
+        self.first_start_began = threading.Event()   # keep_starting has taken up its first attempt
+        self.first_start_done = threading.Event()    # that attempt concluded, however it ended
         self._last_claim = 0.0
         self._last_session_ask = 0.0
         self._last_connect_at: float | None = None
@@ -473,9 +475,25 @@ def handle(method: str, params: dict, server: Server) -> dict:
             return {"content": [{"type": "text", "text": f"no tool {params.get('name')}"}],
                     "isError": True}
         if server.psession is None:
+            # A call can outrun the first start — the runtime starts this server with the
+            # session, before any hook has published the binding, and a per-call server loses
+            # that race on every call (#9559) — so wait for that one attempt within a bound
+            # rather than refusing it outright, and let the refusal below name what the start
+            # found, never a bare None (#9470). The first wait spans the thread-start window
+            # too; what never began never concludes, so only a begun attempt is waited on.
+            if server.first_start_began.wait(START_BEGAN_WAIT_S):
+                server.first_start_done.wait(FIRST_START_WAIT_S)
+        if server.psession is None:
+            why = server.binding_error
+            if why is None and server.first_start_began.is_set():
+                why = ("the binding had not resolved yet: the first start was still running; "
+                       "call frames again, and restart the session if it keeps refusing")
+            elif why is None:
+                why = ("the binding was never resolved: this server never began its start, as a "
+                       "session's own always does — call frames again, and restart the session "
+                       "if it keeps refusing")
             return {"content": [{"type": "text", "text": f"refused: this plugin serves no "
-                                                        f"zcode session here: "
-                                                        f"{server.binding_error}"}]}
+                                                        f"zcode session here: {why}"}]}
         return {"content": [{"type": "text", "text": server.frames()}]}
     raise ValueError(method)
 
@@ -486,10 +504,23 @@ def handle(method: str, params: dict, server: Server) -> dict:
 # retried until a hook has run.
 RETRY_S = 3.0
 
+# How long a frames call first waits for keep_starting to take up the first attempt: main()
+# starts that thread before it serves stdin, so this spans a loaded machine's thread start, and
+# only a server built without the thread (a hand-built one, in a test) waits it out (#9559).
+START_BEGAN_WAIT_S = 1.0
+
+# How long a frames call waits for that first start to conclude before refusing (#9559): the
+# clients' own subprocess timeout, within which a start that can conclude does — the ancestry
+# walk's `ps` calls and the workspace probe are timed to less.
+FIRST_START_WAIT_S = 10.0
+
 
 def keep_starting(server: Server) -> None:
     """Start the server, retrying until a binding resolves or the session ends. A start that
-    raises (an unreadable binding, a claim it cannot write) is retried like one that refused."""
+    raises (an unreadable binding, a claim it cannot write) is retried like one that refused.
+    The first attempt is marked done however it ends, so a frames call that arrived during it
+    waits for it instead of refusing the race (#9559)."""
+    server.first_start_began.set()
     while True:
         try:
             if server.start():
@@ -497,6 +528,8 @@ def keep_starting(server: Server) -> None:
         except Exception as why:
             server.binding_error = f"the binding could not be read or claimed: {why}"
             server.broke("the start", why)
+        finally:
+            server.first_start_done.set()
         if server.stopping.wait(RETRY_S):
             return
 

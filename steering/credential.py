@@ -413,7 +413,12 @@ def _native_current(p: Path, d: dict, clock) -> str:
             if d.get("credential") and d.get("exp", 0) > clock():
                 return d["credential"]
             raise NoCredential(f"{d['refused']}; its renewal stopped there: enrol this machine on the workspace again")
-        holder = _holder()
+        exchanging = not d.get("credential")
+        # A renewal states no hardware, so it measures none (doc 143 §4): the credential it carries
+        # names the machine already, and the anchor is asked only where its answer is stated, at the
+        # exchange — a measurement a cage's own network namespace cannot make of a placeholder
+        # board's ports, where the host's PCI ports are invisible to the ioctl that reads them (#9210).
+        holder = _holder() if exchanging else {"os_node": _own_os_node()}
         if d.get("os_node") and holder["os_node"] != d["os_node"]:
             raise NoCredential(f"this OS user's node is {holder['os_node'] or 'unreadable'}, and the enrolment "
                                f"is bound to {d['os_node']}: enrol again")
@@ -421,7 +426,6 @@ def _native_current(p: Path, d: dict, clock) -> str:
             import uuid
             d["pending"] = str(uuid.uuid4())
             _write(p, d)
-        exchanging = not d.get("credential")
         path = f"{routes(d['door'])}/api/v1/" + ("device-exchanges" if exchanging else "machine-renewals")
         try:
             status, got = _native_post(d["origin"], path, holder if exchanging else {},

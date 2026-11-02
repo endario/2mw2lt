@@ -173,6 +173,9 @@ def _settled_refusal(e) -> str:
                                           "where a merge adapted the passed change: a round on that adaptation alone"),
                                          ("gate: review <repo> <branch> pr <n> token <t>",
                                           "to commission a round on this head, and carry its pass once it ships")])
+    if e.title:
+        # The server's own sentence where its catalogue carries one (doc 206 §6).
+        return str(e)
     return refusal.refuse(str(e), send="/2mw2lt:gate")
 
 

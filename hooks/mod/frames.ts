@@ -298,7 +298,7 @@ export const SEAT_TOOLS: Record<string, SeatTool> = {
   answer: {
     description: 'Seat only: answer a snapshot or a regroup by its episode once you have reviewed it: acted, saying what you did, or considered, saying why nothing needed you. This is how a snapshot is answered, never by speaking to the owner.',
     fields: { episode: word('The episode the signal carries.'), verdict: { type: 'string', description: 'What you did with it.', enum: ['acted', 'considered'] },
-              because: { type: 'string', description: 'What you did, or why nothing needed you, in at most 500 characters.', max: 500 } },
+              because: { type: 'string', description: 'What you did, or why nothing needed you, in at most 2000 characters.', max: 2000 } },
     required: ['episode', 'verdict', 'because'],
     build: a => ({ client: 'say', stdin: `answer: token @lease ${str(a, 'episode')} ${str(a, 'verdict')} because ${str(a, 'because')}` }),
   },
@@ -396,19 +396,21 @@ export const CHECKPOINT_TOOL = {
                  items: { type: 'object', properties: { text: { type: 'string' }, scope: { type: 'array', items: { type: 'string' } } },
                           required: ['text', 'scope'], additionalProperties: false } },
       mirror: { type: 'string', description: 'A GitHub pull request or issue URL to post the note on.' },
+      card: { type: 'string', pattern: '^[0-9a-f]{24}$', description: "The card this checkpoint is of, by its 24-hex wire id; the session must execute the card. A handover naming its card is what a launch onto the card takes it over by." },
     },
     required: ['boundary', 'text'],
     additionalProperties: false,
   },
 }
-export function checkpointCall(args: Record<string, unknown>): { boundary: string; text: string; learned?: string; mirror?: string } | { refused: string } {
-  for (const k of Object.keys(args)) if (!['boundary', 'text', 'learned', 'mirror'].includes(k)) return { refused: `checkpoint takes no ${k}` }
-  const { boundary, text, learned, mirror } = args
+export function checkpointCall(args: Record<string, unknown>): { boundary: string; text: string; learned?: string; mirror?: string; card?: string } | { refused: string } {
+  for (const k of Object.keys(args)) if (!['boundary', 'text', 'learned', 'mirror', 'card'].includes(k)) return { refused: `checkpoint takes no ${k}` }
+  const { boundary, text, learned, mirror, card } = args
   if (typeof boundary !== 'string' || !CHECKPOINT_BOUNDARIES.includes(boundary)) return { refused: `boundary is one of ${CHECKPOINT_BOUNDARIES.join(', ')}` }
   if (typeof text !== 'string' || text === '') return { refused: 'text is required' }
   if (learned !== undefined && !Array.isArray(learned)) return { refused: 'learned is a list' }
   if (mirror !== undefined && (typeof mirror !== 'string' || mirror === '')) return { refused: 'mirror is a URL' }
-  return { boundary, text, ...(learned !== undefined ? { learned: JSON.stringify(learned) } : {}), ...(mirror !== undefined ? { mirror } : {}) }
+  if (card !== undefined && (typeof card !== 'string' || !/^[0-9a-f]{24}$/.test(card))) return { refused: 'card is the 24-hex wire id of the card the checkpoint names' }
+  return { boundary, text, ...(learned !== undefined ? { learned: JSON.stringify(learned) } : {}), ...(mirror !== undefined ? { mirror } : {}), ...(card !== undefined ? { card } : {}) }
 }
 
 // The brain's timers as typed tools (#8143): every session's own — the seat's or a worker's — over

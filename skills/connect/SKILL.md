@@ -166,10 +166,15 @@ A `say` from `warm <id>` is the platform refreshing your prompt cache while the 
 End the turn without a word.
 
 When work needs a card and has neither an owning issue nor a gate yet, declare it, triaged. For an
-issue you took with `taking.py`, this joins the card that took it and sets its triage:
+issue you took with `taking.py`, this joins the card that took it and sets its triage — whether or
+not the issue is named again, for a declaration joins the one live card its session executes
+(#7634, #9509). A live card also gains an anchor after the fact (#9568): a take joins the one card
+its session executes that no anchor places, and a declaration naming that card with `--card` adds
+the `resolves:` or `advances:` anchors it lacks:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/declare.py" <session> "<work>" resolves:<issue> triage:<criticality>,<size>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/declare.py" <session> --card <card> "<work>" advances:<issue> triage:<criticality>,<size>
 ```
 
 Triage says how much breaks if the work is wrong (`critical`, `major`, `minor`, `trivial`) and how
@@ -400,10 +405,12 @@ migration renumber included, costs a round.
 Before compacting, handover or exit, put the work on its branch/issue and write a
 `## Checkpoint` note to a file. The note names state, next steps, contingencies, agreements and
 links; `/2mw2lt:checkpoint` gives the full template. Hand it to the platform, which keeps it and
-hands its text to whoever the brain directs to take over; it answers `checkpointed: <checkpoint id>`:
+hands its text to whoever the brain directs to take over; it answers `checkpointed: <checkpoint id>`.
+A handover that hands a card over names it — `--card <its wire id>` — for that is what a launch
+onto the card takes it over by (#9295):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <session> handover --text-file <note-file>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <session> handover --text-file <note-file> [--card <wire id>]
 ```
 
 A harness whose shell has no `CLAUDE_PLUGIN_ROOT` — Codex, and every harness besides Claude
@@ -411,7 +418,7 @@ Code — runs the same verb through the workspace's stable launcher, which its C
 with no dialog:
 
 ```bash
-python3 <workspace>/.claude/steering-launch.py exec checkpoint <session> handover --text-file <note-file>
+python3 <workspace>/.claude/steering-launch.py exec checkpoint <session> handover --text-file <note-file> [--card <wire id>]
 ```
 
 When your card's plan will hand tasks to other builders, as its brief names them, write it before

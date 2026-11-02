@@ -93,6 +93,11 @@ as your own directive, under the line `from: session <you>, steward of goal <goa
 seat's bounds`. A brief names commands, never intentions, as the brain's do: write
 `/2mw2lt:gate`, `taking.py <session> <issue>` and `/2mw2lt:disconnect`, not "get it reviewed".
 
+A launch onto a covered card you execute yourself is your handover of it
+(#9295): a session that declared a card
+executes it, and your launch onto it needs no checkpoint — the session the launch starts takes the
+card as its executor.
+
 Refusals name the bound you met:
 
 | Refusal | Meaning |
@@ -102,6 +107,7 @@ Refusals name the bound you met:
 | `stewardship-vendor` | the vendor has no account in your bounds; name one that has, or ask the brain to widen the accounts |
 | `stewardship-concurrency-full` | your concurrency is taken, by sessions running or launches still waiting; wait for one to end, withdraw a launch still waiting, or retire a session your launches started |
 | `stewardship-not-covering` | the card, session, goal or launch is not this goal's |
+| `launch-card-executed` | the card is executed by a session still at work on it; your own covered card excepted, where the launch hands it over |
 | `stewardship-ended`, `stewardship-epoch-stale` | your stewardship no longer stands; stop and tell the brain |
 
 ## Retier a card

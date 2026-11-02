@@ -1834,10 +1834,10 @@ test('the checkpoint\'s text reaches checkpoint.py byte for byte on stdin, the l
   await w.clock.settle()
   const text = '## Checkpoint\n\nBoundary: `context` — session s1.\n\n**Next.**\n1. `rm -rf "$x"`; ünïcode, trailing spaces   \n\n'
   const learned = [{ text: 'Read the plan first.', scope: ['steering/'] }]
-  const r = await $.tool.call({ tool: CHECKPOINT_TOOL_NAME, boundary: 'context', text, learned, mirror: 'https://github.com/example-org/example-repo/pull/1' } as never)
+  const r = await $.tool.call({ tool: CHECKPOINT_TOOL_NAME, boundary: 'context', text, learned, mirror: 'https://github.com/example-org/example-repo/pull/1', card: '1b6f6a8e3c1d4f7e9a2b5d4c' } as never)
   expect((r as { result?: string }).result).toBe('checkpointed: 7d1c0f2e-0000-4000-8000-000000000001 context\nid 0123456789abcdef0123')
   expect(checkpointRuns(w)).toEqual([['python3', `${w.root}/steering/enroll/checkpoint.py`, 's1', 'context',
-    '--learned-file', '/tmp/tmp.lessons', '--mirror', 'https://github.com/example-org/example-repo/pull/1']])
+    '--learned-file', '/tmp/tmp.lessons', '--mirror', 'https://github.com/example-org/example-repo/pull/1', '--card', '1b6f6a8e3c1d4f7e9a2b5d4c']])
   expect(w.stdins).toEqual([text])
   expect(w.writes).toContainEqual({ path: '/tmp/tmp.lessons', text: JSON.stringify(learned) })
   const at = (argv: string[]) => w.runs.findIndex(run => run.join(' ') === argv.join(' '))
@@ -1865,6 +1865,8 @@ test('a checkpoint from a session not connected, or at no known boundary, runs n
   await w.clock.settle()
   const odd = await $.tool.call({ tool: CHECKPOINT_TOOL_NAME, boundary: '--retry=x', text: 'note' } as never)
   expect(String((odd as { deny?: string }).deny)).toContain('boundary is one of')
+  const badCard = await $.tool.call({ tool: CHECKPOINT_TOOL_NAME, boundary: 'exit', text: 'note', card: 'card-9295' } as never)
+  expect(String((badCard as { deny?: string }).deny)).toContain('card is the 24-hex wire id')
   w.enrolled = false
   const unconnected = await $.tool.call({ tool: CHECKPOINT_TOOL_NAME, boundary: 'exit', text: 'note' } as never)
   expect(String((unconnected as { deny?: string }).deny)).toContain('/2mw2lt:connect')
@@ -1970,18 +1972,19 @@ test('seatCall: word fields are one word, enums hold, and unknown fields are ref
 })
 
 // A snapshot is answered by its episode, never by speaking to the owner (the owner's ruling, 2026-10-22).
-// The why is bounded at the tool, at the 500 characters the door's own validation holds, so a call
-// over it is refused here naming because, never sent to come back as the wire's disposition (#9362).
+// The why is bounded at the tool, at the 2000 characters the door's own validation holds, so a call
+// over it is refused here naming because, never sent to come back as the wire's disposition (#9362,
+// re-tested: 500 refused the seat's real review paragraph).
 test('seatCall: a snapshot is answered by its episode, acted or considered, with why', async () => {
   expect(seatCall('answer', { episode: '0b5f3c1e-4a2d-4c8e-9f10-2a3b4c5d6e7f', verdict: 'considered', because: 'nothing moved' }))
     .toEqual({ client: 'say', stdin: 'answer: token @lease 0b5f3c1e-4a2d-4c8e-9f10-2a3b4c5d6e7f considered because nothing moved' })
   expect(seatCall('answer', { episode: 'e1', verdict: 'noop', because: 'x' })).toEqual({ refused: 'verdict is one of acted, considered' })
   expect(seatCall('answer', { episode: 'e1', verdict: 'acted' })).toEqual({ refused: 'because is required' })
-  expect(seatCall('answer', { episode: 'e1', verdict: 'acted', because: 'x'.repeat(500) }).stdin)
-    .toBe('answer: token @lease e1 acted because ' + 'x'.repeat(500))
-  expect(seatCall('answer', { episode: 'e1', verdict: 'acted', because: 'x'.repeat(501) }))
-    .toEqual({ refused: 'because is at most 500 characters' })
-  expect(seatSchema('answer').properties.because).toMatchObject({ maxLength: 500 })
+  expect(seatCall('answer', { episode: 'e1', verdict: 'acted', because: 'x'.repeat(2000) }).stdin)
+    .toBe('answer: token @lease e1 acted because ' + 'x'.repeat(2000))
+  expect(seatCall('answer', { episode: 'e1', verdict: 'acted', because: 'x'.repeat(2001) }))
+    .toEqual({ refused: 'because is at most 2000 characters' })
+  expect(seatSchema('answer').properties.because).toMatchObject({ maxLength: 2000 })
 })
 
 test('seatCall: an out-of-band answer names the row, where it was given, and the words', async () => {

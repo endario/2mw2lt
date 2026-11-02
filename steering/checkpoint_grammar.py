@@ -18,7 +18,8 @@ _LINE = re.compile(r"\Acheckpoint:\s*(?P<session>\S+)\s+token\s+\S+\s+json\s+(?P
 _NOTE = re.compile(r"https://github\.com/[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]+")
 _SHA = re.compile(r"[0-9a-f]{64}")
 _ID = re.compile(r"[A-Za-z0-9-]{16,64}")  # the client's occurrence id (`door.OCCURRENCE`)
-_FIELDS = {"id", "boundary", "text", "note", "note_sha256", "learned"}
+_CARD = re.compile(r"[0-9a-f]{24}")  # the card a handover names, by its wire id (Go's `ValidCardID`)
+_FIELDS = {"id", "boundary", "card", "text", "note", "note_sha256", "learned"}
 
 
 def text_refusal(raw: bytes) -> str | None:
@@ -58,6 +59,9 @@ def parse(text: str) -> dict | str:
         return "id is 16 to 64 letters, digits or dashes"
     if body.get("boundary") not in BOUNDARIES:
         return f"boundary is one of {', '.join(BOUNDARIES)}"
+    card = body.get("card")
+    if card is not None and (not isinstance(card, str) or not _CARD.fullmatch(card)):
+        return "card is the 24-hex wire id of the card the checkpoint names"
     text, note = body.get("text"), body.get("note")
     if text is not None:
         # The platform keeps the text itself, and a mirror of it is posted only after, so it names no note.
@@ -82,5 +86,5 @@ def parse(text: str) -> dict | str:
             dropped.append(n)
         else:
             kept.append({"text": item["text"], "scope": item["scope"]})
-    return {"session": m["session"], "id": body["id"], "boundary": body["boundary"], "text": text, "note": note,
+    return {"session": m["session"], "id": body["id"], "boundary": body["boundary"], "card": card, "text": text, "note": note,
             "note_sha256": body.get("note_sha256"), "learned": kept, "dropped": dropped}

@@ -59,17 +59,20 @@ learned=$(mktemp)
 cat > "$learned" <<'JSON'
 [{"text": "<rule, and the mistake it prevents>", "scope": ["steering/"]}]
 JSON
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <your session> <boundary> --text-file <note file> [--learned-file "$learned"] [--mirror <pull request or issue URL>]
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <your session> <boundary> --text-file <note file> [--card <card's wire id>] [--learned-file "$learned"] [--mirror <pull request or issue URL>]
 ```
 
+`--card` names the card the checkpoint is of, by its wire id, and the session must execute the card:
+a `handover` naming its card is what a launch onto the card takes it over by (#9295).
+
 A Claude Code session with the plugin hands the note over with the `mcp__2mw2lt__checkpoint` tool
-(`{boundary, text, learned?, mirror?}`) instead of this command. A session whose shell has no
+(`{boundary, text, card?, learned?, mirror?}`) instead of this command. A session whose shell has no
 `CLAUDE_PLUGIN_ROOT` — Codex and every harness besides Claude Code — runs the same verb through the
 workspace's stable launcher, the one path every harness shares and a Codex session's grant allows
 without a dialog:
 
 ```bash
-python3 <workspace>/.claude/steering-launch.py exec checkpoint <your session> <boundary> --text-file <note file> [--learned-file "$learned"] [--mirror <pull request or issue URL>]
+python3 <workspace>/.claude/steering-launch.py exec checkpoint <your session> <boundary> --text-file <note file> [--card <card's wire id>] [--learned-file "$learned"] [--mirror <pull request or issue URL>]
 ```
 
 The platform scans the note for credentials and keeps it for the workspace's retention.

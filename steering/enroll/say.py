@@ -69,7 +69,9 @@ def _on_go(session: str, token: str, this: str, text: str, target: str | None, i
             print(refusal.reconnect(f"{session}'s token is not valid: {e}"))
             return 1
         if session_routes.settled(e):
-            print(refusal.use("say", str(e)))
+            # The server's own sentence where its catalogue carries one; the verb's grammar only
+            # where none arrived (doc 206 §6).
+            print(e if e.title else refusal.use("say", str(e)))
             return 1
         print(refusal.retry(str(e)))
     except session_routes.Unsent as e:

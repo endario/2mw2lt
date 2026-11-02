@@ -235,9 +235,22 @@ hear first — see [Read the blocked-on line, the ledger and escalations](#read-
   is the usual cause.
 - **`machine-overloaded`**, a signal: a machine's five-minute load, per core, has stayed at or past
   its overload threshold for a sustained spell (`signals.machine_overloaded.*`, 15 minutes by
-  default), once per spell. It names the load, the threshold, and the busiest processes, each with
-  the session it came from where its command line carried a marker (`sess_<id>`). End what loads it
-  before its sessions starve: a session's stray load-test shells are the usual first check.
+  default), once per spell. It names the load, the threshold, and the busiest processes in two
+  fields: `processes`, each with the session its command line marker (`sess_<id>`) named, and
+  `unattributed`, the share no marker named — which may still be a session's, since only ZCode's
+  command lines carry the marker. End what loads it before its sessions starve: the marked
+  sessions' strays first, then look through the fleet's sessions for the unattributed share before
+  looking at the host itself.
+- **`machine-launch-failing`**, a signal: a machine's launches keep failing the same way — 3 of one
+  kind in a row inside an hour by default (`signals.machine_launch_failing.*`), once per spell and
+  re-told at most once an hour. Its facts name the machine, `failures` (the count), `kind` in plain
+  words and the `vendors` involved; the refusals' own words stay on the attempts, where the launch's
+  story reads them. Placement already tries the machine last for new launches until one lands there
+  or its census stops offering what fails, so your move is the cause: read the machine's agent log
+  for the run, then ssh the host for what the refusals name (the vendor's endpoint, its proxy, a
+  login). A launch landing there, a failure of another kind or the hour passing ends the spell. A
+  machine whose census withholds a vendor's accounts on its failed endpoint probe raises the owner's
+  `machine health` row on Needs You instead, which closes itself when the probe passes.
 - **`card-closed`**, a signal: a live card's work landed, or every issue it resolves was closed with no
   branch or closing pull request, an hour ago (`signals.card_closed.*`), once per closing. Routed
   `escalate`, the default, its executor was told at 15 minutes to say done and record its unit-done,
@@ -291,6 +304,10 @@ Answer each snapshot once you have reviewed it, by the `episode` it carries, wit
 answer: token @lease <episode> acted because <what you did>
 answer: token @lease <episode> considered because <why nothing needed you>
 ```
+
+The `because` is nonempty and at most 2000 characters — a review paragraph, not a
+line. Over the bound the door refuses `answer-disposition-invalid`, and the lease
+names it on `because` with the limit.
 
 Choosing not to act is an answer, once you have swept the fleet's sessions as
 [Sweep the fleet's sessions](#sweep-the-fleets-sessions) says. The platform records who answered and when, never whether the

@@ -470,6 +470,8 @@ def _go_answer(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
     except session_routes.Refused as e:
         if (stale := session_routes.outdated(e)) is not None:
             return 1, stale, False
+        if e.code == "answer-disposition-invalid":
+            return 1, refusal.use("answer", "because must be 1 to 2000 characters"), False
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):

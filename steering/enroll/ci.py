@@ -9,6 +9,10 @@ change touches you spot-run where you sit (a test file, a `-run` pattern, one gu
 takes the parts too wide for that and the guards your OS cannot run. `status` reads a run once;
 `log` prints a failed run's output, cut to one guard's when `--guard` names it. Each goes through
 `gh` on this machine's own credential.
+
+A `run` whose wait registration's answer was lost is sent again under the id it printed, and the
+retry answers from the record: no second dispatch, the wait bound to the run the first send made
+(#9528).
 """
 from __future__ import annotations
 
@@ -20,10 +24,13 @@ import json
 import os
 import re
 import subprocess
+import time
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
+import atomic_file  # noqa: E402
+import requestlog  # noqa: E402
 from bind import Refused  # noqa: E402
 from connect import branch, head, speaker_flags, speaking_as  # noqa: E402
 from door import display_reply, occurrence, record, retry_args  # noqa: E402
@@ -67,6 +74,53 @@ def pushed_head(here: Path, on: str) -> str:
     """The commit this checkout last saw its branch pushed to, or ""."""
     return subprocess.run(["git", "-C", str(here), "rev-parse", "-q", "--verify", f"refs/remotes/origin/{on}"],
                           capture_output=True, text=True, timeout=10).stdout.strip()
+
+
+# A keyed send's dispatch record outlives its answer by a week: long enough for every retry, short
+# enough that a busy workspace keeps no unbounded pile (#9528).
+DISPATCH_KEEP = 7 * 86400
+
+
+def dispatch_record(ws: Path, key: str) -> Path:
+    """One keyed send's dispatch record, named by its key's digest — the key itself is a bearer
+    secret, so what is written down is the digest, greppable across client and log (#1867)."""
+    return ws / ".claude" / "ci-dispatches" / f"{requestlog.of_key(key)}.json"
+
+
+def dispatched(ws: Path, key: str) -> dict | None:
+    """What the send under `key` dispatched, or None when no record of it stands. None means no
+    record, not that nothing was dispatched: the record follows the dispatch, so a crash between
+    the two, a swallowed write, a corrupt record or one past its week leaves the retry
+    dispatching afresh — #9528's known window, a run's width."""
+    try:
+        got = json.loads(dispatch_record(ws, key).read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(got, dict) or not (isinstance(got.get("run"), int) and not isinstance(got["run"], bool)
+                                         and got["run"] >= 1):
+        return None
+    for field in ("head", "branch", "repo", "named"):
+        if not isinstance(got.get(field), str) or not got[field]:
+            return None
+    return got
+
+
+def write_dispatch_record(ws: Path, key: str, record: dict) -> None:
+    """Publish what a send dispatched, before its wait is registered: a retry reads this instead
+    of dispatching again. Never raises — the send stands without its record; only its retry would
+    dispatch afresh, as it had to before the record was written (#9528)."""
+    try:
+        path = dispatch_record(ws, key)
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        atomic_file.write_atomic(path, json.dumps(record), 0o600)
+        for old in path.parent.glob("*.json"):
+            try:
+                if old != path and time.time() - old.stat().st_mtime > DISPATCH_KEEP:
+                    old.unlink()
+            except OSError:
+                pass
+    except OSError:
+        pass
 
 
 def parse_run(argv: list[str]) -> dict | str:
@@ -135,63 +189,80 @@ def main(argv: list[str]) -> int:
 
 
 def run(ws: Path, here: Path, repo: str, session: str, flags, picked: dict, retry_id: str | None) -> int:
-    """Dispatch the run on this checkout's pushed head and register its wait."""
+    """Dispatch the run on this checkout's pushed head and register its wait. A retry under the
+    id a send printed is answered from the record: it dispatches nothing again, and its wait
+    binds to the run the first send made, which the door replays under the same key (#9528)."""
     import refusal
     import session_routes
-    if not (here / ".github/scripts/steering-scope.sh").is_file():
-        reason = "this repository has no .github/scripts/steering-scope.sh; pool CI dispatch requires the platform repository's steering workflow"
-        record("ci", reason, ws)
-        return 1
-    on, at = branch(here), head(here)
-    if not on or not at:
-        print("this checkout is on no branch, or no commit", file=sys.stderr)
-        return 1
-    pushed = pushed_head(here, on)
-    if pushed != at:
-        print(f"{at[:12]} is not pushed: origin/{on} is at {pushed[:12] or 'nothing'}. "
-              "The pool runs what the branch holds; push, then run", file=sys.stderr)
-        return 1
-    shards, chunks = known_parts(here)
-    inputs = {"head": at, "session": session}
-    named = []
-    for part, known in (("shards", shards), ("chunks", chunks)):
-        asked = picked.get(part, "none")
-        unknown = [n for n in asked.split(",") if n not in ("all", "none") and n not in known]
-        if unknown:
-            print(f"no such {part[:-1]}: {', '.join(unknown)}; this checkout's are {', '.join(known)}", file=sys.stderr)
-            return 1
-        inputs[part] = asked
-        named.append(f"{part} {asked}")
-    if picked.get("conformance") == "true":
-        inputs["conformance"] = "true"
-        named.append("conformance")
-    else:
-        inputs["conformance"] = "false"
-    if picked.get("shards", "none") == "none" and picked.get("chunks", "none") == "none" and picked.get("conformance", "false") != "true":
-        print("nothing is selected: no shard, no chunk and no conformance", file=sys.stderr)
-        return 1
-    try:
-        session, token = speaking_as(ws, session, flags)
-    except Refused as why:
-        print(str(why), file=sys.stderr)
-        return 1
-    fields = ["-f", f"ref={on}", "-F", "return_run_details=true"]
-    for k, v in inputs.items():
-        fields += ["-f", f"inputs[{k}]={v}"]
-    p = gh("api", "-X", "POST", f"repos/{repo}/actions/workflows/{WORKFLOW}/dispatches", *fields)
-    try:
-        dispatched = json.loads(p.stdout) if p.returncode == 0 else {}
-    except ValueError:
-        dispatched = {}
-    run_id = dispatched.get("workflow_run_id")
-    if not isinstance(run_id, int) or run_id < 1:
-        why = p.stderr.strip() or "GitHub answered the dispatch without naming its run"
-        print(f"not dispatched: {why}", file=sys.stderr)
-        return 1
-    said = f"dispatched {run_id} on {at[:12]}: {', '.join(named)} {dispatched.get('html_url') or ''}".rstrip()
     key = retry_id or occurrence()
+    prior = dispatched(ws, key) if retry_id is not None else None
+    if prior is not None:
+        try:
+            session, token = speaking_as(ws, session, flags)
+        except Refused as why:
+            print(str(why), file=sys.stderr)
+            return 1
+        run_id = prior["run"]
+        said = (f"dispatched {prior['run']} on {prior['head'][:12]} by that id: {prior['named']} "
+                f"https://github.com/{prior['repo']}/actions/runs/{prior['run']}")
+        body = {"kind": "run", "repo": prior["repo"], "run": prior["run"],
+                "head": prior["head"], "branch": prior["branch"]}
+    else:
+        if not (here / ".github/scripts/steering-scope.sh").is_file():
+            reason = "this repository has no .github/scripts/steering-scope.sh; pool CI dispatch requires the platform repository's steering workflow"
+            record("ci", reason, ws)
+            return 1
+        on, at = branch(here), head(here)
+        if not on or not at:
+            print("this checkout is on no branch, or no commit", file=sys.stderr)
+            return 1
+        pushed = pushed_head(here, on)
+        if pushed != at:
+            print(f"{at[:12]} is not pushed: origin/{on} is at {pushed[:12] or 'nothing'}. "
+                  "The pool runs what the branch holds; push, then run", file=sys.stderr)
+            return 1
+        shards, chunks = known_parts(here)
+        inputs = {"head": at, "session": session}
+        named = []
+        for part, known in (("shards", shards), ("chunks", chunks)):
+            asked = picked.get(part, "none")
+            unknown = [n for n in asked.split(",") if n not in ("all", "none") and n not in known]
+            if unknown:
+                print(f"no such {part[:-1]}: {', '.join(unknown)}; this checkout's are {', '.join(known)}", file=sys.stderr)
+                return 1
+            inputs[part] = asked
+            named.append(f"{part} {asked}")
+        if picked.get("conformance") == "true":
+            inputs["conformance"] = "true"
+            named.append("conformance")
+        else:
+            inputs["conformance"] = "false"
+        if picked.get("shards", "none") == "none" and picked.get("chunks", "none") == "none" and picked.get("conformance", "false") != "true":
+            print("nothing is selected: no shard, no chunk and no conformance", file=sys.stderr)
+            return 1
+        try:
+            session, token = speaking_as(ws, session, flags)
+        except Refused as why:
+            print(str(why), file=sys.stderr)
+            return 1
+        fields = ["-f", f"ref={on}", "-F", "return_run_details=true"]
+        for k, v in inputs.items():
+            fields += ["-f", f"inputs[{k}]={v}"]
+        p = gh("api", "-X", "POST", f"repos/{repo}/actions/workflows/{WORKFLOW}/dispatches", *fields)
+        try:
+            answer = json.loads(p.stdout) if p.returncode == 0 else {}
+        except ValueError:
+            answer = {}
+        run_id = answer.get("workflow_run_id")
+        if not isinstance(run_id, int) or run_id < 1:
+            why = p.stderr.strip() or "GitHub answered the dispatch without naming its run"
+            print(f"not dispatched: {why}", file=sys.stderr)
+            return 1
+        write_dispatch_record(ws, key, {"run": run_id, "head": at, "branch": on, "repo": repo,
+                                        "named": ", ".join(named)})
+        said = f"dispatched {run_id} on {at[:12]}: {', '.join(named)} {answer.get('html_url') or ''}".rstrip()
+        body = {"kind": "run", "repo": repo, "run": run_id, "head": at, "branch": on}
     print(f"id {key}", file=sys.stderr)
-    body = {"kind": "run", "repo": repo, "run": run_id, "head": at, "branch": on}
     try:
         answer = session_routes.wait(session, token, key, body)
         print(f"{said}\nregistered: wait {session} {answer['id']}, told on your stream when it ends")

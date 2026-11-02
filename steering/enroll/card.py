@@ -145,7 +145,13 @@ def _on_go(held: dict, verb: str, rest: list[str], usage: str, retry: str | None
         if verb == "conclude" and e.code == "conclusion-over-branches":
             print(session_routes.over_branches(held["token"], fact["card"], rest))
             return 1
-        print(refusal.use("card", str(e)) if session_routes.settled(e) else refusal.retry(str(e)))
+        # A sentence the server carries is printed as its words: what was refused, what it found,
+        # what would succeed (doc 206 §6). The verb's grammar is the fallback a client composes
+        # only when the server sent none — an older server, or a code its catalogue does not row.
+        if e.title:
+            print(e)
+        else:
+            print(refusal.use("card", str(e)) if session_routes.settled(e) else refusal.retry(str(e)))
         if not session_routes.settled(e):
             print(f"if this write may have been made, resend it with --retry={key}", file=sys.stderr)
     if verb == "scope":

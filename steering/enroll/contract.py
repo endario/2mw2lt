@@ -3257,6 +3257,29 @@ FactsPage = typing.TypedDict("FactsPage", {
     "exhausted": "bool",
 })
 
+# FleetHoldBody is what the desk holds a workspace's fleet with: a why, or none.
+FleetHoldBody = typing.TypedDict("FleetHoldBody", {
+    "why": "str",
+})
+
+# FleetHold is a workspace's fleet hold as it stands: held while Occurrence names one, with who
+# holds it and why. Name is derived at read, so a renamed handle cannot stale a held banner.
+FleetHold = typing.TypedDict("FleetHold", {
+    "held": "bool",
+    "holder": "typing.NotRequired[str]",
+    "name": "typing.NotRequired[str]",
+    "why": "typing.NotRequired[str]",
+    "held_at": "typing.NotRequired[str | None]",
+    "occurrence": "typing.NotRequired[str]",
+})
+
+# FleetHoldRelease is the desk letting a workspace's fleet go: whether this call released it,
+# and how many bodies' held screens it replaced.
+FleetHoldRelease = typing.TypedDict("FleetHoldRelease", {
+    "released": "bool",
+    "told": "int",
+})
+
 # ForemanBenchBody asks for one bench run of a route: the harness a model call runs through, and the
 # model, as a model call names them.
 ForemanBenchBody = typing.TypedDict("ForemanBenchBody", {
@@ -6189,7 +6212,8 @@ SettingBody = typing.TypedDict("SettingBody", {
 })
 
 # SignalAnswerBody is the seat's answer to a snapshot it was told: whether it acted on it or
-# considered it and chose not to, and a short why. Choosing not to act is an answer.
+# considered it and chose not to, and why, at most 2000 characters. Choosing not to act is an
+# answer; the why runs as long as a review paragraph.
 SignalAnswerBody = typing.TypedDict("SignalAnswerBody", {
     "verdict": "str",
     "disposition": "str",
@@ -7901,6 +7925,8 @@ CensusRuntime = typing.TypedDict("CensusRuntime", {
     "runtime_id": "str",
     "directory": "typing.NotRequired[str]",
     "claimed": "typing.NotRequired[bool]",
+    "headless": "typing.NotRequired[bool]",
+    "started": "typing.NotRequired[str | None]",
 })
 
 # WorkerCensusBody is the native census body before admission binds its uplink. Interactive is the
@@ -7956,10 +7982,12 @@ LauncherAccount = typing.TypedDict("LauncherAccount", {
 
 # LauncherNoAccount is a launcher of the machine's that offers no account, with its one cause as
 # the machine's probe worded it (#6793): a machine-local fact beside the account-keyed offer,
-# which keys nothing and composes with nothing across machines.
+# which keys nothing and composes with nothing across machines. Vendor names the vendor whose
+# endpoint the cause is, when it is a vendor's probe that withheld the launcher, else it is empty.
 LauncherNoAccount = typing.TypedDict("LauncherNoAccount", {
     "launcher": "str",
     "cause": "str",
+    "vendor": "typing.NotRequired[str]",
 })
 
 # HarnessUnlaunchable is a harness its machine cannot start now, with the first step it lacks
@@ -8085,6 +8113,9 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/dispatches",
     "GET /w/{workspace}/api/v1/events",
     "GET /w/{workspace}/api/v1/facts",
+    "DELETE /w/{workspace}/api/v1/fleet-hold",
+    "GET /w/{workspace}/api/v1/fleet-hold",
+    "POST /w/{workspace}/api/v1/fleet-hold",
     "GET /w/{workspace}/api/v1/foreman",
     "GET /w/{workspace}/api/v1/foreman/activity",
     "POST /w/{workspace}/api/v1/foreman/bench",
