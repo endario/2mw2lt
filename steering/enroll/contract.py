@@ -5443,6 +5443,9 @@ ReleaseRangeDTO = typing.TypedDict("ReleaseRangeDTO", {
 # commit and branch; Review, its newest review round that was not cancelled; Passed, whether a
 # passing review is published on the head it is open at; QueuedAt, when it joined the merge queue
 # on that head, while it waits there; LeftQueueAt, when it left the queue on that head unmerged.
+# Draft says it is a draft. QueuePosition is its place in line as the queue was last read, while it
+# waits; QueueState its entry's state as GitHub's MergeQueueEntryState names it, lowercased, as last
+# read on that stay; LeftReason why it left, as the dequeue said (failed_checks, manual, ...).
 ReleasePullDTO = typing.TypedDict("ReleasePullDTO", {
     "repository": "str",
     "number": "int",
@@ -5456,6 +5459,10 @@ ReleasePullDTO = typing.TypedDict("ReleasePullDTO", {
     "passed": "typing.NotRequired[bool]",
     "queued_at": "typing.NotRequired[str | None]",
     "left_queue_at": "typing.NotRequired[str | None]",
+    "draft": "typing.NotRequired[bool]",
+    "queue_position": "typing.NotRequired[int]",
+    "queue_state": "typing.NotRequired[str]",
+    "left_reason": "typing.NotRequired[str]",
 })
 
 RoomAuthor = typing.TypedDict("RoomAuthor", {
