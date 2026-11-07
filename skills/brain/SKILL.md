@@ -233,14 +233,16 @@ hear first — see [Read the blocked-on line, the ledger and escalations](#read-
   (`signals.machine_disk_low.*`), told again as the free share halves past that, and each day it
   stays low. It names what is free of what. Have it freed before builds there fail: a build cache
   is the usual cause.
-- **`machine-overloaded`**, a signal: a machine's five-minute load, per core, has stayed at or past
-  its overload threshold for a sustained spell (`signals.machine_overloaded.*`, 15 minutes by
-  default), once per spell. It names the load, the threshold, and the busiest processes in two
-  fields: `processes`, each with the session its command line marker (`sess_<id>`) named, and
-  `unattributed`, the share no marker named — which may still be a session's, since only ZCode's
-  command lines carry the marker. End what loads it before its sessions starve: the marked
-  sessions' strays first, then look through the fleet's sessions for the unattributed share before
-  looking at the host itself.
+- **`machine-overloaded`**, a signal: a machine running our sessions or gate runs has stayed
+  congested for a sustained spell (`signals.machine_overloaded.*`, 15 minutes by default), once per
+  spell. Congested is judged apart from placement's `overload_cpu`: by the kernel's five-minute CPU
+  pressure where the host reports it (40% by default), else by five-minute load per core (150%). It
+  names the basis and threshold, the load, the work it holds (`workers`, absent when its census
+  could not say, and `gate_runs`), and the busiest processes in two fields: `processes`, each with
+  the session its command line marker (`sess_<id>`) named or the `commission` of the live gate run it
+  belongs to, and `unattributed`, the share neither named — which may still be a session's, since only ZCode's command lines carry the marker. End
+  what congests it before its work starves: the marked sessions' strays first, then look through the
+  fleet's sessions for the unattributed share before looking at the host itself.
 - **`machine-launch-failing`**, a signal: a machine's launches keep failing the same way — 3 of one
   kind in a row inside an hour by default (`signals.machine_launch_failing.*`), once per spell and
   re-told at most once an hour. Its facts name the machine, `failures` (the count), `kind` in plain
