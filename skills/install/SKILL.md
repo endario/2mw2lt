@@ -254,7 +254,15 @@ next, in one pass:
 3. **The plugin**, at user scope:
    `claude plugin marketplace add endario/2mw2lt`, then
    `claude plugin install 2mw2lt@2mw2lt --scope user`.
-4. **The checkout**: `git clone https://github.com/<owner/name>` of the workspace's repository.
+4. **The checkout** of the workspace's repository, a partial clone that leaves the
+   documentation's images out of the working tree; the agent keeps it that way, and git fetches a
+   file left out when it is read:
+
+   ```bash
+   git clone --filter=blob:limit=256k --no-checkout https://github.com/<owner/name> && cd <name>
+   git sparse-checkout set --no-cone '/*' '!/documentation/**/*.png' '!/documentation/**/*.jpg' \
+     '!/documentation/**/*.webp' && git checkout main
+   ```
 5. **The engine**, as in [Run the engine](#1-run-the-engine), from that checkout with the plugin
    installed there. Its sign-in prints the page for the person's own browser.
 
