@@ -3361,6 +3361,7 @@ ForemanInvocation = typing.TypedDict("ForemanInvocation", {
     "refused": "typing.NotRequired[ForemanRefused | None]",
     "need": "typing.NotRequired[ForemanNeed | None]",
     "seat": "typing.NotRequired[ForemanSeatCase | None]",
+    "rule": "typing.NotRequired[typing.Literal[\"relaunch-unstarted\"]]",
     "at": "str",
 })
 
@@ -3454,7 +3455,7 @@ ForemanScope = typing.TypedDict("ForemanScope", {
 
 # ForemanSeatCase is one case the foreman hands to the seat, and why.
 ForemanSeatCase = typing.TypedDict("ForemanSeatCase", {
-    "case": "typing.Literal[\"wake\", \"interrupt\", \"relaunch\", \"classify-red\", \"drive-on-stuck\", \"credential\", \"migration-edit\", \"unbenched-signal\"]",
+    "case": "typing.Literal[\"wake\", \"interrupt\", \"relaunch\", \"classify-red\", \"drive-on-stuck\", \"credential\", \"migration-edit\", \"unbenched-signal\", \"relaunch-unstarted\"]",
     "why": "typing.Literal[\"not-carried\", \"unreliable\", \"ruled\", \"unbenched\"]",
 })
 
