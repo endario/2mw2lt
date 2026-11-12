@@ -2653,7 +2653,9 @@ CardBriefBudgetDTO = typing.TypedDict("CardBriefBudgetDTO", {
 # CheckoutCensus is one checkout as its machine last read it. A reported checkout is filed under
 # its repository's owner/name with its list of worktrees, empty or not; an unreadable one says why
 # and carries none, absent or null, since it is not the same answer as a checkout that holds none. WorktreesDropped counts those the machine
-# held and did not carry.
+# held and did not carry. LFS is whether the repository's HEAD sets filter=lfs in a .gitattributes
+# (#9701), null when its own probe failed: unknown, never unused, and an unreadable checkout
+# carries none.
 CheckoutCensus = typing.TypedDict("CheckoutCensus", {
     "state": "str",
     "repo": "str",
@@ -2661,6 +2663,7 @@ CheckoutCensus = typing.TypedDict("CheckoutCensus", {
     "why": "typing.NotRequired[str]",
     "worktrees": "list[CheckoutWorktree] | None",
     "worktrees_dropped": "typing.NotRequired[int]",
+    "lfs": "typing.NotRequired[bool | None]",
 })
 
 # CheckoutWorktree is one worktree. Dirty and OnOrigin are each null when their own probe failed,
@@ -4459,6 +4462,7 @@ FleetCheckout = typing.TypedDict("FleetCheckout", {
     "why": "typing.NotRequired[str]",
     "worktrees": "list[CheckoutWorktree] | None",
     "worktrees_dropped": "typing.NotRequired[int]",
+    "lfs": "typing.NotRequired[bool | None]",
     "registration": "str",
 })
 

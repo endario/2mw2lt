@@ -251,10 +251,15 @@ next, in one pass:
    account to sign in as. Then `gh auth setup-git`. Over ssh, `gh` cannot reach the macOS keychain
    and stores the token in plain text; tell the person, and that `gh auth login` again at the
    machine's own screen moves it into the keychain.
-3. **The plugin**, at user scope:
+3. **git-lfs**, where the workspace's repository tracks files in LFS: a machine without it checks
+   out pointer files with no warning, and a push from it names LFS objects it never uploads.
+   `brew install git-lfs` on macOS, `sudo apt-get install -y git-lfs` on Debian, then
+   `git lfs install --skip-repo`. The machine's census reports the tool's absence, and where the
+   repository uses LFS the machine's health row and placement say so until it is installed.
+4. **The plugin**, at user scope:
    `claude plugin marketplace add endario/2mw2lt`, then
    `claude plugin install 2mw2lt@2mw2lt --scope user`.
-4. **The checkout** of the workspace's repository, a partial clone that leaves the
+5. **The checkout** of the workspace's repository, a partial clone that leaves the
    documentation's images out of the working tree; the agent keeps it that way, and git fetches a
    file left out when it is read:
 
@@ -263,7 +268,7 @@ next, in one pass:
    git sparse-checkout set --no-cone '/*' '!/documentation/**/*.png' '!/documentation/**/*.jpg' \
      '!/documentation/**/*.webp' && git checkout main
    ```
-5. **The engine**, as in [Run the engine](#1-run-the-engine), from that checkout with the plugin
+6. **The engine**, as in [Run the engine](#1-run-the-engine), from that checkout with the plugin
    installed there. Its sign-in prints the page for the person's own browser.
 
 On macOS the agent is loaded into the login's background session when nobody of that login is at
