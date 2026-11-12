@@ -401,6 +401,22 @@ next change. Weigh deferring deferrable work and rehoming long sessions whose re
 crosses dear hours; for new work, launch by `floor <rarity>` rather than vendor plus model so
 placement can move work across vendors at peak.
 
+**Through a peak.** A frozen vendor is passed over (`peak`, or `peak-frozen` for a judge). When
+must-do work only that vendor can serve has to run, for example a gate whose only eligible judge is
+in peak, record a bounded override with its why
+(peak-is-not-for-throughput):
+
+```bash
+echo 'peak-override: token @lease <vendor> for builds|gates|both [until <time or duration>] because <why>' \
+  | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" say
+echo 'peak-override-end: token @lease <vendor> because <why>' | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" say
+```
+
+With no `until` the override ends at the vendor's known window's end, and it may last at most
+24 hours. It covers this workspace's work for that vendor, and recording it wakes every wait the
+peak holds. One override stands per vendor, and recording another replaces it. The owner records and
+ends overrides from the desk too, and the desk and your brief show whichever one stands.
+
 A system reminder from the `observe` hook saying you hold the seat and no stream is held for you
 is the daemon's:
 nothing sent to the brain reaches you until you do what it names.

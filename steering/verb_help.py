@@ -46,6 +46,8 @@ _RAW_FORMS = {
     "park": ["park: token <lease token> <session> [until <time or duration>] because <reason>"],
     "keep": ["keep: token <lease token> <session> [until <time or duration>] because <reason>"],
     "unkeep": ["unkeep: token <lease token> <session>"],
+    "peak-override": ["peak-override: token <lease token> <vendor> for builds|gates|both [until <time or duration>] because <why>"],
+    "peak-override-end": ["peak-override-end: token <lease token> <vendor> [because <why>]"],
     "answer": ["answer: token <lease token> <episode> acted because <why>", "answer: token <lease token> <episode> considered because <why>"],
     "regroup": ["regroup: token <lease token> because <why reconsider now>"],
     "intervened": ["intervened: token <lease token> <card> <cause> <why>"],
@@ -64,7 +66,7 @@ _RAW_FORMS = {
 
 _AUDIENCE = {
     **{verb: "session" for verb in ("announce", "blocked", "wait", "done", "recommend", "ask", "claim", "taking", "declare", "checkpoint", "holds", "enroll", "bind", "ack", "say", "detach", "gate")},
-    **{verb: "seat" for verb in ("note", "launch", "withdraw", "relay", "retire", "card", "effort", "wake", "control", "rehome", "park", "interrupt", "cancel", "keep", "unkeep", "answer", "regroup", "intervened", "roster", "lift", "authorship", "dispose", "promote", "out-of-band", "backlog")},
+    **{verb: "seat" for verb in ("note", "launch", "withdraw", "relay", "retire", "card", "effort", "wake", "control", "rehome", "park", "interrupt", "cancel", "keep", "unkeep", "peak-override", "peak-override-end", "answer", "regroup", "intervened", "roster", "lift", "authorship", "dispose", "promote", "out-of-band", "backlog")},
     "rebind": "operator",
     "supersede": "operator",
 }
@@ -105,6 +107,8 @@ _EXAMPLES = {
     "park": ["park: token <lease token> violet until 2h because a critic needs its slot"],
     "keep": ["keep: token <lease token> violet until 45m because the review on #5536 lands within the hour"],
     "unkeep": ["unkeep: token <lease token> violet"],
+    "peak-override": ["peak-override: token <lease token> zai for gates until 2h because the release review needs a GLM judge"],
+    "peak-override-end": ["peak-override-end: token <lease token> zai because the review landed"],
     "answer": ["answer: token <lease token> <episode from the snapshot> acted because I relaunched the stalled worker",
                "answer: token <lease token> <episode from the snapshot> considered because nothing in it needed me"],
     "regroup": ["regroup: token <lease token> because the owner moved the release to Friday"],

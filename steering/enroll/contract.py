@@ -275,6 +275,7 @@ ListedAccountUsage = typing.TypedDict("ListedAccountUsage", {
     "serves_models": "list[str] | None",
     "routes": "list[str] | None",
     "peak_windows": "typing.NotRequired[list[PeakWindowRead] | None]",
+    "peak_override": "typing.NotRequired[PeakOverrideRead | None]",
     "resets_by": "str | None",
     "stopped_by_login": "str | None",
     "stopped_at": "str | None",
@@ -4072,6 +4073,7 @@ LaunchAnswer = typing.TypedDict("LaunchAnswer", {
     "refused": "str | None",
     "replayed": "bool",
     "reclaimable": "typing.NotRequired[list[ReclaimableSession] | None]",
+    "remedy": "typing.NotRequired[str]",
     "host_overloaded": "typing.NotRequired[HostOverloaded | None]",
     "preferred_harness": "typing.NotRequired[LaunchPreferred | None]",
 })
@@ -4098,6 +4100,7 @@ LaunchRead = typing.TypedDict("LaunchRead", {
     "refused": "str | None",
     "replayed": "bool",
     "reclaimable": "typing.NotRequired[list[ReclaimableSession] | None]",
+    "remedy": "typing.NotRequired[str]",
     "host_overloaded": "typing.NotRequired[HostOverloaded | None]",
     "preferred_harness": "typing.NotRequired[LaunchPreferred | None]",
     "passed_over": "dict[str, list[str] | None] | None",
@@ -5052,6 +5055,40 @@ PeakWindowRead = typing.TypedDict("PeakWindowRead", {
     "source_taken_at": "typing.NotRequired[str | None]",
     "frozen": "bool",
     "reason": "typing.NotRequired[str]",
+})
+
+# PeakOverrideBody is the seat or the owner running a vendor's peak through for this workspace's
+# work: builds, gates or both, until an RFC 3339 time or a duration from now (the vendor's known
+# window's end when it names none), and why (#9712).
+PeakOverrideBody = typing.TypedDict("PeakOverrideBody", {
+    "vendor": "str",
+    "work": "str",
+    "until": "typing.NotRequired[str]",
+    "why": "str",
+})
+
+# PeakOverrideEndBody ends the override standing for a vendor, with why when one is given.
+PeakOverrideEndBody = typing.TypedDict("PeakOverrideEndBody", {
+    "vendor": "str",
+    "why": "typing.NotRequired[str]",
+})
+
+# PeakOverrideRead is a peak override as it was recorded: who, by kind (owner or seat), and when.
+PeakOverrideRead = typing.TypedDict("PeakOverrideRead", {
+    "id": "str",
+    "vendor": "str",
+    "work": "str",
+    "until": "str",
+    "why": "str",
+    "by": "str",
+    "at": "str",
+})
+
+# PeakOverrideAnswer is the override a record or an end settled on.
+PeakOverrideAnswer = typing.TypedDict("PeakOverrideAnswer", {
+    "status": "str",
+    "override": "PeakOverrideRead",
+    "replayed": "bool",
 })
 
 # PlacementRead is where the arbiter would place a launch, read without placing it: each judged
@@ -8241,6 +8278,8 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/sessions/{session}/history",
     "POST /w/{workspace}/api/v1/sessions/{session}/keep",
     "GET /w/{workspace}/api/v1/sessions/{session}/live",
+    "POST /w/{workspace}/api/v1/sessions/{session}/peak-overrides",
+    "POST /w/{workspace}/api/v1/sessions/{session}/peak-overrides/end",
     "POST /w/{workspace}/api/v1/sessions/{session}/prompts",
     "POST /w/{workspace}/api/v1/sessions/{session}/push/raises",
     "POST /w/{workspace}/api/v1/sessions/{session}/rebind",
@@ -8275,6 +8314,8 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/understudies",
     "POST /w/{workspace}/api/v1/understudies/casts",
     "DELETE /w/{workspace}/api/v1/understudies/casts/{cast}",
+    "POST /w/{workspace}/api/v1/work/peak-overrides",
+    "POST /w/{workspace}/api/v1/work/peak-overrides/end",
     "GET /w/{workspace}/api/v1/work/regroups",
     "POST /w/{workspace}/api/v1/work/regroups",
     "POST /w/{workspace}/api/v1/workspace/retirement",

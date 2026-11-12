@@ -114,6 +114,13 @@ _KEEP = re.compile(r"^keep:\s*token\s+@lease\s+(?P<to>\S+)(?:\s+until\s+(?P<unti
 _UNKEEP = re.compile(r"^unkeep:\s*token\s+@lease\s+(?P<to>\S+)\s*$")
 _KEEP_USAGE = {"keep": "keep: token @lease <session> [until <time or duration>] because <reason>",
                "unkeep": "unkeep: token @lease <session>"}
+# The seat's override of a vendor's peak freeze for this workspace's builds, gates or both, and its
+# end (#9712). The until is a time or a duration, the vendor's known window's end when unsaid.
+_PEAK = {"peak-override": re.compile(r"^peak-override:\s*token\s+@lease\s+(?P<vendor>\S+)\s+for\s+(?P<work>builds|gates|both)"
+                                     r"(?:\s+until\s+(?P<until>\S+))?\s+because\s+(?P<why>\S.*?)\s*$", re.S),
+         "peak-override-end": re.compile(r"^peak-override-end:\s*token\s+@lease\s+(?P<vendor>\S+)(?:\s+because\s+(?P<why>\S.*?))?\s*$", re.S)}
+_PEAK_USAGE = {"peak-override": "peak-override: token @lease <vendor> for builds|gates|both [until <time or duration>] because <why>",
+               "peak-override-end": "peak-override-end: token @lease <vendor> [because <why>]"}
 # The seat's answer to a snapshot it was told (#6693): it acted on it, or considered it and chose not
 # to, and why. Choosing not to act is an answer.
 _ANSWER = re.compile(r"^answer:\s*token\s+@lease\s+(?P<episode>[0-9a-fA-F-]{36})\s+(?P<verdict>acted|considered)\s+because\s+(?P<why>\S.*?)\s*$", re.S)
@@ -127,7 +134,7 @@ _INTERVENED = re.compile(r"^intervened:\s*token\s+@lease\s+(?P<card>[0-9a-f]{24}
 _INTERVENED_CAUSES = ("unheard", "stalled", "dead", "conflict", "queue-red", "ceiling", "stale-card", "release-red", "other")
 # Every lease verb `go_say` sends to Go, so a refusal of another names what this client takes.
 GO_VERBS = tuple(sorted({"authorship", "backlog", "cancel", "dispose", "intervened", "launch", "lift", "out-of-band", "promote", "relay", "roster",
-                         "withdraw", "answer", "regroup", *_ACTION, *_KEEP_USAGE}))
+                         "withdraw", "answer", "regroup", *_ACTION, *_KEEP_USAGE, *_PEAK}))
 # The paths `go_post` takes: each is the seat's own command, translated to the route Go serves.
 POST_TARGETS = ("/steering/seat/read", "/steering/brain/reply", "/steering/brain/attach",
                 "/steering/brain/detach", "/steering/push/raise", "/steering/body/speak")
@@ -168,6 +175,8 @@ def go_say(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         return _go_action(rec, verb, line, key)
     if verb in _KEEP_USAGE:
         return _go_keep(rec, verb, line, key)
+    if verb in _PEAK:
+        return _go_peak(rec, verb, line, key)
     if verb == "answer":
         return _go_answer(rec, line, key)
     if verb == "regroup":
@@ -438,6 +447,36 @@ def _go_keep(rec: dict, verb: str, line: str, key: str) -> tuple[int, str, bool]
         body.update({**({"until": m["until"]} if m["until"] else {}), "reason": " ".join(m["reason"].split())})
     try:
         said = session_routes.seat_keep(rec["session"], rec["token"], verb, body, key)
+    except session_routes.NotSeated as why:
+        return 1, GO_NOT_SEATED.format(why=why), False
+    except session_routes.Unsent as e:
+        return 1, refusal.retry(str(e)), True
+    except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale, False
+        if e.code in SEAT_LOST:
+            return 1, GO_NOT_SEATED.format(why=e), False
+        if session_routes.settled(e):
+            return 1, refusal.use(verb, str(e)), False
+        return 1, refusal.retry(str(e)), True
+    return 0, said, False
+
+
+def _go_peak(rec: dict, verb: str, line: str, key: str) -> tuple[int, str, bool]:
+    """`peak-override:` or `peak-override-end:` on Go: the brain runs a vendor's peak through for the
+    workspace's builds, gates or both, or ends that. Go admits only the holder, never a steward."""
+    import refusal
+    import session_routes
+    m = _PEAK[verb].match(line)
+    if not m:
+        return 2, refusal.use(verb, f"malformed {verb}: on Go it is `{_PEAK_USAGE[verb]}`"), False
+    body = {"vendor": m["vendor"]}
+    if verb == "peak-override":
+        body.update({"work": m["work"], **({"until": m["until"]} if m["until"] else {})})
+    if m["why"]:
+        body["why"] = " ".join(m["why"].split())
+    try:
+        said = session_routes.seat_peak_override(rec["session"], rec["token"], verb, body, key)
     except session_routes.NotSeated as why:
         return 1, GO_NOT_SEATED.format(why=why), False
     except session_routes.Unsent as e:

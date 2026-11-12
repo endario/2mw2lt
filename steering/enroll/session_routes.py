@@ -1135,7 +1135,9 @@ def seat_launch(session: str, token: str, body: dict, key: str) -> str:
     if answer.get("state") == "withdrawn":
         # Ended at its publish, a pinned account barred or off, its pinned machine gone: not waiting.
         return f"launch withdrawn: {answer['id']}{harness}{on}: {answer.get('reason')}"
-    return f"launch waiting: {answer['id']} {answer.get('reason') or answer.get('state')}{on}{_reclaimable(answer.get('reclaimable'))}"
+    # A wait a vendor's peak holds carries Go's way through it, the exact verb that frees it.
+    remedy = f"\n{answer['remedy']}" if answer.get("remedy") else ""
+    return f"launch waiting: {answer['id']} {answer.get('reason') or answer.get('state')}{on}{_reclaimable(answer.get('reclaimable'))}{remedy}"
 
 
 def _overloaded(host: dict | None) -> str:
@@ -1210,6 +1212,19 @@ def seat_keep(session: str, token: str, verb: str, body: dict, key: str) -> str:
     if verb == "unkeep":
         return f"unkept: {answer['session']}, kept for {answer['reason']}"
     return f"kept: {answer['session']} until {answer['until']} because {answer['reason']}"
+
+
+def seat_peak_override(session: str, token: str, verb: str, body: dict, key: str) -> str:
+    """The holder overrides a vendor's peak freeze (`POST /sessions/{session}/peak-overrides`) or
+    ends the override (`.../peak-overrides/end`), keyed by the line's own key, so a rerun after a
+    lost answer is answered from the first. Raises `NotSeated`, `Refused` or `Unsent`."""
+    seat_generation(session, token)
+    if verb == "peak-override-end":
+        answer = write(f"/sessions/{session}/peak-overrides/end", body, key, SESSION_CARRIER, token)
+        return f"peak override ended: {answer['override']['vendor']}"
+    answer = write(f"/sessions/{session}/peak-overrides", body, key, SESSION_CARRIER, token)
+    o = answer["override"]
+    return f"peak override: {o['vendor']} {o['work']} until {o['until'][11:16]} UTC: {o['why']}"
 
 
 def seat_regroup(session: str, token: str, reason: str, request: str, key: str) -> str:

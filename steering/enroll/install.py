@@ -45,6 +45,7 @@ import shutil
 import socket
 import subprocess
 import tarfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -889,20 +890,62 @@ def require_installer(installed: Path) -> Path:
     return go
 
 
+STALL = 120.0  # seconds without a word from the installer that end the install's wait
+
+
 def run_installer(installed: Path, root: Path, door: str, port: int) -> None:
     """The release's own installer — its `2mw2lt install` — so the job is written by the closure
-    it will run rather than by this plugin's copy."""
+    it will run rather than by this plugin's copy. Bounded by silence, not by total time (#9728):
+    a first install downloads the machine's whole tool kit, which takes as long as its link takes,
+    so the wait ends only when the installer has said nothing for `STALL` seconds — a working
+    install keeps saying where it is — and the refusal carries what it did say, since a first
+    install killed here has written no log to point at."""
     go = require_installer(installed)
+    # The machine job's own port, so an install leaves the job as it is when it already runs.
+    child = subprocess.Popen([str(go), "install", str(root), door],
+                             env={**os.environ, "STEERING_AGENT_PORT": str(port)},
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    said: list[str] = []
+    word = threading.Event()
+
+    def read(stream, relay: bool) -> None:
+        for line in stream:
+            said.append(line)
+            word.set()
+            if relay:  # its progress voice, as a continuation of this transcript's `agent` step
+                try:
+                    say("", line.removeprefix("agent: ").rstrip())
+                except Exception:  # the relay is cosmetic: a reader that died here would leave the
+                    pass           # pipe undrained, and the installer it blocks be killed as stalled
+
+    readers = [threading.Thread(target=read, args=(stream, stream is child.stdout), daemon=True)
+               for stream in (child.stdout, child.stderr)]
+    for reader in readers:
+        reader.start()
+    quiet = time.monotonic()
     try:
-        # The machine job's own port, so an install leaves the job as it is when it already runs.
-        done = subprocess.run([str(go), "install", str(root), door],
-                              env={**os.environ, "STEERING_AGENT_PORT": str(port)},
-                              capture_output=True, text=True, timeout=120)
-    except subprocess.TimeoutExpired:
-        raise Stop(f"the agent release's installer did not answer within 120s; its log is under "
-                   f"{log_directory()}") from None
-    if done.returncode:
-        raise Stop(f"the agent release's installer failed: {(done.stderr or done.stdout).strip()[-400:]}")
+        while True:
+            if word.is_set():
+                word.clear()
+                quiet = time.monotonic()
+            try:
+                child.wait(timeout=max(0.0, STALL - (time.monotonic() - quiet)))
+            except subprocess.TimeoutExpired:
+                if word.is_set():
+                    continue  # it spoke while we waited: the stall is measured from that word
+                last = "".join(said).strip()[-400:]
+                raise Stop(f"the agent release's installer has said nothing for {STALL:.0f}s"
+                           f" ({f'last saying: {last}' if last else 'it had said nothing'})") from None
+            else:
+                break
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+        for reader in readers:
+            reader.join(timeout=STALL)  # the pipes close with the child; only its own children hold them
+    if child.returncode:
+        raise Stop(f"the agent release's installer failed: {''.join(said).strip()[-400:]}")
 
 
 def ensure_agent(root: Path, authority: str, door: str) -> int:

@@ -44,11 +44,13 @@ must-do and critical work for premium providers, and hold what the workhorse sui
 route whose peak is unknown still launches.
 Before the buffer, use the named accounts' expiring quota for useful, authorized work that fits.
 Their quota reasons carry remaining quota and reset time, not permission to invent work or bypass the
-freeze (#7541).
+freeze (#7541). When must-do work only the
+frozen vendor can serve has to run, record an override for it and end it once that work is placed
+(the brain skill's *Through a peak*). Never override to keep the workhorse busy.
 
 **Ahead of a peak's end** (`post-peak.v1`). Release what the peak held: line up the work frozen for
 that vendor so it starts at the boundary, wake or relaunch its parked sessions then, lift the
-freezes you placed by hand, and move back the sessions that went to dearer vendors for the window,
+freezes you placed by hand, end any peak override still standing, and move back the sessions that went to dearer vendors for the window,
 each at a safe turn.
 
 **Answer it** once you have decided, by the episode:
