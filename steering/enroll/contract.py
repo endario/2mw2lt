@@ -3547,6 +3547,7 @@ GateRow = typing.TypedDict("GateRow", {
     "reviewer": "GateReviewer | None",
     "run": "GateRun | None",
     "passed_over": "typing.NotRequired[dict[str, list[str] | None]]",
+    "waiting": "typing.NotRequired[str | None]",
     "priority": "typing.NotRequired[str]",
     "ahead": "typing.NotRequired[int | None]",
 })
@@ -3645,6 +3646,7 @@ GateRead = typing.TypedDict("GateRead", {
     "reviewer": "GateReviewer | None",
     "run": "GateRun | None",
     "passed_over": "typing.NotRequired[dict[str, list[str] | None]]",
+    "waiting": "typing.NotRequired[str | None]",
     "priority": "typing.NotRequired[str]",
     "ahead": "typing.NotRequired[int | None]",
     "result": "GateResult | None",

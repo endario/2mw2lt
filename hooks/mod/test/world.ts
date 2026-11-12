@@ -83,6 +83,7 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
     holdNextLookup: undefined as Promise<void> | undefined,
     readGate: undefined as Promise<void> | undefined,
     state: new Map<string, unknown>(),
+    failSurfaceRestore: false,
     // The next read of this key is answered with what it held when asked, once `release` runs.
     holdNextGet: undefined as { key: string; release: Promise<void> } | undefined,
     context,
@@ -124,6 +125,10 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
   }
   const versions = new Map<string, number>()
   if (!engineState) on('state.get', async ($, e) => {
+    if (e.key === 'surfaceSeq' && w.failSurfaceRestore) {
+      w.failSurfaceRestore = false
+      return { deny: 'state temporarily unavailable' } as never
+    }
     const value = w.state.get(e.key)
     const version = versions.get(e.key) ?? 0
     const held = w.holdNextGet

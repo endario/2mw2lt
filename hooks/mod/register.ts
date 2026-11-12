@@ -590,11 +590,16 @@ function sendBatch($: EngineInterface) {
 
 // Asks the agent whether anyone watches this session, until unfollowed.
 async function pollSurface($: EngineInterface, workspace: string, session: string, gen: number) {
-  if (outbox.seq === undefined) outbox.resume((await $.state.get(SURFACE_SEQ)).value ?? 0)
   let cursor = ''
   let wait = RETRY_MS
   while (gen === following) {
     try {
+      // Restoring the sequence is part of connecting: a transient state read must retry too.
+      if (outbox.seq === undefined) {
+        const saved = (await $.state.get(SURFACE_SEQ)).value ?? 0
+        if (gen !== following) return
+        outbox.resume(saved)
+      }
       // Resolved into a local and installed only while this poll still stands, so a follower made
       // obsolete while it asked installs nothing over a newer one's agent.
       const resolved = await agentOf($, workspace)

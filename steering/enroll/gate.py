@@ -285,8 +285,8 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
                 # The queue's face: where it stands and how many wait ahead (#6850).
                 state = f"queued: {answer['priority']}, {answer.get('ahead', 0)} ahead"
             reply = f"commissioned: {answer['id']} {kind}{round_}, {state}{why}"
-            # What frees a commission no judge's room frees, said whole (#7181).
-            lever = answer.get("lever") or ""
+            # What frees a commission no judge's room frees, said whole (#7181); else why no judge yet (#9709).
+            lever = "\n".join(w for w in (answer.get("waiting"), answer.get("lever")) if w)
         else:
             uncertain, reply = True, refusal.retry("Go answered the commission without naming it")
     except session_routes.Refused as e:
@@ -383,9 +383,11 @@ def gate_row(r: dict) -> str:
     said = f"{r.get('phase')}: {r.get('id')}{place} {r.get('kind')} round {r.get('round')}/{r.get('cap')} at {str(r.get('sha') or '')[:12]}"
     if r.get("verdict"):
         said += f", {r['verdict']}"
-    if r.get("why"):
+    if r.get("why") and not r.get("waiting"):
         said += f" ({wait_reason(r['why'])})"
-    if r.get("passed_over"):
+    if r.get("waiting"):
+        said += "; " + r["waiting"]
+    elif r.get("passed_over"):
         said += "; passed over: " + passed_over(r["passed_over"])
     return said + (f" {r['review']}" if r.get("review") else "")
 

@@ -728,3 +728,21 @@ test('a stored response row names the streamed block it replaces, and no delta o
   expect(rowsOf(w).map(r => [r.id, r.replaces])).toEqual([['r1', 't1/0/0'], ['r2', 't1/0/1'], ['r3', undefined]])
   expect(deltas(w)).toEqual([])
 })
+
+// A failed restore used to end pollSurface before its retry loop: the module stayed loaded,
+// but the machine advertised only history until the session was reloaded (#9716).
+test('a failed sequence restore retries and sends rows without a session reload', async ($, on) => {
+  const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true, cursor: 'c1' }] })
+  w.state.set('surfaceSeq', 40)
+  w.failSurfaceRestore = true
+  await begin($)
+  await w.clock.settle()
+  expect(polls(w)).toHaveLength(0)
+  expect(w.logs.some(s => s.includes('state temporarily unavailable'))).toBe(true)
+  await w.clock.advance(250)
+  await $.session.append(call as never)
+  await w.clock.advance(50)
+  expect(polls(w).length).toBeGreaterThan(0)
+  expect(events(w).map(e => e.seq)).toEqual([41, 42, 43])
+  expect(events(w).find(e => e.kind === 'row' && e.row.id === 'u2')?.seq).toBe(43)
+})
