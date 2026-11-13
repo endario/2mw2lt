@@ -201,8 +201,10 @@ TOOLS = {
         {"topic": "log", "usage": _SPEAKER_USAGE + " <session> log <run> [--guard <label>]", "example": "ci violet log 39384922516 --guard lint_test"},
     ]},
     "goal": {"bare": False, "forms": [
-        {"topic": "prepare", "usage": "--lease prepare plan <goal> --policy <unit> --decision <file> | prepare judge <goal> <criterion>|goal <verdict> [--evidence card:<id>|pull:<owner>/<name>#<n>]... because <why> | prepare import <goal> --source <source> --revision <revision> --rows <file>",
+        {"topic": "prepare", "usage": "--lease prepare plan <goal> --policy <unit> --decision <file> | prepare judge <goal> <criterion>|goal <verdict: a goal accepted, rejected, undetermined or withdrawn; a criterion accepted, rejected, undetermined or dismissed> [--evidence card:<id>|pull:<owner>/<name>#<n>]... because <why> | prepare import <goal> --source <source> --revision <revision> --rows <file>",
          "example": "goal --lease prepare judge 6600d79c-9e3e-4ebc-99ad-e383e40446c7 0f620e92-9564-43a0-90bb-bd35d4d888ef accepted --evidence pull:example-org/example-repo#12 because the merged change logs every refusal"},
+        {"topic": "withdraw", "usage": "prepare judge <goal> goal withdrawn because <why the owner dropped it>",
+         "example": "goal --lease prepare judge 6600d79c-9e3e-4ebc-99ad-e383e40446c7 goal withdrawn because the owner ended the pricing experiment on 13 Nov"},
         {"topic": "submit", "usage": "--lease submit <prepared file>", "example": "goal --lease submit .claude/goal-commands/5f0c6a1e2b3d4c5e6f7a8b9c0d1e2f3a.json"},
     ]},
     "hold": {"current": True, "forms": [

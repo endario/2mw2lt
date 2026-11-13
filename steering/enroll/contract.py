@@ -7508,7 +7508,7 @@ PlanDTO = typing.TypedDict("PlanDTO", {
 # GoalDTO is a goal: its current revision, the earlier ones oldest first, what contributes to it, what
 # it is part of, its judgments and plans oldest first, and the inputs a plan adopted now must expect.
 # Accepted holds only while the newest goal judgment of the current revision accepted it over the
-# criterion judgments now effective.
+# criterion judgments now effective; Withdrawn while that judgment dropped the goal on purpose.
 GoalDTO = typing.TypedDict("GoalDTO", {
     "id": "str",
     "by": "WorkActor",
@@ -7520,6 +7520,7 @@ GoalDTO = typing.TypedDict("GoalDTO", {
     "part_of": "list[ContributionDTO] | None",
     "judgments": "list[JudgmentDTO] | None",
     "accepted": "bool",
+    "withdrawn": "bool",
     "plans": "list[PlanDTO] | None",
     "plan_inputs": "str",
 })
@@ -7768,8 +7769,8 @@ GoalExecution = typing.TypedDict("GoalExecution", {
 })
 
 # GoalSummaryDTO is a goal as the workspace's list of goals names it: its current revision, how many
-# of that revision's criteria each verdict judges now, whether that revision is accepted, and its
-# newest plan, null before one.
+# of that revision's criteria each verdict judges now, whether that revision is accepted or
+# withdrawn, and its newest plan, null before one.
 GoalSummaryDTO = typing.TypedDict("GoalSummaryDTO", {
     "id": "str",
     "at": "str",
@@ -7780,6 +7781,7 @@ GoalSummaryDTO = typing.TypedDict("GoalSummaryDTO", {
     "criteria": "int",
     "verdicts": "dict[str, int] | None",
     "accepted": "bool",
+    "withdrawn": "bool",
     "plan": "PlanSummaryDTO | None",
 })
 

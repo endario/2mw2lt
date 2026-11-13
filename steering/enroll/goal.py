@@ -23,8 +23,11 @@ USAGE = """usage: goal.py --lease prepare plan <goal> --policy <unit> --decision
        goal.py --lease prepare import <goal> --source <source> --revision <revision> --rows <file>
        goal.py --lease submit <prepared file>
 
-       A plan's --decision file holds its purpose, selections, associations and optional cutoff, as the
-       plan route names them; an import's --rows file holds its rows. prepare adds only the fences."""
+       A goal's verdict is accepted, rejected, undetermined or withdrawn; a criterion's may be
+       dismissed too. withdrawn drops a goal its owner ended on purpose — never "rejected", which says
+       it was attempted and failed — and needs its why. A plan's --decision file holds its purpose,
+       selections, associations and optional cutoff, as the plan route names them; an import's --rows
+       file holds its rows. prepare adds only the fences."""
 
 # A refusal that says a fence moved: submit shows what moved and stops (#7004).
 STALE = frozenset({"goal-revision-stale", "plan-revision-stale", "plan-policy-stale", "plan-inputs-stale",

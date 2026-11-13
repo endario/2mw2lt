@@ -795,6 +795,17 @@ into a conclusion. Evidence is a card or a pull request, never a link:
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/goal.py" --lease prepare judge <goal> <criterion>|goal <verdict> --evidence pull:<owner>/<name>#<n> because <why>
 ```
 
+**A goal the owner drops on purpose is withdrawn, never rejected.** `rejected` says the outcome
+was attempted and failed; a goal abandoned by ruling is `withdrawn` — a goal-level verdict that
+carries the ruling's reason, needs no criterion settled, and closes the goal: it leaves the open
+set everywhere an accepted one does, owing no plan and no evidence. Only a goal can be withdrawn
+(a criterion's verdicts are unchanged), the seat files it on the owner's ruling, and a later
+revision reopens the goal like any other:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/goal.py" --lease prepare judge <goal> goal withdrawn because <the owner's ruling>
+```
+
 **Appoint a steward when relaying the goal is the work.** A goal whose cards keep coming back to
 you for each launch, retier, rescue and directive runs better under a steward: a session you
 appoint to run it within bounds.
