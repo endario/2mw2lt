@@ -29,8 +29,12 @@ const TURN = { plugin: '2mw2lt', key: 'turn' } as const
 
 const TOOL = 'mcp__2mw2lt__frames'
 const CHECKPOINT_CALL = 'mcp__2mw2lt__checkpoint'
-const SEAT_TOOL = new RegExp(`^mcp__2mw2lt__(${Object.keys(SEAT_TOOLS).join('|')})$`)
-const TIMER_TOOL = new RegExp(`^mcp__2mw2lt__(${Object.keys(TIMER_TOOLS).join('|')})$`)
+// A plugin tool is claimed by the exact name the harness calls (#9751): one registration per
+// tool, its matcher the whole string — the form the engine's own fallback message for an
+// unclaimed call prescribes. A seated session's `relay` call reached no hook, and which of the
+// issue's candidates did it — the matcher's form, or no handler registered in that process — is
+// unproven without a seated reproduction; this is the form the engine itself names, whatever did.
+const PLUGIN_TOOL = (name: string) => `mcp__2mw2lt__${name}` as const
 const REFRESH_MS = 60_000
 const REPOINT_MS = 1500
 const STDERR_TAIL = 2000
@@ -1289,29 +1293,36 @@ export const register: Register = on => {
   on('tool.describe', { tool: CHECKPOINT_CALL }, async ($, e, next) => ({ ...(await next(e)), isDeferred: false }))
   // The timer tools are every session's own — the seat's or a worker's — so they stand in front
   // for all, unlike the seat's verbs, which wait behind ToolSearch for a holder.
-  on('tool.describe', { tool: TIMER_TOOL }, async ($, e, next) => ({ ...(await next(e)), isDeferred: false }))
+  for (const name of Object.keys(TIMER_TOOLS)) {
+    on('tool.describe', { tool: PLUGIN_TOOL(name) }, async ($, e, next) => ({ ...(await next(e)), isDeferred: false }))
+  }
 
   // The seat's verbs stay behind ToolSearch for a session that does not hold the seat; a holder
   // has them in its list. They move when the seat section does, so the prompt changes once.
-  on('tool.describe', { tool: SEAT_TOOL }, async ($, e, next) => {
-    const described = await next(e)
-    return (await $.state.get(SEAT)).value ? { ...described, isDeferred: false } : described
-  })
+  for (const name of Object.keys(SEAT_TOOLS)) {
+    on('tool.describe', { tool: PLUGIN_TOOL(name) }, async ($, e, next) => {
+      const described = await next(e)
+      return (await $.state.get(SEAT)).value ? { ...described, isDeferred: false } : described
+    })
+  }
 
   // A plugin's tool is answered above the permission system (doc 175 §8): so this hook asks it.
   // These checks guard the tool's entry; the lease itself is the stored one any process under
-  // this provider session could use through lease.py.
-  on('tool.call', { tool: SEAT_TOOL }, async ($, e, next) => {
-    const { tool, tool_use_id: _id, agentId, ...args } = e as unknown as Record<string, unknown> & { tool: string; agentId?: string }
-    // Asked only of the model's own main-loop call: the other refusals need no question put.
-    const checked = agentId === undefined && next.origin.plugin === 'engine'
-      ? await $.tool.check({ tool, input: args }) : { decision: 'deny' as const }
-    const refused = entryRefusal(agentId, next.origin.plugin, tool, checked)
-    if (refused) return { deny: refused }
-    const call = seatCall(tool.replace(/^mcp__2mw2lt__/, ''), args)
-    if ('refused' in call) return { deny: `refused: ${call.refused}` }
-    return runSeatCall($, call)
-  })
+  // this provider session could use through lease.py. One registration per name, each claimed by
+  // its exact string (#9751).
+  for (const name of Object.keys(SEAT_TOOLS)) {
+    on('tool.call', { tool: PLUGIN_TOOL(name) }, async ($, e, next) => {
+      const { tool, tool_use_id: _id, agentId, ...args } = e as unknown as Record<string, unknown> & { tool: string; agentId?: string }
+      // Asked only of the model's own main-loop call: the other refusals need no question put.
+      const checked = agentId === undefined && next.origin.plugin === 'engine'
+        ? await $.tool.check({ tool, input: args }) : { decision: 'deny' as const }
+      const refused = entryRefusal(agentId, next.origin.plugin, tool, checked)
+      if (refused) return { deny: refused }
+      const call = seatCall(name, args)
+      if ('refused' in call) return { deny: `refused: ${call.refused}` }
+      return runSeatCall($, call)
+    })
+  }
 
   on('tool.call', { tool: CHECKPOINT_CALL }, async ($, e, next) => {
     const { tool, tool_use_id: _id, agentId, ...args } = e as unknown as Record<string, unknown> & { tool: string; agentId?: string }
@@ -1324,20 +1335,22 @@ export const register: Register = on => {
 
   // A timer verb goes on the session's own enrolment through timer.py — never lease.py, which a
   // worker must not borrow. A mutation whose answer was lost goes once more under the id the
-  // client printed, as the seat verbs do.
-  on('tool.call', { tool: TIMER_TOOL }, async ($, e, next) => {
-    const { tool, tool_use_id: _id, agentId, ...args } = e as unknown as Record<string, unknown> & { tool: string; agentId?: string }
-    const checked = agentId === undefined && next.origin.plugin === 'engine'
-      ? await $.tool.check({ tool, input: args }) : { decision: 'deny' as const }
-    const refused = entryRefusal(agentId, next.origin.plugin, tool, checked, TIMER_ENTRY)
-    if (refused) return { deny: refused }
-    const call = timerCall(tool.replace(/^mcp__2mw2lt__/, ''), args)
-    if ('refused' in call) return { deny: `refused: ${call.refused}` }
-    const session = await sessionOf($)
-    if (!session) return { deny: 'refused: this session is not connected to steering: run /2mw2lt:connect first.' }
-    const argv = ['python3', script($, 'timer.py'), session, ...call.argv]
-    return answer(call.stdin !== undefined ? await resending($, argv, call.stdin) : await runOwn($, argv))
-  })
+  // client printed, as the seat verbs do. One registration per name (#9751).
+  for (const name of Object.keys(TIMER_TOOLS)) {
+    on('tool.call', { tool: PLUGIN_TOOL(name) }, async ($, e, next) => {
+      const { tool, tool_use_id: _id, agentId, ...args } = e as unknown as Record<string, unknown> & { tool: string; agentId?: string }
+      const checked = agentId === undefined && next.origin.plugin === 'engine'
+        ? await $.tool.check({ tool, input: args }) : { decision: 'deny' as const }
+      const refused = entryRefusal(agentId, next.origin.plugin, tool, checked, TIMER_ENTRY)
+      if (refused) return { deny: refused }
+      const call = timerCall(name, args)
+      if ('refused' in call) return { deny: `refused: ${call.refused}` }
+      const session = await sessionOf($)
+      if (!session) return { deny: 'refused: this session is not connected to steering: run /2mw2lt:connect first.' }
+      const argv = ['python3', script($, 'timer.py'), session, ...call.argv]
+      return answer(call.stdin !== undefined ? await resending($, argv, call.stdin) : await runOwn($, argv))
+    })
+  }
 
   on('tool.call', { tool: TOOL }, async ($, e, next) => {
     const { agentId } = e as unknown as { agentId?: string }
