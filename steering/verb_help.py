@@ -53,6 +53,7 @@ _RAW_FORMS = {
     "intervened": ["intervened: token <lease token> <card> <cause> <why>"],
     "roster": ["roster: token <lease token> [with gone]"],
     "gate": ["gate: review <repo> <branch> pr <n> [head <sha>] [tier <tier>] [harness <harness>] [exclude <vendor>[,<vendor>]] [final] token <t>", "gate: critic <repo> <branch> doc <path> [head <sha>] [tier <tier>] [harness <harness>] [exclude <vendor>[,<vendor>]] [final] token <t>", "gate: status <commission> token <t>", "gate: cancel <commission> token <t>", "gate: pr <n> token <t>", "gate: carry <n> head <sha> [equivalent] token <t>"],
+    "floor": ["floor: token <lease token> review <repo> pr <n> <rung> <reason>", "floor: token <lease token> critic <repo> branch <branch> <rung> <reason>"],
     "lift": ["lift: token <lease token> review <repo> pr <n> <reason>", "lift: token <lease token> critic <repo> branch <branch> <reason>", "lift: token <lease token> bench <vendor> <model> <reason>"],
     "authorship": ["authorship: token <lease token> establish <session> epoch <n> model <model> because <evidence>", "authorship: token <lease token> abandon <session> epoch <n> because <reason>"],
     "dispose": ["dispose: token <lease token> <item id> <reason>"],
@@ -66,7 +67,7 @@ _RAW_FORMS = {
 
 _AUDIENCE = {
     **{verb: "session" for verb in ("announce", "blocked", "wait", "done", "recommend", "ask", "claim", "taking", "declare", "checkpoint", "holds", "enroll", "bind", "ack", "say", "detach", "gate")},
-    **{verb: "seat" for verb in ("note", "launch", "withdraw", "relay", "retire", "card", "effort", "wake", "control", "rehome", "park", "interrupt", "cancel", "keep", "unkeep", "peak-override", "peak-override-end", "answer", "regroup", "intervened", "roster", "lift", "authorship", "dispose", "promote", "out-of-band", "backlog")},
+    **{verb: "seat" for verb in ("note", "launch", "withdraw", "relay", "retire", "card", "effort", "wake", "control", "rehome", "park", "interrupt", "cancel", "keep", "unkeep", "peak-override", "peak-override-end", "answer", "regroup", "intervened", "roster", "lift", "floor", "authorship", "dispose", "promote", "out-of-band", "backlog")},
     "rebind": "operator",
     "supersede": "operator",
 }
@@ -115,6 +116,7 @@ _EXAMPLES = {
     "intervened": ["intervened: token <lease token> 010101010101010101010101 unheard typed the launch brief into the pane"],
     "roster": ["roster: token <lease token> with gone"],
     "gate": ["gate: review endario/repo feat/help pr 1 token <t>", "gate: critic endario/repo feat/help doc documentation/plan.md token <t>", "gate: status 010101010101010101010101 token <t>", "gate: cancel 010101010101010101010101 token <t>", "gate: pr 1 token <t>", "gate: carry 1 head abababababababababababababababababababab token <t>"],
+    "floor": ["floor: token <lease token> review endario/repo pr 1 uncommon a docs-only change", "floor: token <lease token> critic endario/repo branch feat/help epic it moves a trust boundary"],
     "lift": ["lift: token <lease token> review endario/repo pr 1 needs another round", "lift: token <lease token> critic endario/repo branch feat/help needs another round", "lift: token <lease token> bench anthropic opus-5.5 retry it"],
     "authorship": ["authorship: token <lease token> establish violet epoch 1 model opus-5.5 because its transcript names the model", "authorship: token <lease token> abandon violet epoch 1 because no transcript or launch record names its model"],
     "dispose": ["dispose: token <lease token> 010101010101010101010101 handled"],

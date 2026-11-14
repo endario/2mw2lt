@@ -1792,6 +1792,24 @@ lifted, with it, and a critic round, which is not published, carries it on its c
 question — do not lift.** Leave the needs-you row standing; it already reaches the owner through
 the normal channel.
 
+## Set a series' floor
+
+A card's retier never takes a round below `rare`, and never reaches a rung an author asked for
+itself. When a series should run at another rung — a docs-only pull request on a free `uncommon`
+judge, or a round its author asked high that no judge is offered at — set the series' own floor
+(#9789):
+
+```bash
+say "floor: token @lease review <owner/repo> pr <n> <uncommon|rare|epic|legendary> <why>"
+say "floor: token @lease critic <owner/repo> branch <branch> <uncommon|rare|epic|legendary> <why>"
+```
+
+The answer says what it reached: a queued or awaiting round takes it at its next offer, without
+commissioning again; a round already offered or running keeps its floor; later rounds take it. It
+stands over the card's floor and over every ask made before it, up or down; an author may ask a
+later round above it, never below (`floor-below-seat`). A card retier made after it governs again,
+which is how you hand the series back to its card. The typed tool `series_floor` sends the same.
+
 ## Cast an understudy
 
 An understudy replays a settled review round with a model the ladder does not rate, on spare quota,

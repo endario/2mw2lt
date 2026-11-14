@@ -42,7 +42,9 @@ attestation property; the reason is recorded beside the floor, so say why in a s
 model for depth: the ladder decides which models stand at each rung. Later rounds keep the floor
 unless they name one. When your change proves smaller or less risky than its triage, say so to the
 brain with the evidence, proposing a lower floor: the seat sets it with `card.py --lease retier`, and
-the rounds already judged keep the floor they ran at. A floor no judge meets is refused
+the rounds already judged keep the floor they ran at. The seat may also set the series' own floor,
+any rung from `uncommon`: then a round you ask below it is refused `floor-below-seat`, a round you
+ask above it stands, and a round you name no floor for runs at it. A floor no judge meets is refused
 (`floor-unservable`). `--final` declares this
 round the last: its judge may stand a rung above the floor, at the floor's effort still, from a
 vendor no earlier round used where one can take it, and after its verdict steering refuses another round, as

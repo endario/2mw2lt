@@ -26,6 +26,7 @@ const SEAT_ARGS: Record<string, Record<string, unknown>> = {
   park: { session: 's-1', reason: 'the slot is needed' },
   keep: { session: 's-1', reason: 'work is expected in its territory' },
   unkeep: { session: 's-1' },
+  series_floor: { kind: 'review', repo: 'example-org/example-repo', pr: 12, floor: 'uncommon', reason: 'a docs-only change' },
   card_reclassify: { card: '01CARD', field: 'priority', value: 'high', why: 'the seat moved it' },
   card_retire: { card: '01CARD', why: 'duplicate of 01OTHER' },
   card_scope: { name: 'The work', track: 'rt' },

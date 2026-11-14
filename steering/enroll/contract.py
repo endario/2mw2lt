@@ -280,6 +280,9 @@ ListedAccountUsage = typing.TypedDict("ListedAccountUsage", {
     "stopped_by_login": "str | None",
     "stopped_at": "str | None",
     "owner_login": "str | None",
+    "owner_outside": "bool",
+    "owned_in": "str | None",
+    "unserved_elsewhere": "int",
     "label": "str | None",
     "team_owner_label": "str | None",
     "manages": "bool",
@@ -3157,6 +3160,25 @@ GateLiftBody = typing.TypedDict("GateLiftBody", {
     "reason": "str",
 })
 
+# GateFloorBody sets the floor a gate series' rounds are held to, the seat's or the owner's, saying
+# why (#9789): a review series by its pull request, a critique series by its branch.
+GateFloorBody = typing.TypedDict("GateFloorBody", {
+    "kind": "str",
+    "repo": "str",
+    "pr": "typing.NotRequired[int]",
+    "branch": "typing.NotRequired[str]",
+    "floor": "str",
+    "why": "str",
+})
+
+# GateFloorAnswer answers a series floor: the series, and what the floor reached of its open round.
+GateFloorAnswer = typing.TypedDict("GateFloorAnswer", {
+    "series": "str",
+    "reach": "str",
+    "replayed": "bool",
+    "position": "int",
+})
+
 # GateBenchLiftBody ends a bench's streak, for the seat generation, with the reason: one part's, by
 # the dimension and key its bench reason names, or, as before, a route's and model's, by the vendor
 # and model.
@@ -3299,18 +3321,22 @@ ForemanBenchAnswer = typing.TypedDict("ForemanBenchAnswer", {
     "position": "int",
 })
 
-# ForemanRoute is a harness and the model it runs.
+# ForemanRoute is a harness and the model it runs. Maker is whose model that is (MakerOf), named so
+# the console draws its mark without parsing the model string; empty where none is known.
 ForemanRoute = typing.TypedDict("ForemanRoute", {
     "harness": "str",
     "model": "str",
     "effort": "typing.NotRequired[str]",
+    "maker": "typing.NotRequired[str]",
 })
 
-# ForemanStandingRoute adds the chosen route's current eligibility to its identity.
+# ForemanStandingRoute adds the chosen route's current eligibility to its identity. Maker is whose
+# model that is (MakerOf), named so the console draws its mark without parsing the model string.
 ForemanStandingRoute = typing.TypedDict("ForemanStandingRoute", {
     "harness": "str",
     "model": "str",
     "effort": "typing.NotRequired[str]",
+    "maker": "typing.NotRequired[str]",
     "kind": "typing.Literal[\"managed\", \"fleet\"]",
     "bench": "typing.Literal[\"passed\", \"failed\", \"none\"]",
 })
@@ -3551,6 +3577,17 @@ GateRow = typing.TypedDict("GateRow", {
     "waiting": "typing.NotRequired[str | None]",
     "priority": "typing.NotRequired[str]",
     "ahead": "typing.NotRequired[int | None]",
+    "floor": "typing.NotRequired[GateFloor | None]",
+})
+
+# GateFloor is where a round's floor came from: its author's ask ("requested"), a tier it named
+# ("legacy"), the rung its series kept ("series"), its card's triage or retier ("triage",
+# "retier"), or the floor the seat or the owner set on its series ("seat", #9789). Reason is the
+# ask's or the setting's; By says whether the seat or the owner set a series' floor.
+GateFloor = typing.TypedDict("GateFloor", {
+    "source": "str",
+    "reason": "typing.NotRequired[str | None]",
+    "by": "typing.NotRequired[str | None]",
 })
 
 # GateCard is a commission's card by its id and its name now.
@@ -3568,6 +3605,7 @@ GateReviewer = typing.TypedDict("GateReviewer", {
     "effort": "str | None",
     "model": "str | None",
     "model_source": "str | None",
+    "maker": "typing.NotRequired[str]",
     "rarity": "str | None",
     "deeper": "typing.NotRequired[bool]",
     "reused": "typing.NotRequired[bool]",
@@ -3650,6 +3688,7 @@ GateRead = typing.TypedDict("GateRead", {
     "waiting": "typing.NotRequired[str | None]",
     "priority": "typing.NotRequired[str]",
     "ahead": "typing.NotRequired[int | None]",
+    "floor": "typing.NotRequired[GateFloor | None]",
     "result": "GateResult | None",
     "attempts": "list[GateAttempt] | None",
 })
@@ -3838,23 +3877,26 @@ GateSpread = typing.TypedDict("GateSpread", {
     "p90": "float | None",
 })
 
-# GateBenches answers GET /gates/benches: the parts of the workspace's judges benched now, the
-# platform's own failures by refusal code, which charge no judge, and the shadow, what a bench that
-# widened or reordered would have done (go-gate-failure-attribution-design.md §3, §4).
+# GateBenches answers GET /gates/benches: the parts of the workspace's judges benched now, each with
+# the evidence that decided its charge, the platform's own failures by refusal code, which charge no
+# judge, and the shadow, what a bench that reordered would have done (go-gate-failure-attribution-design.md
+# §3, §4; the charge by evidence, #9817).
 GateBenches = typing.TypedDict("GateBenches", {
     "benches": "list[GateBench] | None",
     "platform": "list[GateCount] | None",
     "shadow": "GateBenchShadow",
 })
 
-# GateBench is one benched part: its dimension and key as a lift names them, when its bench ends, and
-# the classes of the strikes that benched it.
+# GateBench is one benched part: its dimension and key as a lift names them, when its bench ends, the
+# classes of the strikes that benched it, and the evidence that decided the charge — what the desk
+# shows beside the strikes.
 GateBench = typing.TypedDict("GateBench", {
     "dimension": "str",
     "key": "str",
     "until": "str",
     "strikes": "int",
     "classes": "list[str] | None",
+    "evidence": "str",
 })
 
 # GateCount is a count under a name.
@@ -3863,11 +3905,10 @@ GateCount = typing.TypedDict("GateCount", {
     "count": "int",
 })
 
-# GateBenchShadow is what the bench does not do yet: the routes and models an ambiguous streak would
-# widen to, the parts one unreset strike would order behind their peers, and how many runs past
-# their deadline barred their judge on every machine of their commission.
+# GateBenchShadow is what the bench does not do: the parts one unreset strike would order behind their
+# peers, and how many deadline declines the window holds — charges the limit's ladder or the cap still
+# owes a part, below the cap none at all (#9817).
 GateBenchShadow = typing.TypedDict("GateBenchShadow", {
-    "would_widen": "list[str] | None",
     "would_reorder": "list[str] | None",
     "timeouts_widened": "int",
 })
@@ -6063,6 +6104,7 @@ SessionVitals = typing.TypedDict("SessionVitals", {
     "turn": "str | None",
     "turn_since": "str | None",
     "model": "str | None",
+    "model_maker": "typing.NotRequired[str | None]",
     "effort": "str | None",
     "context": "SessionContext",
     "entrypoint": "str | None",
@@ -8180,6 +8222,7 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/gates/benches",
     "POST /w/{workspace}/api/v1/gates/carries",
     "GET /w/{workspace}/api/v1/gates/carries/{carry}",
+    "POST /w/{workspace}/api/v1/gates/floors",
     "POST /w/{workspace}/api/v1/gates/lifts",
     "POST /w/{workspace}/api/v1/gates/merges",
     "GET /w/{workspace}/api/v1/gates/stats",

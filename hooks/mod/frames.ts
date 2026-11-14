@@ -265,6 +265,15 @@ export const SEAT_TOOLS: Record<string, SeatTool> = {
     required: ['session'],
     build: a => ({ client: 'say', stdin: `unkeep: token @lease ${str(a, 'session')}` }),
   },
+  series_floor: {
+    description: 'Seat only: set the rung a gate series\'s rounds are held to — a review\'s by its pull request, a critique\'s by its branch — any rung from uncommon, over its card\'s floor and the asks made before it. A queued round takes it at its next offer without commissioning again; one offered or running keeps its floor. A card retier made later governs again.',
+    fields: { kind: { type: 'string', description: 'The series: a review or a critique.', enum: ['review', 'critic'] }, repo: word('The repository, owner/name.'),
+              pr: { type: 'integer', description: 'The pull request, for a review.' }, branch: word('The branch, for a critique.'),
+              floor: { type: 'string', description: 'The rung.', enum: ['uncommon', 'rare', 'epic', 'legendary'] }, reason: text('Why the series stands there.') },
+    required: ['kind', 'repo', 'floor', 'reason'],
+    refuse: a => a.kind === 'review' ? (a.pr === undefined ? 'a review series names its pr' : null) : (a.branch === undefined ? 'a critique series names its branch' : null),
+    build: a => ({ client: 'say', stdin: `floor: token @lease ${str(a, 'kind')} ${str(a, 'repo')} ${a.kind === 'review' ? `pr ${str(a, 'pr')}` : `branch ${str(a, 'branch')}`} ${str(a, 'floor')} ${str(a, 'reason')}` }),
+  },
   card_reclassify: {
     description: 'Seat only: correct a card\'s track, significance, state, priority or major mark.',
     fields: { card: word('The card.'), field: { type: 'string', description: 'What to correct.', enum: ['track', 'significance', 'state', 'priority', 'major'] },

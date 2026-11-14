@@ -1270,6 +1270,18 @@ def lift(session: str, token: str, kind: str, repo: str, at: int | str, reason: 
     return f"lifted: review {repo}#{at}" if kind == "review" else f"lifted: critic {repo} {at}"
 
 
+def series_floor(session: str, token: str, kind: str, repo: str, at: int | str, floor: str, reason: str, key: str) -> str:
+    """The holder sets the rung a gate series' rounds are held to (`POST /gates/floors`, #9789): a
+    review's by its pull request, a critique's by its branch. Go runs it as the seat while this
+    session holds it. `key` is the line's occurrence id, so a resend after a lost answer is answered
+    from the first. Answers what the floor reached. Raises `NotSeated`, `Refused` or `Unsent`."""
+    seat_generation(session, token)
+    body = {"kind": kind, "repo": repo, "floor": floor, "why": reason, **({"pr": at} if kind == "review" else {"branch": at})}
+    answer = write("/gates/floors", body, _own_key("gate.floor", session, key), SESSION_CARRIER, token)
+    series = f"review {repo}#{at}" if kind == "review" else f"critic {repo} {at}"
+    return f"floored: {series} at {floor}; {answer.get('reach', '')}".rstrip("; ")
+
+
 def abandon(session: str, token: str, target: str, epoch: int, reason: str, key: str) -> str:
     """The holder abandons an ended epoch no machine observed running a model
     (`POST /gates/abandonments`) at the generation it holds. `key` is the line's occurrence id, so a

@@ -133,7 +133,7 @@ _REGROUP_USAGE = "regroup: token @lease because <why reconsider now>"
 _INTERVENED = re.compile(r"^intervened:\s*token\s+@lease\s+(?P<card>[0-9a-f]{24})\s+(?P<cause>\S+)\s+(?P<why>\S.*?)\s*$", re.S)
 _INTERVENED_CAUSES = ("unheard", "stalled", "dead", "conflict", "queue-red", "ceiling", "stale-card", "release-red", "other")
 # Every lease verb `go_say` sends to Go, so a refusal of another names what this client takes.
-GO_VERBS = tuple(sorted({"authorship", "backlog", "cancel", "dispose", "intervened", "launch", "lift", "out-of-band", "promote", "relay", "roster",
+GO_VERBS = tuple(sorted({"authorship", "backlog", "cancel", "dispose", "floor", "intervened", "launch", "lift", "out-of-band", "promote", "relay", "roster",
                          "withdraw", "answer", "regroup", *_ACTION, *_KEEP_USAGE, *_PEAK}))
 # The paths `go_post` takes: each is the seat's own command, translated to the route Go serves.
 POST_TARGETS = ("/steering/seat/read", "/steering/brain/reply", "/steering/brain/attach",
@@ -149,6 +149,11 @@ _BENCH = re.compile(r"^lift:\s*token\s+@lease\s+bench\s+(?P<first>\S+)\s+(?P<sec
 # `authorship: abandon` of an ended epoch no machine observed running a model (registry.py abandon).
 _ABANDON = re.compile(r"^authorship:\s*token\s+@lease\s+abandon\s+(?P<session>\S+)\s+epoch\s+(?P<epoch>[0-9]{1,9})"
                       r"\s+because\s+(?P<reason>\S.*?)\s*$", re.S)
+# `floor:` of a review series by its pull request or a critic series by its branch: the rung its
+# rounds are held to, the seat's (#9789).
+_FLOOR = re.compile(r"^floor:\s*token\s+@lease\s+(?P<kind>review|critic)\b(?P<rest>.*)$", re.S)
+_FLOOR_AT = {"review": re.compile(r"\s+(?P<repo>\S+)\s+pr\s+(?P<at>[0-9]{1,9})\s+(?P<floor>uncommon|rare|epic|legendary)\s+(?P<reason>\S.*)$", re.S),
+             "critic": re.compile(r"\s+(?P<repo>\S+)\s+branch\s+(?P<at>\S+)\s+(?P<floor>uncommon|rare|epic|legendary)\s+(?P<reason>\S.*)$", re.S)}
 _LIFT_AT = {"review": re.compile(r"\s+(?P<repo>\S+)\s+pr\s+(?P<at>[0-9]{1,9})\s+(?P<reason>\S.*)$", re.S),
             "critic": re.compile(r"\s+(?P<repo>\S+)\s+branch\s+(?P<at>\S+)\s+(?P<reason>\S.*)$", re.S)}
 
@@ -186,6 +191,9 @@ def go_say(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
     lift = _LIFT.match(line)
     if lift:
         return _go_lift(rec, lift, key)
+    floor = _FLOOR.match(line)
+    if floor:
+        return _go_floor(rec, floor, key)
     if re.match(r"^lift:\s*token\s+@lease\s+bench\b", line):
         return _go_bench_lift(rec, line, key)
     if verb in ("backlog", "roster"):
@@ -197,6 +205,8 @@ def go_say(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         return 1, ruled, False
     if verb == "lift":
         return 2, refusal.use("lift", "malformed lift: invocation"), False
+    if verb == "floor":
+        return 2, refusal.use("floor", "malformed floor: invocation"), False
     if verb != "relay":
         return 1, refusal.refuse(f"{verb[:40]} is not a lease verb this client sends to Go; it sends {', '.join(GO_VERBS)}",
                                  send=[("/2mw2lt:brain", "for each verb's grammar")], to="seat"), False
@@ -599,6 +609,33 @@ def _go_lift(rec: dict, lift: re.Match, key: str) -> tuple[int, str, bool]:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
             return 1, refusal.use("lift", str(e)), False
+        return 1, refusal.retry(str(e)), True
+    return 0, said, False
+
+
+def _go_floor(rec: dict, floor: re.Match, key: str) -> tuple[int, str, bool]:
+    """`floor:` on Go: the rung a review or critic series' rounds are held to, as the seat (#9789).
+    `key` is the line's occurrence, so a resend under `--retry` is answered from the first."""
+    import refusal
+    import session_routes
+    m = _FLOOR_AT[floor["kind"]].match(floor["rest"])
+    if not m:
+        return 2, refusal.use("floor", f"malformed floor: {floor['kind']} invocation"), False
+    at = int(m["at"]) if floor["kind"] == "review" else m["at"]
+    try:
+        said = session_routes.series_floor(rec["session"], rec["token"], floor["kind"], m["repo"], at, m["floor"],
+                                           " ".join(m["reason"].split()), key)
+    except session_routes.NotSeated as why:
+        return 1, GO_NOT_SEATED.format(why=why), False
+    except session_routes.Unsent as e:
+        return 1, refusal.retry(str(e)), True
+    except session_routes.Refused as e:
+        if (stale := session_routes.outdated(e)) is not None:
+            return 1, stale, False
+        if e.code in SEAT_LOST:
+            return 1, GO_NOT_SEATED.format(why=e), False
+        if session_routes.settled(e):
+            return 1, refusal.use("floor", str(e)), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 
