@@ -27,10 +27,13 @@ import records
 
 V = 1
 SOURCE = "claude"
-# What may state a reading. A harness with a hook states its own; one without it is read from
-# outside by the agent on its machine (doc 47 §4), and the source names the harness either way
-# because the binding that attributes a reading is keyed on the provider.
-SOURCES = ("claude", "codex", "zcode")
+_REGISTRY = json.loads(
+    (Path(__file__).resolve().parent / "harness_identity.json").read_text())["harnesses"]
+# What may state a reading: every harness the registry declares, as the plugin is given it. A
+# harness with a hook states its own; one without it is read from outside by the agent on its
+# machine (doc 47 §4), and the source names the harness either way because the binding that
+# attributes a reading is keyed on the provider.
+SOURCES = tuple(e["name"] for e in _REGISTRY)
 TAIL = 256 * 1024  # bytes read from the end of a transcript; a long session's file is unbounded
 
 _FIELDS = {"v", "source", "source_version", "provider_session", "runtime_id", "observed_at",

@@ -279,13 +279,13 @@ def told(kind: str, **fields: object) -> None:
     sys.stdout.flush()
 
 
-def present(ws: Path, psession: str, rid: str) -> None:
+def present(ws: Path, psession: str, rid: str, provider: str) -> None:
     """Spool this process's presence for the agent to relay, which makes a resumed process that
     has fired no hook yet an observed incarnation Go will bind (`supervision.WITNESSED`). One
-    file per incarnation, however often the plugin asks."""
+    file per incarnation, however often the plugin asks, named for the provider it holds for."""
     key = "present-" + hashlib.sha256(f"{psession} {rid}".encode()).hexdigest()[:32]
     spool.admit_at(spool.spool_dir(ws), key, {
-        "v": 4, "source": "claude", "session": psession, "runtime_id": rid, "event": "Present",
+        "v": 4, "source": provider, "session": psession, "runtime_id": rid, "event": "Present",
         "occurrence": key, "observed_at": datetime.now(timezone.utc).isoformat()})
 
 
@@ -309,7 +309,7 @@ def rebound(ws: Path, session: str, token: str, psession: str, rid: str, pid: in
         return None
     code = REFUSAL_CODE.search(answer)
     if code and code.group(1) == "incarnation-unobserved":
-        present(ws, psession, rid)
+        present(ws, psession, rid, provider)
     return code.group(1) if code else answer
 
 

@@ -578,11 +578,39 @@ def _devin_process_names() -> tuple[str, ...]:
     return "devin",
 
 
+# Devin's global options that take the next argument as their value, so it is never the
+# subcommand — the launch's own argv puts `--config <path>` ahead of `acp` (spikes/
+# 9781-devin-worker RECORD.md F2, `devin --help`); and options that take an optional one:
+# `devin -r acp` resumes a session named acp, it serves none.
+_DEVIN_FLAGS = ("--config", "--model", "--prompt-file", "--permission-mode", "--verbosity")
+_DEVIN_MAYBE_FLAGS = ("-p", "--print", "--export", "-r", "--resume", "--respect-workspace-trust")
+
+
+def _devin_subcommand(args: list[str]) -> str | None:
+    """The subcommand clap takes args' first positional for, once the global options and their
+    values are past; `--` ends the options for a prompt, so nothing past it is a subcommand."""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            return None
+        name, _, inline = a.partition("=")
+        if not name.startswith("-"):
+            return a
+        if not inline and name in _DEVIN_FLAGS:
+            i += 1
+        elif not inline and name in _DEVIN_MAYBE_FLAGS \
+                and i + 1 < len(args) and not args[i + 1].startswith("-"):
+            i += 1
+        i += 1
+    return None
+
+
 def _devin_process(argv: list[str]) -> str | None:
     args = _command(argv, _devin_process_names())
     if args is None or any(x in args for x in ("--version", "--help", "-v", "-h")):
         return None
-    return "worker" if args and args[0] == "acp" else None
+    return "worker" if _devin_subcommand(args) == "acp" else None
 
 
 def _devin_pid(psession: str) -> int | None:
@@ -594,6 +622,11 @@ def _devin_pid(psession: str) -> int | None:
     except (OSError, ValueError):
         return None
     return holder if _devin_lock_names(lock, holder) else None
+
+
+def _devin_loaded(psession: str) -> bool:
+    """A Devin session is loaded while its lock row names a live process (#9781 C1)."""
+    return _devin_pid(psession) is not None
 
 
 CENSUS_REGISTRY_LIMIT = 256
@@ -798,12 +831,13 @@ HARNESSES = {h.provider: h for h in (
             version=zcode_version, hooks=True,
             reading=_zcode_reading,
             process_kind=_zcode_process, process_names=_zcode_process_names),
-    # Stage 0 of the Devin harness plan (#9781): identity by the lock rows under the account's
-    # data root, and nothing else yet — no transcripts the door validates, no stream of its own,
-    # no reading — until the plan's stage C completes it. Its session is answered through the
-    # declared `lock-rows` binding, never by a variable: Devin tells no tool child its session.
+    # C1 of the Devin harness plan (#9781): injected delivery reaches it, and a session is loaded
+    # while its lock row names a live process. No transcripts the door validates, no stream of its
+    # own, no reading: its observation is the host's. Its session is answered through the declared
+    # `lock-rows` binding, never by a variable — Devin tells no tool child its session.
     Harness("devin", agent="devin", config=".local/share/devin",
             session_id=_session_of("devin"), harness_pid=_devin_pid,
+            delivery="inject", loaded=_devin_loaded,
             process_kind=_devin_process, process_names=_devin_process_names),
 )}
 

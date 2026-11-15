@@ -3,6 +3,21 @@
   "harnesses": [
     {
       "name": "claude",
+      "delivery": "held-stream",
+      "can": [
+        "launch",
+        "resume",
+        "brain-role",
+        "rehome",
+        "self-observed",
+        "history",
+        "keyed-dialog",
+        "model-call",
+        "native-profile-evidence",
+        "model-proof",
+        "compact-proof",
+        "turn-end-gate"
+      ],
       "session_env": [
         "CLAUDE_CODE_SESSION_ID"
       ],
@@ -11,21 +26,51 @@
     },
     {
       "name": "codex",
+      "delivery": "injected-reach",
+      "can": [
+        "launch",
+        "recorded",
+        "spends-signin"
+      ],
       "session_env": [
         "CODEX_THREAD_ID",
         "CODEX_SESSION_ID"
       ]
     },
     {
-      "name": "opencode"
+      "name": "opencode",
+      "delivery": "injected-reach",
+      "can": [
+        "launch"
+      ]
     },
     {
       "name": "zcode",
+      "delivery": "held-stream",
+      "can": [
+        "launch",
+        "resume",
+        "turn-steering",
+        "plugin-held",
+        "rehome",
+        "self-observed",
+        "model-proof"
+      ],
       "session_binding": "hook-binding"
     },
     {
       "name": "devin",
-      "session_binding": "lock-rows"
+      "delivery": "injected-reach",
+      "can": [
+        "launch",
+        "resume",
+        "prompt-steering",
+        "model-proof",
+        "turn-end-gate",
+        "history"
+      ],
+      "session_binding": "lock-rows",
+      "turn_end_gate": true
     }
   ]
 }

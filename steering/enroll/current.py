@@ -19,9 +19,13 @@ _PLUGIN = "2mw2lt@2mw2lt"
 _REQUIRED = ("steering/enroll/observe.py", "steering/enroll/readout.py")
 
 # How each harness refreshes this plugin from its marketplace (#1795): the action a session is
-# told when the release outruns the pack it runs.
-UPDATE = {"claude": "claude plugin update 2mw2lt@2mw2lt", "codex": "codex plugin add 2mw2lt@2mw2lt",
-          "zcode": "zcode plugins marketplace update 2mw2lt && zcode plugins update 2mw2lt@2mw2lt"}
+# told when the release outruns the pack it runs. The action is each harness's own syntax; the
+# registry bounds which harnesses one may name.
+_REGISTRY = json.loads(
+    (Path(__file__).resolve().parents[1] / "harness_identity.json").read_text())["harnesses"]
+_ACTIONS = {"claude": "claude plugin update 2mw2lt@2mw2lt", "codex": "codex plugin add 2mw2lt@2mw2lt",
+            "zcode": "zcode plugins marketplace update 2mw2lt && zcode plugins update 2mw2lt@2mw2lt"}
+UPDATE = {e["name"]: _ACTIONS[e["name"]] for e in _REGISTRY if e["name"] in _ACTIONS}
 
 
 def _key(name: str) -> tuple:

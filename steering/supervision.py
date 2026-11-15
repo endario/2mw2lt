@@ -1,6 +1,9 @@
 """Supervision (doc 15 §6): the Claude adapter's allow-list and the attention reducer."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 ADMITTED = {"Notification", "PermissionRequest", "PermissionDenied", "PreToolUse", "PostToolUse",
             "PostToolUseFailure", "Elicitation", "ElicitationResult", "Stop", "StopFailure", "UserPromptSubmit",
             "PreCompact"}  # doc 154 §8: a compaction, recorded against the session's checkpoint
@@ -21,10 +24,15 @@ NOTIFICATION_TYPES = {"permission_prompt", "idle_prompt", "auth_success", "elici
 
 
 MIN_VERSION = (2, 1, 196)  # prompt_id on every hook (doc 15 §3)
-# The harnesses whose hook payloads this adapter admits, each with its own version floor. The
-# floor is Claude Code's fact; zcode's runtime sends Claude-shaped payloads on its own version
-# line, which Claude's floor does not measure (#6257), so it has none.
-FLOORS: dict[str, tuple[int, ...]] = {"claude": MIN_VERSION, "zcode": ()}
+_REGISTRY = json.loads(
+    (Path(__file__).resolve().parent / "harness_identity.json").read_text())["harnesses"]
+# The harnesses whose hook payloads this adapter admits — the registry's self-observed ones —
+# each with its own version floor. The floor is Claude Code's fact; another self-observed
+# runtime sends Claude-shaped payloads on its own version line, which Claude's floor does not
+# measure (#6257), so it has none.
+FLOORS: dict[str, tuple[int, ...]] = {
+    e["name"]: MIN_VERSION if e["name"] == "claude" else ()
+    for e in _REGISTRY if "self-observed" in e.get("can", ())}
 # What a permission dialog is about, in the order a tool names it. The owner is being asked to
 # allow one act, and this is the argument that says which (#812).
 ASK_KEYS = ("command", "file_path", "path", "url", "pattern")

@@ -65,26 +65,56 @@ def claude_version(ws: Path, deadline: float) -> str:
     return v
 
 
-# The variable each non-Claude hook runtime states its version in, read from the hook's own env
-# rather than by running the CLI inside the hook's budget.
-HOOK_VERSION_ENV = {"zcode": "ZCODE_APP_VERSION"}
+# The variable each non-Claude hook runtime this adapter admits states its version in, read
+# from the hook's own env rather than by running the CLI inside the hook's budget. The registry
+# names no variable, so this assumes `<NAME>_APP_VERSION`: a harness stating it elsewhere has
+# every observation refused until the registry declares its variable.
+HOOK_VERSION_ENV = {name: f"{name.upper()}_APP_VERSION"
+                    for name in supervision.FLOORS if name != "claude"}
+_REGISTRY = json.loads(
+    (HERE / "harness_identity.json").read_text())["harnesses"]
 
 
 def hook_version(source: str) -> str:
     return os.environ.get(HOOK_VERSION_ENV.get(source, ""), "").strip()
 
 
-def harness_pid(source: str, ws: Path, hook: dict) -> int | None:
-    """The process the observation's runtime id names: None for Claude, whose hook parent
-    `runtime_id` finds itself; for zcode, the pid of the binding the glue published just before
-    this ran, which is the process `connect` resolves too. No binding, no runtime id."""
-    if source == "claude":
-        return None
+def _hook_bound_pid(source: str, ws: Path, hook: dict) -> int | None:
+    """The pid of the binding the glue published just before this ran — the process `connect`
+    resolves too."""
     import zcode_binding
     try:
         return int(zcode_binding.resolve(ws, cwd=str(hook.get("cwd") or os.getcwd()))["pid"])
     except (zcode_binding.Refused, OSError, ValueError, KeyError, TypeError):
         return None
+
+
+def _lock_rows_pid(source: str, ws: Path, hook: dict) -> int | None:
+    """The process holding the lock the source's registry rows name for the hook's session."""
+    import machine_harness
+    h = machine_harness.of(source)
+    sid = hook.get("session_id")
+    if h is None or h.harness_pid is None or not isinstance(sid, str) or not sid:
+        return None
+    try:
+        pid = h.harness_pid(sid)
+    except Exception:
+        return None
+    return pid if isinstance(pid, int) else None
+
+
+# How a source's observation names its runtime's process, by the session binding the registry
+# declares for it. No binding, no runtime id.
+_BINDING_PID = {"hook-binding": _hook_bound_pid, "lock-rows": _lock_rows_pid}
+
+
+def harness_pid(source: str, ws: Path, hook: dict) -> int | None:
+    """The process the observation's runtime id names: None for a source the registry declares
+    no session binding for — Claude's hook parent `runtime_id` finds itself — and the binding
+    kind's own answer otherwise."""
+    kind = next((e.get("session_binding") for e in _REGISTRY if e["name"] == source), None)
+    reader = _BINDING_PID.get(kind or "")
+    return reader(source, ws, hook) if reader else None
 
 
 def main() -> int:
