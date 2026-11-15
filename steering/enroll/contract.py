@@ -3179,13 +3179,13 @@ GateFloorAnswer = typing.TypedDict("GateFloorAnswer", {
     "position": "int",
 })
 
-# GateBenchLiftBody ends a bench's streak, for the seat generation, with the reason: one part's, by
-# the dimension and key its bench reason names, or, as before, a route's and model's, by the vendor
-# and model.
+# GateBenchLiftBody ends a bench's streak, with the reason: one part's, by the dimension and key
+# its bench reason names, or, as before, a route's and model's, by the vendor and model. The seat
+# names its generation; the owner's lift names none.
 GateBenchLiftBody = typing.TypedDict("GateBenchLiftBody", {
     "vendor": "typing.NotRequired[str]",
     "model": "typing.NotRequired[str]",
-    "generation": "int",
+    "generation": "typing.NotRequired[int]",
     "reason": "str",
     "dimension": "typing.NotRequired[str]",
     "key": "typing.NotRequired[str]",
@@ -3877,9 +3877,10 @@ GateSpread = typing.TypedDict("GateSpread", {
     "p90": "float | None",
 })
 
-# GateBenches answers GET /gates/benches: the parts of the workspace's judges benched now, each with
-# the evidence that decided its charge, the platform's own failures by refusal code, which charge no
-# judge, and the shadow, what a bench that reordered would have done (go-gate-failure-attribution-design.md
+# GateBenches answers GET /gates/benches: the parts of the workspace's judges benched — standing,
+# and those whose window passed while their streak stands (#9815) — each with the evidence that
+# decided its charge (#9817), the platform's own failures by refusal code, which charge no judge,
+# and the shadow, what a bench that reordered would have done (go-gate-failure-attribution-design.md
 # §3, §4; the charge by evidence, #9817).
 GateBenches = typing.TypedDict("GateBenches", {
     "benches": "list[GateBench] | None",
@@ -3887,9 +3888,10 @@ GateBenches = typing.TypedDict("GateBenches", {
     "shadow": "GateBenchShadow",
 })
 
-# GateBench is one benched part: its dimension and key as a lift names them, when its bench ends, the
-# classes of the strikes that benched it, and the evidence that decided the charge — what the desk
-# shows beside the strikes.
+# GateBench is one benched part: its dimension and key as a lift names them, when its bench ends,
+# the classes of the strikes that benched it, and the evidence that decided the charge — what the
+# desk shows beside the strikes. An until in the past is a bench whose window has passed while its
+# streak stands: the next strike re-benches the part, until a verdict resets the streak (#9815).
 GateBench = typing.TypedDict("GateBench", {
     "dimension": "str",
     "key": "str",
