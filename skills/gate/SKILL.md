@@ -46,7 +46,8 @@ the rounds already judged keep the floor they ran at. The seat may also set the 
 any rung from `uncommon`: then a round you ask below it is refused `floor-below-seat`, a round you
 ask above it stands, and a round you name no floor for runs at it. A floor no judge meets is refused
 (`floor-unservable`). `--final` declares this
-round the last: its judge may stand a rung above the floor, at the floor's effort still, from a
+round the last: it is judged at the floor it asked for, never a rung above it — a higher floor is
+asked for by name — from a
 vendor no earlier round used where one can take it, and after its verdict steering refuses another round, as
 at the ceiling. The round at the ceiling is final without asking. The review's run details say the
 floor and how the final round ran.
@@ -83,7 +84,7 @@ In a repository 2mw2lt steers this gate replaces `/independent-review` and `/ind
 | | this gate | the runner |
 |---|---|---|
 | reviewer | a vendor that wrote none of the branch, chosen by usage | routed by round and usage, away from the host |
-| depth, final round | `--floor`, `--effort`, `--final`; the final round a rung up, from a vendor no earlier round used | `--tier`, `--complement-of` |
+| depth, final round | `--floor`, `--effort`, `--final`; the final round from a vendor no earlier round used | `--tier`, `--complement-of` |
 | tools | full inside a cage that withholds every credential but the reviewer's own | full with the host's access; `--sandbox` |
 | persona | the project's, read from the base commit | the project's, read from the checkout |
 | record | a fact per round, published by `2mw2lt[bot]` with a status pinned to the commit | a local artifact, published as the user |
