@@ -449,8 +449,56 @@ def _hook_session() -> str | None:
     return binding["psession"] if binding else None
 
 
+def _devin_rows() -> Path:
+    """Devin's session locks, under its data root in the account's XDG data home — the root a
+    launch moves per account (#9781 design §4.4), which is a base the variable names rather than
+    the whole directory, so it is resolved here and not read off `config_dir`."""
+    base = os.environ.get("XDG_DATA_HOME", "").strip()
+    root = Path(base) if base else Path.home() / ".local" / "share"
+    return root / "devin" / "cli" / "session_locks"
+
+
+def _devin_lock_names(lock: Path, holder: int) -> bool:
+    """A lock names its holder only while that process is live, its birth reads, and it was born
+    no later than the lock was written: one naming a dead pid, or a pid born after it, is stale
+    and names no session — the lock survives SIGKILL with its holder gone (#9781 design §2, §4.5).
+    A birth that cannot be read proves nothing, so it names nothing either — the same closed
+    hand the census's registry rows keep (`runtime_id.serving_session`)."""
+    if runtime_id.started_at(holder) is None:
+        return False
+    try:
+        written = lock.stat().st_mtime
+    except OSError:
+        return False
+    birth = runtime_id.started_epoch(holder)
+    return birth is not None and birth <= written
+
+
+def _devin_lock_session() -> str | None:
+    """The session of the `devin acp` this process hangs off, by the lock naming it: Devin tells
+    no tool child its session (#9781 design §2, measured), so the walk that answers Claude from
+    its registry rows answers Devin from its lock rows — the nearest ancestor whose argv is
+    `devin acp`, and the lock under the data root that names that pid."""
+    for pid in runtime_id.ancestor_pids():
+        argv = runtime_id.process_argv(pid)
+        if argv is None or _devin_process(argv) != "worker":
+            continue
+        try:
+            locks = sorted(_devin_rows().glob("*.lock"))
+        except OSError:
+            return None
+        for lock in locks[:CENSUS_REGISTRY_LIMIT]:
+            try:
+                holder = int(lock.read_text().strip())
+            except (OSError, ValueError):
+                continue
+            if holder == pid and _devin_lock_names(lock, holder):
+                return lock.stem
+    return None
+
+
 # The published sessions a declaration may name, by the name the Go registry gives them.
-_BINDINGS = {"hook-binding": _hook_session}
+_BINDINGS = {"hook-binding": _hook_session, "lock-rows": _devin_lock_session}
 
 
 def _zcode_pid(psession: str) -> int | None:
@@ -524,6 +572,28 @@ def _opencode_transcript(psession: str):
 def _opencode_workspace(fd: int, rel, workspace: str) -> str | None:
     import worker_probe
     return worker_probe.opencode_workspace_of(fd, rel, workspace)
+
+
+def _devin_process_names() -> tuple[str, ...]:
+    return "devin",
+
+
+def _devin_process(argv: list[str]) -> str | None:
+    args = _command(argv, _devin_process_names())
+    if args is None or any(x in args for x in ("--version", "--help", "-v", "-h")):
+        return None
+    return "worker" if args and args[0] == "acp" else None
+
+
+def _devin_pid(psession: str) -> int | None:
+    """The process holding the session's lock, when it is live and was born no later than the
+    lock's writing — the process a runtime identity is derived from."""
+    lock = _devin_rows() / f"{psession}.lock"
+    try:
+        holder = int(lock.read_text().strip())
+    except (OSError, ValueError):
+        return None
+    return holder if _devin_lock_names(lock, holder) else None
 
 
 CENSUS_REGISTRY_LIMIT = 256
@@ -728,6 +798,13 @@ HARNESSES = {h.provider: h for h in (
             version=zcode_version, hooks=True,
             reading=_zcode_reading,
             process_kind=_zcode_process, process_names=_zcode_process_names),
+    # Stage 0 of the Devin harness plan (#9781): identity by the lock rows under the account's
+    # data root, and nothing else yet — no transcripts the door validates, no stream of its own,
+    # no reading — until the plan's stage C completes it. Its session is answered through the
+    # declared `lock-rows` binding, never by a variable: Devin tells no tool child its session.
+    Harness("devin", agent="devin", config=".local/share/devin",
+            session_id=_session_of("devin"), harness_pid=_devin_pid,
+            process_kind=_devin_process, process_names=_devin_process_names),
 )}
 
 

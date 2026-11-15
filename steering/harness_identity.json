@@ -22,6 +22,10 @@
     {
       "name": "zcode",
       "session_binding": "hook-binding"
+    },
+    {
+      "name": "devin",
+      "session_binding": "lock-rows"
     }
   ]
 }
