@@ -461,7 +461,7 @@ AccountServed = typing.TypedDict("AccountServed", {
 })
 
 # ProviderModels is the body of POST /providers/models: the model ids the team keeps a provider to,
-# stated by the team's owner (#7522). Every account of the provider whose own owner has stated no
+# stated by the team's owner or the seat's holder (#7522). Every account of the provider whose own owner has stated no
 # models inherits it; null clears it, so the provider serves every model again.
 ProviderModels = typing.TypedDict("ProviderModels", {
     "vendor": "str",
@@ -2325,9 +2325,21 @@ BodyClaimAnswer = typing.TypedDict("BodyClaimAnswer", {
     "expires_at": "typing.NotRequired[str | None]",
 })
 
-# BrainRequestBody is the body of POST /brain/requests: a member's words to the brain.
+# BrainRequestBody is the body of POST /brain/requests: a member's words to the brain, and, to a
+# vacant seat, optionally where the brain it starts should run.
 BrainRequestBody = typing.TypedDict("BrainRequestBody", {
     "text": "str",
+    "launch": "typing.NotRequired[BrainLaunch | None]",
+})
+
+# BrainLaunch is where a word to a vacant seat asks the brain to run: an Anthropic account, a machine
+# by the name its census reports, a model and an effort. Each is optional, and none is a vendor or a
+# harness: the seat host is Claude Code's stream-json loop (doc 208).
+BrainLaunch = typing.TypedDict("BrainLaunch", {
+    "account": "typing.NotRequired[str]",
+    "machine_name": "typing.NotRequired[str]",
+    "model": "typing.NotRequired[str]",
+    "effort": "typing.NotRequired[str]",
 })
 
 # BrainRequestAnswer is where a request was queued: its id, whether the key had sent it already,

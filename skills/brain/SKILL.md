@@ -695,6 +695,16 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post /ladder -
   --json '{"ratings": [{"selector": "\\bmimo-v2\\.6-pro\\b", "rarity": "rare", "model": "mimo-v2.6-pro"}], "why": "…"}'
 ```
 
+The provider's model word, the models the team keeps every account of a vendor to unless the account
+says its own (`vendor_serves_models` in `/accounts`), is yours to state as it is the owner's. A
+launch waiting `excluded:unserving-model` on a model the account routes is that word leaving it out.
+`null` clears the word:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post /providers/models --key <a key of your own> \
+  --json '{"vendor": "devin", "models": ["swe-2", "swe-2-flash"]}'
+```
+
 Delegating a card is also when you say what it waits on and which goal it serves. A goal is the
 Ledger's own record, and a card joins it as `part-of <goal>`, by the goal's id.
 Name the plan's sentence as `--source` when an edge comes from one:
