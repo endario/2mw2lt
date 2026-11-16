@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Refuse three shell commands that each caused an incident (#4551, step 4).
 
-A PreToolUse hook on the shell tool, for Claude Code and Codex alike, beside `delete_guard.py`; both
+A PreToolUse hook on the shell tool, for Claude Code, Codex and Devin alike, beside `delete_guard.py`; both
 read a command through `shell_words.py`. Each rule matches one shape at the command's own position
 and names where it is written: `pkill -f` by a pattern that names neither the worktree nor a
 temporary directory, starting `2mw2lt-follow`, and an auto-merge (`gh pr merge -R <repo> --auto`).
@@ -192,6 +192,9 @@ def ground(cwd: str | None) -> list[str]:
 
 GRANT_FILE = os.path.join(".claude", "merge-grant")
 GRANT_SHAPE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+# The shell tool as each harness's hook payload names it: `Bash` under Claude Code, ZCode and
+# Codex (whose `exec_command` reports `Bash` to hooks), `exec` under Devin (#9781, C4).
+SHELL_TOOLS = frozenset(("Bash", "exec"))
 # Only the SOP merge's own shape pays for the grant file's read.
 MERGE_SHAPED = re.compile(r"\bgh pr merge (?:[1-9][0-9]* )?-R ")
 
@@ -240,7 +243,7 @@ def verdict(payload: dict, env: dict | None = None) -> str | None:
 
 def merge_grant(payload, repo: str) -> dict | None:
     """A project's opt-in grant uses a literal command shape, not shell glob matching."""
-    if not isinstance(payload, dict) or payload.get("tool_name") != "Bash":
+    if not isinstance(payload, dict) or payload.get("tool_name") not in SHELL_TOOLS:
         return None
     tool = payload.get("tool_input")
     command = tool.get("command") if isinstance(tool, dict) else None
@@ -254,7 +257,7 @@ def merge_grant(payload, repo: str) -> dict | None:
 
 # The launch's forge grant (#7528, documentation/steering/plans/2026-10-19-launch-forge-approval-design.md).
 # A launched Claude Code session is granted its SOP's forge writes as prefix rules
-# (machine/internal/interactive/start.go claudeSettings), and Claude Code matches none against a
+# (machine/internal/interactive/claude.go claudeSettings), and Claude Code matches none against a
 # quoted body holding a line that starts with `#`: an OpenAI-backed launch's classifier then
 # refused the write. The launch names its repository in FORGE_GRANT_ENV, which only it sets; an
 # older script ignores the variable and only loses the grant (#7467).
@@ -530,7 +533,7 @@ def _client_granted(path: str) -> bool:
 def forge_grant(payload, environ=None) -> dict | None:
     """Allow for a literal call of a forge verb the grant covers, on its repository, or of an
     enrolment client; None for anything else."""
-    if not isinstance(payload, dict) or payload.get("tool_name") != "Bash":
+    if not isinstance(payload, dict) or payload.get("tool_name") not in SHELL_TOOLS:
         return None
     tool = payload.get("tool_input")
     command = tool.get("command") if isinstance(tool, dict) else None

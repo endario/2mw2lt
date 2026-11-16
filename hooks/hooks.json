@@ -53,7 +53,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|^exec$",
         "hooks": [
           {
             "type": "command",

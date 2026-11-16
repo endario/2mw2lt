@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Refuse a recursive delete that reaches outside the session's own ground (#3909).
 
-A PreToolUse hook on the shell tool, for Claude Code and Codex alike. It finds every recursive
+A PreToolUse hook on the shell tool, for Claude Code, Codex and Devin alike. It finds every recursive
 delete in the command (`rm -r`, `find -delete` or `-exec rm -r`, `rsync --delete`), resolves each
 target as the shell would (`..`, symlinked parents, a variable that is empty, a glob), and blocks
 the call when a target falls outside the working tree, the session's scratchpad or its task

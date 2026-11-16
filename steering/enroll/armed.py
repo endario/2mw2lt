@@ -115,10 +115,14 @@ def main() -> int:
         return DONE   # not a workspace, or not a session steering knows: nothing is owed
     if not session:
         return DONE
+    provider = minted_provider(rows, session)
+    # A hold is owed only where ending the turn takes the session's own stream dark: an
+    # injected reach is woken through its host, and `hold.py` refuses it the hold it would
+    # arm, so demanding one would wedge every turn's end for a debt no act can settle.
     # The plugin's module holding the stream is a hold too, and asking this session for a
     # second one is refused by the daemon as another carrier (#5334).
-    hold = not (holder.fresh(ws, psession) or holding(ws, session))
-    announce = owed_announce(ws, session, minted_provider(rows, session))
+    hold = owes_hold(provider) and not (holder.fresh(ws, psession) or holding(ws, session))
+    announce = owed_announce(ws, session, provider)
     if hold:
         why = reason(session, ws) + (f"\n\n{announce['why']}" if announce else "")
     elif announce:
@@ -165,14 +169,29 @@ def owed_announce(ws: Path, session: str, harness: str) -> dict | None:
     return answer
 
 
-def gated_harness(harness: str) -> bool:
-    """Whether the registry declares that harness's Stop hook can refuse a turn's end (doc 203
-    D6), read from the generated identity data rather than a name test."""
+def registered(harness: str) -> dict | None:
+    """The named harness's generated registry row, or None: a name the registry does not hold,
+    and the file unreadable, both read as the harness saying nothing."""
     try:
         named = json.loads((HERE.parent / "harness_identity.json").read_text())
     except (OSError, ValueError):
-        return False
-    return any(h.get("name") == harness and h.get("turn_end_gate") for h in named.get("harnesses", []))
+        return None
+    return next((h for h in named.get("harnesses", []) if h.get("name") == harness), None)
+
+
+def gated_harness(harness: str) -> bool:
+    """Whether the registry declares that harness's Stop hook can refuse a turn's end (doc 203
+    D6), read from the generated identity data rather than a name test."""
+    return bool((registered(harness) or {}).get("turn_end_gate"))
+
+
+def owes_hold(harness: str) -> bool:
+    """Whether a turn ending with nothing holding can strand this session's harness, from the
+    same generated data: only a held-stream session goes dark without a hold. A name the
+    registry does not know — or none recorded, an enrolment from before providers were minted —
+    is asked as before: those enrolments were all held streams' (#9781, C9)."""
+    found = registered(harness)
+    return found is None or found.get("delivery") == "held-stream"
 
 
 if __name__ == "__main__":
