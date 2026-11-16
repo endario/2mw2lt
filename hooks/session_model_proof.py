@@ -6,13 +6,16 @@ accepted.json. Unrestricted sessions have no STEERING_MODEL_PROOF and publish no
 """
 from __future__ import annotations
 
-import json
-import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "steering"))
+import python_floor  # noqa: E402
+python_floor.hook(blocking=False)  # SessionStart: a hook never fails the start it is attached to
+
+import json
+import os
 
 import atomic_file  # noqa: E402
 

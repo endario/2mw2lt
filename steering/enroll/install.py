@@ -1051,11 +1051,22 @@ def github_account(root: Path, repo: str, chosen: str | None = None) -> str:
     raise Stop(f"several GitHub logins can read {repo}; name one with --gh-account: {', '.join(names)}")
 
 
+def hook_python() -> None:
+    """The `python3` the wired hooks run meets the floor before any work starts (#9888): the hook
+    commands name it bare, so PATH's interpreter — not the one running install — is what install
+    checks."""
+    found, exe = python_floor.on_path()
+    if found is None or tuple(found[:2]) < python_floor.NEEDS:
+        raise Stop(python_floor.path_why(found, exe, "run install again"))
+    say("python", f"{exe} ({'.'.join(str(v) for v in found)})")
+
+
 def install(root: Path, codex: bool = False, team: str | None = None,
             gh_account: str | None = None, invite: str | None = None, login: str | None = None) -> int:
     # A direct call, as the guards make, starts its transcript afresh — not off the import-time clock.
     global _at, _at_line
     _at, _at_line = "", time.monotonic()
+    hook_python()
     console = platform_url()
     repo = repository(root)
     say("repository", repo)

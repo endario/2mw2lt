@@ -2,14 +2,19 @@
 """Admit a completed Codex turn from the plugin's native Stop hook."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import python_floor  # noqa: E402
+python_floor.hook(blocking=False)  # Stop: an exit 2 would loop the turn
+
 import hashlib
 import json
 import math
 import os
-import sys
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))

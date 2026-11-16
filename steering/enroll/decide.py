@@ -18,13 +18,18 @@ output, which leaves the dialog to the person. Never exit 2 here: for this event
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import python_floor  # noqa: E402
+python_floor.hook(blocking=False)  # PermissionRequest: an exit 2 would deny the ask
+
 import json
 import os
-import sys
 import socket
 import time
 import urllib.parse
-from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))

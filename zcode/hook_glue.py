@@ -13,10 +13,15 @@ never a turn.
 """
 from __future__ import annotations
 
-import json
-import os
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "steering"))
+import python_floor  # noqa: E402
+python_floor.hook(blocking=False)  # UserPromptSubmit among its events: a 2 erases the prompt
+
+import json
+import os
 
 ROOT = Path(os.environ.get("ZCODE_PLUGIN_ROOT") or Path(__file__).resolve().parents[1])
 sys.path.insert(0, str(ROOT / "steering"))

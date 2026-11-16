@@ -11,13 +11,18 @@ the summariser's instructions (#3872 D5). It reads the same files, and answers e
 read none of them."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import python_floor  # noqa: E402
+python_floor.hook(blocking=False)  # SessionStart and SessionEnd: a hook never fails them
+
 import hashlib
 import json
 import os
 import subprocess
-import sys
 import time
-from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))

@@ -26,6 +26,9 @@ import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
+import python_floor  # noqa: E402
+python_floor.hook(blocking=False)  # Stop: an exit 2 would loop the turn
+
 import json
 import os
 import shlex

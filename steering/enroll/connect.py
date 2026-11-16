@@ -30,6 +30,7 @@ from bind import Refused, Unclaimed, bind, incarnation, incarnation_of, pid_arg,
 import machine_harness as harness_mod  # noqa: E402
 from process_probe import Undetermined  # noqa: E402
 import hooks  # noqa: E402
+import python_floor  # noqa: E402
 import checkout_binding  # noqa: E402
 import holder  # noqa: E402
 from verb_help import current_args, error, help_requested, script_help  # noqa: E402
@@ -854,6 +855,13 @@ def main(argv: list[str]) -> int:
         h = harness_of(o.provider)
     except Refused as why:
         return error("connect", str(why))
+    # Claude, zcode, codex and Devin all load plugin hooks whose commands name `python3` bare; on a
+    # machine whose PATH resolves one under the floor they fail open on every call (#9888), so a
+    # connect that would leave them wired is refused before any work.
+    if h.hooks or h.provider in ("codex", "devin"):
+        if why := python_floor.on_path_refusal("run connect again"):
+            print(why, file=sys.stderr)
+            return 1
     session, acct = o.session, account(o, h)
 
     ws = required_workspace_root(project_dir(), timeout=2.0)

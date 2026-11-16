@@ -13,13 +13,18 @@ The pointer form, until every client sends text: `checkpoint.py <session> <bound
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import python_floor  # noqa: E402
+python_floor.require()
+
 import hashlib
 import json
 import os
 import re
 import subprocess
-import sys
-from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))

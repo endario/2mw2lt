@@ -319,6 +319,7 @@ UsageReading = typing.TypedDict("UsageReading", {
     "taken_at": "str",
     "live_until": "str",
     "plan": "str | None",
+    "organization_type": "typing.NotRequired[str | None]",
     "credits": "UsageCredits | None",
     "limits": "list[UsageLimit] | None",
     "budget": "typing.NotRequired[dict[str, typing.Any]]",

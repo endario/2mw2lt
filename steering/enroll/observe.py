@@ -10,6 +10,9 @@ import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
+import python_floor  # noqa: E402
+python_floor.hook(blocking=False)  # every admitted event runs it; on PreToolUse a 2 would block the call it only notes
+
 import fcntl
 import hashlib
 import json

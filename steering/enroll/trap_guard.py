@@ -14,15 +14,20 @@ command exactly or gives no answer.
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import python_floor  # noqa: E402
+python_floor.hook(blocking=True)  # PreToolUse: an exit 2 refuses the tool call
+
 import fnmatch
 import json
 import os
 import re
 import shlex
 import subprocess
-import sys
 import tempfile
-from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from shell_words import (ASSIGNMENT, SHELLS, Unresolvable, assigned, command_name, expand, heredocs,  # noqa: E402
