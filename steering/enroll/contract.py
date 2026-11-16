@@ -584,6 +584,22 @@ AccountTransferred = typing.TypedDict("AccountTransferred", {
     "to": "str",
 })
 
+# AccountCarry is the body of POST /accounts/carry: the owner of a legacy Claude account, a bare
+# accountUuid, names the person-in-org account `<accountUuid>_<organizationUuid>` it became (#9910).
+AccountCarry = typing.TypedDict("AccountCarry", {
+    "vendor": "str",
+    "account_id": "str",
+    "to": "str",
+})
+
+# AccountCarried is its answer: the legacy account as the team resolved it, and the account it is now.
+AccountCarried = typing.TypedDict("AccountCarried", {
+    "vendor": "str",
+    "account_id": "str",
+    "from": "str",
+    "to": "str",
+})
+
 # AccountRemoval is the body of POST /accounts/remove and POST /accounts/restore: the account's
 # owner removes it from 2mw2lt, or takes the removal back (#8361).
 AccountRemoval = typing.TypedDict("AccountRemoval", {
@@ -1347,7 +1363,9 @@ StreamLaunch = typing.TypedDict("StreamLaunch", {
     "deadline_at": "typing.NotRequired[str]",
 })
 
-# StreamGateRun is a gate run offered to this machine, to be judged by Judge.
+# StreamGateRun is a gate run offered to this machine, to be judged by Judge. DeadlineAt is when
+# the door stops accepting its answer, from delivery: the run's Timeout and a grace to answer in. A
+# door that predates it sends none, and the machine reckons the deadline from the run's own start.
 StreamGateRun = typing.TypedDict("StreamGateRun", {
     "kind": "str",
     "id": "str",
@@ -1360,6 +1378,7 @@ StreamGateRun = typing.TypedDict("StreamGateRun", {
     "account": "str",
     "brief": "GateBrief",
     "timeout": "int",
+    "deadline_at": "typing.NotRequired[str]",
 })
 
 # StreamModelRun is a model call offered to this machine (doc 91 §2): run Text on Model, through
@@ -8156,6 +8175,7 @@ ROUTES = frozenset({
     "GET /healthz",
     "GET /w/{workspace}/api/v1/accounts",
     "POST /w/{workspace}/api/v1/accounts/burn",
+    "POST /w/{workspace}/api/v1/accounts/carry",
     "POST /w/{workspace}/api/v1/accounts/co-owners",
     "DELETE /w/{workspace}/api/v1/accounts/co-owners/{id}",
     "POST /w/{workspace}/api/v1/accounts/concurrency",
