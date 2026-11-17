@@ -705,6 +705,40 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post /provider
   --json '{"vendor": "devin", "models": ["swe-2", "swe-2-flash"]}'
 ```
 
+The team's accounts themselves — carrying a legacy account onto the qualified one it became,
+retiring one, taking a retirement back, renumbering them inside the team — are the owner's words
+the seat speaks on its delegated bearer, through `accounts.py`. Every argument names a vendor and
+the account's number in the team as `GET /accounts` lists it, never a raw id; a refusal prints its
+check and what satisfies it. `--dry-run` resolves the numbers and shows the before and after,
+sending nothing:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/accounts.py" list [vendor]
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/accounts.py" carry <vendor> <legacy number> <qualified number>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/accounts.py" remove <vendor> <number>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/accounts.py" restore <vendor> <number>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/accounts.py" number <vendor> <number> <to>
+```
+
+The words stand where the grant does. `access` asks coordination what the seat's grant now
+carries and, when it does not cover them, says exactly what the owner grants and where — the
+Access class at reach "Everything you own", in the console's Team settings on the delegation row
+for this workspace's seat. A grant without it, or at the workspace's reach alone, refuses
+`delegation-revoked` naming `class` or `reach`; ask the owner, never widen a default:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/accounts.py" access
+```
+
+A removed account's number is free to take: the seat removes it, and `number` hands it the number
+the moving account leaves, so a restore needs nothing. The owner's sequence for the legacy
+accounts — carry each legacy number onto the qualified account that succeeded it, `remove` the
+number no successor claims, then `number` the survivors down — is dry-run first, then sent:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/accounts.py" number anthropic 5 4 --dry-run
+```
+
 Delegating a card is also when you say what it waits on and which goal it serves. A goal is the
 Ledger's own record, and a card joins it as `part-of <goal>`, by the goal's id.
 Name the plan's sentence as `--source` when an edge comes from one:

@@ -144,6 +144,14 @@ TOOLS = {
         {"topic": "send", "usage": "<session> <directive id>", "example": "ack violet 1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00"},
         {"topic": "store", "usage": "--store <session> [--provider-session <id>] < <token-file>", "example": "ack --store violet < token.txt"},
     ]},
+    "accounts": {"forms": [
+        {"topic": "access", "usage": _SPEAKER_USAGE + " access", "example": "accounts access"},
+        {"topic": "list", "usage": _SPEAKER_USAGE + " list [vendor]", "example": "accounts list anthropic"},
+        {"topic": "carry", "usage": _SPEAKER_USAGE + " carry <vendor> <legacy number> <qualified number> [--dry-run]", "example": "accounts carry anthropic 1 7"},
+        {"topic": "remove", "usage": _SPEAKER_USAGE + " remove <vendor> <number> [--dry-run]", "example": "accounts remove anthropic 4"},
+        {"topic": "restore", "usage": _SPEAKER_USAGE + " restore <vendor> <number> [--dry-run]", "example": "accounts restore anthropic 4"},
+        {"topic": "number", "usage": _SPEAKER_USAGE + " number <vendor> <number> <to> [--dry-run]", "example": "accounts number anthropic 5 4"},
+    ]},
     "bind": {"verb": "bind", "current": True, "forms": [
         {"topic": None, "usage": "[--provider <provider>] [--provider-session <id>] [--pid <pid>] [session]", "example": "bind --current"},
     ]},

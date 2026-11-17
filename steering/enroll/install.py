@@ -1111,7 +1111,9 @@ def install(root: Path, codex: bool = False, team: str | None = None,
         # invitation to decide it, the account that signs in decides the team the workspace lands in, so
         # the approval page refuses any other: a team of another account's is chosen with --login.
         named = login is not None or invite is None
-        token = sign_in(console, f"install {repo} on {label}", invite, login or name, named=named)
+        # --team rides the scope so the approval page names the team, not a guess (#9989).
+        token = sign_in(console, f"install {repo} on {label}" + (f" in team {team}" if team else ""),
+                        invite, login or name, named=named)
         try:
             access = go_access(console, token)
             checked_login(access, login or name, named)
@@ -1452,7 +1454,7 @@ def main(argv: list[str]) -> int:
         if arg == "--team":
             if action != "install":
                 return verb_help.error("install", "--team is only for install")
-            if i + 1 >= len(args) or args[i + 1].startswith("-"):
+            if i + 1 >= len(args) or args[i + 1].startswith("-") or not args[i + 1].strip() or len(args[i + 1].split()) > 1:
                 return verb_help.error("install", "missing team value")
             if team is not None:
                 return verb_help.error("install", "team may appear once")

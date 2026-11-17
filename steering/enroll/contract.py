@@ -614,6 +614,21 @@ AccountRemoved = typing.TypedDict("AccountRemoved", {
     "removed": "bool",
 })
 
+# AccountNumber is the body of POST /accounts/number: the account's owner renumbers it to a free
+# number within its team (#9910).
+AccountNumber = typing.TypedDict("AccountNumber", {
+    "vendor": "str",
+    "account_id": "str",
+    "number": "int",
+})
+
+# AccountNumbered is its answer: the account as the team resolves it and its number now.
+AccountNumbered = typing.TypedDict("AccountNumbered", {
+    "vendor": "str",
+    "account_id": "str",
+    "number": "int",
+})
+
 # AccountOffer is the body of POST /accounts/offer: the account's owner offers it to a GitHub
 # account by its numeric id and the login the console resolved it to (#8430).
 AccountOffer = typing.TypedDict("AccountOffer", {
@@ -6281,6 +6296,7 @@ DelegationClaims = typing.TypedDict("DelegationClaims", {
     "session": "str",
     "epoch": "int",
     "classes": "list[str] | None",
+    "reach": "str",
 })
 
 # DelegationList is each live workspace of a team with its live grant to the seat, or none
@@ -8183,6 +8199,7 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/accounts/matrix",
     "POST /w/{workspace}/api/v1/accounts/move",
     "POST /w/{workspace}/api/v1/accounts/move/answer",
+    "POST /w/{workspace}/api/v1/accounts/number",
     "POST /w/{workspace}/api/v1/accounts/offer",
     "POST /w/{workspace}/api/v1/accounts/remove",
     "POST /w/{workspace}/api/v1/accounts/reset",
