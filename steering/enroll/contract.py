@@ -61,6 +61,60 @@ InvitationDTO = typing.TypedDict("InvitationDTO", {
     "expires_at": "str",
 })
 
+# AccountAdd is a member asking to add a Claude account on a host they run a machine on, named as the
+# accounts matrix names its hosts.
+AccountAdd = typing.TypedDict("AccountAdd", {
+    "host": "str",
+})
+
+# AccountAdded is the request the ask opened: its id, the host, and the time after which the home it
+# makes is no longer the requester's alone.
+AccountAdded = typing.TypedDict("AccountAdded", {
+    "request": "str",
+    "host": "str",
+    "deadline": "str",
+})
+
+# AccountAddItem is one of the caller's add requests, as the desk reads it. State is "requested" while the
+# machine has not answered, "ready" once its home is made and waits for the sign-in, "unwired" when the home
+# could not be wired (Cause says why), "signed-in" once an account is read in the home, and "expired" past
+# the deadline. Launcher is the command that signs in, where the machine named a home.
+AccountAddItem = typing.TypedDict("AccountAddItem", {
+    "request": "str",
+    "host": "str",
+    "state": "str",
+    "launcher": "typing.NotRequired[str]",
+    "cause": "typing.NotRequired[str]",
+    "deadline": "str",
+})
+
+# AccountAdds is GET /accounts/add: the caller's requests of the last week, newest first.
+AccountAdds = typing.TypedDict("AccountAdds", {
+    "items": "list[AccountAddItem] | None",
+})
+
+# MachineAccountAddBody is what the door offers the machine: the request, and the deadline the home's
+# marker carries.
+MachineAccountAddBody = typing.TypedDict("MachineAccountAddBody", {
+    "request": "str",
+    "deadline": "str",
+})
+
+# MachineAccountAddAnswer is the machine's answer: the home it made and whether it wired it. Status
+# is "ready" or "unwired"; Cause says why only when unwired.
+MachineAccountAddAnswer = typing.TypedDict("MachineAccountAddAnswer", {
+    "status": "str",
+    "home": "str",
+    "cause": "typing.NotRequired[str]",
+})
+
+# MachineAccountAddReceipt is the machine's answer to its add action, as the answer route takes it.
+MachineAccountAddReceipt = typing.TypedDict("MachineAccountAddReceipt", {
+    "uplink": "str",
+    "id": "str",
+    "result": "MachineAccountAddAnswer",
+})
+
 # AccountMatrix is GET /accounts/matrix: what each host the team's machines run on may spend, for
 # every account the team knows (documentation/accounts/machine-account-matrix-design.md, #8609).
 # Cells are keyed as the accounts read keys its rows: vendor and account id.
@@ -1984,7 +2038,7 @@ AgentPlacement = typing.TypedDict("AgentPlacement", {
     "agent_limit": "typing.NotRequired[int | None]",
 })
 
-# AgentAttachmentBody names one image adopted by an act on the machine's current uplink.
+# AgentAttachmentBody names one image or file adopted by an act on the machine's current uplink.
 # Index is required: an omitted index must not silently read the first image.
 AgentAttachmentBody = typing.TypedDict("AgentAttachmentBody", {
     "uplink": "str",
@@ -1995,8 +2049,14 @@ AgentAttachmentBody = typing.TypedDict("AgentAttachmentBody", {
 
 # Attachment is the re-encoded image an upload returns and a prompt keeps after its bytes expire.
 # Its digest is SHA-256 hex; its index in the prompt is the fetch route's zero-based index.
+#
+# Kind is "image" or "transit" (a PDF carried to the session and deleted once its act is answered);
+# a descriptor from before kinds existed names none, and is an image. Name is a transit file's own
+# name, sanitised, and an image has none.
 Attachment = typing.TypedDict("Attachment", {
     "id": "str",
+    "kind": "typing.NotRequired[str]",
+    "name": "typing.NotRequired[str]",
     "digest": "str",
     "media_type": "str",
     "width": "int",
@@ -8190,6 +8250,8 @@ ROUTES = frozenset({
     "POST /forge/hook",
     "GET /healthz",
     "GET /w/{workspace}/api/v1/accounts",
+    "GET /w/{workspace}/api/v1/accounts/add",
+    "POST /w/{workspace}/api/v1/accounts/add",
     "POST /w/{workspace}/api/v1/accounts/burn",
     "POST /w/{workspace}/api/v1/accounts/carry",
     "POST /w/{workspace}/api/v1/accounts/co-owners",
@@ -8371,6 +8433,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/sessions/{session}/directives",
     "POST /w/{workspace}/api/v1/sessions/{session}/directives/{directive}/acknowledgement",
     "GET /w/{workspace}/api/v1/sessions/{session}/due",
+    "POST /w/{workspace}/api/v1/sessions/{session}/files",
     "POST /w/{workspace}/api/v1/sessions/{session}/forge-token",
     "GET /w/{workspace}/api/v1/sessions/{session}/history",
     "POST /w/{workspace}/api/v1/sessions/{session}/keep",
@@ -8417,6 +8480,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/work/regroups",
     "POST /w/{workspace}/api/v1/workspace/retirement",
     "POST /w/{workspace}/api/v1/workspace/slug",
+    "POST /w/{workspace}/steering/agent/account-add",
     "POST /w/{workspace}/steering/agent/account-export",
     "POST /w/{workspace}/steering/agent/account-receive",
     "POST /w/{workspace}/steering/agent/accounts",

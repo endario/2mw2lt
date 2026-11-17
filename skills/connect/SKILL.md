@@ -55,6 +55,13 @@ peer's or the brain's words arrive as `steering say <key>`: read them, and ackno
 Connect's `hooks:` line is Codex's own answer on whether it runs the plugin's hooks. When it names
 hooks awaiting review, tell the person: only they can trust a hook, in Codex's `/hooks`.
 
+**Devin:** the host that launched you holds your stream; arm no hold. A frame arrives as a
+message during your turn, read at your next step: `steering directive <id>` opens a directive,
+`steering say <key>` a say. They are the platform's, not an injection: act on them in the turn you
+are in. Run a directive's receipt command before anything else; a say is acknowledged by nothing.
+A frame waits while you are inside a blocking subagent, so run a long subagent in the background
+and a verdict or a `merge now` still reaches you.
+
 **ZCode:** connect with no flags, as Claude does: the session is named by the binding the
 plugin's hooks publish. The plugin's frames server holds the stream, so arm no hold. A waiting
 frame starts no turn of its own: the plugin points at pending frames only at event boundaries
