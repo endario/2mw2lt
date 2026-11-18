@@ -33,6 +33,35 @@ class _Placeholder(Unreadable):
     """The platform UUID is one boards ship when they have none."""
 
 
+class _Absent(Unreadable):
+    """The platform exposes no UUID at all, as a micro-VM without DMI."""
+
+
+# Where a hosted micro-VM's maker writes the machine's id (doc 210 §4.2). Not trusted for what it
+# says: the admission it is checked against was bound to that id when the machine was made, and a
+# copy of the machine reads another.
+PROVIDER_ID = "/etc/instabox/identity"
+
+
+def _provider(absent: str) -> str:
+    """A DMI-less machine's anchor: its maker's id for it, namespaced by the maker."""
+    path = os.environ.get("STEERING_HARDWARE_PROVIDER_FILE") or PROVIDER_ID
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+    except FileNotFoundError:
+        raise Unreadable(f"{absent}, and no maker's id is at {path}")
+    except OSError as e:
+        raise Unreadable(f"{absent}, and {path} cannot be read: {e}")
+    try:
+        got = raw.decode().strip()
+    except UnicodeDecodeError:
+        raise Unreadable(f"{absent}, and {path} is not UTF-8 text")
+    if not re.fullmatch(r"m_[a-z0-9]{8,64}", got):
+        raise Unreadable(f"{absent}, and {path} names no InstaBox machine")
+    return "instabox:" + got
+
+
 def _normal(raw: str, source: str) -> str:
     uuid = raw.strip().replace("-", "").lower()
     if not re.fullmatch(r"[0-9a-f]{32}", uuid):
@@ -115,6 +144,8 @@ def _linux() -> str:
             raw = f.read()
     except PermissionError:
         raise Unreadable(f"{path} is not readable by this user: {LINUX_FIX}")
+    except FileNotFoundError as e:
+        raise _Absent(f"{path} cannot be read: {e}")
     except OSError as e:
         raise Unreadable(f"{path} cannot be read: {e}")
     return _normal(raw, path)
@@ -130,6 +161,11 @@ def fingerprint(system: str | None = None) -> str:
     elif system == "Linux":
         try:
             uuid = _linux()
+        except _Absent as e:
+            anchor = _provider(str(e))
+            got = hashlib.sha256(b"2mw2lt machine v1 provider\0" + anchor.encode()).hexdigest()
+            _CACHED.append(got)
+            return got
         except _Placeholder as e:
             ports = _board_ports(str(e))
             got = hashlib.sha256(b"2mw2lt machine v1 ports\0" + ports.encode()).hexdigest()

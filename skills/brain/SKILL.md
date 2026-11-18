@@ -187,12 +187,19 @@ hear first — see [Read the blocked-on line, the ledger and escalations](#read-
   `escalate`, the default, its author was told first and you hear it only if it is still open at the
   seat's window, or at once when no session asked for it or its author left. It names who asked for the review or carried it and whether they are still enrolled. Passed
   and open, not proven mergeable: have the author merge it, merge it, or say why it waits.
-- **`gate-delayed`**, a signal from `gate <commission>`: a gate has waited 15 minutes for a judge
-  (`signals.gate_delayed.*`), counted from its commission across every judge that handed it on, or
-  its judge has run past its offer's deadline. Once per wait and once per offer. No last output says
-  only that nothing was seen. Free room for a judge, look at the machine, or cancel and commission again.
+- **`gate-delayed`**, a signal from `gate <commission>`: a gate has waited past its threshold for a
+  judge (`signals.gate_delayed.*`, 7 minutes unless the workspace sets another), counted from its
+  commission across every judge that handed it on, or its judge has run past its offer's deadline.
+  Once per wait and once per offer. No last output says only that nothing was seen. Free room for a
+  judge, look at the machine, or cancel and commission again.
   One whose facts name a `floor` is told at once: no judge at its card's floor was offered, so retier
-  the card, and the queued round takes the new floor. Its commissioner is told too, by default.
+  the card, and the queued round takes the new floor. Its commissioner is told too, by default, and it
+  decides. Its message leads with one sentence naming the floor and what was seen to hold each vendor
+  ("No epic judge free: openai: busy; anthropic: a judge's maker wrote the change."), then the moves
+  that can free it: keep waiting, ask you to lower the floor with evidence, cancel and commission again
+  pinning a judge, or ask you for a peak override; for a gate a floor, catalog or setting holds, only the
+  ask that fits the hold. Yours is the longer list of every vendor's refusals. Lower a floor
+  on that evidence, never because the diff is large.
 - **`gate-unheard`**, a signal from `gate <commission>`: a gate round ended after the session that
   asked for it stopped standing, so nobody heard its ending (`signals.gate_unheard.*`), once per gate.
   It names the ending's first line, that session, and the card the round was for when it has one.

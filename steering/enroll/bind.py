@@ -92,7 +92,7 @@ def ancestry(limit: int = 8) -> list[str]:
 
 def identity(pid: int, provider: str) -> str | None:
     """The runtime id of `pid`, derived the way `observe.py` and `readout.py` derive it."""
-    return runtime_id.derive(provider, pid=pid)
+    return runtime_id.derive(provider, pid=pid, timeout=runtime_id.PS_PATIENT)
 
 
 def identified() -> str:

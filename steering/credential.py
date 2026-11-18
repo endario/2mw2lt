@@ -465,6 +465,52 @@ def _native_current(p: Path, d: dict, clock) -> str:
         os.close(lock)
 
 
+def revoke_native(p: Path) -> str | None:
+    """End on coordination the admission the native enrolment at `p` holds, asked on its own
+    credential (#10135): Go ends that credential and the login's renewable chain, and names no other.
+    Says what happened, for the caller to say; None when no file is at `p`. `NoCredential` when Go
+    refused it or did not answer, or the file there holds no native credential to ask with."""
+    try:
+        p.read_bytes()
+    except FileNotFoundError:
+        return None
+    except OSError as e:
+        raise NoCredential(f"{p} could not be read ({e})")
+    d = _read(p)
+    if d is None:
+        raise NoCredential(f"{p} is not a readable enrolment")
+    if d.get("native") and d.get("pending"):
+        # An exchange or renewal was sent and its answer lost: Go may have issued a successor this
+        # file does not hold, which a revocation on the held credential would leave live. Its key
+        # recovers what Go issued, as the next renewal would.
+        current(p)
+        if (_read(p) or {}).get("pending"):
+            raise NoCredential("an exchange or renewal it sent is still unanswered, so the credential "
+                               "coordination holds current for it is not known here")
+    lock = open_lock(p)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        d = _held(p)     # a renewal may have replaced the credential while this waited for its lock
+        if not d.get("native") or not d.get("credential"):
+            raise NoCredential("the enrolment held here has no native credential to revoke itself with")
+        if not all(isinstance(d.get(k), str) for k in ("origin", "door", "credential")):
+            raise NoCredential(f"{p} is not a readable enrolment")
+        import uuid
+        try:
+            _, got = _native_post(d["origin"], f"{routes(d['door'])}/api/v1/machine-revocations", {},
+                                  {HEADER: d["credential"], "Idempotency-Key": str(uuid.uuid4())})
+        except NoCredential as e:
+            # Revoked already: an earlier revocation whose answer was lost, or a member's.
+            if e.code == "machine-revocation-credential-ended":
+                return "already revoked on coordination"
+            raise
+    finally:
+        os.close(lock)
+    if got.get("status") != "revoked":
+        raise NoCredential(f"coordination's answer to the revocation did not say it revoked: {got}")
+    return "revoked on coordination"
+
+
 def _sweep_superseded(files: list[Path], failures: dict, clock, say) -> None:
     """Remove an enrolment whose renewal Go refused by name while another, at another door, holds a
     live credential for the same workspace on the same origin: the copy an alias's door rewrite or

@@ -438,6 +438,7 @@ def let_go(prior: tuple[str, str] | None, authority: str, door: str) -> bool:
         return False
     left_id, left_door = prior
     gone = []
+    revoke_held(credential.path_for(left_door))
     with contextlib.suppress(FileNotFoundError):
         credential.path_for(left_door).unlink()
         gone.append("credential")
@@ -990,9 +991,10 @@ def record(root: Path, door: str, authority: str) -> None:
     os.environ["STEERING_DOOR"] = door
 
 
-# What install writes into a checkout, relative to its root.
+# What install writes into a checkout, relative to its root, and where its sessions' worktrees go:
+# a rescue's `git add -A` in a repository that does not ignore them would commit each as a gitlink.
 LOCAL_FILES = (".env", ".claude/settings.local.json", ".claude/.settings.local.json.lock", ".claude/steering-launch.py",
-               ".claude/steering-workspace", ".claude/steering-tokens")
+               ".claude/steering-workspace", ".claude/steering-tokens", ".claude/worktrees")
 
 
 def exclude_local(root: Path) -> None:
@@ -1357,7 +1359,6 @@ def end_session(console: str, token: str) -> None:
 
 
 def uninstall(root: Path, retire: bool) -> int:
-    import hooks
     console = platform_url()
     bound = checkout_binding.id_at(root)
     try:
@@ -1365,13 +1366,33 @@ def uninstall(root: Path, retire: bool) -> int:
     except Stop as e:
         door = None
         say("credential", f"kept: {e}")
-    if retire and bound:
-        # By the bound id, which retire_on routes through the person's access: a door's path is how
-        # the console was reached, not always an address coordination knows (#7657).
-        retire_on(console, bound)
-    elif retire:
-        say("workspace", "not retired: this checkout is bound to no workspace; "
-                         "name the workspace with `install.py retire <id>`")
+    held = credential.path_for(door) if bound and door else None
+    if held is not None:
+        # Before a retirement: a retired workspace refuses a credential bound to it, this revocation's among them.
+        revoke_held(held)
+    retired = True
+    try:
+        if retire and bound:
+            # By the bound id, which retire_on routes through the person's access: a door's path is how
+            # the console was reached, not always an address coordination knows (#7657).
+            try:
+                retire_on(console, bound)
+            except Stop as e:
+                retired = False
+                say("workspace", f"not retired: {e}; retire it with `install.py retire {bound}`")
+        elif retire:
+            say("workspace", "not retired: this checkout is bound to no workspace; "
+                             "name the workspace with `install.py retire <id>`")
+    finally:
+        # The revocation has run, so cleanup runs whatever becomes of the retirement: one refused,
+        # cancelled or failed never leaves the machine installed on a revoked credential (#10135).
+        _remove_local(root, bound, held)
+    return 0 if retired else 1
+
+
+def _remove_local(root: Path, bound: str | None, held: Path | None) -> None:
+    """What an install added to this checkout and this machine's agent for `bound`."""
+    import hooks
     hooks.uninstall(root)
     say("hooks", "removed")
     env = root / ".env"
@@ -1386,10 +1407,22 @@ def uninstall(root: Path, retire: bool) -> int:
         # the machine's other workspaces and stays.
         (machine_workspaces.directory(Path.home()) / f"{bound}.json").unlink(missing_ok=True)
         machine_workspaces.poke()
-        if door:
-            credential.path_for(door).unlink(missing_ok=True)
+        if held is not None:
+            held.unlink(missing_ok=True)
         say("agent", f"{bound} deregistered from this machine's agent")
-    return 0
+
+
+def revoke_held(held: Path) -> None:
+    """End this machine's admission on the credential `held` keeps, before the file goes (#10135):
+    the file deleted alone left its binding live, and a copy of it renewing for a week past expiry."""
+    try:
+        said = credential.revoke_native(held)
+    except (credential.NoCredential, OSError) as e:
+        say("credential", f"not revoked on coordination: {e}; removed from this machine all the same, "
+                          "so a copy of it held elsewhere could still renew")
+        return
+    if said:
+        say("credential", said)
 
 
 def retire_on(console: str, wid: str) -> None:

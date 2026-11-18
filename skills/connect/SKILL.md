@@ -227,8 +227,9 @@ Each script's `--help` gives its forms and examples.
 
 **Never search the whole disk or your home directory** (`find ~`, `find /`, `rg ~`). On a Mac such
 a walk reaches other apps' private data, and macOS stops the session on a permission dialog
-until the owner answers it, hours later. Search the worktree or a directory you can name; the
-coordination fixture's PostgreSQL is already in `COORDINATION_PG_PREFIX` where the host has it.
+until the owner answers it, hours later. Search the worktree or a directory you can name. A
+launched session is given the coordination fixture's pinned Go and PostgreSQL where the host has
+them; in any other session, connect's `toolchain:` line names the file to source for them.
 
 ## The bulletin
 

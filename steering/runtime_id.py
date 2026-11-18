@@ -45,6 +45,12 @@ def node_id(node_file: Path | None = None) -> str | None:
         return None
 
 
+# The bound for a caller with no hook deadline over it, connect and the witness: on a loaded host
+# `ps` is slow rather than absent, and a None here refuses a session that is there. The hooks keep
+# their own bounds.
+PS_PATIENT = 5.0
+
+
 def process_start(pid: int, timeout: float = 1.0) -> str | None:
     try:
         out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=timeout,

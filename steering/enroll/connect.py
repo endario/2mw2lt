@@ -775,6 +775,16 @@ def checkpoint_block(ws: Path, session: str, psession: str) -> str | None:
     return f"{said}, at {got.get('note')}"
 
 
+def toolchain_line(environ, home: Path) -> str | None:
+    """The env file a session sources to run coordination/'s guards on the host's pinned tools, when
+    its environment lacks them: a launched worker is given them by its launch, a session a person
+    opened by hand is not, and its own `go` may be one the fixture refuses."""
+    env = home / ".local" / "share" / "2mw2lt-agent" / "tools" / "env"
+    if environ.get("COORDINATION_PG_PREFIX") or not env.is_file():
+        return None
+    return f"toolchain: . {shlex.quote(str(env))} before running coordination's guards"
+
+
 def repo_line(ws: Path) -> str:
     """`repo: owner/name`, the repository this workspace serves as its door names it. A checkout's
     `origin` may be an SSH host alias, which `gh` cannot resolve; `gh -R` with this line does not
@@ -975,6 +985,9 @@ def main(argv: list[str]) -> int:
         blind = None
     if blind:
         print(blind, file=sys.stderr)
+    tools = toolchain_line(os.environ, Path.home())
+    if tools:
+        print(tools)
     if not h.holds:
         print(reached(session, psession, ws) if port else
               f"reach: not asserted, there being no agent here for {ws}; "

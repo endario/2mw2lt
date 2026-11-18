@@ -278,6 +278,7 @@ AccountList = typing.TypedDict("AccountList", {
     "items": "list[ListedAccountUsage] | None",
     "vendor_models": "dict[str, list[AccountModel] | None] | None",
     "vendor_serves_models": "dict[str, list[str] | None] | None",
+    "cost_words": "list[ModelCostWord] | None",
     "manages_providers": "bool",
     "unnamed": "list[UnnamedDirectory] | None",
     "removed": "list[RemovedAccount] | None",
@@ -328,6 +329,7 @@ ListedAccountUsage = typing.TypedDict("ListedAccountUsage", {
     "serves_for": "list[str] | None",
     "serves_models": "list[str] | None",
     "routes": "list[str] | None",
+    "costs": "dict[str, ModelCostRead] | None",
     "peak_windows": "typing.NotRequired[list[PeakWindowRead] | None]",
     "peak_override": "typing.NotRequired[PeakOverrideRead | None]",
     "resets_by": "str | None",
@@ -698,6 +700,30 @@ AccountOffered = typing.TypedDict("AccountOffered", {
     "vendor": "str",
     "account_id": "str",
     "login": "str",
+})
+
+# ModelCostRead is what a route costs, as the desk reads it (10101-model-cost-class design D6): the
+# class free, offer or metered, the moment an offer ends, and whose word it is, "vendor" or "owner".
+# An account's Costs omit a model nobody has said, which the desk treats as metered.
+ModelCostRead = typing.TypedDict("ModelCostRead", {
+    "class": "str",
+    "until": "typing.NotRequired[str | None]",
+    "source": "str",
+})
+
+# ModelCostWord is a standing word of the owner's on a route: Account is "" for every account of the
+# vendor, Model is the id as the word names it, By is "owner" or "seat", and Why is the reason it
+# was given.
+ModelCostWord = typing.TypedDict("ModelCostWord", {
+    "id": "str",
+    "vendor": "str",
+    "account": "str",
+    "model": "str",
+    "class": "str",
+    "until": "typing.NotRequired[str | None]",
+    "why": "str",
+    "by": "str",
+    "at": "str",
 })
 
 # ActionBody asks a machine to act on a session's process: to wake it, set its level, end it,
@@ -5043,6 +5069,11 @@ RenewalProgress = typing.TypedDict("RenewalProgress", {
     "recheck_at": "int",
 })
 
+# MachineRevocation answers a machine's revocation of its own admission.
+MachineRevocation = typing.TypedDict("MachineRevocation", {
+    "status": "str",
+})
+
 # OwnershipOffers is the open offers of one kind a person is party to (#8430): those offered to
 # them, less any they declined, and those they made, which never show a decline.
 OwnershipOffers = typing.TypedDict("OwnershipOffers", {
@@ -8106,6 +8137,26 @@ LadderAnswer = typing.TypedDict("LadderAnswer", {
     "ladder": "LadderRead",
 })
 
+# ModelCostBody is the owner's word on what a route costs (10101-model-cost-class design D2): Class
+# "free", "offer" (which names Until, and only an offer does) or "metered", or "clear" to take the word
+# on the route back. An empty Account is every account of the vendor.
+ModelCostBody = typing.TypedDict("ModelCostBody", {
+    "vendor": "str",
+    "account": "typing.NotRequired[str]",
+    "model": "str",
+    "class": "str",
+    "until": "typing.NotRequired[str | None]",
+    "why": "str",
+    "clears": "typing.NotRequired[str]",
+})
+
+# ModelCostAnswer answers a word: "set" or "cleared".
+ModelCostAnswer = typing.TypedDict("ModelCostAnswer", {
+    "status": "str",
+    "replayed": "bool",
+    "position": "int",
+})
+
 # WorkRoute is one route of the work wire: its method and path under WorkBase, the query form that
 # selects it when one path answers several, and the names of its request body and answer in
 # testdata/work.json; a read has no request.
@@ -8390,11 +8441,13 @@ ROUTES = frozenset({
     "GET /w/{workspace}/api/v1/launches/{launch}",
     "POST /w/{workspace}/api/v1/launches/{launch}/withdrawal",
     "POST /w/{workspace}/api/v1/machine-renewals",
+    "POST /w/{workspace}/api/v1/machine-revocations",
     "GET /w/{workspace}/api/v1/machines",
     "POST /w/{workspace}/api/v1/machines/{machine}/removal",
     "DELETE /w/{workspace}/api/v1/model-keys/{provider}",
     "GET /w/{workspace}/api/v1/model-keys/{provider}",
     "PUT /w/{workspace}/api/v1/model-keys/{provider}",
+    "POST /w/{workspace}/api/v1/models/cost",
     "GET /w/{workspace}/api/v1/momentum",
     "POST /w/{workspace}/api/v1/names",
     "GET /w/{workspace}/api/v1/needs",
