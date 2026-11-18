@@ -9,6 +9,11 @@
                                         several signed-in logins can read the repository;
                                         --login names the GitHub account to sign in as, when it
                                         is not the workspace's
+    install.py --machine-only <owner>/<repo> [invite-code] [--team <id>] [--login <login>]
+                                        install this login as a lent machine's service user
+                                        (doc 209): no GitHub login and no checkout are read; an
+                                        empty served root under this home names the repository,
+                                        and every launch runs sandboxed
     install.py lanes [workspace] [--merge] [--gh-account <login>]
                                         the open lanes pull request and how it would merge;
                                         --merge merges it as the workspace's login, then waits
@@ -43,6 +48,7 @@ import http.client
 import json
 import os
 import platform
+import pwd
 import re
 import shutil
 import signal
@@ -51,6 +57,7 @@ import subprocess
 import tarfile
 import threading
 import time
+import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -88,6 +95,7 @@ class Stop(SystemExit):
 
 
 _at = ""  # the step last shown, which a stop names
+_service = False  # this run installs a lent machine's service user, which has no browser (doc 209)
 _at_line = time.monotonic()  # when the previous line was said, which a slow step's line names
 
 
@@ -233,7 +241,9 @@ def waited(method: str, url: str, deadline: float, body: dict | None = None,
 def unopened() -> str | None:
     """Why this run opens no browser, or None. Over SSH a browser opened here is the far machine's,
     signed in as whoever uses it, and the console binds the code to the first account that opens it
-    (#6327)."""
+    (#6327). A service user's run opens none either: its approver signs in from their own desk."""
+    if _service:
+        return "this login is a service user, with no browser of its own"
     return "this run is over SSH" if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY") else None
 
 
@@ -1057,6 +1067,88 @@ def github_account(root: Path, repo: str, chosen: str | None = None) -> str:
     raise Stop(f"several GitHub logins can read {repo}; name one with --gh-account: {', '.join(names)}")
 
 
+# A repository as GitHub names one, `owner/name`, which a machine-only install is given.
+REPO = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}/[A-Za-z0-9._-]{1,100}")
+
+
+def login_home() -> Path:
+    """This login's own home, as the account database names it, whatever `HOME` says."""
+    return Path(pwd.getpwuid(os.getuid()).pw_dir)
+
+
+def machine_only_refusal() -> str | None:
+    """Why this login cannot be installed as a lent machine's service user (doc 209 §4.1–4.3), or
+    None. Everything the install writes goes under `HOME`, so a `HOME` that is not this login's own
+    would put it in another person's home: `sudo -u` keeps the caller's on some machines."""
+    if platform.system() != "Darwin":
+        return f"a machine-only install sandboxes every launch in an APFS disk image, which only macOS makes, and this is {platform.system()}"
+    if os.geteuid() == 0:
+        return "it runs as root; run it as the service user (`sudo -H -u _2mw2lt …`), whose agent it installs"
+    own = login_home()
+    if Path.home().resolve() != own.resolve():
+        return (f"HOME is {Path.home()}, and this login's home is {own}; run it with that home "
+                "(`sudo -H -u <service user> …`), so nothing is written in another login's")
+    return None
+
+
+def served_root(repo: str) -> Path:
+    """The served root of doc 209 §4.6: an empty repository under this home whose origin is
+    `repo`'s https address, holding only what the agent reads there. Nothing is fetched into it: a
+    launch clones from the machine's mirror. One already made for `repo` is kept, so a run resumes."""
+    root = Path.home() / "served" / repo
+    url = f"https://github.com/{repo}.git"
+    if root.exists():
+        if not (root / ".git").is_dir():
+            raise Stop(f"{root} exists and is not a repository made by install; move it aside, then run install again")
+        held = origin_slug(root, timeout=5)
+        if (held or "").lower() != repo.lower():
+            raise Stop(f"{root} names {held or 'no GitHub repository'} as its origin, not {repo}; "
+                       "move it aside, then run install again")
+        say("served", f"{root}")
+        return root
+    root.parent.mkdir(parents=True, exist_ok=True)
+    for args in (["init", "-q", str(root)], ["-C", str(root), "remote", "add", "origin", url]):
+        done = subprocess.run(["git", *args], capture_output=True, text=True, timeout=10)
+        if done.returncode:
+            raise Stop(f"could not make the served root at {root}: git {args[0] if args[0] != '-C' else args[2]} "
+                       f"said {(done.stderr or done.stdout).strip() or done.returncode}")
+    say("served", f"{root}, origin {url}")
+    return root
+
+
+def sandboxed(home: Path) -> None:
+    """`[sandbox] enabled = true` in this login's agent.toml, at the image size the settings name
+    by default, so every launch the agent starts here is sandboxed from its first (doc 209 §4.3).
+    The table is added to the file as written and the result parsed back, as `agentjob` adds a
+    limit; a file that already turns sandboxing off, or that its readers refuse, is not rewritten."""
+    import settings
+    path = agentjob.tunables(home)
+    try:
+        text = path.read_text()
+    except FileNotFoundError:
+        text = ""
+    try:
+        existing = tomllib.loads(text)
+        settings.validate(existing)
+    except (tomllib.TOMLDecodeError, ValueError) as e:
+        raise Stop(f"{path} cannot be read as the agent's settings ({e}); fix it, then run install again") from None
+    table = existing.get("sandbox")
+    if table is not None:
+        if table.get("enabled") is not True:
+            raise Stop(f"{path} has a [sandbox] table that does not turn sandboxing on, and a machine-only "
+                       "install sandboxes every launch; set `enabled = true` there, then run install again")
+        say("sandbox", f"on, images of {table.get('image_gib', settings.SANDBOX_IMAGE_GIB)} GiB ({path})")
+        return
+    added = f"[sandbox]\nenabled = true\nimage_gib = {settings.SANDBOX_IMAGE_GIB}\n"
+    base, text = (existing, f"{text.rstrip()}\n\n{added}") if text.strip() else ({"schema": 1}, f"schema = 1\n\n{added}")
+    wanted = {**base, "sandbox": {"enabled": True, "image_gib": settings.SANDBOX_IMAGE_GIB}}
+    if tomllib.loads(text) != wanted:
+        raise Stop(f"{path}: the [sandbox] table cannot be added to it as written; add "
+                   f"`[sandbox] enabled = true` by hand, then run install again")
+    agentjob.write(path, text.encode())
+    say("sandbox", f"on, images of {settings.SANDBOX_IMAGE_GIB} GiB ({path})")
+
+
 def hook_python() -> None:
     """The `python3` the wired hooks run meets the floor before any work starts (#9888): the hook
     commands name it bare, so PATH's interpreter — not the one running install — is what install
@@ -1067,16 +1159,27 @@ def hook_python() -> None:
     say("python", f"{exe} ({'.'.join(str(v) for v in found)})")
 
 
-def install(root: Path, codex: bool = False, team: str | None = None,
-            gh_account: str | None = None, invite: str | None = None, login: str | None = None) -> int:
+def install(root: Path | None, codex: bool = False, team: str | None = None,
+            gh_account: str | None = None, invite: str | None = None, login: str | None = None,
+            machine: str | None = None) -> int:
+    """`machine`, an `owner/name`, installs this login as a lent machine's service user (doc 209)
+    in place of a checkout at `root`: the served root is made here, and no GitHub login is read.
+    The login was only ever the sign-in's hint and the registry's pin for a full host's sessions;
+    the machine is admitted on the console sign-in its approver gives, as any machine is."""
     # A direct call, as the guards make, starts its transcript afresh — not off the import-time clock.
-    global _at, _at_line
-    _at, _at_line = "", time.monotonic()
+    global _at, _at_line, _service
+    _at, _at_line, _service = "", time.monotonic(), machine is not None
+    if machine is not None:
+        if why := machine_only_refusal():
+            raise Stop(f"this login cannot be installed machine-only: {why}")
     hook_python()
     console = platform_url()
+    if machine is not None:
+        root = served_root(machine)
+        sandboxed(Path.home())
     repo = repository(root)
     say("repository", repo)
-    name = github_account(root, repo, gh_account)
+    name = None if machine is not None else github_account(root, repo, gh_account)
     label = f"{socket.gethostname().split('.')[0]} as {getpass.getuser()}"
     bound = checkout_binding.id_at(root)
     door = recorded_door(root, bound) if bound else None
@@ -1157,6 +1260,10 @@ def install(root: Path, codex: bool = False, team: str | None = None,
     machine_workspaces.poke()
     port = ensure_agent(root, authority, door)
     say("agent", f"serving {authority} on 127.0.0.1:{port}")
+    if machine is not None:
+        # A lent machine drafts no lanes: they are the repository's, from a checkout of it.
+        print(json.dumps({"workspace": authority, "door": door, "port": port, "root": str(root)}))
+        return 0
     if left:
         say("sessions", "each session on this checkout runs /2mw2lt:connect again: its enrolment was the old door's")
     source = tracks_source(root, repo)
@@ -1773,6 +1880,7 @@ def main(argv: list[str]) -> int:
     gh_account = None
     invite = None
     login = None
+    machine_only = None
     paths: list[str] = []
     i = 0
     while i < len(args):
@@ -1817,6 +1925,14 @@ def main(argv: list[str]) -> int:
             if login is not None:
                 return verb_help.error("install", "login may appear once")
             login = args[i + 1].removeprefix("@"); i += 2; continue
+        if arg == "--machine-only":
+            if action != "install":
+                return verb_help.error("install", "--machine-only is only for install")
+            if i + 1 >= len(args) or not REPO.fullmatch(args[i + 1]):
+                return verb_help.error("install", "--machine-only takes the repository as owner/name")
+            if machine_only is not None:
+                return verb_help.error("install", "machine-only may appear once")
+            machine_only = args[i + 1]; i += 2; continue
         if arg.startswith("-"):
             return verb_help.error("install", f"unknown option {arg!r}")
         # An invitation code is taken as one wherever it stands, so `/2mw2lt:install <code>` runs as typed.
@@ -1830,9 +1946,19 @@ def main(argv: list[str]) -> int:
         return verb_help.error("install", f"{action} does not accept install options")
     if len(paths) > 1:
         return verb_help.error("install", "too many workspace paths")
+    if machine_only is not None:
+        # Each its own refusal: a served root is made, not a checkout named, and no gh login is read.
+        if paths:
+            return verb_help.error("install", "--machine-only makes its own served root and takes no workspace path")
+        if gh_account is not None:
+            return verb_help.error("install", "--machine-only reads no GitHub login, so it takes no --gh-account")
+        if codex:
+            return verb_help.error("install", "--machine-only wires the hooks a sandboxed session's connect needs, "
+                                              "which --codex does not write")
     if action == "retire" and (len(paths) != 1 or not WORKSPACE_ID.fullmatch(paths[0])):
         return verb_help.error("install", "retire takes one workspace id, as the install answer printed it")
-    if action != "retire":
+    root = None
+    if action != "retire" and machine_only is None:
         anchor = Path(paths[0]) if paths else Path.cwd()
         try:
             root = common_root(anchor, timeout=5)
@@ -1854,7 +1980,8 @@ def main(argv: list[str]) -> int:
             return retire_workspace(paths[0])
         if action == "lanes":
             return adopt_lanes(root, merge, gh_account)
-        return uninstall(root, retire, machine) if action == "uninstall" else install(root, codex, team, gh_account, invite, login)
+        return uninstall(root, retire, machine) if action == "uninstall" else install(root, codex, team, gh_account, invite,
+                                                                                   login, machine_only)
     except KeyboardInterrupt:
         raise Stop(f"stopped at {_at or action}; run {action} again to resume") from None
     except subprocess.TimeoutExpired as e:

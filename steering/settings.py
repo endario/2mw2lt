@@ -20,6 +20,8 @@ import agentjob
 # machine's capacity rather than the defaults it asserts (#2667).
 DEFAULT_PATH = Path(os.environ.get("STEERING_AGENT_SETTINGS") or agentjob.tunables(Path.home()))
 KEYS = {"vendor_limit", "agent_limit", "host_limit", "max_workers"}
+# A sandboxed launch's image size, in GiB, as the Go agent bounds it (machine/internal/settings, doc 209 §4.4).
+SANDBOX_IMAGE_GIB, SANDBOX_IMAGE_GIB_MIN, SANDBOX_IMAGE_GIB_MAX = 32, 4, 1024
 
 
 def _label() -> str:
@@ -40,7 +42,7 @@ _cache = _Cache()
 def validate(data) -> dict:
     if not isinstance(data, dict):
         raise ValueError("is not a table")
-    extra = set(data) - {"schema", "capacity", "placement", "routing", "machine"}
+    extra = set(data) - {"schema", "capacity", "placement", "routing", "machine", "sandbox"}
     if extra:
         raise ValueError(f"has an unknown top-level key ({', '.join(sorted(extra))})")
     if "schema" in data and data["schema"] != 1:
@@ -113,6 +115,17 @@ def validate(data) -> dict:
         raise ValueError(f"[machine] has an unknown key ({', '.join(sorted(extra))})")
     if "name" in machine and not valid_machine_name(machine["name"]):
         raise ValueError(f"[machine].name={machine['name']!r} is not 1 to 64 bytes, trimmed, without a control character")
+    sandbox = data.get("sandbox", {})
+    if not isinstance(sandbox, dict):
+        raise ValueError("[sandbox] is not a table")
+    extra = set(sandbox) - {"enabled", "image_gib"}
+    if extra:
+        raise ValueError(f"[sandbox] has an unknown key ({', '.join(sorted(extra))})")
+    if "enabled" in sandbox and not isinstance(sandbox["enabled"], bool):
+        raise ValueError(f"[sandbox].enabled={sandbox['enabled']!r} is not true or false")
+    gib = sandbox.get("image_gib", SANDBOX_IMAGE_GIB)
+    if not isinstance(gib, int) or isinstance(gib, bool) or not SANDBOX_IMAGE_GIB_MIN <= gib <= SANDBOX_IMAGE_GIB_MAX:
+        raise ValueError(f"[sandbox].image_gib={gib!r} is not a whole number from {SANDBOX_IMAGE_GIB_MIN} to {SANDBOX_IMAGE_GIB_MAX}")
     # Kept beside the limits under keys no `[capacity]` entry can take, so one cache holds them all.
     return {**table, **({"placement": placing} if placing else {}),
             **({"routing": routing} if routing else {}), **({"machine": machine} if machine else {})}

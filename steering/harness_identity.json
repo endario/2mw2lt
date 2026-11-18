@@ -16,7 +16,8 @@
         "native-profile-evidence",
         "model-proof",
         "compact-proof",
-        "turn-end-gate"
+        "turn-end-gate",
+        "sandboxed"
       ],
       "session_env": [
         "CLAUDE_CODE_SESSION_ID"

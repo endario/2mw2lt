@@ -234,6 +234,7 @@ TOOLS = {
     ]},
     "install": {"forms": [
         {"topic": "install", "usage": "[workspace] [invite-code] [--codex] [--team <id>] [--gh-account <login>] [--login <login>]", "example": "install . 2MW-7KQ4-XN2D-9HTB-M3PC"},
+        {"topic": "--machine-only", "usage": "--machine-only <owner>/<repo> [invite-code] [--team <id>] [--login <login>]", "example": "install --machine-only example-org/example-repo"},
         {"topic": "lanes", "usage": "lanes [workspace] [--merge] [--gh-account <login>]", "example": "install lanes . --merge"},
         {"topic": "uninstall", "usage": "uninstall [workspace] [--workspace] [--machine]", "example": "install uninstall ."},
         {"topic": "retire", "usage": "retire <workspace id>", "example": "install retire workspace-1"},

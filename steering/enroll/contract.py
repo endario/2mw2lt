@@ -4670,6 +4670,7 @@ FleetMachine = typing.TypedDict("FleetMachine", {
     "state": "MachineState",
     "mine": "bool",
     "linked_at": "str | None",
+    "sandbox": "typing.NotRequired[MachineSandbox | None]",
 })
 
 # MachineState is a machine's liveness as coordination reads it from what its agent already sends
@@ -4805,6 +4806,50 @@ MachineRemovalAnswer = typing.TypedDict("MachineRemovalAnswer", {
 MachineReportAnswer = typing.TypedDict("MachineReportAnswer", {
     "status": "str",
     "machine_key": "typing.NotRequired[str]",
+})
+
+# MachineSandbox is what a machine's census says of its sandboxing (doc 209 §4.3). Enabled says
+# whether new launches run in session images, and ImageGib, said only then, caps each image's size
+# in GiB. Live and Held are the image records the agent holds, said whether or not sandboxing is
+# enabled, since turning it off leaves the images that exist in place; Held names each image kept
+# until it is disposed of, at most SandboxHeldMax of them, and HeldTotal counts every image held,
+# named or not; a census that leaves it out holds no more than it names. ReadAt is when the agent
+# read those records, apart from the worker census, and orders one report against another. An
+# agent says the field only when it read every record, so leaving it out keeps what was said. A
+# machine-local fact, as KitTool is: it keys nothing and composes with nothing across machines.
+MachineSandbox = typing.TypedDict("MachineSandbox", {
+    "enabled": "bool",
+    "image_gib": "typing.NotRequired[int]",
+    "live": "typing.NotRequired[int]",
+    "held": "typing.NotRequired[list[SandboxHeld]]",
+    "held_total": "typing.NotRequired[int]",
+    "read_at": "str",
+})
+
+# SandboxHeld is one image the machine keeps until it is disposed of: the launch it belonged to and
+# the reason in the machine's words.
+SandboxHeld = typing.TypedDict("SandboxHeld", {
+    "launch": "str",
+    "why": "str",
+})
+
+# SandboxTokenRequest asks for an App token reading the workspace's one repository on the
+# machine's own credential (doc 209 §4.6), for the clone a sandboxed launch starts from: Scope is
+# clone, and Launch names the launch the machine holds open.
+SandboxTokenRequest = typing.TypedDict("SandboxTokenRequest", {
+    "uplink": "str",
+    "scope": "str",
+    "launch": "str",
+})
+
+# SandboxTokenAnswer is GitHub's installation token, when it lapses in RFC 3339, and the repository
+# it was minted for as GitHub's mint answered it: the full name GitHub holds now for the pinned id,
+# and that id.
+SandboxTokenAnswer = typing.TypedDict("SandboxTokenAnswer", {
+    "token": "str",
+    "expires_at": "str",
+    "repository": "str",
+    "repository_id": "int",
 })
 
 # MainMergeCICost is an owner-pulled reading, derived from existing executor writes and GitHub
@@ -8165,6 +8210,41 @@ PlatformLadderAnswer = typing.TypedDict("PlatformLadderAnswer", {
     "ladder": "PlatformLadderRead",
 })
 
+# PlatformTeamBody names the tenant that is the platform's team, or ends the platform's team with End,
+# and says why (#10142). The platform's team is the one whose seat may write the platform's ladder.
+PlatformTeamBody = typing.TypedDict("PlatformTeamBody", {
+    "tenant": "typing.NotRequired[str]",
+    "end": "typing.NotRequired[bool]",
+    "why": "str",
+})
+
+# PlatformTeamRead is the platform's team as it stands: the tenant, and who set it, why and when. A
+# platform with no team reads null in every member.
+PlatformTeamRead = typing.TypedDict("PlatformTeamRead", {
+    "tenant": "str | None",
+    "by": "str | None",
+    "why": "str | None",
+    "at": "str | None",
+})
+
+# PlatformTeamAnswer answers the operator's setting, with the team read back. Status is "set", "ended",
+# or "unchanged" when the platform's team already stood so.
+PlatformTeamAnswer = typing.TypedDict("PlatformTeamAnswer", {
+    "status": "str",
+    "replayed": "bool",
+    "team": "PlatformTeamRead",
+})
+
+# PlatformSeatAnswer answers the platform seat's write of the platform's ladder: "rated" when it applied,
+# "unchanged" when it changed no row, and "held" when it waits for the owner's nod, with the need that
+# asks for it.
+PlatformSeatAnswer = typing.TypedDict("PlatformSeatAnswer", {
+    "status": "str",
+    "replayed": "bool",
+    "position": "int",
+    "need": "typing.NotRequired[str]",
+})
+
 # ModelCostBody is the owner's word on what a route costs (10101-model-cost-class design D2): Class
 # "free", "offer" (which names Until, and only an offer does) or "metered", or "clear" to take the word
 # on the route back. An empty Account is every account of the vendor.
@@ -8244,6 +8324,7 @@ WorkerCensusBody = typing.TypedDict("WorkerCensusBody", {
     "machine_name": "typing.NotRequired[str | None]",
     "forge_login": "typing.NotRequired[ForgeLogin | None]",
     "session_kit": "typing.NotRequired[list[KitTool] | None]",
+    "sandbox": "typing.NotRequired[MachineSandbox]",
     "rehome_protocol": "typing.NotRequired[int]",
     "rehome_imports": "typing.NotRequired[list[str] | None]",
 })
@@ -8307,6 +8388,8 @@ ROUTES = frozenset({
     "POST /api/v1/installations/{installation}/release",
     "GET /api/v1/platform/ladder",
     "POST /api/v1/platform/ladder",
+    "GET /api/v1/platform/team",
+    "POST /api/v1/platform/team",
     "POST /api/v1/team-authorizations",
     "POST /api/v1/teams",
     "GET /api/v1/teams/{team}/collaborators",
@@ -8488,6 +8571,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/offers/{id}/withdraw",
     "GET /w/{workspace}/api/v1/placement",
     "GET /w/{workspace}/api/v1/placements",
+    "POST /w/{workspace}/api/v1/platform/ladder",
     "POST /w/{workspace}/api/v1/providers/models",
     "GET /w/{workspace}/api/v1/push/key",
     "POST /w/{workspace}/api/v1/push/key",
@@ -8615,6 +8699,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/steering/agent/renew",
     "POST /w/{workspace}/steering/agent/retire",
     "POST /w/{workspace}/steering/agent/routes",
+    "POST /w/{workspace}/steering/agent/sandbox/token",
     "POST /w/{workspace}/steering/agent/settled",
     "GET /w/{workspace}/steering/agent/stream",
     "POST /w/{workspace}/steering/agent/surface",

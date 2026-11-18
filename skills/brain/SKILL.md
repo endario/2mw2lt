@@ -1910,9 +1910,12 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post /understu
 
 Go refuses a model no account serves (`model-not-served`), a rated model cast off its rung
 (`rated-model-other-rung`), `allowed` for a model the owner has not named (`model-not-allowed`),
-`calibration` for an unrated model, a basis whose tier is not the cast's, and a second open cast of
-one model (`cast-already-open`). From there the work is the tick's: every ten minutes, one understudy
-at a time, only while none of the team's work waits and the account has quota to spare. A model whose
+`calibration` for an unrated model, a basis whose tier is not the cast's, a second open cast of one
+model (`cast-already-open`), and `free` for a model every route that has a word on its cost meters
+(`understudy-basis-not-free`). Where routes do have a word, a free cast's `until` is theirs, not
+yours: none for a model served free, the latest offer's end otherwise; the cast closes at it. From
+there the work is the tick's: every ten minutes, one understudy at a time, only while none of the
+team's work waits and the account has quota to spare, or the route serves the model free. A model whose
 last two understudies failed on its model or route sits out an hour; a calibration never does.
 
 **Close a cast** early when its model leaves the pool or its read already says enough; one closes by

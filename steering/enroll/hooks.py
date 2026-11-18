@@ -131,6 +131,14 @@ def wired_by(entry: object) -> set[str]:
             if (p := _command_path(h)) and _ENROLL.match(p)}
 
 
+def observe_wired(workspace: Path) -> bool:
+    """Whether the workspace's settings run any steering pack's hook: what a Claude connect requires
+    of the workspace it enrols in, and so what a sandboxed launch checks of the root its session
+    will connect to."""
+    settings = load(settings_path(workspace))
+    return any(wired_by(entry) for entries in settings.get("hooks", {}).values() for entry in entries)
+
+
 def stale_pins(doc: dict, sender: Path = SENDER) -> set[str]:
     """The directories of this install's pack that are not this sender's: what a plugin
     update left pinned under the version directory it replaced (#340)."""

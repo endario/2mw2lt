@@ -883,10 +883,7 @@ def main(argv: list[str]) -> int:
         print(f"repinned: {repinned}")
     # Claude's hooks are wired in the workspace's settings; zcode's ship in the plugin.
     if h.hooks and h.provider == "claude":
-        settings = hooks.load(hooks.settings_path(ws))
-        wired = any(hooks.wired_by(entry)
-                    for entries in settings.get("hooks", {}).values() for entry in entries)
-        if not wired:
+        if not hooks.observe_wired(ws):
             print(f"this workspace has no observe hook; run /2mw2lt:install in {ws} to wire it",
                   file=sys.stderr)
             return 1

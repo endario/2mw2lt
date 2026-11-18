@@ -274,6 +274,33 @@ next, in one pass:
 On macOS the agent is loaded into the login's background session when nobody of that login is at
 the screen, so it keeps running with nobody logged in.
 
+## A lent machine, as its service user
+
+When the person lends a Mac to the fleet,
+the agent runs as the hidden service user `_2mw2lt`, and every launch on the machine is sandboxed.
+Nothing is put in the lending person's home, and no GitHub login or checkout is used. Over ssh, as
+an admin, with `_2mw2lt` already made:
+
+1. **Python**, as in step 1 above, run as the service user: `sudo -H -u _2mw2lt uv python install 3.13 --default`.
+2. **The plugin**, at user scope, as the service user, from its own home.
+3. **The engine**, as the service user and with its home:
+
+   ```bash
+   sudo -H -u _2mw2lt python3 "<its plugin root>/steering/enroll/install.py" --machine-only <owner/name>
+   ```
+
+   It opens no browser. It prints the console page and code: give them to the person who
+   approves, the team's owner, at their own desk. Its last line is `{workspace, door, port, root}`.
+   It drafts no lanes, and no session connects from it: each sandboxed session connects in its own
+   clone.
+4. **At boot**, once: `sudo bash "<its plugin root>/steering/host/mac-agent-boot.sh" _2mw2lt`.
+   This writes the one file outside the service home.
+
+Its own stops: **`… runs as root`**, **`HOME is …`** (run it with `sudo -H`), **`… only macOS
+makes`**, **`<root> names <repository> as its origin`** or **`<root> exists and is not a
+repository`** (move it aside), and **`… does not turn sandboxing on`** (set `enabled = true` in the
+`agent.toml` it names). Every other stop is the ordinary install's.
+
 ## The foreman's key
 
 The foreman works as installed, answering on the fleet: sessions' machines. To run it on a hosted
