@@ -61,7 +61,7 @@ STANDING_RULES = """standing rules — every session, however started, works thi
 - announce on the first branch claim: verb.py announce <session> as <account> on <branch> doing "<work>"
 - open the work's pull request as a draft and keep it draft through every gate round
 - mark it ready only after the reviewer's ship it
-- spot-run the tests your change touches; dispatch the wider guards through ci.py run, never the whole suite
+- run only the tests your change touches, by name (go test -run 'TestA|TestB' ./pkg/, one test file, one guard), never a whole package, a shard or the suite; push and dispatch anything wider with ci.py run, and keep working while it runs
 - never deploy and never query production
 - push the repository direct when the plugin's public mirror refuses
 - say done with the result and where to see it: verb.py done <session> "<result>\""""
