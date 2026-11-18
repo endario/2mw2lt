@@ -15,6 +15,9 @@
                                         for the daemon to sync the merged lanes
     install.py uninstall [workspace]    remove what an install added here
     install.py uninstall --workspace    and have the platform retire the workspace too
+    install.py uninstall --machine      and take this machine's agent down with it: its jobs, its
+                                        release root and tools, its keys, logs and proxies — the
+                                        one act for a machine whose last workspace this is
     install.py retire <workspace id>    have the platform retire a workspace by its id, for one
                                         no checkout here is bound to (#3742)
 
@@ -42,6 +45,7 @@ import os
 import platform
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import tarfile
@@ -1358,7 +1362,7 @@ def end_session(console: str, token: str) -> None:
         pass
 
 
-def uninstall(root: Path, retire: bool) -> int:
+def uninstall(root: Path, retire: bool, machine: bool = False) -> int:
     console = platform_url()
     bound = checkout_binding.id_at(root)
     try:
@@ -1367,9 +1371,10 @@ def uninstall(root: Path, retire: bool) -> int:
         door = None
         say("credential", f"kept: {e}")
     held = credential.path_for(door) if bound and door else None
+    off_platform = True
     if held is not None:
         # Before a retirement: a retired workspace refuses a credential bound to it, this revocation's among them.
-        revoke_held(held)
+        off_platform = revoke_held(held)
     retired = True
     try:
         if retire and bound:
@@ -1387,7 +1392,12 @@ def uninstall(root: Path, retire: bool) -> int:
         # The revocation has run, so cleanup runs whatever becomes of the retirement: one refused,
         # cancelled or failed never leaves the machine installed on a revoked credential (#10135).
         _remove_local(root, bound, held)
-    return 0 if retired else 1
+    swept = True
+    if machine:
+        swept = unprovision_machine(Path.home())
+    # A revocation that failed leaves the machine admitted on the platform however clean this
+    # checkout is, so the exit says it: a scripted decommission learns it was not whole.
+    return 0 if retired and off_platform and swept else 1
 
 
 def _remove_local(root: Path, bound: str | None, held: Path | None) -> None:
@@ -1409,20 +1419,309 @@ def _remove_local(root: Path, bound: str | None, held: Path | None) -> None:
         machine_workspaces.poke()
         if held is not None:
             held.unlink(missing_ok=True)
+        stopped = _stop_gate_runs(root / ".claude" / "gate-runs")
+        if stopped:
+            say("agent", f"{stopped} gate run{'s' if stopped != 1 else ''} of this workspace stopped")
         say("agent", f"{bound} deregistered from this machine's agent")
+        _remove_checkout_credentials(root)
+        registry = machine_workspaces.directory(Path.home())
+        if not (registry.is_dir() and any(registry.glob("*.json"))):
+            say("machine", "this was the last workspace this machine's agent served; the job stays, "
+                           "serving nothing and following no release — `install.py uninstall --machine` "
+                           "takes it down")
 
 
-def revoke_held(held: Path) -> None:
+def _gate_run_pids(runs: Path) -> list[tuple[int, str]]:
+    """The live gate-run processes a run directory's records name: detached from the agent, they
+    outlive the workspace they were commissioned for, delivering to a door that now refuses them.
+    A pid whose command no longer names a gate run is not one: the kernel reuses pids."""
+    pids: list[tuple[int, str]] = []
+    if not runs.is_dir():
+        return pids
+    for record in sorted(runs.glob("*/*/run.json")):
+        try:
+            named = json.loads(record.read_text()).get("pid")
+            pid = int(named[0]) if isinstance(named, list) and named and isinstance(named[0], (int, float)) else 0
+        except (OSError, ValueError, TypeError):
+            continue
+        if pid <= 1:
+            continue
+        try:
+            command = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True,
+                                     text=True, timeout=5).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if "gate-run" in command or "gate_child" in command or "gate-child" in command:
+            pids.append((pid, command.strip()))
+    return pids
+
+
+def _stop_gate_runs(runs: Path) -> int:
+    """Stop the gate runs parked under `runs`, TERM first — a run parks its judges on it (doc 132
+    §4.2) — then KILL what a short wait leaves. How many were stopped."""
+    return _terminate([pid for pid, _ in _gate_run_pids(runs)])
+
+
+def _stop_gate_runs_by_binary(base: Path) -> int:
+    """The gate runs still running from this machine's release root, stopped wherever their
+    workspaces' checkouts have gone: their pids are found by the binary they run, not by any
+    registry. How many were stopped."""
+    if not base.is_dir():
+        return 0
+    try:
+        found = subprocess.run(["pgrep", "-f", re.escape(str(base)) + r".*gate-run"], capture_output=True,
+                               text=True, timeout=10).stdout.split()
+    except (OSError, subprocess.TimeoutExpired):
+        return 0
+    pids = [pid for pid in (int(n) for n in found if n.isdigit()) if pid != os.getpid() and _alive(pid)]
+    return _terminate(pids)
+
+
+def _terminate(pids: list[int]) -> int:
+    """Stop `pids`, TERM first — a gate run parks its judges on it (doc 132 §4.2) — then KILL
+    what a short wait leaves. How many this user signalled: another user's process is neither
+    signalled nor counted, though it may have been waited out."""
+    signalled = [pid for pid in pids if _signal(pid, signal.SIGTERM)]
+    end = time.monotonic() + 10
+    while time.monotonic() < end and any(_alive(pid) for pid in signalled):
+        time.sleep(0.2)
+    for pid in signalled:
+        if _alive(pid):
+            _signal(pid, signal.SIGKILL)
+    return len(signalled)
+
+
+def _signal(pid: int, how: int) -> bool:
+    """Signal `pid`, saying whether this user could: a permission failure is not a stop."""
+    try:
+        os.kill(pid, how)
+        return True
+    except OSError:
+        return False
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True   # another user's process: alive, and not ours to stop
+
+
+def unprovision_machine(home: Path) -> bool:
+    """Take this machine's agent down: its jobs, the release root and tools kit its activations
+    provisioned, the keys, settings, logs and proxies it wrote, the session-kit links into
+    ~/.local/bin, and the credentials left for workspaces no checkout names any more — each
+    revoked before its file goes, as this checkout's was (#10135). The one act to unprovision a
+    machine; `uninstall` names it when the last workspace goes. Whether the platform holds no
+    live admission for this machine after it: a credential that would not revoke leaves one."""
+    where = machine_workspaces.directory(home)
+    left = sorted(p.name.removesuffix(".json") for p in where.glob("*.json")) if where.is_dir() else []
+    if left:
+        say("machine", "not taken down: its agent still serves " + ", ".join(left)
+                       + "; uninstall each of their checkouts first")
+        return False
+    base = agentjob.root(home)
+    runs = _stop_gate_runs_by_binary(base)
+    if runs:
+        say("machine", f"{runs} gate run{'s' if runs != 1 else ''} still running from this machine's release stopped")
+    _take_down_jobs(home)
+    shutil.rmtree(base, ignore_errors=True)
+    say("machine", f"the agent's release root removed ({base}: its releases, tools kit and launcher)")
+    _take_down_proxies(home)
+    links = _remove_tool_links(home, base)
+    if links:
+        say("machine", f"{links} session-kit link{'s' if links != 1 else ''} removed from ~/.local/bin")
+    config = home / ".config" / "2mw2lt"
+    for gone in (agentjob.settings(home), config / "worker-credentials.env", config / "machine.key",
+                 config / "agents", config / "reaper", config / "launchers", where,
+                 agentjob.log_directory(home)):
+        if gone.is_dir():
+            shutil.rmtree(gone, ignore_errors=True)
+        else:
+            gone.unlink(missing_ok=True)
+    say("machine", "the agent's settings, keys, worker credentials and logs removed")
+    return _sweep_machine_credentials()
+
+
+# The updater's own job, beside the agent's (follow/job.go): a transient unit under systemd, a
+# plist under launchd. Stopping the agent's job does not stop it, so a decommission must.
+UPDATE_LABEL = "com.2mw2lt.agent-update"
+
+
+def _take_down_jobs(home: Path) -> None:
+    """Stop the machine's agent jobs and take their files with them: the machine job, the
+    updater's, and any an install older than the registry left per workspace. A job left loaded
+    would start the agent again at the next login, serving a registry that names nothing."""
+    jobs = agentjob.jobs_directory(home)
+    labels = {agentjob.MACHINE_LABEL, UPDATE_LABEL}
+    for path, document in agentjob.steering_jobs(jobs):
+        labels.add(str((document or {}).get("Label") or path.stem))
+    domain = agentjob.launch_domain()
+    said: list[str] = []
+    for label in sorted(labels):
+        loaded = agentjob.loaded(domain, label)
+        if loaded:
+            agentjob.stop(domain, label)
+            try:
+                agentjob.wait_unloaded(domain, label)
+            except RuntimeError as e:
+                say("machine", f"{label} did not stop in time ({e}); it may still be running")
+        if agentjob.init_system() == "systemd":
+            agentjob.command(["disable", "--now", f"{label}.service"])
+            agentjob.command(["daemon-reload"])
+        path = agentjob.job_path(jobs, label)
+        held = path.exists()
+        path.unlink(missing_ok=True)
+        for stale in jobs.glob(f"{path.name}.bak-*"):
+            stale.unlink(missing_ok=True)
+        if loaded or held:
+            said.append(label)
+    if said:
+        say("machine", "the agent jobs " + ", ".join(said) + " stopped and removed")
+
+
+def _take_down_proxies(home: Path) -> None:
+    """The claude-code-proxy instances the agent kept, one per Codex login (#8623): their units
+    stopped and removed, their env files and the wrappers under the launcher root gone. A wrapper
+    a person built by hand — under /usr/local/bin, before the pass owned them — is theirs and is
+    only named."""
+    config = home / ".config"
+    units = config / "systemd" / "user" if agentjob.init_system() == "systemd" else agentjob.jobs_directory(home)
+    named = re.compile(r"^claude-code-proxy(-[0-9]+)?\.service$"
+                       if agentjob.init_system() == "systemd" else r"^com\.2mw2lt\.claude-code-proxy(-[0-9]+)?\.plist$")
+    stopped: list[str] = []
+    slots: list[str] = []
+    for unit in sorted(units.glob("claude-code-proxy*.service" if agentjob.init_system() == "systemd"
+                                  else "com.2mw2lt.claude-code-proxy*.plist")):
+        if not named.fullmatch(unit.name):
+            continue
+        label = unit.name.removesuffix(".service") if agentjob.init_system() == "systemd" else unit.name.removesuffix(".plist")
+        # The slot's own suffix names its env file and wrapper: those go with the unit, and a
+        # person's file of the same prefix that no removed unit owns stays.
+        slots.append(next(label[len(p):] for p in ("claude-code-proxy", "com.2mw2lt.claude-code-proxy")
+                          if label.startswith(p)))
+        if agentjob.init_system() == "systemd":
+            agentjob.command(["disable", "--now", unit.name])
+            agentjob.command(["daemon-reload"])
+        else:
+            domain = agentjob.launch_domain()
+            agentjob.stop(domain, label)
+        unit.unlink(missing_ok=True)
+        stopped.append(label)
+    for slot in slots:
+        (config / f"claude-codex{slot}.env").unlink(missing_ok=True)
+        if (config / "2mw2lt" / "launchers").is_dir():
+            (config / "2mw2lt" / "launchers" / f"claude-codex{slot}").unlink(missing_ok=True)
+    if stopped:
+        say("machine", "the claude-code-proxy instances " + ", ".join(stopped) + " stopped and removed; "
+                       "the Codex sign-ins themselves are the person's and stay")
+    hand_kept = sorted(p.name for p in Path("/usr/local/bin").glob("claude-codex*")) \
+        if Path("/usr/local/bin").is_dir() else []
+    if hand_kept:
+        say("machine", "wrappers a hand built stay: " + ", ".join(hand_kept))
+
+
+def _remove_tool_links(home: Path, base: Path) -> int:
+    """The session-kit links the tools kit placed in ~/.local/bin, each pointing into the agent's
+    root (agent-tools.sh): a person's own install of the same name, or a link to somewhere else,
+    stays. How many were removed."""
+    links = 0
+    bin = home / ".local" / "bin"
+    if not bin.is_dir():
+        return 0
+    inside = os.path.realpath(base) + os.sep
+    for held in sorted(bin.iterdir()):
+        try:
+            if held.is_symlink() and os.path.realpath(held).startswith(inside):
+                held.unlink()
+                links += 1
+        except OSError:
+            continue
+    return links
+
+
+def _sweep_machine_credentials() -> bool:
+    """Each credential this machine still holds for a workspace no checkout names any more,
+    revoked before its file goes as this checkout's was (#10135); one that will not revoke
+    stays, for a copy of it held elsewhere could still renew, and deleting it would hide that.
+    Whether none is left live on the platform."""
+    clean = True
+    held = credential.home()
+    if not held.is_dir():
+        return True
+    for p in sorted(held.glob("*.json")):
+        try:
+            credential.revoke_native(p)
+        except (credential.NoCredential, OSError) as e:
+            clean = False
+            say("credential", f"kept {p.name}: not revoked on coordination: {e}; a copy of it held "
+                              "elsewhere could still renew, so it is left to be named")
+            continue
+        p.unlink(missing_ok=True)
+        p.with_suffix(".lock").unlink(missing_ok=True)
+        say("credential", f"{p.name} revoked on coordination and removed")
+    return clean
+
+
+def _remove_checkout_credentials(root: Path) -> None:
+    """The credentials a bound checkout held: the per-session enrollment records every harness
+    shares (hooks.tokens_directory), the observe token a local wiring copied in, and the Codex
+    forge rule naming this checkout's launcher. A checkout no binding places keeps whatever it
+    holds, and the daemon's own workspace keeps its own tokens (hooks.is_daemon_workspace) — its
+    forge rule still goes, for the launcher it names goes with the uninstall."""
+    import codex_rules
+    import hooks
+    removed: list[str] = []
+    if not hooks.is_daemon_workspace(root):
+        tokens = root / ".claude" / "steering-tokens"
+        if tokens.is_dir():
+            shutil.rmtree(tokens, ignore_errors=True)
+            if not tokens.exists():
+                removed.append("the sessions' enrollment tokens")
+            else:
+                say("credential", f"the sessions' enrollment tokens under {tokens} were not all removed; "
+                                  "remove them by hand")
+        for name in hooks.TOKENS:
+            held = root / ".claude" / name
+            if held.exists():
+                try:
+                    held.unlink()
+                    removed.append(f"the {name.removeprefix('steering-').replace('-', ' ')}")
+                except OSError as e:
+                    say("credential", f"{held} was not removed ({e}); remove it by hand")
+    if codex_rules.remove(root):
+        removed.append("the Codex forge rule")
+    if removed:
+        say("credential", f"removed from the checkout: {', '.join(removed)}")
+
+
+def revoke_held(held: Path) -> bool:
     """End this machine's admission on the credential `held` keeps, before the file goes (#10135):
-    the file deleted alone left its binding live, and a copy of it renewing for a week past expiry."""
+    the file deleted alone left its binding live, and a copy of it renewing for a week past expiry.
+    Whether the platform holds no live admission for this machine after it: a revocation that
+    failed leaves one a copy of the credential could still renew."""
     try:
         said = credential.revoke_native(held)
-    except (credential.NoCredential, OSError) as e:
+    except credential.NoCredential as e:
+        moved = ""
+        if e.status == 404:
+            # The route the credential was enrolled at is gone — its workspace moved, its alias was
+            # cut, its team renamed — so this machine's own way to end its admission went with it.
+            moved = ("; the door it was enrolled at no longer routes there, the workspace having moved or "
+                     "been renamed, so end this machine's admission from the desk if one still stands")
+        say("credential", f"not revoked on coordination: {e}{moved}; removed from this machine all the "
+                          "same, so a copy of it held elsewhere could still renew")
+        return False
+    except OSError as e:
         say("credential", f"not revoked on coordination: {e}; removed from this machine all the same, "
                           "so a copy of it held elsewhere could still renew")
-        return
+        return False
     if said:
         say("credential", said)
+    return True
 
 
 def retire_on(console: str, wid: str) -> None:
@@ -1441,6 +1740,11 @@ def retire_on(console: str, wid: str) -> None:
         status, got = call("POST", f"{console}{door_mod.routed(route)}/api/v1/workspace/retirement", {}, token,
                            key=str(uuid.uuid4()))
         if status != 200:
+            if got.get("code") == "workspace-retired":
+                # A re-run, or another person's retire: the state asked for stands, so this is the
+                # outcome the caller wanted, not a refusal.
+                say("workspace", f"{wid} is retired already; its state is kept on the platform")
+                return
             raise Stop(f"coordination would not retire {wid} ({status}): {got.get('code') or got}")
         say("workspace", f"{wid} retired; its state is kept on the platform")
     finally:
@@ -1464,6 +1768,7 @@ def main(argv: list[str]) -> int:
     retire = False
     merge = False
     codex = False
+    machine = False
     team = None
     gh_account = None
     invite = None
@@ -1476,6 +1781,10 @@ def main(argv: list[str]) -> int:
             if action != "uninstall":
                 return verb_help.error("install", "--workspace is only for uninstall")
             retire = True; i += 1; continue
+        if arg == "--machine":
+            if action != "uninstall":
+                return verb_help.error("install", "--machine is only for uninstall")
+            machine = True; i += 1; continue
         if arg == "--merge":
             if action != "lanes":
                 return verb_help.error("install", "--merge is only for lanes")
@@ -1545,7 +1854,7 @@ def main(argv: list[str]) -> int:
             return retire_workspace(paths[0])
         if action == "lanes":
             return adopt_lanes(root, merge, gh_account)
-        return uninstall(root, retire) if action == "uninstall" else install(root, codex, team, gh_account, invite, login)
+        return uninstall(root, retire, machine) if action == "uninstall" else install(root, codex, team, gh_account, invite, login)
     except KeyboardInterrupt:
         raise Stop(f"stopped at {_at or action}; run {action} again to resume") from None
     except subprocess.TimeoutExpired as e:

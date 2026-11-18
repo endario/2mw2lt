@@ -1260,10 +1260,12 @@ AccountRoutes = typing.TypedDict("AccountRoutes", {
     "costs": "typing.NotRequired[dict[str, RouteCost]]",
 })
 
-# RouteCost is a vendor's class for one route: free, offer (which ends at Until) or metered.
+# RouteCost is a vendor's class for one route: free, offer (which ends at Until) or metered, and
+# whether its vendor says the route may train on its prompts.
 RouteCost = typing.TypedDict("RouteCost", {
     "class": "str",
     "until": "typing.NotRequired[str | None]",
+    "training": "typing.NotRequired[bool]",
 })
 
 # StreamUplink opens a generation of the machine's uplink: every later call names its id.

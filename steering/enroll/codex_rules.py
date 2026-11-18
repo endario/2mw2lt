@@ -65,3 +65,17 @@ def write(workspace: Path, home: Path | None = None) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     return f"forge grant: written to {path}, reaches the next session; run as python3 {launcher(workspace)} exec forge <gh words> or exec checkpoint <save>"
+
+
+def remove(workspace: Path, home: Path | None = None) -> bool:
+    """Take the rule install wrote for workspace, if there is one: the checkout's uninstall
+    removes the launcher the rule names, and a rule granting a launcher that no longer runs is
+    a grant to nothing. Whether one was there."""
+    path = path_for(workspace, home)
+    if not path.exists():
+        return False
+    try:
+        path.unlink()
+    except OSError:
+        return False
+    return True

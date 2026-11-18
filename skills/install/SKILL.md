@@ -300,6 +300,15 @@ It removes what the install added on this machine:
 With `--workspace`, it also has the platform retire the workspace, after one more sign-in. The
 platform keeps the workspace's state rather than deleting it.
 
+With `--machine`, once no workspace is left on this machine, it also takes the machine's agent
+down: its jobs (the agent's and the updater's), its release root and tools kit, the keys, worker
+credentials, logs and claude-code-proxy instances it provisioned, the session-kit links it placed
+in `~/.local/bin`, and any credentials left for workspaces whose checkouts are gone — each
+revoked on the platform before its file goes. Wrappers a person built by hand stay, named. It
+refuses while the machine's agent still serves another workspace: uninstall that one's checkout
+first. A plain `uninstall` that leaves the machine's agent serving nothing says when `--machine`
+is the next step.
+
 A workspace no checkout here is bound to — it was provisioned from another machine, or its
 checkout was never wired — is retired by its id, from anywhere:
 

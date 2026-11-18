@@ -10,6 +10,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 import hashlib
 import json
 import os
+import re
 import time
 import uuid
 
@@ -80,13 +81,88 @@ def token(ws: Path, now=time.time, asked=ask) -> str:
     return minted
 
 
+def _forge_gh_root() -> Path:
+    """The state tree the launch's `worker_env` names as the worker's gh configuration,
+    platform-owned by construction whatever it holds."""
+    state = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state")
+    return state / "2mw2lt" / "forge-gh"
+
+
+def _default_config_dir() -> Path | None:
+    """gh's own fallback when `GH_CONFIG_DIR` names none (go-gh's configdir): XDG_CONFIG_HOME
+    plus `gh` first — gh puts it ahead of AppData on Windows too — then `%AppData%\\GitHub CLI`
+    there, then `~/.config/gh`."""
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg:
+        return Path(xdg, "gh")
+    if os.name == "nt":
+        app = os.environ.get("AppData")
+        return Path(app, "GitHub CLI") if app else None
+    return Path.home() / ".config" / "gh"
+
+
+# The exact hosts.yml this platform writes — the bare token here, the JSON-quoted one a gate
+# cage's gh configuration holds — both naming x-access-token as the only login. Anything else,
+# another user or a second host or a shape gh rewrote, is not ours to overwrite. Raw bytes, as
+# read: a CRLF file is not ours, whatever a text mode would normalize it to.
+_OURS_HOSTS = re.compile(rb"^github\.com:\n    users:\n        x-access-token:\n"
+                         rb"            oauth_token: [^\n]*\n    git_protocol: https\n"
+                         rb"    oauth_token: [^\n]*\n    user: x-access-token\n\Z")
+
+# The config.yml this platform writes, the whole of it: outside the platform's own tree, a
+# configuration holding anyone's preferences is not ours to reset.
+_OURS_CONFIG = b'version: "1"\n'
+
+
+def _refused(d: Path) -> str | None:
+    """Why the platform may not write its login into the gh configuration directory `d`; `None`
+    when it may. `GH_CONFIG_DIR` names whatever the caller exported, and the owner's own
+    `~/.config/gh` had its login replaced that way by a plain `gh auth status`. Where the named
+    path writes is its resolved destination, a dangling alias's target included, so an alias
+    cannot hide it."""
+    try:
+        resolved = d.resolve()
+        root = _forge_gh_root().resolve()
+        default = _default_config_dir()
+        default = default.resolve() if default is not None else None
+    except (OSError, RuntimeError):
+        return f"refusing to write the gh configuration at {d}: its path cannot be resolved"
+    if resolved == root or root in resolved.parents:
+        return None
+    try:
+        hosts = (resolved / "hosts.yml").read_bytes()
+    except FileNotFoundError:
+        hosts = None
+    except OSError as e:
+        return f"refusing to write the gh configuration at {d}: its hosts.yml cannot be read: {e}"
+    if hosts is not None and not _OURS_HOSTS.match(hosts):
+        return (f"refusing to write the gh configuration at {d}: its hosts.yml holds a login "
+                "that is not the App's x-access-token")
+    try:
+        config = (resolved / "config.yml").read_bytes()
+    except FileNotFoundError:
+        config = None
+    except OSError as e:
+        return f"refusing to write the gh configuration at {d}: its config.yml cannot be read: {e}"
+    if config is not None and config != _OURS_CONFIG:
+        return (f"refusing to write the gh configuration at {d}: its config.yml holds a "
+                "configuration that is not the platform's")
+    if hosts is None and default is not None and resolved == default:
+        return (f"refusing to write the gh configuration at {d}: it is gh's default "
+                "configuration directory, the machine's own login's")
+    return None
+
+
 def _configure(minted: str) -> None:
     """The token in the worker's own `gh` configuration (`GH_CONFIG_DIR`), as the only login there,
-    so a `gh` found ahead of the wrapper acts as the App, or is refused once the token is stale."""
+    so a `gh` found ahead of the wrapper acts as the App, or is refused once the token is stale.
+    A directory the platform does not own is refused before anything is written."""
     d = os.environ.get("GH_CONFIG_DIR")
     if not d:
         return
     d = Path(d)
+    if reason := _refused(d):
+        raise Refused(reason)
     d.mkdir(parents=True, exist_ok=True, mode=0o700)
     # Written already migrated: gh migrates a bare token by asking `/user`, which an installation
     # token cannot read.
