@@ -53,7 +53,7 @@ at the ceiling. The round at the ceiling is final without asking. The review's r
 floor and how the final round ran.
 
 `--judge <vendor>[/<model>][@<effort>]` asks for a named judge — for when the owner or the brain
-wants one, as in `--judge openai/gpt-6.1-sol@medium`. The commission is refused when the catalog
+wants one, as in `--judge openai/gpt-6.2-sol@medium`. The commission is refused when the catalog
 holds no such judge at the floor (`judge-unknown`, naming the judges it serves there) or when the only judges matching it wrote the
 change (`judge-authored`), and a busy pinned judge waits like any gate. Never use it to steer a
 verdict: the choice of judge stays steering's otherwise.
