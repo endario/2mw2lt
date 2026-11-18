@@ -37,9 +37,13 @@ branch has the run. Steering chooses it; there is no provider to pass.
 
 `--floor <rarity> --why "<reason>"` holds the series' judge to a rung of the ladder (`uncommon`,
 `rare`, `epic`, `legendary`): steering takes a judge at the floor, and one rung up only when none at
-it can take the round; a final round puts a vendor no earlier round used before either. Name `epic` for a large diff, a new mechanism, or a security, concurrency or
-attestation property; the reason is recorded beside the floor, so say why in a sentence. Never name a
-model for depth: the ladder decides which models stand at each rung. Later rounds keep the floor
+it can take the round; a final round puts a vendor no earlier round used before either. Raise the
+floor for what breaks if the change is wrong and whether that can be undone, never for how much
+changed. Name `epic` for custody, actuation, auth or secrets, concurrency, a migration, an attestation
+property, or a new mechanism others will build on; the reason is recorded beside the floor, so say why
+in a sentence. A large diff in one of those can still justify it; size alone never does. A large diff
+of UI, docs, tests or mechanical moves stays at its triage floor: the reviewer reads more, not deeper.
+A diff too big to review is split, not escalated. Never name a model for depth: the ladder decides which models stand at each rung. Later rounds keep the floor
 unless they name one. When your change proves smaller or less risky than its triage, say so to the
 brain with the evidence, proposing a lower floor: the seat sets it with `card.py --lease retier`, and
 the rounds already judged keep the floor they ran at. The seat may also set the series' own floor,
@@ -66,7 +70,9 @@ commission at another (`minimal`, `low`, `medium`, `high`, `xhigh`, `max`), and 
 A round at a `rare` floor or below on a small diff, 50 changed lines unless the team's owner set
 another limit, runs read-only: no shell, network or writes. A migration, workflow, authorization,
 credential, isolation, release or gate path always runs full, and so does an `epic` or final round,
-so name `--floor epic` for a small change that needs the reviewer to run it. The team's owner turns this off, or changes the limit and the paths kept full, in the console's
+so `--floor epic` is not a way to get a reviewer that runs a small change: run it yourself and let
+your own result stand in the pull request. Name it only when what breaks if the change is wrong is one
+of the risks above. The team's owner turns this off, or changes the limit and the paths kept full, in the console's
 Workspace settings, or Team settings for every workspace; no session can.
 
 The reviewer holds its own full tool set — shell, network, builds and tests — in a clone with no

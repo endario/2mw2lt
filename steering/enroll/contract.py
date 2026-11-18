@@ -1224,11 +1224,20 @@ AgentRoutesBody = typing.TypedDict("AgentRoutesBody", {
     "accounts": "list[AccountRoutes] | None",
 })
 
-# AccountRoutes is one account's models, each by the vendor's own id, which its dispatch takes.
+# AccountRoutes is one account's models, each by the vendor's own id, which its dispatch takes, and
+# the cost class its vendor's listing gives some of them (10101-model-cost-class design D2): a model
+# absent from Costs is one the vendor said nothing of.
 AccountRoutes = typing.TypedDict("AccountRoutes", {
     "vendor": "str",
     "account_id": "str",
     "models": "list[str] | None",
+    "costs": "typing.NotRequired[dict[str, RouteCost]]",
+})
+
+# RouteCost is a vendor's class for one route: free, offer (which ends at Until) or metered.
+RouteCost = typing.TypedDict("RouteCost", {
+    "class": "str",
+    "until": "typing.NotRequired[str | None]",
 })
 
 # StreamUplink opens a generation of the machine's uplink: every later call names its id.

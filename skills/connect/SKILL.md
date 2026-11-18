@@ -192,7 +192,8 @@ that floor unless you raise it
 (`gate.py --floor`, with why). When your change proves smaller or less risky than its triage, say so
 to the brain with the evidence, proposing a lower floor: the seat sets it with
 `card.py --lease retier`, and the triage record stands as it was made. When your stage proves harder
-than its triage, raise its floor yourself, and the seat is told your why:
+than its triage, meaning more breaks, or less can be undone, if it is wrong and not that the diff grew,
+raise its floor yourself, and the seat is told your why:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease retier <card> <stage> <floor> "<why>"
