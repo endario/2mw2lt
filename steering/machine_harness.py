@@ -463,7 +463,10 @@ def _devin_lock_names(lock: Path, holder: int) -> bool:
     no later than the lock was written: one naming a dead pid, or a pid born after it, is stale
     and names no session — the lock survives SIGKILL with its holder gone (#9781 design §2, §4.5).
     A birth that cannot be read proves nothing, so it names nothing either — the same closed
-    hand the census's registry rows keep (`runtime_id.serving_session`)."""
+    hand the census's registry rows keep (`runtime_id.serving_session`). The birth is read at
+    the kernel's grain and the row's mtime at the filesystem's, so a row written within the
+    second of the birth still names its holder; one a pid reused past that grain owns predates
+    it by more (#10181)."""
     if runtime_id.started_at(holder) is None:
         return False
     try:
@@ -471,7 +474,7 @@ def _devin_lock_names(lock: Path, holder: int) -> bool:
     except OSError:
         return False
     birth = runtime_id.started_epoch(holder)
-    return birth is not None and birth <= written
+    return birth is not None and birth <= written + 1
 
 
 def _devin_lock_session() -> str | None:

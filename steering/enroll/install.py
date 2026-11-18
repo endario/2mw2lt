@@ -918,7 +918,8 @@ def run_installer(installed: Path, root: Path, door: str, port: int) -> None:
     go = require_installer(installed)
     # The machine job's own port, so an install leaves the job as it is when it already runs.
     child = subprocess.Popen([str(go), "install", str(root), door],
-                             env={**os.environ, "STEERING_AGENT_PORT": str(port)},
+                             env={**os.environ, "STEERING_AGENT_PORT": str(port),
+                                  **({"STEERING_NO_GH_ACCOUNT": "1"} if _service else {})},
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     said: list[str] = []
     word = threading.Event()
@@ -1149,6 +1150,55 @@ def sandboxed(home: Path) -> None:
     say("sandbox", f"on, images of {settings.SANDBOX_IMAGE_GIB} GiB ({path})")
 
 
+PLUGIN = "2mw2lt@2mw2lt"
+MARKETPLACE = ("2mw2lt", "endario/2mw2lt")  # its name in known_marketplaces.json, and its source
+
+
+def plugin_loads(claude_home: Path) -> bool:
+    """Whether `claude_home` holds the plugin's install record and the setting that loads it, the
+    two the agent's launch check reads (launchready.Runs)."""
+    def read(name: str) -> dict:
+        try:
+            doc = json.loads((claude_home / name).read_text())
+        except (OSError, ValueError):
+            return {}
+        return doc if isinstance(doc, dict) else {}
+    records = (read("plugins/installed_plugins.json").get("plugins") or {}).get(PLUGIN)
+    enabled = read("settings.json").get("enabledPlugins")
+    return bool(records) and isinstance(enabled, dict) and enabled.get(PLUGIN) is True
+
+
+def service_plugin(home: Path) -> None:
+    """The service user's own Claude home loads the 2mw2lt plugin: each token launcher's home
+    shares it from there, and nobody runs /2mw2lt:install inside Claude on a lent machine."""
+    claude_home = home / ".claude"
+    if plugin_loads(claude_home):
+        say("plugin", f"{PLUGIN} ({claude_home})")
+        return
+    claude = shutil.which("claude")
+    if claude is None:
+        raise Stop("this login has no Claude Code CLI (claude) on PATH, and its Claude home must load the 2mw2lt "
+                   "plugin; install Claude Code as this user, then run install again")
+    env = {**os.environ, "CLAUDE_CONFIG_DIR": str(claude_home)}
+    try:
+        known = json.loads((claude_home / "plugins" / "known_marketplaces.json").read_text())
+    except (OSError, ValueError):
+        known = {}
+    steps = [] if isinstance(known, dict) and MARKETPLACE[0] in known else [["plugin", "marketplace", "add", MARKETPLACE[1]]]
+    for args in [*steps, ["plugin", "install", PLUGIN, "--scope", "user"]]:
+        try:
+            done = subprocess.run([claude, *args], capture_output=True, text=True, timeout=300, env=env)
+        except subprocess.TimeoutExpired:
+            raise Stop(f"`claude {' '.join(args)}` did not finish in 300s; run it as this user, then run install again") from None
+        if done.returncode:
+            said = (done.stderr or done.stdout).strip()[-400:] or f"exit {done.returncode}"
+            raise Stop(f"`claude {' '.join(args)}` refused: {said}; run it as this user, then run install again")
+    if not plugin_loads(claude_home):
+        raise Stop(f"`claude plugin install {PLUGIN}` finished, and {claude_home} still does not load it; run "
+                   f"`claude plugin enable {PLUGIN}` as this user, then run install again")
+    say("plugin", f"{PLUGIN} installed ({claude_home})")
+
+
 def hook_python() -> None:
     """The `python3` the wired hooks run meets the floor before any work starts (#9888): the hook
     commands name it bare, so PATH's interpreter — not the one running install — is what install
@@ -1177,6 +1227,7 @@ def install(root: Path | None, codex: bool = False, team: str | None = None,
     if machine is not None:
         root = served_root(machine)
         sandboxed(Path.home())
+        service_plugin(Path.home())
     repo = repository(root)
     say("repository", repo)
     name = None if machine is not None else github_account(root, repo, gh_account)
