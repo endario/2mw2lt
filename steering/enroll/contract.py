@@ -496,7 +496,8 @@ UnnamedDirectory = typing.TypedDict("UnnamedDirectory", {
 # owner from inside the team (#5996). For keeps a serving account to these purposes
 # (AccountPurposes) and Models to these model ids (#7375); each is a nullable list left absent to
 # preserve what is stored, null to clear it, and a list to state it. A stopped account serves
-# nothing, so it takes no list, and a stop clears both.
+# nothing, so it takes no list, and a stop clears the team's purposes. Models are the account's one list
+# in every team it serves, stated by its true owner alone, and a stop leaves them standing.
 AccountServe = typing.TypedDict("AccountServe", {
     "vendor": "str",
     "account_id": "str",
@@ -8097,9 +8098,8 @@ TracksBindAnswer = typing.TypedDict("TracksBindAnswer", {
     "position": "int",
 })
 
-# LadderBody rates selectors on the team's ladder (#6565): a rung, "none" to unrate a selector the
-# platform rates, or "platform" to take the platform's rating again, with why. Model is the id a
-# launch dispatches for a rated selector where no route is published.
+# LadderBody rates selectors on a ladder (#6565): a rung, or "none" to unrate a selector, with why.
+# Model is the id a launch dispatches for a rated selector where no route is published.
 LadderBody = typing.TypedDict("LadderBody", {
     "ratings": "list[LadderRatingBody] | None",
     "why": "str",
@@ -8137,6 +8137,32 @@ LadderAnswer = typing.TypedDict("LadderAnswer", {
     "replayed": "bool",
     "position": "int",
     "ladder": "LadderRead",
+})
+
+# PlatformLadderRead is the platform's ladder as it stands, the one every team that rates nothing is
+# judged by (#10142). By and Why name who wrote this version and why; a version a migration wrote
+# names neither.
+PlatformLadderRead = typing.TypedDict("PlatformLadderRead", {
+    "version": "int",
+    "by": "PlatformLadderBy | None",
+    "why": "str | None",
+    "at": "str",
+    "rows": "list[LadderRowDTO] | None",
+})
+
+# PlatformLadderBy is who wrote a platform version: Kind "operator" with the operator's subject, or
+# "seat" with the seat's session.
+PlatformLadderBy = typing.TypedDict("PlatformLadderBy", {
+    "kind": "str",
+    "id": "str",
+})
+
+# PlatformLadderAnswer answers the operator's rating, with the platform's ladder read back. Status is
+# "rated", or "unchanged" when the ratings changed no row and made no version.
+PlatformLadderAnswer = typing.TypedDict("PlatformLadderAnswer", {
+    "status": "str",
+    "replayed": "bool",
+    "ladder": "PlatformLadderRead",
 })
 
 # ModelCostBody is the owner's word on what a route costs (10101-model-cost-class design D2): Class
@@ -8279,6 +8305,8 @@ ROUTES = frozenset({
     "GET /api/v1/hosts/{host}/settings/{key}",
     "POST /api/v1/hosts/{host}/settings/{key}",
     "POST /api/v1/installations/{installation}/release",
+    "GET /api/v1/platform/ladder",
+    "POST /api/v1/platform/ladder",
     "POST /api/v1/team-authorizations",
     "POST /api/v1/teams",
     "GET /api/v1/teams/{team}/collaborators",

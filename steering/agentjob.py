@@ -43,6 +43,11 @@ Run = Callable[[list[str]], subprocess.CompletedProcess[str]]
 STOP_SECONDS = 90
 # Every rewrite of a job backs it up; only the newest few are worth keeping (#3498).
 BACKUPS_KEPT = 3
+# The keep-alive of a job whose process can end itself cleanly (agentjob.WhileFailed): the init
+# system restarts a crash but lets a clean exit stay down, so the agent that serves nothing ends
+# itself and the machine runs no agent from its last workspace's uninstall until the next
+# install starts one. launchd's own shape; Restart=on-failure under systemd.
+WHILE_FAILED = {"SuccessfulExit": False}
 
 
 def init_system() -> str:
@@ -94,7 +99,10 @@ def dump(document: dict) -> bytes:
         lines.append(f"WorkingDirectory={_unit_escape(str(document['WorkingDirectory']))}")
     for name, value in sorted((document.get("EnvironmentVariables") or {}).items()):
         lines.append(f"Environment={_unit_quote(f'{name}={value}')}")
-    if document.get("KeepAlive"):
+    keep = document.get("KeepAlive")
+    if isinstance(keep, dict):
+        lines += ["Restart=on-failure", "RestartSec=5"]
+    elif keep:
         lines += ["Restart=always", "RestartSec=5"]
     for key, stream in (("StandardOutPath", "StandardOutput"), ("StandardErrorPath", "StandardError")):
         if document.get(key):
@@ -128,6 +136,9 @@ def load(path: Path) -> dict | None:
                 document["EnvironmentVariables"][name] = held
             elif key == "Restart" and value == "always":
                 document["KeepAlive"] = document["RunAtLoad"] = True
+            elif key == "Restart" and value == "on-failure":
+                document["KeepAlive"] = dict(WHILE_FAILED)
+                document["RunAtLoad"] = True
             elif key in ("StandardOutput", "StandardError") and value.startswith("append:"):
                 document[f"{key.removesuffix('put')}Path"] = value.removeprefix("append:").replace("%%", "%")
     except (UnicodeDecodeError, ValueError):
@@ -288,6 +299,25 @@ def loaded(domain: str, label: str, run: Run = command) -> bool:
     return run(["print", f"{domain}/{label}"]).returncode == 0
 
 
+def running(domain: str, label: str, run: Run = command) -> bool:
+    """Whether the job's process answers. Under systemd `loaded` says so, for is-active is the
+    process; under launchd a loaded job stays listed once its process has exited — exactly the
+    state an agent that ended itself leaves, its keep-alive holding back only crashes — so the
+    label is listed and its dict read: `launchctl list <label>` prints the job as one, its
+    `"PID" = <n>;` line there only while the process runs, no PID at all once it has ended."""
+    if init_system() == "systemd":
+        return loaded(domain, label, run)
+    listed = run(["list", label])
+    if listed.returncode != 0:
+        return False
+    for line in listed.stdout.splitlines():
+        trimmed = line.strip()
+        if trimmed.startswith('"PID"'):
+            pid = trimmed.removeprefix('"PID" =').removesuffix(";").strip()
+            return pid.isdigit() and pid != "0"
+    return False
+
+
 def stop(domain: str, label: str, run: Run = command) -> None:
     run(["stop", f"{label}.service"] if init_system() == "systemd" else ["bootout", f"{domain}/{label}"])
 
@@ -397,7 +427,7 @@ def migrate_jobs(home: Path, launch_agents: Path, run: Run = command) -> list[st
                "EnvironmentVariables": {**shared, "STEERING_AGENT_PORT": MACHINE_PORT,
                                         "STEERING_AGENT_LOG_ACTIVE": str(active),
                                         "STEERING_AGENT_LOG_STARTUP": str(startup)},
-               "RunAtLoad": True, "KeepAlive": True,
+               "RunAtLoad": True, "KeepAlive": dict(WHILE_FAILED),
                "StandardOutPath": str(startup), "StandardErrorPath": str(startup)}
     # Activation moves this pin into rollback settings after the jobs are consolidated.
     if pin := (template.get("EnvironmentVariables") or {}).get("STEERING_GH_ACCOUNT"):
@@ -746,12 +776,17 @@ def _activate(release: Path, home: Path, launch_agents: Path, run: Run, domain: 
         desired["EnvironmentVariables"] = environment
         desired["ProgramArguments"] = arguments
         desired["WorkingDirectory"] = str(release)
+        if desired.get("KeepAlive") is True:
+            # A rewrite moves the job to the keep-alive an agent that can end itself cleanly
+            # holds: the true an older job kept would resurrect the agent after its own clean
+            # end, flapping once a minute on machines upgraded past their job's writing.
+            desired["KeepAlive"] = dict(WHILE_FAILED)
         encoded = dump(desired)
         try:
             unchanged = path.read_bytes() == encoded
         except OSError:
             unchanged = False
-        if unchanged and loaded(domain, label, run):
+        if unchanged and running(domain, label, run):
             continue
         backup(path)
         write(path, encoded)

@@ -213,7 +213,9 @@ hear first — see [Read the blocked-on line, the ledger and escalations](#read-
   workspace/account/reset. Its facts name the plan, window, reset, required peak, expected waste, bottleneck
   and evidence time. A manual start uses the same kind, once per workspace/account/start, with
   `trigger: manual-burn`, vendor/account, start, effective end, current sessions and launches placed in
-  the last hour. Place ready, authorized work by vendor before the end, in proportion to capacity
+  the last hour. An offer on a model ending within a day, with nothing run on it since it began, uses
+  the kind too, once per account/model/end, with `reason: offer-ending`, the model, its end and since
+  when it went unused. Place ready, authorized work by vendor before the end, in proportion to capacity
   that would otherwise be wasted; say when nothing fits. No synthetic load, and neither blue nor a
   manual burn overrides hold, authorization, serving or eligibility guards.
 - **`account-reset`**, a signal from `account <subject>`: an account's spent window rolled over and
