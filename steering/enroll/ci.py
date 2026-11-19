@@ -56,6 +56,24 @@ def gh_json(path: str):
     return json.loads(p.stdout)
 
 
+def release_running(repo: str) -> dict | None:
+    """The release run live on `repo` — queued, running or waiting — or None. The pool offers its runners to queued
+    jobs roughly in the order their runs were made, so a dispatch made while a release runs takes
+    runners its later jobs wait for (release 44497747633, documentation/ci/14 §5). A read that fails
+    is no evidence of a release, and the dispatch goes on: the release cancels what it finds."""
+    # Every live state, not queued and in_progress alone: a run also stands waiting, requested or
+    # pending. Releases are cut by hand, so the newest few hold any that is live.
+    try:
+        runs = gh_json(f"repos/{repo}/actions/workflows/release.yml/runs?per_page=5")
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+    found = runs.get("workflow_runs") if isinstance(runs, dict) else None
+    for r in found or []:
+        if isinstance(r, dict) and isinstance(r.get("id"), int) and r.get("status") != "completed":
+            return r
+    return None
+
+
 def known_parts(root: Path) -> tuple[list[str], list[str]]:
     """The steering shards and coordination chunks this checkout's workflow knows, as the
     workflow's own scope reads them."""
@@ -244,6 +262,12 @@ def run(ws: Path, here: Path, repo: str, session: str, flags, picked: dict, retr
             session, token = speaking_as(ws, session, flags)
         except Refused as why:
             print(str(why), file=sys.stderr)
+            return 1
+        release = release_running(repo)
+        if release is not None:
+            where = release.get("html_url") or f"https://github.com/{repo}/actions/runs/{release['id']}"
+            print(f"not dispatched: release {release['id']} is running, and a release's jobs go first "
+                  f"(documentation/ci/14 §5); dispatch again when it ends: {where}", file=sys.stderr)
             return 1
         fields = ["-f", f"ref={on}", "-F", "return_run_details=true"]
         for k, v in inputs.items():

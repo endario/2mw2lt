@@ -227,7 +227,7 @@ def go_say(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
-            return 1, refusal.use("relay", str(e)), False
+            return 1, refusal.answered("relay", e), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 
@@ -258,7 +258,7 @@ def _go_out_of_band(rec: dict, line: str) -> tuple[int, str, bool]:
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
-            return 1, refusal.use("out-of-band", str(e)), False
+            return 1, refusal.answered("out-of-band", e), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 
@@ -286,7 +286,7 @@ def _go_need(rec: dict, verb: str, line: str) -> tuple[int, str, bool]:
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
-            return 1, refusal.use(verb, str(e)), False
+            return 1, refusal.answered(verb, e), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 
@@ -348,7 +348,7 @@ def _go_launch(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         if e.code == "launch-reason-is-a-brief":
             return 1, refusal.use("launch", REASON_IS_A_BRIEF), False
         if session_routes.settled(e):
-            return 1, refusal.use("launch", str(e)), False
+            return 1, refusal.answered("launch", e), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 
@@ -372,7 +372,7 @@ def _go_withdraw(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
-            return 1, refusal.use("withdraw", str(e)), False
+            return 1, refusal.answered("withdraw", e), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 
@@ -397,7 +397,7 @@ def _go_cancel(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
-            return 1, refusal.use("cancel", str(e)), False
+            return 1, refusal.answered("cancel", e), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 
@@ -439,7 +439,7 @@ def _go_action(rec: dict, verb: str, line: str, key: str) -> tuple[int, str, boo
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
-            return 1, refusal.use(verb, str(e)), False
+            return 1, refusal.answered(verb, e), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 
@@ -467,7 +467,7 @@ def _go_keep(rec: dict, verb: str, line: str, key: str) -> tuple[int, str, bool]
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
-            return 1, refusal.use(verb, str(e)), False
+            return 1, refusal.answered(verb, e), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 
@@ -497,7 +497,7 @@ def _go_peak(rec: dict, verb: str, line: str, key: str) -> tuple[int, str, bool]
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
-            return 1, refusal.use(verb, str(e)), False
+            return 1, refusal.answered(verb, e), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 
@@ -524,7 +524,7 @@ def _go_answer(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
-            return 1, refusal.use("answer", str(e)), False
+            return 1, refusal.answered("answer", e), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 
@@ -548,7 +548,7 @@ def _go_regroup(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
-            return 1, refusal.use("regroup", str(e)), False
+            return 1, refusal.answered("regroup", e), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 
@@ -581,7 +581,7 @@ def _go_intervened(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
-            return 1, refusal.use("intervened", str(e)), False
+            return 1, refusal.answered("intervened", e), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 
@@ -608,7 +608,7 @@ def _go_lift(rec: dict, lift: re.Match, key: str) -> tuple[int, str, bool]:
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
-            return 1, refusal.use("lift", str(e)), False
+            return 1, refusal.answered("lift", e), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 
@@ -635,7 +635,7 @@ def _go_floor(rec: dict, floor: re.Match, key: str) -> tuple[int, str, bool]:
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
-            return 1, refusal.use("floor", str(e)), False
+            return 1, refusal.answered("floor", e), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 
@@ -663,7 +663,7 @@ def _go_abandon(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
-            return 1, refusal.use("authorship", str(e)), False
+            return 1, refusal.answered("authorship", e), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 
@@ -689,7 +689,7 @@ def _go_bench_lift(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
         if session_routes.settled(e):
-            return 1, refusal.use("lift", str(e)), False
+            return 1, refusal.answered("lift", e), False
         return 1, refusal.retry(str(e)), True
     return 0, said, False
 
@@ -715,7 +715,7 @@ def _go_read(rec: dict, verb: str, line: str) -> tuple[int, str, bool]:
             return 1, stale, False
         if e.code in SEAT_LOST:
             return 1, GO_NOT_SEATED.format(why=e), False
-        return 1, refusal.use(verb, str(e)) if session_routes.settled(e) else refusal.retry(str(e)), False
+        return 1, refusal.answered(verb, e) if session_routes.settled(e) else refusal.retry(str(e)), False
 
 
 def go_read(rec: dict, body: bytes) -> tuple[int, str]:

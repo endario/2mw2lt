@@ -23,7 +23,7 @@ import time
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
-from local_workspace import KEY_HEADER, agent_key, agent_port, origin_slug, required_workspace_root, workspace_header  # noqa: E402
+from local_workspace import KEY_HEADER, agent_auth, agent_port, origin_slug, required_workspace_root, workspace_header  # noqa: E402
 from ack import provider_ids, token_path, valid_token  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
 from bind import Refused, Unclaimed, bind, incarnation, incarnation_of, pid_arg, records  # noqa: E402
@@ -619,7 +619,7 @@ def reached(session: str, psession: str, workspace: Path | None = None) -> str:
     url = f"http://127.0.0.1:{AGENT_PORT}/steering/reach"
     req = urllib.request.Request(url, data=body, method="POST",
                                  headers={"Content-Type": "application/json",
-                                          KEY_HEADER: agent_key(workspace, AGENT_PORT) or "",
+                                          **agent_auth(workspace, AGENT_PORT),
                                           **(workspace_header(workspace) if workspace else {})})
     try:
         # Clear of the agent's own `UPLINK_WAIT`: at the same value, an agent whose uplink is

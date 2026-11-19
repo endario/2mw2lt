@@ -177,16 +177,21 @@ def main() -> int:
             o["runtime_id"] = rid
     except Exception:
         pass  # no runtime: admitted, unattributed
-    try:
-        path = spool.admit(ws, o)
-    except OSError:
-        return finish()
-    if path is None:
-        return finish()
+    # A sandboxed launch's cage is denied the spool (#10265): its observation goes to its agent on
+    # the launch's bearer, which spools it once it is this launch's own, and never to the door.
+    launch = bool(os.environ.get("STEERING_LAUNCH_BEARER"))
+    path = None
+    if not launch:
+        try:
+            path = spool.admit(ws, o)
+        except OSError:
+            return finish()
+        if path is None:
+            return finish()
     left = deadline - time.monotonic()
     if left < 0.2:
-        record("observe", f"admitted, no time left to send ({left:.2f}s of {BUDGET})", ws)
-        return finish()  # admitted; the sweep delivers it
+        record("observe", f"{'not sent' if launch else 'admitted'}, no time left to send ({left:.2f}s of {BUDGET})", ws)
+        return finish()  # admitted, the sweep delivers it; a launch's had no spool to wait in
     seated = brain_route("observe")
     notice = None
     # This machine's agent relays an enrolled session's observation to the door on its warm
@@ -203,12 +208,14 @@ def main() -> int:
         notice = None  # an agent that took the post is final; the spool and its drain own the rest
     elif ride is not None:
         said, release, relaying = ride
-        if not relaying:  # a relay still sending owns the file, and puts it back if it fails
+        if not relaying and path is not None:  # a relay still sending owns the file, and puts it back if it fails
             claimed = spool.claim(path)
             if claimed:
                 claimed.unlink()
         keep_release(ws, release)
         notice = received_notice(ws, o, said, time.time())
+    elif launch:
+        record("observe", "no agent took a sandboxed launch's observation, which reaches only its agent", ws)
     else:
         notice = door_send(seated, ws, o, path, deadline - time.monotonic())
     # A turn that runs long reaches no Stop, so its tool calls carry the reading (#1159).
@@ -241,12 +248,15 @@ ANSWERED_IN_TURN = ("UserPromptSubmit",)
 
 def agent_send(ws: Path, o: dict, left: float):
     """The observation through this machine's agent, admitted by its key and naming its
-    workspace, as the reach and turn routes are; None when no agent answered at all, so the
+    workspace, as the reach and turn routes are, or a sandboxed launch's on its bearer, which the
+    agent spools once it is the launch's own (#10265); None when no agent answered at all, so the
     caller sends to the door as it always has — an agent that answered is final, its 2xx carrying
     the door's answer and anything else AGENT_REFUSED, and one still forwarding when the wait ends
 AGENT_HELD. A 202 is the agent still sending, with the door's last answer to this event. The
     loopback is cheap to fail, so an agent that is absent costs the hook milliseconds of its
     budget, not the send."""
+    # A launch's observation rides its bearer, which the agent spools once it is the launch's own
+    # (#10265, §6 step 2); any other hook's, on the agent's key, was spooled before it posted.
     req = local_workspace.agent_request(ws, "/steering/observe", o, timeout=1.0)
     if req is None:
         return None

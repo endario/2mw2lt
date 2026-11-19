@@ -110,7 +110,7 @@ def _on_go(ws: Path, verb: str, session: str, text: str, retry_id: str | None) -
             return run()
         except session_routes.Refused as e:
             unsure = not session_routes.settled(e)
-            print(display_reply(refusal.retry(str(e)) if unsure else refusal.use(verb, str(e))), file=sys.stderr)
+            print(display_reply(refusal.retry(str(e)) if unsure else refusal.answered(verb, e)), file=sys.stderr)
             if e.code in ("done-card-required", "wait-card-required"):
                 # A done or a wait is one card's (doc 199 §3, doc 200 D8): Go names each the session holds.
                 cards = "\n".join(f"  {c}" for c in e.detail.split("; ") if c) or "  (see connect's card: line)"

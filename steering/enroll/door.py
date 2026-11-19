@@ -295,6 +295,16 @@ def anchored(workspace: Path | None):
         ANCHOR.reset(token)
 
 
+# How long each phase of the workspace lookup under `configured_door` may take before it refuses.
+# The lookup reads a few files, so only a stalled mount or a starved process outruns it, and a
+# refusal is no better than a wait: the hooks that ask run under the harness's own budget, which
+# kills what outlasts it. The shortest hook in hooks/hooks.json is three seconds and the ones that
+# reach this lookup allow five or more; a one-second budget refused first, on a runner loaded with
+# a release's shards (#10346). The file read and the git fallback each get the budget, so the worst
+# case is twice it.
+LOOKUP_BUDGET = 2.5
+
+
 def configured_door() -> str:
     """`STEERING_DOOR` from the environment, else from the workspace's `.env` — the hooks run
     with the harness's environment, which does not read that file. Under `ANCHOR`, that
@@ -312,7 +322,7 @@ def configured_door() -> str:
     # caller serving the workspace asks under ANCHOR and, with no STEERING_PORT in its
     # environment to fall back on, refuses instead (below).
     try:
-        ws = workspace_root(anchor, timeout=1.0)
+        ws = workspace_root(anchor, timeout=LOOKUP_BUDGET)
     except subprocess.TimeoutExpired:
         raise SystemExit(f"door: the workspace lookup from {anchor} timed out; refusing to fall back to the loopback daemon")
     except subprocess.CalledProcessError as e:

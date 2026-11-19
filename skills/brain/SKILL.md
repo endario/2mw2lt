@@ -194,8 +194,9 @@ hear first — see [Read the blocked-on line, the ledger and escalations](#read-
   judge, look at the machine, or cancel and commission again.
   One whose facts name a `floor` is told at once: no judge at its card's floor was offered, so retier
   the card, and the queued round takes the new floor. Its commissioner is told too, by default, and it
-  decides. Its message leads with one sentence naming the floor and what was seen to hold each vendor
-  ("No epic judge free: openai: busy; anthropic: a judge's maker wrote the change."), then the moves
+  decides. Its message leads with the floor and what held each account, machine or model, by name
+  ("No epic judge is free. openai#2 has spent its quota until 14:00Z. claude-opus-5-5 cannot review
+  it: its maker wrote the change."), then the moves
   that can free it: keep waiting, ask you to lower the floor with evidence, cancel and commission again
   pinning a judge, or ask you for a peak override; for a gate a floor, catalog or setting holds, only the
   ask that fits the hold. Yours is the longer list of every vendor's refusals. Lower a floor

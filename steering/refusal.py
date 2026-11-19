@@ -6,6 +6,7 @@ inbox's replay unchanged. `conforms` is the check made where answers are given.
 """
 from __future__ import annotations
 
+import http
 import re
 
 from verb_help import VERBS
@@ -107,6 +108,29 @@ def use(verb: str, why: str) -> str:
     forms = VERBS[verb]["forms"]
     return refuse(why, send=[item for form in forms for item in (form["grammar"], form["example"])],
                   to=AUDIENCE[verb])
+
+
+def _status_text(status: int) -> str:
+    try:
+        return http.HTTPStatus(status).phrase
+    except ValueError:
+        return ""
+
+
+def titled(e) -> bool:
+    """Whether the refusal carries the server's own sentence. A bare status text for a title
+    ("Not Found") is a writer's placeholder, not a sentence."""
+    title = getattr(e, "title", "")
+    return bool(title) and title != _status_text(getattr(e, "status", 0))
+
+
+def answered(verb: str, e) -> str:
+    """A settled refusal Go answered: its own sentence where its catalogue carries one, which says
+    what would succeed, and the verb's grammar only where none arrived (doc 206 §6)."""
+    title = getattr(e, "title", "")
+    if titled(e):
+        return Refusal(f"{PREFIX}{e}", str(e), {"kind": "server", "to": AUDIENCE[verb], "text": title})
+    return use(verb, str(e))
 
 
 def reconnect(reason: str, to: str = "session") -> str:

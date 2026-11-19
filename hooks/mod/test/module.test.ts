@@ -2080,15 +2080,17 @@ test('a sandboxed launch holds on its bearer, with no agent key', async ($, on) 
   expect(mine.some(f => 'X-Steering-Agent-Key' in f.headers)).toBe(false)
 })
 
-// Its live view is asked on the key it does not hold, so it is not asked, and nothing clears the
-// agent its hold is let go on: the session's end lets the hold go at once, on the bearer.
-test("a sandboxed launch's hold is let go at its end, on its bearer", async ($, on) => {
+// Its live view is asked on the same bearer, never the key it does not hold (design §6, step 2), and
+// the session's end lets the hold go at once, on the bearer.
+test("a sandboxed launch's live view and hold ride its bearer, and its hold is let go at its end", async ($, on) => {
   const bearer = 'launch-bearer-stand-in'
   const w = world(on, { agent: true, holdRoute: true, proofEnv: { STEERING_LAUNCH_BEARER: bearer }, holdPolls: [admitted()] })
   w.agentKey = undefined
   await begin($)
   await w.clock.settle()
-  expect(w.fetches.some(f => f.url.includes('/steering/surface/poll'))).toBe(false)
+  const polls = w.fetches.filter(f => f.url.includes('/steering/surface/poll'))
+  expect(polls.length).toBeGreaterThan(0)
+  expect(polls.every(f => f.headers.Authorization === `Bearer ${bearer}` && !('X-Steering-Agent-Key' in f.headers))).toBe(true)
   await $.session.end({ sessionId: 'ps-1', reason: 'exit' } as never)
   const gone = framesFetches(w).filter(f => f.method === 'DELETE')
   expect(gone.length).toBe(1)

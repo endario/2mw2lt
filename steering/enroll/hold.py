@@ -660,9 +660,10 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                         cures = why in CURABLE
                         told("refused", why=f"refused {e.code}: {why}.{serves}", retry=cures,
                              **({} if cures else {"remedy": STOPPED_REMEDY}))
-                    print(f"refused {e.code}{f': {why}' if why else ''}.{serves} "
-                          f"nothing this loop retries will change that; run /2mw2lt:connect, "
-                          f"then hold this stream again", file=sys.stderr if plugin else sys.stdout)
+                    print(f"refused {e.code}{f': {why}' if why else ', with no reason given'}.{serves} "
+                          f"The agent at 127.0.0.1:{port} refused the hold for session {session}, and holding "
+                          f"again will not change that: run /2mw2lt:connect, then hold this stream again",
+                          file=sys.stderr if plugin else sys.stdout)
                     return 1
                 if not quiet:
                     print(f"the stream at 127.0.0.1:{port} was refused {e.code}"

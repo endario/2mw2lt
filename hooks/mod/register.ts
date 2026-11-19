@@ -563,8 +563,12 @@ async function agentOf($: EngineInterface, workspace: string) {
   return undefined
 }
 
-const agentHeaders = (a: { key: string; workspace: string }) =>
-  ({ 'content-type': 'application/json', 'X-Steering-Agent-Key': a.key, 'X-Steering-Workspace': surface.workspaceHeader(a.workspace) })
+// A sandboxed launch's cage is denied the agent's key (#10265): its live view rides the launch's
+// bearer, which the agent holds to this session alone, and never the key beside it.
+const agentHeaders = (a: { key: string; bearer?: string; workspace: string }) =>
+  ({ 'content-type': 'application/json',
+    ...(a.bearer ? { Authorization: `Bearer ${a.bearer}` } : { 'X-Steering-Agent-Key': a.key }),
+    'X-Steering-Workspace': surface.workspaceHeader(a.workspace) })
 
 function show($: EngineInterface, payload: surface.Payload) {
   if (!watching || !outbox.add(watched, payload)) return
@@ -614,9 +618,6 @@ async function pollSurface($: EngineInterface, workspace: string, session: strin
       agent ??= resolved
       // An agent not yet started is retried as one that stopped: its key appears when it starts.
       if (!agent) throw new Error(`no key for the agent serving ${workspace}`)
-      // A sandboxed launch's cage holds no agent key, and the live view is asked on the key alone
-      // (#10265): it is not asked, so no poll it could not make clears the agent its hold lets go on.
-      if (agent.bearer) return
       void sendCommandReceipts($)
       // The producer, as the events name it: the agent advertises this session's rows only while
       // the conversation its hold pins is the one polling.

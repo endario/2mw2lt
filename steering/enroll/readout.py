@@ -32,7 +32,7 @@ import runtime_id  # noqa: E402
 import targeting  # noqa: E402
 import verb_help  # noqa: E402
 import vitals as adapter  # noqa: E402
-from local_workspace import KEY_HEADER, agent_key, agent_port, workspace_header, workspace_root  # noqa: E402
+from local_workspace import agent_auth, agent_port, workspace_header, workspace_root  # noqa: E402
 import door  # noqa: E402
 from door import failure, record  # noqa: E402
 import observe_post  # noqa: E402
@@ -114,7 +114,7 @@ def tell_agent(ws: Path, hook: dict, timeout: float) -> None:
     port = agent_port(ws, timeout=min(1.0, timeout))
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}/steering/turn", data=json.dumps({"provider_session": sid}).encode(), method="POST",
-        headers={"Content-Type": "application/json", KEY_HEADER: agent_key(ws, port) or "", **workspace_header(ws)})
+        headers={"Content-Type": "application/json", **agent_auth(ws, port), **workspace_header(ws)})
     door.send(req, timeout=timeout).close()
 
 

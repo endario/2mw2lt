@@ -404,6 +404,7 @@ UsageLimit = typing.TypedDict("UsageLimit", {
     "scope": "str | None",
     "projection": "UsageProjection | None",
     "waste": "typing.NotRequired[UsageWaste | None]",
+    "scopes": "typing.NotRequired[list[str] | None]",
 })
 
 # UsageWaste is whether the remaining quota can burn at the best directly observed single-account
@@ -516,6 +517,7 @@ AccountServed = typing.TypedDict("AccountServed", {
     "for": "typing.NotRequired[list[str] | None]",
     "models": "typing.NotRequired[list[str] | None]",
     "owner": "str",
+    "dropped": "typing.NotRequired[list[str] | None]",
 })
 
 # ProviderModels is the body of POST /providers/models: the model ids the team keeps a provider to,
@@ -530,6 +532,7 @@ ProviderModels = typing.TypedDict("ProviderModels", {
 ProviderModelsStated = typing.TypedDict("ProviderModelsStated", {
     "vendor": "str",
     "models": "list[str] | None",
+    "dropped": "typing.NotRequired[list[str] | None]",
 })
 
 # AccountReset is the body of POST /accounts/reset: the time by which the account's windows reset,
@@ -858,6 +861,23 @@ ActRead = typing.TypedDict("ActRead", {
     "winner_why": "typing.NotRequired[str]",
     "machine": "typing.NotRequired[MachineState | None]",
     "deadline_at": "str",
+    "how": "typing.NotRequired[str]",
+    "cwd": "typing.NotRequired[str]",
+    "home": "typing.NotRequired[str]",
+    "command": "typing.NotRequired[str]",
+    "bound": "typing.NotRequired[bool]",
+    "steps": "typing.NotRequired[list[RehomeStep] | None]",
+    "undo": "typing.NotRequired[str]",
+})
+
+# RehomeStep is one step of a rehome as its machine took it: offer, compact, stop, copy, quarantine,
+# admit, launch or handover; its outcome (done, skipped or refused) and how long it took; and a line
+# of detail a diagnosis needs, never a credential or a transcript's words.
+RehomeStep = typing.TypedDict("RehomeStep", {
+    "step": "str",
+    "outcome": "str",
+    "ms": "int",
+    "detail": "typing.NotRequired[str]",
 })
 
 # AnswerBody is a desk answer to a dialog a session waits at: the dialog's Need, and the decision —
@@ -1533,6 +1553,7 @@ MachineAction = typing.TypedDict("MachineAction", {
     "compact": "typing.NotRequired[bool]",
     "prove_model": "typing.NotRequired[list[str] | None]",
     "compact_prove_model": "typing.NotRequired[list[str] | None]",
+    "by_hand": "typing.NotRequired[bool]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1596,6 +1617,7 @@ StreamWake = typing.TypedDict("StreamWake", {
     "compact": "typing.NotRequired[bool]",
     "prove_model": "typing.NotRequired[list[str] | None]",
     "compact_prove_model": "typing.NotRequired[list[str] | None]",
+    "by_hand": "typing.NotRequired[bool]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1668,6 +1690,7 @@ StreamControl = typing.TypedDict("StreamControl", {
     "compact": "typing.NotRequired[bool]",
     "prove_model": "typing.NotRequired[list[str] | None]",
     "compact_prove_model": "typing.NotRequired[list[str] | None]",
+    "by_hand": "typing.NotRequired[bool]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1715,6 +1738,7 @@ StreamRehome = typing.TypedDict("StreamRehome", {
     "compact": "typing.NotRequired[bool]",
     "prove_model": "typing.NotRequired[list[str] | None]",
     "compact_prove_model": "typing.NotRequired[list[str] | None]",
+    "by_hand": "typing.NotRequired[bool]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1762,6 +1786,7 @@ StreamPark = typing.TypedDict("StreamPark", {
     "compact": "typing.NotRequired[bool]",
     "prove_model": "typing.NotRequired[list[str] | None]",
     "compact_prove_model": "typing.NotRequired[list[str] | None]",
+    "by_hand": "typing.NotRequired[bool]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1809,6 +1834,7 @@ StreamPrompt = typing.TypedDict("StreamPrompt", {
     "compact": "typing.NotRequired[bool]",
     "prove_model": "typing.NotRequired[list[str] | None]",
     "compact_prove_model": "typing.NotRequired[list[str] | None]",
+    "by_hand": "typing.NotRequired[bool]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1856,6 +1882,7 @@ StreamAnswer = typing.TypedDict("StreamAnswer", {
     "compact": "typing.NotRequired[bool]",
     "prove_model": "typing.NotRequired[list[str] | None]",
     "compact_prove_model": "typing.NotRequired[list[str] | None]",
+    "by_hand": "typing.NotRequired[bool]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1903,6 +1930,7 @@ StreamInterrupt = typing.TypedDict("StreamInterrupt", {
     "compact": "typing.NotRequired[bool]",
     "prove_model": "typing.NotRequired[list[str] | None]",
     "compact_prove_model": "typing.NotRequired[list[str] | None]",
+    "by_hand": "typing.NotRequired[bool]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -4256,6 +4284,7 @@ LaunchAnswer = typing.TypedDict("LaunchAnswer", {
     "request": "str",
     "state": "str",
     "reason": "typing.NotRequired[str]",
+    "how": "typing.NotRequired[str]",
     "barred": "typing.NotRequired[list[str] | None]",
     "account": "typing.NotRequired[LaunchAccount | None]",
     "outcome": "str | None",
@@ -4283,6 +4312,7 @@ LaunchRead = typing.TypedDict("LaunchRead", {
     "request": "str",
     "state": "str",
     "reason": "typing.NotRequired[str]",
+    "how": "typing.NotRequired[str]",
     "barred": "typing.NotRequired[list[str] | None]",
     "account": "typing.NotRequired[LaunchAccount | None]",
     "outcome": "str | None",

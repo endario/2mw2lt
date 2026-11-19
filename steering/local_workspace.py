@@ -308,22 +308,32 @@ def agent_key(anchor, port) -> str | None:
         return None
 
 
+def agent_auth(anchor, port) -> dict:
+    """What admits this session to its agent's loopback routes: a sandboxed launch's bearer, which
+    its cage holds in place of the agent's key it is denied (#10265), else the agent's key, empty
+    where none is held. The agent holds a launch's bearer to that launch's own session."""
+    bearer = os.environ.get("STEERING_LAUNCH_BEARER", "")
+    if bearer:
+        return {"Authorization": f"Bearer {bearer}"}
+    return {KEY_HEADER: agent_key(anchor, port) or ""}
+
+
 def agent_request(anchor: Path, path: str, body: dict | None, timeout: float | None = None):
     """A POST of `body` to `path`, or a GET when there is none, on the loopback of the agent
-    serving this workspace, admitted by its key and naming the workspace; None when no agent key
-    is held, so nothing can take it."""
+    serving this workspace, admitted by its key or the launch's bearer (`agent_auth`) and naming
+    the workspace; None when neither is held, so nothing can take it."""
     import json
     import urllib.request
     port = agent_port(anchor, timeout=timeout)
-    key = agent_key(anchor, port)
-    if not key:
+    auth = agent_auth(anchor, port)
+    if not any(auth.values()):
         return None
     if body is None:
         return urllib.request.Request(f"http://127.0.0.1:{port}{path}", method="GET",
-                                      headers={KEY_HEADER: key, **workspace_header(str(anchor))})
+                                      headers={**auth, **workspace_header(str(anchor))})
     return urllib.request.Request(
         f"http://127.0.0.1:{port}{path}", data=json.dumps(body).encode(), method="POST",
-        headers={"Content-Type": "application/json", KEY_HEADER: key, **workspace_header(str(anchor))})
+        headers={"Content-Type": "application/json", **auth, **workspace_header(str(anchor))})
 
 
 def agent_port(anchor: Path, timeout: float | None = None) -> str:

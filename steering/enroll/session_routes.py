@@ -135,6 +135,20 @@ def _renewed(e: urllib.error.HTTPError, problem: dict, presented: str | None) ->
         return False
 
 
+def _refused(e: urllib.error.HTTPError, problem: dict) -> "Refused":
+    """The refusal `e` answered, with the reason it gave: Go's detail, or the agent's relay's own
+    words when it refused before the door (#10265), so a caller can tell what to fix."""
+    wait_seconds = problem.get("wait_seconds")
+    detail = problem.get("detail")
+    if not isinstance(detail, str) and isinstance(problem.get("refused"), str):
+        detail = problem["refused"]
+    title = problem.get("title")
+    return Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
+                   wait_seconds if isinstance(wait_seconds, int) else None, _request(e, problem), _remedy(problem),
+                   detail if isinstance(detail, str) and len(detail) <= 200 else "",
+                   title if isinstance(title, str) else "")
+
+
 def post(path: str, body: dict, key: str, carrier: str, token: str, timeout: float = 10.0,
          resend: bool = True, method: str = "POST") -> dict:
     """One write under `key`, sent again under the same key while Go asks it to wait, and again
@@ -176,16 +190,7 @@ def post(path: str, body: dict, key: str, carrier: str, token: str, timeout: flo
                 if attempts < RETRY_ATTEMPTS and time.monotonic() - started + pause <= RETRY_LIMIT:
                     time.sleep(pause)
                     continue
-            wait_seconds = problem.get("wait_seconds")
-            detail = problem.get("detail")
-            # The agent's relay refuses in its own words, before the door (#10265).
-            if not isinstance(detail, str) and isinstance(problem.get("refused"), str):
-                detail = problem["refused"]
-            title = problem.get("title")
-            raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
-                          wait_seconds if isinstance(wait_seconds, int) else None, _request(e, problem), _remedy(problem),
-                          detail if isinstance(detail, str) and len(detail) <= 200 else "",
-                          title if isinstance(title, str) else "") from None
+            raise _refused(e, problem) from None
         except (urllib.error.URLError, OSError, TimeoutError, http.client.HTTPException, ValueError) as e:
             if (wait := again(f"no answer ({e})")) is not None:
                 time.sleep(wait)
@@ -404,7 +409,7 @@ def checkpoint(token: str, body: dict) -> tuple[str, bool]:
             # line Go named, so no suffix repeats it.
             return refusal.resend(f"{e}: the checkpoint text contains credential-shaped content",
                                   "remove or reword that content, then send the checkpoint again"), False
-        return refusal.use("checkpoint", str(e)), False
+        return refusal.answered("checkpoint", e), False
     got = answer.get("checkpoint") or {}
     dropped = got.get("dropped") or 0
     return f"checkpointed: {got['id']} {body['boundary']}" + (f" dropped: {dropped}" if dropped else ""), False
@@ -420,8 +425,7 @@ def checkpoint_now(session: str, token: str, timeout: float) -> dict | None:
             newest = json.loads(r.read() or b"{}").get("checkpoints") or []
     except urllib.error.HTTPError as e:
         problem = _problem(e)
-        raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
-                      request=_request(e, problem), remedy=_remedy(problem)) from None
+        raise _refused(e, problem) from None
     except (urllib.error.URLError, OSError, TimeoutError, http.client.HTTPException, ValueError) as e:
         raise Unsent(f"{_base()}: no answer ({e})") from None
     return newest[0] if newest else None
@@ -439,8 +443,7 @@ def due_now(session: str, token: str, timeout: float) -> dict:
             return json.loads(r.read() or b"{}")
     except urllib.error.HTTPError as e:
         problem = _problem(e)
-        raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
-                      request=_request(e, problem), remedy=_remedy(problem)) from None
+        raise _refused(e, problem) from None
     except (urllib.error.URLError, OSError, TimeoutError, http.client.HTTPException, ValueError) as e:
         raise Unsent(f"{_base()}: no answer ({e})") from None
 
@@ -463,7 +466,7 @@ def checkpoint_read(session: str, token: str, which: str) -> tuple[str, dict | N
             return refusal.reconnect("the session's token is not valid"), None
         if not settled(e):
             return refusal.retry(str(e)), None
-        return refusal.use("checkpoint", str(e)), None
+        return refusal.answered("checkpoint", e), None
     if which != "latest":
         return "", got
     newest = got.get("checkpoints") or []
@@ -805,8 +808,7 @@ def get(path: str, token: str, timeout: float = 10.0) -> dict:
                 if attempts < RETRY_ATTEMPTS and time.monotonic() - started + pause <= RETRY_LIMIT:
                     time.sleep(pause)
                     continue
-            raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
-                          request=_request(e, problem), remedy=_remedy(problem)) from None
+            raise _refused(e, problem) from None
         except (urllib.error.URLError, OSError, TimeoutError, http.client.HTTPException, ValueError) as e:
             if (wait := again(f"no answer ({e})")) is not None:
                 time.sleep(wait)
@@ -1097,7 +1099,8 @@ def relay(session: str, token: str, to: str, epoch: int | None, text: str, key: 
     if epoch is None:
         epoch = standing_epoch(token, to)
         if epoch is None:
-            raise Refused(404, "session-not-enrolled", "to")
+            raise Refused(404, "session-not-enrolled", "to",
+                          title=f"No session named {to} is enrolled in this workspace. Relay to a name the roster shows.")
     directive = str(uuid.UUID(_own_key("relay.directive", session, key)))
     answer = lent(session, token, lambda generation: issue_directive(session, token, directive, to, epoch, generation, text, checkpoint))
     # A steward's directive to a busy session waits behind the one it holds (doc 198 D6).
@@ -1144,11 +1147,17 @@ def seat_launch(session: str, token: str, body: dict, key: str) -> str:
         return f"launched: {answer['id']}{harness}{on}{_overloaded(answer.get('host_overloaded'))}{nudge}"
     if answer.get("state") == "admitted":
         return f"launching: {answer['id']}{harness}{on}{_overloaded(answer.get('host_overloaded'))}{nudge}"
+    how = answer.get("how")
     if answer.get("state") == "withdrawn":
         # Ended at its publish, a pinned account barred or off, its pinned machine gone: not waiting.
+        if how:
+            return f"launch withdrawn: {answer['id']}{harness}{on}: {how} [{answer.get('reason')}]"
         return f"launch withdrawn: {answer['id']}{harness}{on}: {answer.get('reason')}"
     # A wait a vendor's peak holds carries Go's way through it, the exact verb that frees it.
     remedy = f"\n{answer['remedy']}" if answer.get("remedy") else ""
+    if how:
+        return (f"launch waiting: {answer['id']}{on}: {how} [{answer.get('reason') or answer.get('state')}]"
+                f"{_reclaimable(answer.get('reclaimable'))}{remedy}")
     return f"launch waiting: {answer['id']} {answer.get('reason') or answer.get('state')}{on}{_reclaimable(answer.get('reclaimable'))}{remedy}"
 
 
