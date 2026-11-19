@@ -11,6 +11,7 @@ AccessDTO = typing.TypedDict("AccessDTO", {
     "collaborations": "list[CollaborationDTO] | None",
     "subject_binding": "str",
     "github_login": "str",
+    "github_id": "int",
     "subject": "str | None",
     "invitations": "list[InvitationDTO] | None",
 })
@@ -4834,12 +4835,15 @@ SandboxHeld = typing.TypedDict("SandboxHeld", {
 })
 
 # SandboxTokenRequest asks for an App token reading the workspace's one repository on the
-# machine's own credential (doc 209 §4.6), for the clone a sandboxed launch starts from: Scope is
-# clone, and Launch names the launch the machine holds open.
+# machine's own credential (doc 209 §4.6), for the clone a sandboxed launch starts from (Scope is
+# clone, and Launch names the launch the machine holds open) or, once a session has ended, for the
+# proof that its kept image holds nothing unpublished (§4.11: Scope is verify, and Session names the
+# session, whose enrolment must have ended).
 SandboxTokenRequest = typing.TypedDict("SandboxTokenRequest", {
     "uplink": "str",
     "scope": "str",
-    "launch": "str",
+    "launch": "typing.NotRequired[str]",
+    "session": "typing.NotRequired[str]",
 })
 
 # SandboxTokenAnswer is GitHub's installation token, when it lapses in RFC 3339, and the repository

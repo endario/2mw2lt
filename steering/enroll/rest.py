@@ -160,6 +160,10 @@ def fetch(url: str, token: str | None, method: str = "GET", body: bytes | None =
         headers[WORKSPACE_HEADER] = workspace
     req = urllib.request.Request(url, headers=headers, method=method,
                                  data=(body if body is not None else b"") if method in ("POST", "PUT") else None)
+    if (launch := door.launch_bearer()) and not bearer:
+        # A sandboxed launch's session reaches its door through its agent alone (#10265): a door
+        # request goes to the relay, and one anywhere else is refused before it is built.
+        req = door.relayed(req, launch)
     again = door.resender(time.monotonic(), f"rest: {url}",
                           action="resending under the same key" if key else "asking again")
     resendable = method not in ("POST", "PUT", "DELETE") or bool(key)

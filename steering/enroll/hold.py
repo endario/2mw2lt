@@ -567,6 +567,9 @@ def hold(port: str, session: str, token: str, rid: str, frames: Path, until: boo
                                                                            "service" if service else
                                                                            "event" if until else "monitor"),
                                                        **({"X-Steering-Config-Dir": path_header(config)} if config else {}),
+                                                       # A sandboxed launch's hold is admitted on its bearer (#10265).
+                                                       **({"Authorization": f"Bearer {door.launch_bearer()}"}
+                                                          if door.launch_bearer() else {}),
                                                        **(workspace_header(workspace) if workspace else {})})
             try:
                 with door.send(req, timeout=HOLD_READ) as r:

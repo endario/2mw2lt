@@ -92,7 +92,9 @@ class Unsent(OSError):
 
 def _base() -> str:
     """The workspace's routes: the door, which on Go names its workspace (`/<team>/<workspace>`, or
-    `/w/<alias>`)."""
+    `/w/<alias>`); for a sandboxed launch's session, its agent's relay, which sends them on (#10265)."""
+    if door.launch_bearer():
+        return f"{door.relay_base()}/api/v1"
     base, _ = door.door()
     _, workspace = door.split(base)
     if not workspace:
@@ -101,6 +103,9 @@ def _base() -> str:
 
 
 def _machine_token() -> str:
+    if door.launch_bearer():
+        raise SystemExit("this session is a sandboxed launch's, which holds no machine credential: its agent "
+                         "enrolled it and relays its own session's requests, and nothing else is sent from it")
     import credential  # noqa: E402
     token = credential.for_url(door.door()[0])
     if not token:
@@ -110,6 +115,10 @@ def _machine_token() -> str:
 
 def session_headers(token: str) -> dict[str, str]:
     """The paired credentials for one direct session request."""
+    bearer = door.launch_bearer()
+    if bearer:
+        # The agent adds the machine's credential, to this session's own requests alone.
+        return {SESSION_CARRIER: token, "Authorization": f"Bearer {bearer}", "User-Agent": door.USER_AGENT}
     return {SESSION_CARRIER: token, MACHINE_CARRIER: _machine_token(), "User-Agent": door.USER_AGENT}
 
 
@@ -169,6 +178,9 @@ def post(path: str, body: dict, key: str, carrier: str, token: str, timeout: flo
                     continue
             wait_seconds = problem.get("wait_seconds")
             detail = problem.get("detail")
+            # The agent's relay refuses in its own words, before the door (#10265).
+            if not isinstance(detail, str) and isinstance(problem.get("refused"), str):
+                detail = problem["refused"]
             title = problem.get("title")
             raise Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
                           wait_seconds if isinstance(wait_seconds, int) else None, _request(e, problem), _remedy(problem),

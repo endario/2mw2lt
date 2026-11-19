@@ -1117,6 +1117,95 @@ def served_root(repo: str) -> Path:
     return root
 
 
+# The commit identity a sandboxed launch's clone is given (machine/internal/sandbox.Clone): the
+# served root's own user.name and user.email, which a service user has no global config to supply.
+IDENTITY_KEYS = ("user.name", "user.email")
+
+
+def identity_key(root: Path, key: str) -> str | None:
+    """The value `git config --get key` reads in `root` — every scope and every include, as the
+    launcher reads it — None where unset. A key set to nothing, or to blanks, is a value the launcher
+    refuses and an unset key the installer would overwrite, so it stops here naming the key; so does
+    a read git itself failed (#10239)."""
+    try:
+        done = subprocess.run(["git", "-C", str(root), "config", "--get", key], capture_output=True,
+                              text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise Stop(f"could not read {key} in {root}: {e}") from None
+    if done.returncode == 1 and not done.stderr.strip():
+        return None
+    if done.returncode:
+        raise Stop(f"could not read {key} in {root}: git said {(done.stderr or done.stdout).strip() or done.returncode}")
+    if not done.stdout.strip():
+        raise Stop(f"{key} is set to nothing in {root}, and a launch refuses a blank one; set it with "
+                   f"`git -C {root} config {key} <value>` or remove it with `git -C {root} config --unset-all {key}`, "
+                   "then run install again")
+    return done.stdout.strip()
+
+
+def served_identity(root: Path) -> list[str]:
+    """The identity keys `root` lacks, read as the launcher reads them, so the installer and the
+    launcher cannot disagree on what is configured."""
+    return [key for key in IDENTITY_KEYS if identity_key(root, key) is None]
+
+
+def noreply_identity(access: dict, console: str) -> dict[str, str]:
+    """The commit identity coordination's access answer names the sign-in as: the login, and its
+    GitHub noreply address `<id>+<login>@users.noreply.github.com`, which carries no one's own email.
+    Each way the answer can fail to name one says so."""
+    login = access.get("github_login")
+    if not login:
+        raise Stop("this sign-in is not linked to a GitHub account, so it names no commit author; run install "
+                   "again and approve it in a browser profile signed in to GitHub")
+    if not isinstance(login, str) or not LOGIN.fullmatch(login):
+        raise Stop(f"coordination named the sign-in's GitHub login {login!r}, which is not one; ask its operator")
+    if "github_id" not in access:
+        raise Stop(f"{console} does not say the sign-in's GitHub id, which its noreply address needs; it runs a "
+                   "release before this plugin's, so ask its operator to update it")
+    ident = access["github_id"]
+    if isinstance(ident, bool) or not isinstance(ident, int) or ident < 1:
+        raise Stop(f"coordination named the sign-in's GitHub id {ident!r} (login @{login}), which is not a positive "
+                   "number; the account's id could not be read, so run install again, or ask the operator")
+    return {"user.name": login, "user.email": f"{ident}+{login}@users.noreply.github.com"}
+
+
+def give_identity(root: Path, missing: list[str], identity: dict[str, str]) -> None:
+    """The keys `root` lacked, set from `identity` and no other: a usable value it held is kept."""
+    for key in missing:
+        try:
+            done = subprocess.run(["git", "-C", str(root), "config", key, identity[key]], capture_output=True,
+                                  text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError) as e:
+            raise Stop(f"could not set {key} in {root}: {e}") from None
+        if done.returncode:
+            raise Stop(f"could not set {key} in {root}: git said {(done.stderr or done.stdout).strip() or done.returncode}")
+    # Read back rather than naming `identity`: a key the root kept is announced as what the launcher's
+    # own read will find, not as the approver's value it was never given.
+    say("identity", f"{root} commits as {identity_key(root, 'user.name')} <{identity_key(root, 'user.email')}>")
+
+
+def repair_identity(console: str, root: Path, authority: str, missing: list[str], scope: str,
+                    login: str | None) -> None:
+    """A served root made before it was given an identity, given one on a fresh sign-in. The sign-in
+    is trusted as the approver only where its account can select the workspace this root is bound to,
+    so a browser profile that cannot reach it never becomes the Git author."""
+    say("identity", f"{root} has no {' or '.join(missing)}; sign in to give it one")
+    token = sign_in(console, scope, None, login, named=True)
+    try:
+        access = go_access(console, token)
+        checked_login(access, login, login is not None)
+        reaches = any(isinstance(w, dict) and str(w.get("workspace_id", "")).lower() == authority.lower()
+                      for t in access["teams"] if isinstance(t, dict) for w in t.get("workspaces") or [])
+        if not reaches:
+            raise Stop(f"this sign-in cannot select the workspace {authority} that {root} serves, so it is not the "
+                       "approver's; run install again and approve it as the account that admitted this machine, "
+                       f"or set the identity yourself: `git -C {root} config user.name <name>` and "
+                       f"`git -C {root} config user.email <email>`")
+        give_identity(root, missing, noreply_identity(access, console))
+    finally:
+        end_session(console, token)
+
+
 def sandboxed(home: Path) -> None:
     """`[sandbox] enabled = true` in this login's agent.toml, at the image size the settings name
     by default, so every launch the agent starts here is sandboxed from its first (doc 209 §4.3).
@@ -1154,18 +1243,61 @@ PLUGIN = "2mw2lt@2mw2lt"
 MARKETPLACE = ("2mw2lt", "endario/2mw2lt")  # its name in known_marketplaces.json, and its source
 
 
+def _claude_json(claude_home: Path, name: str) -> dict:
+    """One of the Claude home's JSON files, `{}` where it is absent, unreadable or not an object."""
+    try:
+        doc = json.loads((claude_home / name).read_text())
+    except (OSError, ValueError):
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
+def plugin_installed(claude_home: Path) -> bool:
+    """Whether `claude_home`'s install record names a record for the plugin. A shape that is not an
+    object of lists counts as absent, as Go's accounts.PluginInstalled reads it."""
+    plugins = _claude_json(claude_home, "plugins/installed_plugins.json").get("plugins")
+    records = plugins.get(PLUGIN) if isinstance(plugins, dict) else None
+    return isinstance(records, list) and bool(records)
+
+
 def plugin_loads(claude_home: Path) -> bool:
     """Whether `claude_home` holds the plugin's install record and the setting that loads it, the
     two the agent's launch check reads (launchready.Runs)."""
-    def read(name: str) -> dict:
-        try:
-            doc = json.loads((claude_home / name).read_text())
-        except (OSError, ValueError):
-            return {}
-        return doc if isinstance(doc, dict) else {}
-    records = (read("plugins/installed_plugins.json").get("plugins") or {}).get(PLUGIN)
-    enabled = read("settings.json").get("enabledPlugins")
-    return bool(records) and isinstance(enabled, dict) and enabled.get(PLUGIN) is True
+    enabled = _claude_json(claude_home, "settings.json").get("enabledPlugins")
+    return plugin_installed(claude_home) and isinstance(enabled, dict) and enabled.get(PLUGIN) is True
+
+
+def marketplace_source(entry: object) -> str | None:
+    """The repository a known_marketplaces.json entry names as its source, `owner/name`, or the url
+    it names where that is not GitHub's; None for an entry that names neither."""
+    source = entry.get("source") if isinstance(entry, dict) else None
+    if not isinstance(source, dict):
+        return None
+    repo, url = source.get("repo"), source.get("url")
+    if isinstance(repo, str) and repo:
+        return repo
+    if isinstance(url, str) and url:
+        found = re.fullmatch(r"https://github\.com/([^/]+/[^/]+?)(?:\.git)?/?", url)
+        return found.group(1) if found else url
+    return None
+
+
+def added_plugin_record(home: Path) -> Path:
+    """What this install added to the service user's Claude home, which `uninstall --machine` takes
+    out again and nothing else: a person's own marketplace or plugin there is never ours to remove."""
+    return home / ".config" / "2mw2lt" / "service-plugin.json"
+
+
+def _record_added(home: Path, **added: bool) -> None:
+    path = added_plugin_record(home)
+    try:
+        held = json.loads(path.read_text())
+    except (OSError, ValueError):
+        held = {}
+    held = held if isinstance(held, dict) else {}
+    held.update({k: True for k, v in added.items() if v})
+    path.parent.mkdir(parents=True, exist_ok=True)
+    spool.write_atomic(path, json.dumps(held))
 
 
 def service_plugin(home: Path) -> None:
@@ -1180,11 +1312,18 @@ def service_plugin(home: Path) -> None:
         raise Stop("this login has no Claude Code CLI (claude) on PATH, and its Claude home must load the 2mw2lt "
                    "plugin; install Claude Code as this user, then run install again")
     env = {**os.environ, "CLAUDE_CONFIG_DIR": str(claude_home)}
-    try:
-        known = json.loads((claude_home / "plugins" / "known_marketplaces.json").read_text())
-    except (OSError, ValueError):
-        known = {}
-    steps = [] if isinstance(known, dict) and MARKETPLACE[0] in known else [["plugin", "marketplace", "add", MARKETPLACE[1]]]
+    known = _claude_json(claude_home, "plugins/known_marketplaces.json")
+    name, repo = MARKETPLACE
+    held = marketplace_source(known.get(name))
+    # A marketplace of the name that comes from elsewhere is not ours to replace or to install from.
+    if held is not None and held.lower() != repo.lower():
+        raise Stop(f"{claude_home} already has a marketplace named {name}, and it comes from {held}, not {repo}; "
+                   f"remove it with `CLAUDE_CONFIG_DIR={claude_home} claude plugin marketplace remove {name}` as this "
+                   "user, then run install again")
+    adds = name not in known or held is None
+    # What was there before is a person's: only what this run adds is recorded for the decommission.
+    had_plugin = plugin_installed(claude_home)
+    steps = [["plugin", "marketplace", "add", repo]] if adds else []
     for args in [*steps, ["plugin", "install", PLUGIN, "--scope", "user"]]:
         try:
             done = subprocess.run([claude, *args], capture_output=True, text=True, timeout=300, env=env)
@@ -1193,10 +1332,57 @@ def service_plugin(home: Path) -> None:
         if done.returncode:
             said = (done.stderr or done.stdout).strip()[-400:] or f"exit {done.returncode}"
             raise Stop(f"`claude {' '.join(args)}` refused: {said}; run it as this user, then run install again")
+        _record_added(home, marketplace=args[1:3] == ["marketplace", "add"], plugin=args[1] == "install" and not had_plugin)
     if not plugin_loads(claude_home):
         raise Stop(f"`claude plugin install {PLUGIN}` finished, and {claude_home} still does not load it; run "
                    f"`claude plugin enable {PLUGIN}` as this user, then run install again")
     say("plugin", f"{PLUGIN} installed ({claude_home})")
+
+
+def unprovision_plugin(home: Path) -> bool:
+    """The marketplace and plugin this install added to the service user's Claude home, taken out
+    through the CLI that added them; what the record does not name stays. Each step that fails is said
+    and stays recorded for the next run. Whether nothing is left of it."""
+    path = added_plugin_record(home)
+    try:
+        held = json.loads(path.read_text())
+    except FileNotFoundError:
+        return True  # a home this install added nothing to
+    except (OSError, ValueError) as e:
+        say("plugin", f"kept {path}: it cannot be read ({e})")
+        return False
+    held = held if isinstance(held, dict) else {}
+    steps = [(key, args) for key, args in (("plugin", ["plugin", "uninstall", PLUGIN, "--scope", "user"]),
+                                           ("marketplace", ["plugin", "marketplace", "remove", MARKETPLACE[0]]))
+             if held.get(key) is True]
+    if not steps:
+        path.unlink(missing_ok=True)
+        return True
+    claude_home = home / ".claude"
+    claude = shutil.which("claude")
+    if claude is None:
+        say("plugin", f"not removed from {claude_home}: this login has no claude on PATH; run "
+                      + "; ".join(f"`claude {' '.join(a)}`" for _, a in steps) + " as this user")
+        return False
+    env = {**os.environ, "CLAUDE_CONFIG_DIR": str(claude_home)}
+    whole = True
+    for key, args in steps:
+        try:
+            done = subprocess.run([claude, *args], capture_output=True, text=True, timeout=300, env=env)
+            failed = (done.stderr or done.stdout).strip()[-400:] or f"exit {done.returncode}" if done.returncode else None
+        except (OSError, subprocess.SubprocessError) as e:
+            failed = str(e)
+        if failed:
+            whole = False
+            say("plugin", f"`claude {' '.join(args)}` refused: {failed}; it stays recorded in {path}")
+        else:
+            held.pop(key, None)
+            say("plugin", f"{key} removed from {claude_home}")
+    if whole:
+        path.unlink(missing_ok=True)
+    else:
+        path.write_text(json.dumps(held))
+    return whole
 
 
 def hook_python() -> None:
@@ -1224,8 +1410,11 @@ def install(root: Path | None, codex: bool = False, team: str | None = None,
             raise Stop(f"this login cannot be installed machine-only: {why}")
     hook_python()
     console = platform_url()
+    unnamed: list[str] = []  # the identity keys a machine-only install's served root still lacks
     if machine is not None:
         root = served_root(machine)
+        # Read before anything is written, so a value the launcher would refuse stops the run early.
+        unnamed = served_identity(root)
         sandboxed(Path.home())
         service_plugin(Path.home())
     repo = repository(root)
@@ -1277,7 +1466,11 @@ def install(root: Path | None, codex: bool = False, team: str | None = None,
         try:
             access = go_access(console, token)
             checked_login(access, login or name, named)
+            # Named before admission, written after it: a sign-in that cannot admit leaves the root bare.
+            author = noreply_identity(access, console) if unnamed else {}
             door, authority, team_id, owner = admit_on_go(console, token, access, repo, team)
+            if unnamed:
+                give_identity(root, unnamed, author)
             record(root, door, authority)
             say("machine", f"this machine is admitted to {authority}")
             wait_for_go_grant(console, token, team_id, repo, owner)
@@ -1297,6 +1490,8 @@ def install(root: Path | None, codex: bool = False, team: str | None = None,
         else:
             say("github", f"the workspace's door does not say whether the App reaches {repo}: it runs a release "
                           "before this plugin's, so this run cannot check the grant")
+        if machine is not None and unnamed:
+            repair_identity(console, root, authority, unnamed, f"install {repo} on {label}", login)
     wire(root, door, authority, codex)
     say("hooks", "none for Codex" if codex else "written")
     if codex:
@@ -1515,9 +1710,12 @@ def end_session(console: str, token: str) -> None:
     """End the console session; one that cannot be ended lapses on its own, and must not hide
     whatever stopped the run."""
     try:
-        call("DELETE", f"{console}/api/install/session", token=token)
-    except Stop:
-        pass
+        status, got = call("DELETE", f"{console}/api/install/session", token=token)
+    except Stop as e:
+        say("session", f"the console session could not be ended ({e}); it lapses on its own")
+        return
+    if not 200 <= status < 300:
+        say("session", f"the console would not end the session ({status}); it lapses on its own")
 
 
 def uninstall(root: Path, retire: bool, machine: bool = False) -> int:
@@ -1692,6 +1890,7 @@ def unprovision_machine(home: Path) -> bool:
     links = _remove_tool_links(home, base)
     if links:
         say("machine", f"{links} session-kit link{'s' if links != 1 else ''} removed from ~/.local/bin")
+    plugin_gone = unprovision_plugin(home)
     config = home / ".config" / "2mw2lt"
     for gone in (agentjob.settings(home), config / "worker-credentials.env", config / "machine.key",
                  config / "agents", config / "reaper", config / "launchers", where,
@@ -1701,7 +1900,7 @@ def unprovision_machine(home: Path) -> bool:
         else:
             gone.unlink(missing_ok=True)
     say("machine", "the agent's settings, keys, worker credentials and logs removed")
-    return _sweep_machine_credentials()
+    return _sweep_machine_credentials() and plugin_gone
 
 
 # The updater's own job, beside the agent's (follow/job.go): a transient unit under systemd, a

@@ -522,7 +522,7 @@ let watching = false
 let busyNow: boolean | undefined
 let watched = ''                     // the session the channel follows: what its events are sent as
 let sending: Promise<void> = Promise.resolve()
-let agent: { base: string; key: string; workspace: string } | undefined
+let agent: { base: string; key: string; workspace: string; bearer?: string } | undefined
 let following = 0
 let surfaceSaid = ''
 // The command list the agent was last told, as sent: told again when it changes. Owed once a poll
@@ -548,14 +548,17 @@ async function agentOf($: EngineInterface, workspace: string) {
     xdg: await env(() => $.env.get('XDG_CONFIG_HOME')),
     home,
   })
+  const config = async () => await env(() => $.env.get('CLAUDE_CONFIG_DIR')) || (home ? `${home}/.claude` : '')
+  // A sandboxed launch's cage is denied the agent's key (#10265): its hold rides the launch's
+  // bearer, which the agent holds to this session alone, and never the key beside it.
+  const bearer = await env(() => $.env.get('STEERING_LAUNCH_BEARER'))
+  if (bearer) return { base: `http://127.0.0.1:${port}`, key: '', bearer, workspace, config: await config(), cwd: await $.session.root() }
   for (const file of keyFiles) {
     const key = await $.fs.read(file).then(t => String(t).trim(), () => '')
     // The hold's poll rides this agent too (#7838), so it carries what its frames route asks
     // beyond the key: the harness's configuration directory, under which the agent reads the
     // session's own registry, and the project this session runs in, which a hand-over names.
-    if (key) return { base: `http://127.0.0.1:${port}`, key, workspace,
-      config: await env(() => $.env.get('CLAUDE_CONFIG_DIR')) || (home ? `${home}/.claude` : ''),
-      cwd: await $.session.root() }
+    if (key) return { base: `http://127.0.0.1:${port}`, key, workspace, config: await config(), cwd: await $.session.root() }
   }
   return undefined
 }
@@ -611,6 +614,9 @@ async function pollSurface($: EngineInterface, workspace: string, session: strin
       agent ??= resolved
       // An agent not yet started is retried as one that stopped: its key appears when it starts.
       if (!agent) throw new Error(`no key for the agent serving ${workspace}`)
+      // A sandboxed launch's cage holds no agent key, and the live view is asked on the key alone
+      // (#10265): it is not asked, so no poll it could not make clears the agent its hold lets go on.
+      if (agent.bearer) return
       void sendCommandReceipts($)
       // The producer, as the events name it: the agent advertises this session's rows only while
       // the conversation its hold pins is the one polling.
@@ -1002,7 +1008,8 @@ const framesRoute = (a: NonNullable<typeof agent>, session: string, held: string
   `${a.base}/steering/session/${encodeURIComponent(session)}/frames${held ? `?hold=${encodeURIComponent(held)}` : ''}`
 
 const holdHeaders = (a: NonNullable<typeof agent>, ps: string) => ({
-  'X-Steering-Agent-Key': a.key, 'X-Steering-Workspace': surface.workspaceHeader(a.workspace),
+  ...(a.bearer ? { Authorization: `Bearer ${a.bearer}` } : { 'X-Steering-Agent-Key': a.key }),
+  'X-Steering-Workspace': surface.workspaceHeader(a.workspace),
   'X-Steering-Provider': 'claude', 'X-Steering-Provider-Session': ps, 'X-Steering-Wake': 'plugin',
   ...(a.config ? { 'X-Steering-Config-Dir': encodeURIComponent(a.config) } : {}),
   ...(a.cwd ? { 'X-Steering-Project': encodeURIComponent(a.cwd) } : {}),

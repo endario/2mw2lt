@@ -130,6 +130,7 @@ product's, so no brief repeats them (#9153). Every session, however started, wor
 - mark it ready only after the reviewer's `ship it`;
 - run only the tests your change touches, by name (`go test -run 'TestA|TestB' ./pkg/`, one test file, one guard), never a whole package, a shard or the suite; push and dispatch anything wider with `ci.py run`, and keep working while it runs;
 - never deploy and never query production;
+- synthetic load (CPU hogs to reproduce a load-failing test) is made only by `load.py run --cpus <n> --seconds <s> -- <command>`: bounded, its pids recorded, killed by pid and verified gone when the command ends; never hogs of your own started in the background, and never killed by pattern;
 - push the repository direct when the plugin's public mirror refuses;
 - say done with the result and where to see it: `verb.py done <session> "<result>"`.
 

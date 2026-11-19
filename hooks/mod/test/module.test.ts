@@ -2065,6 +2065,36 @@ const framesFetches = (w: { fetches: { url: string; method: string; headers: Rec
   w.fetches.filter(f => f.url.includes('/frames'))
 const holdsLetGo = (w: Parameters<typeof framesFetches>[0]) => framesFetches(w).filter(f => f.method === 'DELETE').map(f => f.url.split('/frames')[1])
 
+// A sandboxed launch's cage is denied the agent's key (#10265): the hold rides the bearer its agent
+// minted for this launch, and never sends a key beside it.
+test('a sandboxed launch holds on its bearer, with no agent key', async ($, on) => {
+  const bearer = 'launch-bearer-stand-in'
+  const w = world(on, { agent: true, holdRoute: true, proofEnv: { STEERING_LAUNCH_BEARER: bearer }, holdPolls: [admitted()] })
+  w.agentKey = undefined
+  await begin($)
+  await w.clock.settle()
+  const mine = framesFetches(w)
+  expect(mine.length).toBeGreaterThan(0)
+  expect(mine[0]?.url).toBe(`http://127.0.0.1:${AGENT.port}/steering/session/s1/frames`)
+  expect(mine.every(f => f.headers.Authorization === `Bearer ${bearer}`)).toBe(true)
+  expect(mine.some(f => 'X-Steering-Agent-Key' in f.headers)).toBe(false)
+})
+
+// Its live view is asked on the key it does not hold, so it is not asked, and nothing clears the
+// agent its hold is let go on: the session's end lets the hold go at once, on the bearer.
+test("a sandboxed launch's hold is let go at its end, on its bearer", async ($, on) => {
+  const bearer = 'launch-bearer-stand-in'
+  const w = world(on, { agent: true, holdRoute: true, proofEnv: { STEERING_LAUNCH_BEARER: bearer }, holdPolls: [admitted()] })
+  w.agentKey = undefined
+  await begin($)
+  await w.clock.settle()
+  expect(w.fetches.some(f => f.url.includes('/steering/surface/poll'))).toBe(false)
+  await $.session.end({ sessionId: 'ps-1', reason: 'exit' } as never)
+  const gone = framesFetches(w).filter(f => f.method === 'DELETE')
+  expect(gone.length).toBe(1)
+  expect(gone[0]?.headers.Authorization).toBe(`Bearer ${bearer}`)
+})
+
 test('a workspace naming an agent is held as polls: the first admits, and a waking frame points', async ($, on) => {
   const w = world(on, { agent: true, holdRoute: true, holdPolls: [admitted(), framesOf({ id: 'u1', kind: 'usage', wakes: false }, { id: 'f1', kind: 'say', wakes: true })] })
   await begin($)

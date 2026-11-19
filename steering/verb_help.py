@@ -297,6 +297,11 @@ TOOLS = {
     "readout": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "readout --help"}]},
     "rebrief": {"bare": False, "forms": [{"topic": None, "usage": "[--help]", "example": "rebrief --help"},
                                          {"topic": "--keep", "usage": "--keep <session>", "example": "rebrief --keep violet"}]},
+    "load": {"forms": [
+        {"topic": "run", "usage": "run [--cpus <n>] [--seconds <s>] [--pidfile <file>] -- <command> [args...]",
+         "example": "load run --cpus 2 --seconds 120 -- go test -run TestX ./pkg/"},
+        {"topic": "reap", "usage": "reap <pidfile>", "example": "load reap load.pids"},
+    ]},
     "timer": {"bare": False, "forms": [
         {"topic": "list", "usage": "<session> list [--limit <rows>] [--next <cursor>]", "example": "timer violet list"},
         {"topic": "read", "usage": "<session> read <timer id>", "example": "timer violet read 1b6f6a8e-3c1d-4f7e-9a2b-5d4c3b2a1f00"},

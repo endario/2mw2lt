@@ -4,6 +4,7 @@ another machine, reached through its HTTPS ingress); otherwise the loopback daem
 from __future__ import annotations
 
 import contextlib
+import hmac
 import contextvars
 import http.client
 import ipaddress
@@ -111,13 +112,28 @@ class CredentialRefused(OSError):
         self.reason = reason
 
 
+class BearerKept(RuntimeError):
+    """A sandboxed launch's bearer on a request bound off this machine: refused, never resent, since
+    the bearer is good only at its agent (#10265)."""
+
+
 def open_direct(req: urllib.request.Request, timeout: float):
     """A request to the door or console on this module's opener, with no credential added: the
-    exchange that mints one cannot present one."""
+    exchange that mints one cannot present one. A launch's bearer leaves for its agent alone: on a
+    request to any other host it is refused here, whichever client built it (#10265)."""
+    bearer = launch_bearer()
+    if bearer and not is_loopback(urllib.parse.urlsplit(req.full_url).hostname or ""):
+        held = [v for k, v in req.header_items() if k.lower() == "authorization"]
+        if any(hmac.compare_digest(v.encode(), f"Bearer {bearer}".encode()) for v in held):
+            raise BearerKept(f"{urllib.parse.urlsplit(req.full_url).hostname} is not this machine: a "
+                             "sandboxed launch's bearer is sent to its agent alone")
     return _OPENER.open(req, timeout=timeout)
 
 
 def send(req: urllib.request.Request, timeout: float):
+    bearer = launch_bearer()
+    if bearer and _to_door(req.full_url):
+        return open_direct(relayed(req, bearer), timeout)
     if not is_loopback(urllib.parse.urlsplit(req.full_url).hostname or ""):
         return send_agent(req, timeout)
     req.add_header("User-Agent", USER_AGENT)
@@ -136,7 +152,57 @@ def agent_credential_failed(e: Exception) -> Exception:
     return OSError(f"no usable agent credential: {e}")
 
 
+LAUNCH_BEARER = "STEERING_LAUNCH_BEARER"
+
+
+def launch_bearer() -> str | None:
+    """The bearer a sandboxed launch's session reaches its door with, through its agent's relay
+    (#10265), or None for a session that presents the machine's own credential. Its cage holds no
+    machine credential, so a session holding one sends every door request through the relay."""
+    return os.environ.get(LAUNCH_BEARER) or None
+
+
+def relay_base() -> str:
+    """The agent relay a launch's door routes are sent to: what follows a route's workspace is
+    appended, and the agent adds the machine's credential to the routes it relays."""
+    parent = str(Path(__file__).resolve().parent.parent)
+    if parent not in sys.path:
+        sys.path.insert(0, parent)
+    from local_workspace import agent_port  # noqa: E402  (the port the served root records)
+    # The workspace configured_door anchors on, so the relay and the door it stands for agree.
+    port = agent_port(ANCHOR.get() or Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()))
+    if not port.isdigit():
+        raise OSError("a sandboxed launch's session reaches its door through its agent, and "
+                      "STEERING_AGENT_PORT names none")
+    return f"http://127.0.0.1:{port}/steering/relay"
+
+
+def _to_door(url: str) -> bool:
+    base = door_url().rstrip("/")
+    return url == base or url.startswith(base + "/")
+
+
+def relayed(req: urllib.request.Request, bearer: str) -> urllib.request.Request:
+    """`req` to this workspace's door, sent instead to its agent's relay on the launch's bearer.
+    A request to anywhere but this workspace's door is refused: the relay sends nothing else."""
+    base = door_url().rstrip("/")
+    url = req.full_url
+    if not _to_door(url):
+        raise OSError(f"{url} is not this workspace's door, and a sandboxed launch's session reaches "
+                      "only that, through its agent")
+    out = urllib.request.Request(relay_base() + url[len(base):], data=req.data, method=req.get_method())
+    for k, v in req.header_items():
+        if k.lower() not in ("authorization", "x-steering-agent-credential"):
+            out.add_header(k, v)
+    out.add_header("Authorization", f"Bearer {bearer}")
+    out.add_header("User-Agent", USER_AGENT)
+    return out
+
+
 def send_agent(req: urllib.request.Request, timeout: float, *, required: bool = False):
+    bearer = launch_bearer()
+    if bearer:
+        return open_direct(relayed(req, bearer), timeout)
     parent = str(Path(__file__).resolve().parent.parent)
     if parent not in sys.path:
         sys.path.insert(0, parent)

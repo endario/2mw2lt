@@ -22,6 +22,8 @@ DEFAULT_PATH = Path(os.environ.get("STEERING_AGENT_SETTINGS") or agentjob.tunabl
 KEYS = {"vendor_limit", "agent_limit", "host_limit", "max_workers"}
 # A sandboxed launch's image size, in GiB, as the Go agent bounds it (machine/internal/settings, doc 209 §4.4).
 SANDBOX_IMAGE_GIB, SANDBOX_IMAGE_GIB_MIN, SANDBOX_IMAGE_GIB_MAX = 32, 4, 1024
+# Hours a kept image waits before collection judges it; 0 turns collection off (doc 209 §4.11).
+SANDBOX_COLLECT_AFTER, SANDBOX_COLLECT_AFTER_MAX = 24, 8760
 
 
 def _label() -> str:
@@ -118,7 +120,7 @@ def validate(data) -> dict:
     sandbox = data.get("sandbox", {})
     if not isinstance(sandbox, dict):
         raise ValueError("[sandbox] is not a table")
-    extra = set(sandbox) - {"enabled", "image_gib"}
+    extra = set(sandbox) - {"enabled", "image_gib", "collect_after"}
     if extra:
         raise ValueError(f"[sandbox] has an unknown key ({', '.join(sorted(extra))})")
     if "enabled" in sandbox and not isinstance(sandbox["enabled"], bool):
@@ -126,6 +128,9 @@ def validate(data) -> dict:
     gib = sandbox.get("image_gib", SANDBOX_IMAGE_GIB)
     if not isinstance(gib, int) or isinstance(gib, bool) or not SANDBOX_IMAGE_GIB_MIN <= gib <= SANDBOX_IMAGE_GIB_MAX:
         raise ValueError(f"[sandbox].image_gib={gib!r} is not a whole number from {SANDBOX_IMAGE_GIB_MIN} to {SANDBOX_IMAGE_GIB_MAX}")
+    hours = sandbox.get("collect_after", SANDBOX_COLLECT_AFTER)
+    if not isinstance(hours, int) or isinstance(hours, bool) or not 0 <= hours <= SANDBOX_COLLECT_AFTER_MAX:
+        raise ValueError(f"[sandbox].collect_after={hours!r} is not a whole number of hours from 0 to {SANDBOX_COLLECT_AFTER_MAX}")
     # Kept beside the limits under keys no `[capacity]` entry can take, so one cache holds them all.
     return {**table, **({"placement": placing} if placing else {}),
             **({"routing": routing} if routing else {}), **({"machine": machine} if machine else {})}

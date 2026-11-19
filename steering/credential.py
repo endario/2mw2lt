@@ -244,7 +244,11 @@ def _fresh(d: dict, clock) -> bool:
 
 def for_url(url: str) -> str | None:
     """The credential to present to this URL, or None when this OS user holds no enrolment for
-    it — the door then judges the request as it always has."""
+    it — the door then judges the request as it always has. A sandboxed launch's session holds
+    none, and is refused rather than sent bare: its door requests go through its agent (#10265)."""
+    if os.environ.get("STEERING_LAUNCH_BEARER"):
+        raise NoCredential(f"{url}: a sandboxed launch's session holds no machine credential; its "
+                           "agent relays its own session's requests")
     p = entry_for(url)
     return current(p) if p is not None else None
 
