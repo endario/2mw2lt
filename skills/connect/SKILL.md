@@ -128,7 +128,7 @@ product's, so no brief repeats them (#9153). Every session, however started, wor
 - announce on the first branch claim: `verb.py announce <session> as <account> on <branch> doing "<work>"`;
 - open the work's pull request as a draft and keep it draft through every gate round;
 - mark it ready only after the reviewer's `ship it`;
-- run only the tests your change touches, by name (`go test -run 'TestA|TestB' ./pkg/`, one test file, one guard), never a whole package, a shard or the suite; push and dispatch anything wider with `ci.py run`, and keep working while it runs;
+- run only the tests your change touches, by name (`go test -run 'TestA|TestB' ./pkg/`, one test file, one guard), never a whole package, a shard or the suite; push and dispatch anything wider with `ci.py run`, and keep working while it runs; before you mark it ready or merge it, dispatch `ci.py run --merge-scope` on your pushed head and have it pass;
 - never deploy and never query production;
 - synthetic load (CPU hogs to reproduce a load-failing test) is made only by `load.py run --cpus <n> --seconds <s> -- <command>`: bounded, its pids recorded, killed by pid and verified gone when the command ends; never hogs of your own started in the background, and never killed by pattern;
 - push the repository direct when the plugin's public mirror refuses;
@@ -378,12 +378,19 @@ is the nightly's and a release's — `--all` and `all` are refused, and the nigh
 A failure only a loaded run shows is a defect in that guard, to fix: every guard passes under load.
 
 ```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ci.py" <session> run --merge-scope  # what your paths name; the step before ready or merge
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ci.py" <session> run --shards rest1,mac  # the parts your change reads; --conformance from a Mac
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ci.py" <session> status <run>
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ci.py" <session> log <run> [--guard <label>]
 ```
 
-`run` refuses a head you have not pushed, and an omitted part runs none of it. Its verdict arrives
+`run` refuses a head you have not pushed, and an omitted part runs none of it. `run --merge-scope`
+is the one command the standing rules require of every pull request: it reads your branch's change
+from `main` with the merge queue's own table (`merge-scope.sh`) and dispatches exactly the merge
+tier its paths name — the steering merge shard, the Go merge chunk narrowed to its parts — so what
+a session's dispatch runs is what its entry's group will run. Before you mark the pull request
+ready or merge it, that dispatch must have passed on your pushed head (a change the tier never
+reads names nothing, and needs no dispatch). Its verdict arrives
 on your stream from `wait <id>`:
 `passed on <head>`, `failed on <head>: <jobs>: <guards>`, or why it judged nothing; a job no runner
 has taken in 15 minutes is told once, and you decide whether to keep waiting or

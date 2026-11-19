@@ -705,9 +705,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post /ladder -
   --json '{"ratings": [{"selector": "\\bmimo-v2\\.6-pro\\b", "rarity": "rare", "model": "mimo-v2.6-pro"}], "why": "…"}'
 ```
 
-The provider's model word, the models the team keeps every account of a vendor to unless the account
-says its own (`vendor_serves_models` in `/accounts`), is yours to state as it is the owner's. A
-launch waiting `excluded:unserving-model` on a model the account routes is that word leaving it out.
+A provider's model ticks are each account owner's, kept over every account of the vendor they own in
+every team: `/accounts` shows an account's as its `provider_models`. You state only the
+team owner's, which also govern the team's accounts no one owns; a word another person keeps over
+their own account is theirs to change, and a launch waiting `excluded:unserving-model` on it says so.
 `null` clears the word:
 
 ```bash
@@ -1959,9 +1960,12 @@ that are not there already, so they survive this session.
   or the brain's, and the owner's rail draws only the owner's. `backlog: token @lease`
   lists each open one as `<owner|brain> <id> <what>`, from either door. The brain's rows (recommendations, inbox lines, blocks, escalated
   directives, failed deliveries, waiting dialogs, and `unheard:` says a worker sent while nobody held the seat) are yours, and nobody else sees them while you hold the seat.
-  A waiting dialog is a session sitting at a question or a permission prompt: wake it, or dispose
-  of it citing when its row says the session was last seen, or promote it with the answer you
-  recommend. The daemon closes one itself, naming the rule, when the session's turn ends or it
+  A waiting dialog is a session sitting at a question or a permission prompt. Answer it with
+  `respond: token @lease <session> <need> deny|esc|answer <option label>[; …] because <why>`: deny a call you would
+  not run (the session reads your reason and goes on), esc to end its turn on it, or answer a
+  question with the options it drew. You never allow a permission: one you would allow, promote with
+  that recommendation, and the owner answers it from the desk. Otherwise wake it, or dispose of it
+  citing when its row says the session was last seen, or promote it with the answer you recommend. The daemon closes one itself, naming the rule, when the session's turn ends or it
   takes a new prompt.
   On every sweep, act on each with your own verbs (`relay:`, `wake:`, `card:`), then close it
   with `dispose: token @lease <id> <reason>`, a reason the owner can read in the

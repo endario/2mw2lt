@@ -184,7 +184,9 @@ and dispatch the parts that read it on the CI pool with
 whole suite, which is the nightly's and a release's. The suite runs on every push to `main`,
 and the brain fixes forward what it turns red. Every guard passes under load: one that
 fails in a loaded run and passes alone is a defect to fix, never a flake to report past. Mark it ready only after
-`ship it`, then merge it.
+`ship it`, then merge it — and before either, have `ci.py run --merge-scope` passed on your pushed
+head: it dispatches the merge tier your paths name, the same parts your entry's merge group will
+run, and name-only spot runs never reach them.
 
 For GitHub state reads and waiting, follow
 [connect's interim GitHub rule](../connect/SKILL.md#interim-github-rule).

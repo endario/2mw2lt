@@ -52,6 +52,24 @@ POLL = 60.0  # one request's bound: the agent holds a poll for less and answers 
 PACE = 1.0   # the least time between polls, so an agent that answers `pending` at once is not spun
 
 
+def chosen(tool_input: dict, choose: object) -> tuple[dict | None, str]:
+    """The answers map for labels chosen among a question's drawn options, one per question in the
+    order asked (doc 212), or None and why: the seat chooses among what the dialog offered and
+    writes no text, so a label no option bears is refused here, where the question itself is."""
+    questions = [q for q in tool_input.get("questions") or [] if isinstance(q, dict)]
+    if not isinstance(choose, list) or any(not isinstance(c, str) for c in choose):
+        return None, "choose is not a list of labels"
+    if not questions or len(choose) != len(questions):
+        return None, f"choose names {len(choose)} label(s) for the dialog's {len(questions)} question(s)"
+    answers = {}
+    for q, label in zip(questions, choose):
+        offered = [o.get("label") for o in q.get("options") or [] if isinstance(o, dict)]
+        if label not in offered:
+            return None, f"{label[:80]!r} is not an option of the question {str(q.get('question'))[:80]!r}"
+        answers[q.get("question")] = label
+    return answers, ""
+
+
 def decision(hook: dict, answer: object) -> tuple[dict | None, str]:
     """The hook output for the agent's answer, or None and the check it failed."""
     if not isinstance(answer, dict):
@@ -88,6 +106,12 @@ def decision(hook: dict, answer: object) -> tuple[dict | None, str]:
             return None, f"an answer decision for {hook.get('tool_name')!r}, which asks no question"
         tool_input = hook.get("tool_input") if isinstance(hook.get("tool_input"), dict) else {}
         asked = {q.get("question") for q in tool_input.get("questions") or [] if isinstance(q, dict)}
+        if "choose" in answer:
+            answers, why = chosen(tool_input, answer["choose"])
+            if answers is None:
+                return None, why
+            return {"hookSpecificOutput": {"hookEventName": "PermissionRequest",
+                                           "decision": {"behavior": "allow", "updatedInput": {**tool_input, "answers": answers}}}}, ""
         answers = answer.get("answers")
         if not isinstance(answers, dict):
             return None, "answers is not an object"

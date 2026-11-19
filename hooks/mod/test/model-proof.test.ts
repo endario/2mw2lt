@@ -24,19 +24,6 @@ function commands(on: any) {
   return e
 }
 
-const composeDefaults = {
-  name: 'compose-defaults', tier: 'prepend' as const,
-  register(on: any) {
-    on('prompt.compose', async ($: any, e: Record<string, unknown>, next: any) => {
-      if (e.model === undefined) return $.prompt.compose({
-        model: 'claude-test', promptModel: 'claude-test', surfaces: ['terminal'],
-        tools: [], outputStyle: null, traits: [],
-      })
-      return next(e)
-    })
-  },
-}
-
 async function proofStart($: any, on: any, deadline?: string) {
   let second!: (p: unknown) => void
   const w = world(on, {
@@ -49,7 +36,7 @@ async function proofStart($: any, on: any, deadline?: string) {
   return { w, e, second }
 }
 
-test('restricted startup publishes effective compose evidence before restoring the hold', { plugins: [composeDefaults] }, async ($, on) => {
+test('restricted startup publishes effective compose evidence before restoring the hold', async ($, on) => {
   const { w } = await proofStart($, on)
   const path = `${DIR}/prompt-compose.json`
   expect(JSON.parse(w.files.get(path)!)).toEqual({ launch: 'launch-1', session: 'ps-1', model: 'claude-test' })
@@ -70,7 +57,34 @@ test('an unrestricted startup does not invoke the proof compose channel', async 
   expect(w.composes).toEqual([])
 })
 
-test('restricted resume holds idle prompt and command ingress until acceptance', { plugins: [composeDefaults] }, async ($, on) => {
+test('a restricted startup the model report does not answer restores the hold and publishes no evidence', async ($, on) => {
+  const w = world(on, {
+    agent: true, rounds: [HELD], proofEnv: env(), usageFails: true,
+    polls: [{ watch: true, cursor: 'c1' }, new Promise(() => {})],
+  })
+  commands(on)
+  await begin($)
+  await w.clock.settle()
+  expect(w.files.has(`${DIR}/prompt-compose.json`)).toBe(false)
+  expect(w.logs.some(l => l.includes("could not read the engine's model report"))).toBe(true)
+  expect(w.actions.some(a => a.includes('--session-of'))).toBe(true)
+})
+
+test('a restricted startup whose model report names no model composes bare and publishes no evidence', async ($, on) => {
+  const w = world(on, {
+    agent: true, rounds: [HELD], proofEnv: env(),
+    context: { point: 167_000, raw: 200_000, source: 'auto', model: undefined },
+    polls: [{ watch: true, cursor: 'c1' }, new Promise(() => {})],
+  })
+  commands(on)
+  await begin($)
+  await w.clock.settle()
+  expect(w.files.has(`${DIR}/prompt-compose.json`)).toBe(false)
+  expect(w.logs.some(l => l.includes('model proof compose failed'))).toBe(true)
+  expect(w.actions.some(a => a.includes('--session-of'))).toBe(true)
+})
+
+test('restricted resume holds idle prompt and command ingress until acceptance', async ($, on) => {
   const { w, e, second } = await proofStart($, on)
   second({ watch: true, cursor: 'c2', commands: [
     { kind: 'prompt', body: { id: 'prompt-1', text: 'list the files', from: FROM } },
@@ -89,7 +103,7 @@ test('restricted resume holds idle prompt and command ingress until acceptance',
   expect(w.appends).toEqual([])
 })
 
-test('restricted resume holds direct composer ingress until acceptance', { plugins: [composeDefaults] }, async ($, on) => {
+test('restricted resume holds direct composer ingress until acceptance', async ($, on) => {
   const { w } = await proofStart($, on)
   const typed = $.prompt.submit({ text: 'typed at the composer' })
   await w.clock.settle()
@@ -101,7 +115,7 @@ test('restricted resume holds direct composer ingress until acceptance', { plugi
   expect(w.submits).toEqual(['typed at the composer'])
 })
 
-test('restricted resume holds busy append ingress until acceptance', { plugins: [composeDefaults] }, async ($, on) => {
+test('restricted resume holds busy append ingress until acceptance', async ($, on) => {
   const { w, second } = await proofStart($, on)
   await $.turn.start({ turnId: 'busy', text: 'working' })
   second({ watch: true, cursor: 'c2', commands: [
@@ -117,7 +131,7 @@ test('restricted resume holds busy append ingress until acceptance', { plugins: 
   await $.turn.complete({ turnId: 'busy', text: '', reason: 'answer' } as never)
 })
 
-test('proof timeout refuses prompt, command and busy append without an append fallback', { plugins: [composeDefaults] }, async ($, on) => {
+test('proof timeout refuses prompt, command and busy append without an append fallback', async ($, on) => {
   let second!: (p: unknown) => void
   let third!: (p: unknown) => void
   const w = world(on, {

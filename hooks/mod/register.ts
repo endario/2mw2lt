@@ -68,7 +68,10 @@ async function proofRefusal($: EngineInterface): Promise<string | undefined> {
 }
 
 // The compose call is evidence, not a turn. Its hook writes only while this launch-scoped call is
-// in flight, before any restored hold or desk act can reach the spending wrappers above.
+// in flight, before any restored hold or desk act can reach the spending wrappers above. The event
+// a hook passes on may not change the model, and must carry a promptModel (2.1.328), so a compose
+// with no model of its own cannot travel the chain: the engine's own effective-model report names
+// the model here, and the composition is pinned to it.
 let modelProofCompose: { dir: string; launch: string } | undefined
 async function publishModelProof($: EngineInterface): Promise<void> {
   const dir = await $.env.get('STEERING_MODEL_PROOF')
@@ -78,8 +81,19 @@ async function publishModelProof($: EngineInterface): Promise<void> {
     $.ui.log('2mw2lt: model proof compose has no launch identity', { to: 'debug' })
     return
   }
+  let model: string | undefined
+  try {
+    const { context } = await $.session.usage({ breakdown: 'summary' })
+    model = context.breakdown?.model
+  } catch (err) {
+    $.ui.log(`2mw2lt: model proof compose could not read the engine's model report: ${String(err)}`, { to: 'debug' })
+  }
   modelProofCompose = { dir, launch }
-  try { await $.prompt.compose({}) } catch (err) {
+  try {
+    await $.prompt.compose(typeof model === 'string' && model
+      ? { model, promptModel: model, surfaces: ['terminal'], tools: [], outputStyle: null, traits: [] }
+      : {})                                   // an engine that names the model itself composes with it
+  } catch (err) {
     $.ui.log(`2mw2lt: model proof compose failed: ${String(err)}`, { to: 'debug' })
   } finally { modelProofCompose = undefined }
 }

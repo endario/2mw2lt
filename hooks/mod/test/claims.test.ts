@@ -22,6 +22,7 @@ const SEAT_ARGS: Record<string, Record<string, unknown>> = {
   'out-of-band': { item: '01ROW', channel: 'the owner\'s chat, 2026-11-13T09:00Z', words: 'ship it' },
   retire: { worker: 'teal', reason: 'its card landed' },
   wake: { target: 'amber', reason: 'dark for an hour' },
+  respond: { session: 'teal', need: '07595200-1740-53dd-9fdf-b1ede1b7b027', choice: 'deny', reason: 'the target is a variable' },
   rehome: { session: 's-1', account: '2', reason: 'the pool needs it' },
   park: { session: 's-1', reason: 'the slot is needed' },
   keep: { session: 's-1', reason: 'work is expected in its territory' },

@@ -6,8 +6,11 @@ table names — and a push runs scope only, the queue's group standing for it; t
 the nightly's and a release's (documentation/ci/18). A dispatch names its parts — shards, chunks,
 the conformance — and never the whole suite, so `--all` and `all` are refused. The tests your
 change touches you spot-run where you sit (a test file, a `-run` pattern, one guard); the pool
-takes the parts too wide for that and the guards your OS cannot run. `status` reads a run once;
-`log` prints a failed run's output, cut to one guard's when `--guard` names it. Each goes through
+takes the parts too wide for that and the guards your OS cannot run. `run --merge-scope` reads
+the branch's change from `main` with the queue's own table and dispatches exactly what its paths
+name: the step every pull request owes on its pushed head before it is marked ready or merged
+(the brain, on the owner's behalf, 2026-11-19). `status` reads a run once; `log` prints a failed
+run's output, cut to one guard's when `--guard` names it. Each goes through
 `gh` on this machine's own credential.
 
 A `run` whose wait registration's answer was lost is sent again under the id it printed, and the
@@ -38,6 +41,9 @@ from local_workspace import checkout_slug, required_workspace_root  # noqa: E402
 from verb_help import error, help_requested, script_help  # noqa: E402
 
 WORKFLOW = "steering.yml"
+# The merge tier's parts, as merge-scope.sh names them (documentation/ci/18 §6) and the merge
+# chunk runs: the vocabulary a --merge-scope dispatch may carry as its `parts` input.
+MERGE_PARTS = ("httpapi", "coordination", "credentialscan", "machine", "console", "scripts")
 # A failed job's annotations name the guards that failed; GitHub's own line on a failed step names none.
 EXIT_LINE = "Process completed with exit code"
 TIMESTAMP = re.compile(r"^\d{4}-\d\d-\d\dT[\d:.]+Z ")
@@ -94,6 +100,40 @@ def pushed_head(here: Path, on: str) -> str:
                           capture_output=True, text=True, timeout=10).stdout.strip()
 
 
+def merge_scope(here: Path, at: str) -> tuple[bool, str]:
+    """What the merge tier runs for this head's change from `main`, as the queue's own group will
+    read it: merge-scope.sh, the one table a merge group reads (documentation/ci/18 §6), run here
+    on the same checkout over the branch's diff from its merge-base with `origin/main`. Raises
+    ValueError with the refusal's words; a scope that names nothing is (False, "") — a change the
+    suite never reads, which the queue's group answers with the checks alone."""
+    script = here / ".github/scripts/merge-scope.sh"
+    if not script.is_file():
+        raise ValueError("this checkout has no .github/scripts/merge-scope.sh; --merge-scope needs the merge tier's own table")
+    base = subprocess.run(["git", "-C", str(here), "merge-base", at, "refs/remotes/origin/main"],
+                          capture_output=True, text=True, timeout=10)
+    if base.returncode != 0 or not base.stdout.strip():
+        raise ValueError("origin/main is not here to scope the change from: fetch it, then run")
+    p = subprocess.run(["bash", str(script), base.stdout.strip(), at],
+                       capture_output=True, text=True, timeout=60, cwd=str(here))
+    if p.returncode != 0:
+        raise ValueError(f"merge-scope.sh did not answer: {(p.stderr.strip() or p.stdout.strip())[:200]}")
+    steering = parts = None
+    for line in p.stdout.splitlines():
+        if line.startswith("steering="):
+            flag = line.partition("=")[2]
+            if flag not in ("true", "false"):
+                raise ValueError(f"merge-scope.sh answered steering={flag}, not true or false")
+            steering = flag == "true"
+        elif line.startswith("parts="):
+            parts = line.partition("=")[2].split()
+    if steering is None or parts is None:
+        raise ValueError("merge-scope.sh answered without its steering flag and parts")
+    unknown = [name for name in parts if name not in MERGE_PARTS]
+    if unknown:
+        raise ValueError(f"merge-scope.sh named no part of the merge tier: {', '.join(unknown)}")
+    return steering, " ".join(parts)
+
+
 # A keyed send's dispatch record outlives its answer by a week: long enough for every retry, short
 # enough that a busy workspace keeps no unbounded pile (#9528).
 DISPATCH_KEEP = 7 * 86400
@@ -144,15 +184,26 @@ def write_dispatch_record(ws: Path, key: str, record: dict) -> None:
 def parse_run(argv: list[str]) -> dict | str:
     """`run`'s flags as the dispatch's inputs, or why they are malformed. A list is names
     separated by commas or `none`; the whole suite — `--all`, or `all` among the names — is the
-    nightly's and a release's, never a dispatch's, whose parts it names (documentation/ci/14)."""
+    nightly's and a release's, never a dispatch's, whose parts it names (documentation/ci/14).
+    `--merge-scope` takes no other part flag: it asks the merge tier's own table what the change
+    reads, and the dispatch is whatever that names."""
+    SCOPE_ONLY = "--merge-scope names its own parts: give it no other part flag"
     picked: dict = {}
     it = iter(argv)
     for a in it:
         if a == "--all":
             return "the whole suite is the nightly's and a release's: name the parts your change reads"
+        elif a == "--merge-scope":
+            if picked:
+                return SCOPE_ONLY
+            picked["merge_scope"] = True
         elif a in ("--conformance", "--no-conformance"):
+            if picked.get("merge_scope"):
+                return SCOPE_ONLY
             picked["conformance"] = "true" if a == "--conformance" else "false"
         elif a in ("--shards", "--chunks") or a.startswith(("--shards=", "--chunks=")):
+            if picked.get("merge_scope"):
+                return SCOPE_ONLY
             name, _, value = a.partition("=")
             value = value or next(it, "")
             names = value.split(",")
@@ -165,7 +216,7 @@ def parse_run(argv: list[str]) -> dict | str:
         else:
             return f"run does not take {a}"
     if not picked:
-        return "run needs the parts your change reads: --shards, --chunks or --conformance"
+        return "run needs the parts your change reads: --shards, --chunks, --conformance or --merge-scope"
     return picked
 
 
@@ -239,6 +290,23 @@ def run(ws: Path, here: Path, repo: str, session: str, flags, picked: dict, retr
             print(f"{at[:12]} is not pushed: origin/{on} is at {pushed[:12] or 'nothing'}. "
                   "The pool runs what the branch holds; push, then run", file=sys.stderr)
             return 1
+        merge_parts = ""
+        if picked.get("merge_scope"):
+            if on == "main":
+                print("the merge scope is a branch's change from main; this checkout is on main", file=sys.stderr)
+                return 1
+            try:
+                steering, merge_parts = merge_scope(here, at)
+            except ValueError as why:
+                print(str(why), file=sys.stderr)
+                return 1
+            if not steering and not merge_parts:
+                print("nothing this change touches runs in the merge tier; nothing to dispatch — "
+                      "the queue's group still runs the checks on its commits")
+                return 0
+            picked = {"shards": "merge" if steering else "none",
+                      "chunks": "merge" if merge_parts else "none",
+                      "conformance": "false"}
         shards, chunks = known_parts(here)
         inputs = {"head": at, "session": session}
         named = []
@@ -250,6 +318,9 @@ def run(ws: Path, here: Path, repo: str, session: str, flags, picked: dict, retr
                 return 1
             inputs[part] = asked
             named.append(f"{part} {asked}")
+        if merge_parts:
+            inputs["parts"] = merge_parts
+            named.append(f"parts {merge_parts}")
         if picked.get("conformance") == "true":
             inputs["conformance"] = "true"
             named.append("conformance")

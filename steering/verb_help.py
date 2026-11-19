@@ -43,6 +43,7 @@ _RAW_FORMS = {
     "control": ["control: token <lease token> <session> effort <level> because <reason>", "control: token <lease token> <session> model <model> because <reason>", "control: token <lease token> <session> compact [without checkpoint] because <reason>"],
     "rehome": ["rehome: token <lease token> <session> to [vendor <vendor>] <account> [machine <name>] [model <model>] [effort <level>] [compact [without checkpoint]] because <reason>"],
     "interrupt": ["interrupt: token <lease token> <session> [working] because <reason>"],
+    "respond": ["respond: token <lease token> <session> <need> deny because <reason>", "respond: token <lease token> <session> <need> esc because <reason>", "respond: token <lease token> <session> <need> answer <option label>[; <option label>...] because <reason>"],
     "park": ["park: token <lease token> <session> [until <time or duration>] because <reason>"],
     "keep": ["keep: token <lease token> <session> [until <time or duration>] because <reason>"],
     "unkeep": ["unkeep: token <lease token> <session>"],
@@ -67,7 +68,7 @@ _RAW_FORMS = {
 
 _AUDIENCE = {
     **{verb: "session" for verb in ("announce", "blocked", "wait", "done", "recommend", "ask", "claim", "taking", "declare", "checkpoint", "holds", "enroll", "bind", "ack", "say", "detach", "gate")},
-    **{verb: "seat" for verb in ("note", "launch", "withdraw", "relay", "retire", "card", "effort", "wake", "control", "rehome", "park", "interrupt", "cancel", "keep", "unkeep", "peak-override", "peak-override-end", "answer", "regroup", "intervened", "roster", "lift", "floor", "authorship", "dispose", "promote", "out-of-band", "backlog")},
+    **{verb: "seat" for verb in ("note", "launch", "withdraw", "relay", "retire", "card", "effort", "wake", "control", "rehome", "park", "interrupt", "respond", "cancel", "keep", "unkeep", "peak-override", "peak-override-end", "answer", "regroup", "intervened", "roster", "lift", "floor", "authorship", "dispose", "promote", "out-of-band", "backlog")},
     "rebind": "operator",
     "supersede": "operator",
 }
@@ -105,6 +106,7 @@ _EXAMPLES = {
     "control": ["control: token <lease token> violet effort high because review", "control: token <lease token> violet model opus-5.5 because review", "control: token <lease token> violet compact without checkpoint because context full"],
     "rehome": ["rehome: token <lease token> violet to vendor zai 4 model glm-5.3 effort high compact because account 2 is spent"],
     "interrupt": ["interrupt: token <lease token> violet working because the plan changed"],
+    "respond": ["respond: token <lease token> violet 07595200-1740-53dd-9fdf-b1ede1b7b027 deny because the removal's target is a variable", "respond: token <lease token> violet 07595200-1740-53dd-9fdf-b1ede1b7b027 esc because the session should wait for the owner", "respond: token <lease token> violet 07595200-1740-53dd-9fdf-b1ede1b7b027 answer Latest mover because the plan settled it"],
     "park": ["park: token <lease token> violet until 2h because a critic needs its slot"],
     "keep": ["keep: token <lease token> violet until 45m because the review on #5536 lands within the hour"],
     "unkeep": ["unkeep: token <lease token> violet"],
@@ -206,7 +208,7 @@ TOOLS = {
         {"topic": "merge", "usage": _SPEAKER_USAGE + " <session> merge <pr> [--head <sha>] [--retry=<id>]", "example": "gate violet merge 1"},
     ]},
     "ci": {"forms": [
-        {"topic": "run", "usage": _SPEAKER_USAGE + " <session> run [--shards <names>|none] [--chunks <names>|none] [--conformance] [--retry=<id>]", "example": "ci violet run --shards rest1"},
+        {"topic": "run", "usage": _SPEAKER_USAGE + " <session> run [--merge-scope | (--shards <names>|none) [--chunks <names>|none] [--conformance]] [--retry=<id>]", "example": "ci violet run --merge-scope"},
         {"topic": "status", "usage": _SPEAKER_USAGE + " <session> status <run>", "example": "ci violet status 39384922516"},
         {"topic": "log", "usage": _SPEAKER_USAGE + " <session> log <run> [--guard <label>]", "example": "ci violet log 39384922516 --guard lint_test"},
     ]},

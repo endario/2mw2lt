@@ -278,9 +278,9 @@ AccountSpend = typing.TypedDict("AccountSpend", {
 AccountList = typing.TypedDict("AccountList", {
     "items": "list[ListedAccountUsage] | None",
     "vendor_models": "dict[str, list[AccountModel] | None] | None",
-    "vendor_serves_models": "dict[str, list[str] | None] | None",
     "cost_words": "list[ModelCostWord] | None",
-    "manages_providers": "bool",
+    "owns_team": "bool",
+    "team_owner": "str | None",
     "unnamed": "list[UnnamedDirectory] | None",
     "removed": "list[RemovedAccount] | None",
     "offers": "OwnershipOffers | None",
@@ -329,6 +329,7 @@ ListedAccountUsage = typing.TypedDict("ListedAccountUsage", {
     "serves": "bool",
     "serves_for": "list[str] | None",
     "serves_models": "list[str] | None",
+    "provider_models": "list[str] | None",
     "routes": "list[str] | None",
     "costs": "dict[str, ModelCostRead] | None",
     "peak_windows": "typing.NotRequired[list[PeakWindowRead] | None]",
@@ -405,6 +406,7 @@ UsageLimit = typing.TypedDict("UsageLimit", {
     "projection": "UsageProjection | None",
     "waste": "typing.NotRequired[UsageWaste | None]",
     "scopes": "typing.NotRequired[list[str] | None]",
+    "group": "typing.NotRequired[str | None]",
 })
 
 # UsageWaste is whether the remaining quota can burn at the best directly observed single-account
@@ -520,15 +522,16 @@ AccountServed = typing.TypedDict("AccountServed", {
     "dropped": "typing.NotRequired[list[str] | None]",
 })
 
-# ProviderModels is the body of POST /providers/models: the model ids the team keeps a provider to,
-# stated by the team's owner or the seat's holder (#7522). Every account of the provider whose own owner has stated no
-# models inherits it; null clears it, so the provider serves every model again.
+# ProviderModels is the body of POST /providers/models: the model ids a person keeps every account of a
+# provider they own to, in every team those accounts serve, stated by that person or, for its team's
+# owner, the seat's holder (#7522, doc 211 §3). Null clears it, so their accounts serve every model the
+# accounts' own words allow.
 ProviderModels = typing.TypedDict("ProviderModels", {
     "vendor": "str",
     "models": "list[str] | None",
 })
 
-# ProviderModelsStated is its answer: the provider and the models the team now keeps it to.
+# ProviderModelsStated is its answer: the provider and the models its accounts' owner now keeps it to.
 ProviderModelsStated = typing.TypedDict("ProviderModelsStated", {
     "vendor": "str",
     "models": "list[str] | None",
@@ -739,6 +742,17 @@ ActionBody = typing.TypedDict("ActionBody", {
     "value": "typing.NotRequired[str]",
     "reason": "str",
     "interrupt_working": "typing.NotRequired[bool]",
+    "answer": "typing.NotRequired[SeatDialogAnswer | None]",
+})
+
+# SeatDialogAnswer is the seat's answer to the dialog a Need of the session names (doc 212): it denies
+# the call, ends the turn on it (esc), or answers a question with labels chosen among its drawn
+# options, one per question in the order asked. It never allows a permission and writes no text:
+# its reason is the action's own.
+SeatDialogAnswer = typing.TypedDict("SeatDialogAnswer", {
+    "need": "str",
+    "choice": "str",
+    "labels": "typing.NotRequired[list[str] | None]",
 })
 
 # ActionAnswer is the action recorded, and its state when answered.
@@ -1554,6 +1568,7 @@ MachineAction = typing.TypedDict("MachineAction", {
     "prove_model": "typing.NotRequired[list[str] | None]",
     "compact_prove_model": "typing.NotRequired[list[str] | None]",
     "by_hand": "typing.NotRequired[bool]",
+    "interrupt_working": "typing.NotRequired[bool]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1567,6 +1582,7 @@ MachineAction = typing.TypedDict("MachineAction", {
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
     "answers": "typing.NotRequired[dict[str, str]]",
+    "choose": "typing.NotRequired[list[str] | None]",
     "always": "typing.NotRequired[bool]",
 })
 
@@ -1618,6 +1634,7 @@ StreamWake = typing.TypedDict("StreamWake", {
     "prove_model": "typing.NotRequired[list[str] | None]",
     "compact_prove_model": "typing.NotRequired[list[str] | None]",
     "by_hand": "typing.NotRequired[bool]",
+    "interrupt_working": "typing.NotRequired[bool]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1631,6 +1648,7 @@ StreamWake = typing.TypedDict("StreamWake", {
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
     "answers": "typing.NotRequired[dict[str, str]]",
+    "choose": "typing.NotRequired[list[str] | None]",
     "always": "typing.NotRequired[bool]",
 })
 
@@ -1691,6 +1709,7 @@ StreamControl = typing.TypedDict("StreamControl", {
     "prove_model": "typing.NotRequired[list[str] | None]",
     "compact_prove_model": "typing.NotRequired[list[str] | None]",
     "by_hand": "typing.NotRequired[bool]",
+    "interrupt_working": "typing.NotRequired[bool]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1704,6 +1723,7 @@ StreamControl = typing.TypedDict("StreamControl", {
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
     "answers": "typing.NotRequired[dict[str, str]]",
+    "choose": "typing.NotRequired[list[str] | None]",
     "always": "typing.NotRequired[bool]",
 })
 
@@ -1739,6 +1759,7 @@ StreamRehome = typing.TypedDict("StreamRehome", {
     "prove_model": "typing.NotRequired[list[str] | None]",
     "compact_prove_model": "typing.NotRequired[list[str] | None]",
     "by_hand": "typing.NotRequired[bool]",
+    "interrupt_working": "typing.NotRequired[bool]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1752,6 +1773,7 @@ StreamRehome = typing.TypedDict("StreamRehome", {
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
     "answers": "typing.NotRequired[dict[str, str]]",
+    "choose": "typing.NotRequired[list[str] | None]",
     "always": "typing.NotRequired[bool]",
 })
 
@@ -1787,6 +1809,7 @@ StreamPark = typing.TypedDict("StreamPark", {
     "prove_model": "typing.NotRequired[list[str] | None]",
     "compact_prove_model": "typing.NotRequired[list[str] | None]",
     "by_hand": "typing.NotRequired[bool]",
+    "interrupt_working": "typing.NotRequired[bool]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1800,6 +1823,7 @@ StreamPark = typing.TypedDict("StreamPark", {
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
     "answers": "typing.NotRequired[dict[str, str]]",
+    "choose": "typing.NotRequired[list[str] | None]",
     "always": "typing.NotRequired[bool]",
 })
 
@@ -1835,6 +1859,7 @@ StreamPrompt = typing.TypedDict("StreamPrompt", {
     "prove_model": "typing.NotRequired[list[str] | None]",
     "compact_prove_model": "typing.NotRequired[list[str] | None]",
     "by_hand": "typing.NotRequired[bool]",
+    "interrupt_working": "typing.NotRequired[bool]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1848,6 +1873,7 @@ StreamPrompt = typing.TypedDict("StreamPrompt", {
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
     "answers": "typing.NotRequired[dict[str, str]]",
+    "choose": "typing.NotRequired[list[str] | None]",
     "always": "typing.NotRequired[bool]",
 })
 
@@ -1883,6 +1909,7 @@ StreamAnswer = typing.TypedDict("StreamAnswer", {
     "prove_model": "typing.NotRequired[list[str] | None]",
     "compact_prove_model": "typing.NotRequired[list[str] | None]",
     "by_hand": "typing.NotRequired[bool]",
+    "interrupt_working": "typing.NotRequired[bool]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1896,6 +1923,7 @@ StreamAnswer = typing.TypedDict("StreamAnswer", {
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
     "answers": "typing.NotRequired[dict[str, str]]",
+    "choose": "typing.NotRequired[list[str] | None]",
     "always": "typing.NotRequired[bool]",
 })
 
@@ -1931,6 +1959,7 @@ StreamInterrupt = typing.TypedDict("StreamInterrupt", {
     "prove_model": "typing.NotRequired[list[str] | None]",
     "compact_prove_model": "typing.NotRequired[list[str] | None]",
     "by_hand": "typing.NotRequired[bool]",
+    "interrupt_working": "typing.NotRequired[bool]",
     "until": "typing.NotRequired[str]",
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
@@ -1944,6 +1973,7 @@ StreamInterrupt = typing.TypedDict("StreamInterrupt", {
     "message": "typing.NotRequired[str]",
     "interrupt": "typing.NotRequired[bool]",
     "answers": "typing.NotRequired[dict[str, str]]",
+    "choose": "typing.NotRequired[list[str] | None]",
     "always": "typing.NotRequired[bool]",
 })
 

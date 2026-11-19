@@ -1216,7 +1216,7 @@ def seat_action(session: str, token: str, body: dict, key: str) -> str:
     the first. A goal's steward wakes, parks, retires and interrupts the sessions its launches started. Raises
     `NotSeated`, `Refused` or `Unsent`."""
     answer = lent(session, token, lambda _: write("/actions", body, key, SESSION_CARRIER, token))
-    doing = {"wake": "waking", "control": "controlling", "retire": "retiring", "rehome": "rehoming", "park": "parking", "interrupt": "interrupting"}[body["kind"]]
+    doing = {"wake": "waking", "control": "controlling", "retire": "retiring", "rehome": "rehoming", "park": "parking", "interrupt": "interrupting", "answer": "responding"}[body["kind"]]
     value = f" {body['value']}" if body.get("value") else ""
     # A retire whose machine's credential no longer reaches the workspace is ended by the seat's
     # own command (#7227), not offered to a machine: the answer's state says which happened.

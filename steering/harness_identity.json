@@ -17,7 +17,8 @@
         "model-proof",
         "compact-proof",
         "turn-end-gate",
-        "sandboxed"
+        "sandboxed",
+        "rehome-by-hand"
       ],
       "session_env": [
         "CLAUDE_CODE_SESSION_ID"

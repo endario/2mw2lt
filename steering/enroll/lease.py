@@ -100,7 +100,12 @@ _ACTION = {
     # A park stops an idle session's process and keeps its enrolment, for a wake to resume it.
     "park": re.compile(r"^park:\s*token\s+@lease\s+(?P<to>\S+)(?:\s+until\s+(?P<until>\S+))?\s+because\s+(?P<reason>\S.*?)\s*$", re.S),
 }
+# The seat's answer to a session's waiting dialog (doc 212): a deny, an esc that ends the turn, or a
+# question answered by its drawn options' labels, one per question in order, `; ` between them.
+_ACTION["respond"] = re.compile(r"^respond:\s*token\s+@lease\s+(?P<to>\S+)\s+(?P<need>[0-9a-fA-F-]{36})\s+"
+                                r"(?:(?P<choice>deny|esc)|answer\s+(?P<labels>\S.*?))\s+because\s+(?P<reason>\S.*?)\s*$", re.S)
 _ACTION_USAGE = {
+    "respond": "respond: token @lease <session> <need> deny|esc|answer <option label>[; <option label>...] because <reason>",
     "interrupt": "interrupt: token @lease <session> [working] because <reason>",
     "wake": "wake: token @lease <session> because <reason>",
     "control": "control: token @lease <session> effort <level> | model <model> | compact [without checkpoint] because <reason>",
@@ -403,13 +408,19 @@ def _go_cancel(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
 
 
 def _go_action(rec: dict, verb: str, line: str, key: str) -> tuple[int, str, bool]:
-    """`wake:`, `control:`, `retire:`, `rehome:`, `park:` or `interrupt:` on Go: the brain asks the session's machine to act on it."""
+    """`wake:`, `control:`, `retire:`, `rehome:`, `park:`, `interrupt:` or `respond:` on Go: the brain asks the session's machine to act on it."""
     import refusal
     import session_routes
     m = _ACTION[verb].match(line)
     if not m:
         return 2, refusal.use(verb, f"malformed {verb}: on Go it is `{_ACTION_USAGE[verb]}`"), False
     body = {"kind": verb, "to": m["to"], "reason": " ".join(m["reason"].split())}
+    if verb == "respond":
+        labels = [" ".join(l.split()) for l in m["labels"].split(";")] if m["labels"] else []
+        if any(not l for l in labels):
+            return 2, refusal.use(verb, f"an empty option label: on Go it is `{_ACTION_USAGE[verb]}`"), False
+        body["kind"] = "answer"
+        body["answer"] = {"need": m["need"].lower(), "choice": m["choice"] or "answer", **({"labels": labels} if labels else {})}
     if verb == "interrupt" and m["working"]:
         body["interrupt_working"] = True
     if verb == "control":

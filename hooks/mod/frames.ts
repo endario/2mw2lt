@@ -233,6 +233,16 @@ export const SEAT_TOOLS: Record<string, SeatTool> = {
     required: ['target', 'reason'],
     build: a => ({ client: 'say', stdin: `wake: token @lease ${str(a, 'target')} because ${str(a, 'reason')}` }),
   },
+  respond: {
+    description: 'Seat only: answer the dialog a session waits at, the one its Needs You row names (doc 212). deny refuses the call with your reason as its message and the turn goes on; esc refuses it and ends the turn; answer chooses a question\'s drawn options, one label per question in the order asked. You never allow a permission: one you would allow, promote with your recommendation.',
+    fields: { session: word('The session waiting at the dialog.'), need: word('The Needs You row\'s id that names the dialog.'),
+              choice: { type: 'string', enum: ['deny', 'esc', 'answer'], description: 'What you answer.' },
+              labels: text('For answer: the chosen option labels as the question drew them, one per question in order, separated by "; ".'),
+              reason: text('Why: the session reads it with a deny.') },
+    required: ['session', 'need', 'choice', 'reason'],
+    refuse: a => (a.choice === 'answer') !== (a.labels !== undefined && str(a, 'labels').trim() !== '') ? 'labels go with answer, and only with answer' : null,
+    build: a => ({ client: 'say', stdin: `respond: token @lease ${str(a, 'session')} ${str(a, 'need')} ${str(a, 'choice')}${a.choice === 'answer' ? ` ${str(a, 'labels')}` : ''} because ${str(a, 'reason')}` }),
+  },
   rehome: {
     description: 'Seat only: move a stopped Claude Code session to another account on the same machine, keeping its conversation. Name the account as for a launch, by its number under its vendor (Anthropic when vendor is not given), and the model and effort it resumes on, in that vendor\'s own ids; without them it resumes on the launcher\'s defaults. compact runs /compact on the account it leaves first; without_checkpoint, only with compact, skips the checkpoint that compact otherwise requires.',
     fields: { session: word('The session to move.'), vendor: word('The account\'s vendor, such as zai; Anthropic when not given.'),

@@ -25,7 +25,7 @@ export type Poll = { watch: boolean; cursor?: string; commands?: unknown[] } | {
 export type HoldPoll = { status: number; text: string; hold?: Promise<void> } | 'throw'
 
 export function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording = '', keep = 'Keep verbatim: steering session s1; branch b; checkpoint https://github.com/example-org/example-repo/pull/1.\n',
-                         agent = false, polls = [] as (Poll | Promise<Poll>)[], posts = [] as (number | Promise<number>)[], holdPolls = [] as (HoldPoll | Promise<HoldPoll>)[], deleteHangs = false, holdRoute = false, enrolled = true, submitRejects = false, submitDrops = false, storesSubmits = false, ackFails = false, readFails = false, engineState = false,
+                         agent = false, polls = [] as (Poll | Promise<Poll>)[], posts = [] as (number | Promise<number>)[], holdPolls = [] as (HoldPoll | Promise<HoldPoll>)[], deleteHangs = false, holdRoute = false, enrolled = true, submitRejects = false, submitDrops = false, storesSubmits = false, ackFails = false, readFails = false, usageFails = false, engineState = false,
                          proofEnv = {} as Record<string, string>,
                          // The engine's own answer to `$.session.usage({ breakdown })`: the window it measures
                          // against, the token count it auto-compacts at, and who settled the window.
@@ -34,6 +34,8 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
     clock: mock.clock(on, { now: 1_000_000 }),
     ackFails,
     readFails,
+    // The engine's own usage report refuses to answer, so the model-proof compose cannot read it.
+    usageFails,
     // The engine's refusal after the person's Esc: a submit resolves `drop` until they type (#7827).
     submitDrops,
     root: '',
@@ -316,6 +318,7 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
   })
   on('session.measure', async ($, e) => ({ changed: e.changed }))
   on('session.usage', async () => {
+    if (w.usageFails) throw new Error('usage is unavailable')
     w.usageCalls++
     const c = w.context
     return { value: { startedAt: 0, context: { window: 1_000_000, breakdown: {
@@ -325,7 +328,11 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
   on('turn.step', async function* ($, e) { for (const c of w.steps.shift() ?? []) yield c as never; return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage: { model: 'claude-test', input_tokens: 1, output_tokens: 1, cache_read_input_tokens: w.stepUsage - 1, cache_creation_input_tokens: 0 } } as never })
   on('session.end', async ($, e) => ({ sessionId: e.sessionId }))
   on('classic.SessionStart', async () => ({}) as never)
+  // The compose event is pinned (2.1.328): what travels the chain carries a promptModel, and a
+  // bare one is refused where it is passed on, so the engine stub answers a pinned composition
+  // and refuses a bare event the way the engine's own validation does.
   on('prompt.compose', async ($, e) => {
+    if (typeof (e as any).promptModel !== 'string') throw new Error('next() passed an argument with no { promptModel } (a model id)')
     w.composes.push((e as any).model)
     w.actions.push(`compose:${(e as any).model}`)
     return { sections: [{ id: 'intro', text: 'engine', scope: 'shared' as const }] }
