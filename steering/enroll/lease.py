@@ -15,6 +15,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 import json  # noqa: E402
 import re  # noqa: E402
 import uuid  # noqa: E402
+from urllib.parse import unquote  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -416,9 +417,18 @@ def _go_action(rec: dict, verb: str, line: str, key: str) -> tuple[int, str, boo
         return 2, refusal.use(verb, f"malformed {verb}: on Go it is `{_ACTION_USAGE[verb]}`"), False
     body = {"kind": verb, "to": m["to"], "reason": " ".join(m["reason"].split())}
     if verb == "respond":
-        labels = [" ".join(l.split()) for l in m["labels"].split(";")] if m["labels"] else []
-        if any(not l for l in labels):
+        # A label is written as the question drew it, but the sentence's own separators it may
+        # carry are percent-encoded (doc 212): a `;` is %3B, a space `because` touches %20, and a
+        # `%` is %25. Only those escapes decode — a bare `%`, or another escape a mistyped literal
+        # left behind, is refused rather than silently answer with a label no seat wrote.
+        raw = [" ".join(l.split()) for l in m["labels"].split(";")] if m["labels"] else []
+        if any(not l for l in raw):
             return 2, refusal.use(verb, f"an empty option label: on Go it is `{_ACTION_USAGE[verb]}`"), False
+        if any(re.search(r"%(?!3B|20|25)", l, re.IGNORECASE) for l in raw):
+            return 2, refusal.use(verb, "a label encodes only the sentence's separators: a ; is %3B, "
+                                       "a space `because` touches is %20, and its own % is %25 — a bare "
+                                       f"% or another escape is refused: on Go it is `{_ACTION_USAGE[verb]}`"), False
+        labels = [unquote(l) for l in raw]
         body["kind"] = "answer"
         body["answer"] = {"need": m["need"].lower(), "choice": m["choice"] or "answer", **({"labels": labels} if labels else {})}
     if verb == "interrupt" and m["working"]:

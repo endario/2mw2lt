@@ -237,7 +237,7 @@ export const SEAT_TOOLS: Record<string, SeatTool> = {
     description: 'Seat only: answer the dialog a session waits at, the one its Needs You row names (doc 212). deny refuses the call with your reason as its message and the turn goes on; esc refuses it and ends the turn; answer chooses a question\'s drawn options, one label per question in the order asked. You never allow a permission: one you would allow, promote with your recommendation.',
     fields: { session: word('The session waiting at the dialog.'), need: word('The Needs You row\'s id that names the dialog.'),
               choice: { type: 'string', enum: ['deny', 'esc', 'answer'], description: 'What you answer.' },
-              labels: text('For answer: the chosen option labels as the question drew them, one per question in order, separated by "; ".'),
+              labels: text('For answer: the chosen option labels as the question drew them, one per question in order, separated by "; ". A label carrying the sentence\'s own separators writes them percent-encoded: ";" as %3B, a space "because" touches as %20, "%" as %25.'),
               reason: text('Why: the session reads it with a deny.') },
     required: ['session', 'need', 'choice', 'reason'],
     refuse: a => (a.choice === 'answer') !== (a.labels !== undefined && str(a, 'labels').trim() !== '') ? 'labels go with answer, and only with answer' : null,

@@ -50,6 +50,7 @@ from local_workspace import workspace_root  # noqa: E402
 WAIT = 3590.0
 POLL = 60.0  # one request's bound: the agent holds a poll for less and answers `pending`
 PACE = 1.0   # the least time between polls, so an agent that answers `pending` at once is not spun
+REFUSED = 5.0  # telling the agent a decision it handed decides nothing is a local call
 
 
 def chosen(tool_input: dict, choose: object) -> tuple[dict | None, str]:
@@ -127,8 +128,33 @@ def decision(hook: dict, answer: object) -> tuple[dict | None, str]:
     return {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": out}}, ""
 
 
+def refused(ws: Path, hook: dict, ask: str, why: str) -> bool:
+    """Tell the agent the decision it handed decides nothing, so the ask opens again to a corrected
+    answer this hook, polling on, is handed (doc 212). False when it could not be told: an agent
+    that holds it handed still would refuse the retry `decided-already`, so the dialog stays the
+    person's rather than stand on an answer nothing can take back."""
+    try:
+        req = local_workspace.agent_request(ws, "/steering/surface/refused",
+                                            {"session": hook["session_id"], "ask": ask, "why": why[:300]}, timeout=1.0)
+    except Exception as e:
+        record("decide", f"ask {ask}: the agent's port could not be read: {type(e).__name__}: {e}", ws)
+        return False
+    if req is None:
+        record("decide", "no agent key for this workspace; the dialog is the person's", ws)
+        return False
+    try:
+        with send(req, timeout=REFUSED) as r:
+            r.read()
+    except Exception as e:
+        record("decide", f"ask {ask}: the agent did not take the refusal: {type(e).__name__}: {e}", ws)
+        return False
+    return True
+
+
 def wait(ws: Path, hook: dict, ask: str, deadline: float) -> dict | None:
-    """Poll the agent until it decides, says the ask settled, or cannot be reached."""
+    """Poll the agent until it decides, says the ask settled, or cannot be reached. An answer the
+    hook cannot apply is refused back to the agent and the poll goes on, so a corrected answer
+    reaches the dialog while it stands."""
     query = urllib.parse.urlencode({"session": hook["session_id"], "ask": ask})
     try:
         req = local_workspace.agent_request(ws, f"/steering/surface/ask?{query}", None, timeout=1.0)
@@ -159,7 +185,10 @@ def wait(ws: Path, hook: dict, ask: str, deadline: float) -> dict | None:
         out, why = decision(hook, answer)
         if out is None:
             record("decide", f"ask {ask}: the agent's answer decides nothing: {why}", ws)
-        elif why:
+            if not refused(ws, hook, ask, why):
+                return None
+            continue
+        if why:
             record("decide", f"ask {ask}: {why}", ws)
         return out
     record("decide", f"ask {ask}: no decision within {WAIT:.0f}s; the dialog is the person's", ws)

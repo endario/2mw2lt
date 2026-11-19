@@ -1963,7 +1963,8 @@ that are not there already, so they survive this session.
   A waiting dialog is a session sitting at a question or a permission prompt. Answer it with
   `respond: token @lease <session> <need> deny|esc|answer <option label>[; …] because <why>`: deny a call you would
   not run (the session reads your reason and goes on), esc to end its turn on it, or answer a
-  question with the options it drew. You never allow a permission: one you would allow, promote with
+  question with the options it drew (a label carrying `;` or a space `because` touches percent-encodes
+  it: `%3B`, `%20`; a `%` is `%25`). You never allow a permission: one you would allow, promote with
   that recommendation, and the owner answers it from the desk. Otherwise wake it, or dispose of it
   citing when its row says the session was last seen, or promote it with the answer you recommend. The daemon closes one itself, naming the rule, when the session's turn ends or it
   takes a new prompt.
