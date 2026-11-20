@@ -18,13 +18,18 @@
                                         the open lanes pull request and how it would merge;
                                         --merge merges it as the workspace's login, then waits
                                         for the daemon to sync the merged lanes
-    install.py uninstall [workspace]    remove what an install added here
-    install.py uninstall --workspace    and have the platform retire the workspace too
+    install.py uninstall [workspace]    remove what an install added here: leaving a workspace's
+                                        machine is this alone, and the workspace keeps serving
+                                        its other machines
     install.py uninstall --machine      and take this machine's agent down with it: its jobs, its
                                         release root and tools, its keys, logs and proxies — the
                                         one act for a machine whose last workspace this is
-    install.py retire <workspace id>    have the platform retire a workspace by its id, for one
-                                        no checkout here is bound to (#3742)
+    install.py create <team>/<workspace>
+                                        create the workspace at that address on the platform,
+                                        joining no machine — `install` in its repository joins one
+    install.py delete <team>/<workspace>
+                                        have the platform retire the workspace at that address, for
+                                        every machine, its state kept (#3742)
 
 The person acts only where a grant is theirs to give: signing in, and giving the App
 the repository. For each it prints the page, opens it, and waits.
@@ -70,6 +75,7 @@ sys.path.insert(0, str(STEERING))
 sys.path.insert(0, str(HERE))
 
 import agentjob  # noqa: E402
+import contract  # noqa: E402
 import credential  # noqa: E402
 import door as door_mod  # noqa: E402
 import door_rewrite  # noqa: E402
@@ -295,8 +301,6 @@ def refusal_proof(device_code: str) -> str:
 INVITE = re.compile(r"2MW(-[2-9A-HJKMNP-TV-Z]{4}){4}", re.IGNORECASE)
 # A GitHub login, as the console reads the one install carries (#3954).
 LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}")
-# A workspace id or alias, as coordination routes one: one path segment of at most 64.
-WORKSPACE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
 def ended(said: object, login: str | None) -> str:
@@ -1718,8 +1722,7 @@ def end_session(console: str, token: str) -> None:
         say("session", f"the console would not end the session ({status}); it lapses on its own")
 
 
-def uninstall(root: Path, retire: bool, machine: bool = False) -> int:
-    console = platform_url()
+def uninstall(root: Path, machine: bool = False) -> int:
     bound = checkout_binding.id_at(root)
     try:
         door = recorded_door(root, bound) if bound else None
@@ -1729,31 +1732,14 @@ def uninstall(root: Path, retire: bool, machine: bool = False) -> int:
     held = credential.path_for(door) if bound and door else None
     off_platform = True
     if held is not None:
-        # Before a retirement: a retired workspace refuses a credential bound to it, this revocation's among them.
         off_platform = revoke_held(held)
-    retired = True
-    try:
-        if retire and bound:
-            # By the bound id, which retire_on routes through the person's access: a door's path is how
-            # the console was reached, not always an address coordination knows (#7657).
-            try:
-                retire_on(console, bound)
-            except Stop as e:
-                retired = False
-                say("workspace", f"not retired: {e}; retire it with `install.py retire {bound}`")
-        elif retire:
-            say("workspace", "not retired: this checkout is bound to no workspace; "
-                             "name the workspace with `install.py retire <id>`")
-    finally:
-        # The revocation has run, so cleanup runs whatever becomes of the retirement: one refused,
-        # cancelled or failed never leaves the machine installed on a revoked credential (#10135).
-        _remove_local(root, bound, held)
+    _remove_local(root, bound, held)
     swept = True
     if machine:
         swept = unprovision_machine(Path.home())
     # A revocation that failed leaves the machine admitted on the platform however clean this
     # checkout is, so the exit says it: a scripted decommission learns it was not whole.
-    return 0 if retired and off_platform and swept else 1
+    return 0 if off_platform and swept else 1
 
 
 def _remove_local(root: Path, bound: str | None, held: Path | None) -> None:
@@ -2081,48 +2067,74 @@ def revoke_held(held: Path) -> bool:
     return True
 
 
-def retire_on(console: str, wid: str) -> None:
-    """Retire `wid` on coordination, its state kept."""
+def workspace_address(value: str) -> bool:
+    """Whether `value` is a workspace's `<team>/<workspace>` address: both slugs in the contract's
+    grammar, its team none of the reserved ones a door's address route never carries."""
+    team, _, slug = value.partition("/")
+    return (re.fullmatch(contract.TEAM_SLUG, team) is not None and team not in contract.RESERVED_TEAM_SLUGS
+            and re.fullmatch(contract.WORKSPACE_SLUG, slug) is not None)
+
+
+def retire_on(console: str, address: str) -> None:
+    """Retire the workspace `address` names on coordination, its state kept."""
     # Its own scope: an install's carries the approval page on to GitHub for the repository (#4015).
-    token = sign_in(console, f"retire {wid}")
+    token = sign_in(console, f"delete {address}")
     try:
-        # A workspace's uuid, as install prints it, is no route: its address, which the person's access names, is.
-        route = wid
-        if door_rewrite.is_uuid(wid):
-            route = next((w["address"] for t in go_access(console, token)["teams"] if isinstance(t, dict)
-                          for w in t.get("workspaces") or [] if isinstance(w, dict) and w.get("workspace_id") == wid
-                          and isinstance(w.get("address"), str)), None)
-            if route is None:
-                raise Stop(f"none of the teams you signed in to holds workspace {wid}; sign in as its team's owner")
-        status, got = call("POST", f"{console}{door_mod.routed(route)}/api/v1/workspace/retirement", {}, token,
+        status, got = call("POST", f"{console}{door_mod.routed(address)}/api/v1/workspace/retirement", {}, token,
                            key=str(uuid.uuid4()))
         if status != 200:
             if got.get("code") == "workspace-retired":
-                # A re-run, or another person's retire: the state asked for stands, so this is the
+                # A re-run, or another person's delete: the state asked for stands, so this is the
                 # outcome the caller wanted, not a refusal.
-                say("workspace", f"{wid} is retired already; its state is kept on the platform")
+                say("workspace", f"{address} is retired already; its state is kept on the platform")
                 return
-            raise Stop(f"coordination would not retire {wid} ({status}): {got.get('code') or got}")
-        say("workspace", f"{wid} retired; its state is kept on the platform")
+            raise Stop(f"coordination would not retire {address} ({status}): {got.get('code') or got}")
+        say("workspace", f"{address} retired; its state is kept on the platform")
     finally:
         end_session(console, token)
 
 
-def retire_workspace(wid: str) -> int:
-    """Retire a workspace by its id, the way to reach one no checkout here is bound to (#3742).
-    What an install added on a machine is still that machine's `uninstall` to remove."""
-    retire_on(platform_url(), wid)
+def delete_workspace(address: str) -> int:
+    """Retire the workspace `address` names, for every machine — from anywhere, for one no checkout
+    here is bound to as for one that is (#3742). What an install added on a machine is still that
+    machine's `uninstall` to remove."""
+    retire_on(platform_url(), address)
     return 0
+
+
+def create_at(address: str) -> int:
+    """Create the workspace `address` names — the repository `<team>/<workspace>` in the team
+    slugged `<team>` — on the platform, joining no machine. A plain `install` in its repository
+    does the same creation and then admits the machine it runs on."""
+    console = platform_url()
+    token = sign_in(console, f"create {address}")
+    try:
+        access = go_access(console, token)
+        slug = address.split("/")[0]
+        team = next((t for t in access["teams"] if isinstance(t, dict) and t.get("slug") == slug), None)
+        if team is None:
+            slugs = sorted(t["slug"] for t in access["teams"] if isinstance(t, dict) and t.get("slug"))
+            raise Stop(f"you are in no team addressed {slug}"
+                       + (f"; your teams' addresses begin {', '.join(slugs)}" if slugs else ""))
+        if team.get("owner") is not True:
+            raise Stop(f"only a team's owner creates its workspaces; you are a member of {slug}")
+        got = create_workspace(console, token, team["id"], address)
+        print(json.dumps({"workspace": got.get("address") or address}))
+        return 0
+    finally:
+        end_session(console, token)
 
 
 def main(argv: list[str]) -> int:
     if verb_help.help_requested("install", argv):
         print(verb_help.script_help("install", topic=argv[0] if len(argv) == 2 else None)); return 0
     args = list(argv)
-    action = args[0] if args[:1] in (["uninstall"], ["lanes"], ["retire"]) else "install"
+    if args[:1] == ["retire"]:
+        return verb_help.error("install", "`retire` is gone: `install.py delete <team>/<workspace>` "
+                                          "retires the workspace for every machine")
+    action = args[0] if args[:1] in (["uninstall"], ["lanes"], ["create"], ["delete"]) else "install"
     if action != "install":
         args.pop(0)
-    retire = False
     merge = False
     codex = False
     machine = False
@@ -2135,10 +2147,12 @@ def main(argv: list[str]) -> int:
     i = 0
     while i < len(args):
         arg = args[i]
-        if arg == "--workspace":
-            if action != "uninstall":
-                return verb_help.error("install", "--workspace is only for uninstall")
-            retire = True; i += 1; continue
+        if arg in ("--workspace", "--retire-workspace"):
+            # Both read as "this machine's part of the workspace" while retiring the workspace for
+            # every machine — a leave ask that ended the workspace. Uninstall leaves; delete retires.
+            return verb_help.error("install", "uninstall removes this machine from the workspace; "
+                                              "`install.py delete <team>/<workspace>` retires the "
+                                              "workspace for every machine")
         if arg == "--machine":
             if action != "uninstall":
                 return verb_help.error("install", "--machine is only for uninstall")
@@ -2160,7 +2174,7 @@ def main(argv: list[str]) -> int:
                 return verb_help.error("install", "team may appear once")
             team = args[i + 1]; i += 2; continue
         if arg == "--gh-account":
-            if action == "uninstall":
+            if action not in ("install", "lanes"):
                 return verb_help.error("install", "--gh-account is only for install and lanes")
             if i + 1 >= len(args) or args[i + 1].startswith("-"):
                 return verb_help.error("install", "missing gh-account value")
@@ -2192,10 +2206,15 @@ def main(argv: list[str]) -> int:
             invite = arg; i += 1; continue
         paths.append(arg); i += 1
     if action != "install" and (codex or team is not None
-                                or (action in ("uninstall", "retire") and gh_account is not None)):
+                                or (action != "lanes" and gh_account is not None)):
         return verb_help.error("install", f"{action} does not accept install options")
     if len(paths) > 1:
         return verb_help.error("install", "too many workspace paths")
+    if action in ("create", "delete") and (len(paths) != 1 or not workspace_address(paths[0])):
+        reason = f"{action} takes one explicit `<team>/<workspace>` address"
+        if action == "delete":
+            reason += " — never `.`, a workspace id, or the checkout's binding"
+        return verb_help.error("install", reason)
     if machine_only is not None:
         # Each its own refusal: a served root is made, not a checkout named, and no gh login is read.
         if paths:
@@ -2205,10 +2224,8 @@ def main(argv: list[str]) -> int:
         if codex:
             return verb_help.error("install", "--machine-only wires the hooks a sandboxed session's connect needs, "
                                               "which --codex does not write")
-    if action == "retire" and (len(paths) != 1 or not WORKSPACE_ID.fullmatch(paths[0])):
-        return verb_help.error("install", "retire takes one workspace id, as the install answer printed it")
     root = None
-    if action != "retire" and machine_only is None:
+    if action not in ("create", "delete") and machine_only is None:
         anchor = Path(paths[0]) if paths else Path.cwd()
         try:
             root = common_root(anchor, timeout=5)
@@ -2226,12 +2243,14 @@ def main(argv: list[str]) -> int:
     _at = ""
     _at_line = time.monotonic()
     try:
-        if action == "retire":
-            return retire_workspace(paths[0])
+        if action == "create":
+            return create_at(paths[0])
+        if action == "delete":
+            return delete_workspace(paths[0])
         if action == "lanes":
             return adopt_lanes(root, merge, gh_account)
-        return uninstall(root, retire, machine) if action == "uninstall" else install(root, codex, team, gh_account, invite,
-                                                                                   login, machine_only)
+        return uninstall(root, machine) if action == "uninstall" else install(root, codex, team, gh_account, invite,
+                                                                            login, machine_only)
     except KeyboardInterrupt:
         raise Stop(f"stopped at {_at or action}; run {action} again to resume") from None
     except subprocess.TimeoutExpired as e:

@@ -324,8 +324,8 @@ It removes what the install added on this machine:
 - its entry in the machine agent's registry;
 - this workspace's credential.
 
-With `--workspace`, it also has the platform retire the workspace, after one more sign-in. The
-platform keeps the workspace's state rather than deleting it.
+That is the whole of leaving: removing this machine from a workspace is a plain `uninstall`, with
+no flag, and the workspace keeps serving its other machines.
 
 With `--machine`, once no workspace is left on this machine, it also takes the machine's agent
 down: its jobs (the agent's and the updater's), its release root and tools kit, the keys, worker
@@ -336,15 +336,30 @@ refuses while the machine's agent still serves another workspace: uninstall that
 first. A plain `uninstall` that leaves the machine's agent serving nothing says when `--machine`
 is the next step.
 
-A workspace no checkout here is bound to — it was provisioned from another machine, or its
-checkout was never wired — is retired by its id, from anywhere:
+## Uninstall vs delete
+
+`install` and `uninstall` act on this machine; `create` and `delete` act on the workspace, which
+they name by its `<team>/<workspace>` address — never a path, an id, or a checkout's binding.
+
+Removing a machine is `uninstall`. `delete` is only for when the person explicitly asks to delete
+the workspace itself: it stops the workspace on every machine, and its name can never be reused.
+After one sign-in the platform retires it and keeps its state — retiring, not erasing — so a
+re-run answers that it is retired already. What an install added on this machine is still
+`uninstall`'s to remove.
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" retire <id>
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" delete <team>/<workspace>
 ```
 
-After one more sign-in, the platform retires it and keeps its state, as above. Nothing on this
-machine is touched: what an install added here is still `uninstall`'s to remove.
+`create` makes the workspace on the platform at that address — the repository
+`<team>/<workspace>` in the team `<team>` — and joins no machine to it:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" create <team>/<workspace>
+```
+
+A plain `install` in a repository creates its workspace the same way when it is missing, then
+admits the machine it runs on.
 
 Install the plugin itself at user scope, from a directory that is not your home. From `~`,
 `--scope project` writes into `~/.claude/settings.json`, which every repository under it then

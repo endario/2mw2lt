@@ -238,8 +238,9 @@ TOOLS = {
         {"topic": "install", "usage": "[workspace] [invite-code] [--codex] [--team <id>] [--gh-account <login>] [--login <login>]", "example": "install . 2MW-7KQ4-XN2D-9HTB-M3PC"},
         {"topic": "--machine-only", "usage": "--machine-only <owner>/<repo> [invite-code] [--team <id>] [--login <login>]", "example": "install --machine-only example-org/example-repo"},
         {"topic": "lanes", "usage": "lanes [workspace] [--merge] [--gh-account <login>]", "example": "install lanes . --merge"},
-        {"topic": "uninstall", "usage": "uninstall [workspace] [--workspace] [--machine]", "example": "install uninstall ."},
-        {"topic": "retire", "usage": "retire <workspace id>", "example": "install retire workspace-1"},
+        {"topic": "uninstall", "usage": "uninstall [workspace] [--machine]", "example": "install uninstall ."},
+        {"topic": "create", "usage": "create <team>/<workspace>", "example": "install create example-org/example-repo"},
+        {"topic": "delete", "usage": "delete <team>/<workspace>", "example": "install delete example-org/example-repo"},
     ]},
     "rest": {"forms": [
         {"topic": None, "usage": _SPEAKER_USAGE + " [--lease] [--post [--json <body>] [--key <key>] | --put --json <body> --key <key> | --delete --key <key>] <api-v1-path> [--all]", "example": "rest /openapi.json"},
