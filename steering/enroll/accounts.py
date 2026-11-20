@@ -8,16 +8,18 @@ row for this workspace's seat.
 Words:
   access                                        the live grant's classes and reach, and what the
                                                 owner grants where when they do not cover these words
-  list [vendor]                                 the team's accounts, each at its number; the
-                                                owner's removed accounts say `removed`
+  list [vendor]                                 the team's accounts, each at its number with its
+                                                alias beside it; the owner's removed accounts say
+                                                `removed`
   carry <vendor> <legacy> <qualified>           fold the account at <legacy> into the account it
                                                 became at <qualified>, which keeps the lower number
-  remove <vendor> <number>                      retire the account; its number frees for another
-  restore <vendor> <number>                     bring a removed account back
-  number <vendor> <number> <to>                 move the account at <number> to a free number <to>
+  remove <vendor> <account>                     retire the account; its number frees for another
+  restore <vendor> <account>                    bring a removed account back
+  number <vendor> <account> <to>                move the account to a free number <to>
 
-Arguments name vendor and the account's number in the team, never a raw id: each is resolved
-through GET /accounts before any write. `--dry-run` on a write resolves and shows the before and
+Arguments name vendor and the account's number in the team or the alias the team owner set on it
+(the label the desk's nav bar shows), never a raw id: each is resolved through GET /accounts
+before any write, within this team only. `--dry-run` on a write resolves and shows the before and
 after, sending nothing. A refusal prints its check and what to do about it, as rest.py does.
 """
 from __future__ import annotations
@@ -86,15 +88,38 @@ def read(base: str, delegated: str) -> tuple[list[dict], list[dict]]:
     return items, removed
 
 
-def named(vendor: str, number: int, items: list[dict], removed: list[dict],
+def alias_of(account: dict) -> str | None:
+    """The alias a session names the account by: the team owner's label, else the grantor's own."""
+    return account.get("team_owner_label") or account.get("label") or None
+
+
+def shown(account: dict) -> str:
+    """An account as the seat names it: vendor#number with the alias beside it, as the nav bar."""
+    name = f"{account.get('vendor')}#{account.get('number')}"
+    if alias_of(account):
+        name += f" ({alias_of(account)})"
+    return name
+
+
+def named(vendor: str, selector: str, items: list[dict], removed: list[dict],
           gone: bool = False) -> dict:
-    """The one account vendor's number names — among the owner's removed when `gone` asks."""
-    pool = removed if gone else items
-    found = [a for a in pool if a.get("vendor") == vendor and a.get("number") == number]
+    """The one account vendor's number or the team owner's alias names — among the owner's removed
+    when `gone` asks. An alias naming more than one account, or a selector naming none, is refused
+    with the accounts it could have meant."""
+    pool = [a for a in (removed if gone else items) if a.get("vendor") == vendor]
+    where = "removed" if gone else "standing"
+    try:
+        found = [a for a in pool if a.get("number") == int(selector)]
+    except ValueError:
+        found = [a for a in pool if alias_of(a) == selector]
+        if len(found) > 1:
+            print(f"accounts: alias {selector!r} names more than one {vendor} account: "
+                  f"{', '.join(shown(a) for a in found)} — name it by number instead",
+                  file=sys.stderr)
+            raise SystemExit(1)
     if len(found) != 1:
-        where = "removed" if gone else "standing"
-        said = ", ".join(f"{a.get('vendor')}#{a.get('number')}" for a in pool) or "none"
-        print(f"accounts: no {where} {vendor} account stands at number {number} ({where}: {said})",
+        said = ", ".join(shown(a) for a in pool) or "none"
+        print(f"accounts: no {where} {vendor} account named {selector!r} ({where}: {said})",
               file=sys.stderr)
         raise SystemExit(1)
     return found[0]
@@ -135,8 +160,8 @@ def main(argv: list[str], stdin) -> int:  # noqa: ARG001 — no caller hands a b
                "number": (3,)}
     if len(at) not in arities[word]:
         usage = {"access": "", "list": "[vendor]", "carry": "<vendor> <legacy> <qualified>",
-                 "remove": "<vendor> <number>", "restore": "<vendor> <number>",
-                 "number": "<vendor> <number> <to>"}[word]
+                 "remove": "<vendor> <account>", "restore": "<vendor> <account>",
+                 "number": "<vendor> <account> <to>"}[word]
         return error("accounts", f"{word} takes: {usage}".rstrip(": "))
     if dry and word in ("access", "list"):
         return error("accounts", f"--dry-run is a write word's, not {word}'s")
@@ -178,33 +203,32 @@ def main(argv: list[str], stdin) -> int:  # noqa: ARG001 — no caller hands a b
         vendor = at[0] if at else None
         for a in items:
             if vendor is None or a.get("vendor") == vendor:
-                print(f"{a.get('vendor')}#{a.get('number')}\tstanding\t{a.get('account_id', '')}")
+                print(f"{shown(a)}\tstanding\t{a.get('account_id', '')}")
         for a in removed:
             if vendor is None or a.get("vendor") == vendor:
-                print(f"{a.get('vendor')}#{a.get('number')}\tremoved\t{a.get('account_id', '')}")
+                print(f"{shown(a)}\tremoved\t{a.get('account_id', '')}")
         return 0
 
     vendor = at[0]
-    number = whole(at[1], "the account's number")
     if word == "carry":
-        legacy = named(vendor, number, items, removed)
-        qualified = named(vendor, whole(at[2], "the qualified account's number"), items, removed)
+        legacy = named(vendor, at[1], items, removed)
+        qualified = named(vendor, at[2], items, removed)
         body = {"vendor": vendor, "account_id": legacy.get("account_id"),
                 "to": qualified.get("account_id")}
-        before = f"{vendor}#{number} standing beside {vendor}#{at[2]}"
-        after = f"{vendor}#{number} folded away; the qualified account keeps the lower number"
+        before = f"{shown(legacy)} standing beside {shown(qualified)}"
+        after = f"{shown(legacy)} folded away; the qualified account keeps the lower number"
     elif word == "number":
         to = whole(at[2], "the number it moves to")
-        account = named(vendor, number, items, removed)
+        account = named(vendor, at[1], items, removed)
         body = {"vendor": vendor, "account_id": account.get("account_id"), "number": to}
-        before, after = f"{vendor}#{number}", f"{vendor}#{to}"
+        before, after = shown(account), f"{vendor}#{to}"
     else:
         gone = word == "restore"
-        account = named(vendor, number, items, removed, gone=gone)
+        account = named(vendor, at[1], items, removed, gone=gone)
         body = {"vendor": vendor, "account_id": account.get("account_id")}
-        before = f"{vendor}#{number} {'removed' if gone else 'standing'}"
-        after = {"remove": f"{vendor}#{number} removed; its number frees for another",
-                 "restore": f"{vendor}#{number} standing again"}[word]
+        before = f"{shown(account)} {'removed' if gone else 'standing'}"
+        after = {"remove": f"{shown(account)} removed; its number frees for another",
+                 "restore": f"{shown(account)} standing again"}[word]
 
     if dry:
         show("dry run — nothing was sent",

@@ -936,7 +936,7 @@ say "launch: token @lease vendor opencode model <model> because <why>"
 say "launch: token @lease vendor commandcode model <model> because <why>"
 # OPTIONAL clauses, never part of the usual launch. Each one overrides the platform's
 # placement, so add it only with a stated reason (see "Where a launch goes"):
-#   on <node>      pin the machine        account <n>   pin the account (needs vendor)
+#   on <node>      pin the machine        account <n|alias>   pin the account (needs vendor)
 say "launch: token @lease on <node> floor <rarity> because pinned: <the owner's word, or the fact the platform cannot see>"
 ```
 
@@ -1228,7 +1228,9 @@ on the same machine, or an explicitly named machine, with its conversation, name
 say "rehome: token @lease <session> to [vendor <vendor>] <account> [machine <name>] [model <model>] [effort <level>] [compact [without checkpoint]] because <why>"
 ```
 
-For `rehome:`, name the account by its stable team number under its vendor. A move into another
+For `rehome:`, name the account by its stable team number under its vendor, or by the team owner's
+alias for it (`to anthropic ccr1`) — the same alias `account <number-or-alias>` takes on a launch,
+resolved within the team, refused when it names none or more than one account. A move into another
 vendor's home (`vendor zai`, or a proxied launcher's) is named as one, and names the model it
 resumes on in that vendor's own ids (`glm-5.3`, `glm-5.3-flash`); without `model` and `effort` it
 resumes on the launcher's defaults.
