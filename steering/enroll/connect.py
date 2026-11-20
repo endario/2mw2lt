@@ -359,7 +359,7 @@ def enrol(ws: Path, session: str, account: str, doing: str, psession: str,
         return session_routes.enrol(ws, session, h.provider, psession, rid)["credential"]
     except session_routes.Refused as e:
         door.record("connect-enrol-refused", str(e), ws)
-        raise Refused(session_routes.reconnect(e)) from None
+        raise Refused(session_routes.reconnect(e, session=session)) from None
     except session_routes.Unsent as e:
         door.record("connect-enrol-unsent", str(e), ws)
         raise Refused(f"{e}\nthe enrolment is kept, and the next connect sends it again") from None

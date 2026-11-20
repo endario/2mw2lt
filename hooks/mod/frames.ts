@@ -285,9 +285,9 @@ export const SEAT_TOOLS: Record<string, SeatTool> = {
     build: a => ({ client: 'say', stdin: `floor: token @lease ${str(a, 'kind')} ${str(a, 'repo')} ${a.kind === 'review' ? `pr ${str(a, 'pr')}` : `branch ${str(a, 'branch')}`} ${str(a, 'floor')} ${str(a, 'reason')}` }),
   },
   card_reclassify: {
-    description: 'Seat only: correct a card\'s track, significance, state, priority or major mark.',
-    fields: { card: word('The card.'), field: { type: 'string', description: 'What to correct.', enum: ['track', 'significance', 'state', 'priority', 'major'] },
-              value: word('The new value; for track a lane id or off-track.'), why: text('Why.') },
+    description: 'Seat only: correct a card\'s name, track, significance, state, priority or major mark.',
+    fields: { card: word('The card.'), field: { type: 'string', description: 'What to correct.', enum: ['name', 'track', 'significance', 'state', 'priority', 'major'] },
+              value: text('The new value; for track a lane id or off-track.'), why: text('Why.') },
     required: ['card', 'field', 'value', 'why'],
     build: a => ({ client: 'card', argv: ['reclassify', str(a, 'card'), str(a, 'field'), str(a, 'value'), str(a, 'why')] }),
   },

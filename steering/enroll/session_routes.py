@@ -54,7 +54,7 @@ class Refused(Exception):
     greps still find it. A client composes no remedy of its own for a refusal that carries one."""
 
     def __init__(self, status: int, code: str, field: str = "", wait: int | None = None, request: str = "",
-                 remedy: str = "", detail: str = "", title: str = ""):
+                 remedy: str = "", detail: str = "", title: str = "", relay: bool = False):
         super().__init__(f"refused ({status}): " + (title or code)
                          + (f" [{code}]" if title and code != title else "")
                          + (f" [{field}]" if field else "")
@@ -66,12 +66,19 @@ class Refused(Exception):
         self.detail = detail
         # The server's sentence, where its catalogue carries one (doc 206); empty when it does not.
         self.title = title
+        # The agent's relay refused it before the door (#10265), in its own words and with no code.
+        self.relay = relay
 
 
-def reconnect(e: Refused, reason: str | None = None) -> str:
-    """A refusal connecting again repairs, unless Go named this client older than its contract."""
+def reconnect(e: Refused, reason: str | None = None, session: str = "") -> str:
+    """A refusal connecting again repairs, unless Go named this client older than its contract, or
+    the agent's relay refused it: connect inside a sandboxed launch sends on the same bearer the relay
+    refused, so only the seat, relaunching the session, can act on the relay's own cause."""
     if e.remedy == "update-plugin":
         return refusal.outdated(str(e))
+    if e.relay:
+        return refusal.refuse(f"{e}: its agent's relay refused it before the door, and connecting again sends the same bearer",
+                              hand_to=("the brain", f"blocked: {session or 'this session'} on its agent's relay refusing its bearer"))
     return refusal.reconnect(reason or str(e))
 
 
@@ -140,13 +147,14 @@ def _refused(e: urllib.error.HTTPError, problem: dict) -> "Refused":
     words when it refused before the door (#10265), so a caller can tell what to fix."""
     wait_seconds = problem.get("wait_seconds")
     detail = problem.get("detail")
+    relay = not problem.get("code") and isinstance(problem.get("refused"), str)
     if not isinstance(detail, str) and isinstance(problem.get("refused"), str):
         detail = problem["refused"]
     title = problem.get("title")
     return Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
                    wait_seconds if isinstance(wait_seconds, int) else None, _request(e, problem), _remedy(problem),
                    detail if isinstance(detail, str) and len(detail) <= 200 else "",
-                   title if isinstance(title, str) else "")
+                   title if isinstance(title, str) else "", relay)
 
 
 def post(path: str, body: dict, key: str, carrier: str, token: str, timeout: float = 10.0,
@@ -354,7 +362,7 @@ def bind(session: str, token: str, provider: str, psession: str, runtime: str,
             return refusal.retry(str(e))
         if e.code in INVALID_TOKEN:
             return refusal.reconnect(f"unknown, detached or stale token for {session}")
-        return reconnect(e)
+        return reconnect(e, session=session)
     return f"bound: {psession} to {session}"
 
 
@@ -377,7 +385,7 @@ def detach(session: str, token: str, key: str | None = None, handover: str = "")
         if e.status == 400 and handover:  # a handover Go does not take: sent again it fails again
             return refusal.resend(str(e), "a --handover that is the exit checkpoint's id")
         if e.status == 400:  # no handover was sent, so what Go refused is the session it names
-            return reconnect(e)
+            return reconnect(e, session=session)
         return refusal.retry(str(e))
     return f"detached: {session}"
 

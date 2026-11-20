@@ -82,3 +82,17 @@ test('every seat tool and timer tool answers a call in its own name', async ($, 
   expect(w.runs.filter(argv => /\/(lease|card|timer)\.py$/.test(String(argv[1]))).length)
     .toBe(Object.keys(SEAT_TOOLS).length + Object.keys(TIMER_TOOLS).length)
 })
+
+// The coordination's correction takes a card's name, and the card client passes it through; the
+// tool's own enum and one-word value refused it, so a seat could not retitle a card it had scoped.
+test('card_reclassify renames a card, its name passed whole', async ($, on) => {
+  const w = world(on, { rounds: [{ lines: [], code: 0, hold: never }] })
+  await begin($)
+  await w.clock.settle()
+  const name = 'The session kit carries agent-friendly CLIs'
+  const got = await $.tool.call({ tool: 'mcp__2mw2lt__card_reclassify', card: '01CARD', field: 'name', value: name, why: 'scope narrowed' } as never) as { deny?: unknown }
+  expect(got.deny).toBe(undefined)
+  const card = w.runs.filter(argv => String(argv[1]).endsWith('/card.py'))
+  expect(card.length).toBe(1)
+  expect(card[0].slice(-4)).toEqual(['01CARD', 'name', name, 'scope narrowed'])
+})
