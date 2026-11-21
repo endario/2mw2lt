@@ -338,6 +338,11 @@ ListedAccountUsage = typing.TypedDict("ListedAccountUsage", {
     "resets_by": "str | None",
     "stopped_by_login": "str | None",
     "stopped_at": "str | None",
+    "halted_at": "str | None",
+    "halted_as": "str | None",
+    "halted_by_login": "str | None",
+    "halted_channel": "str | None",
+    "halted_words": "str | None",
     "owner_login": "str | None",
     "owner_outside": "bool",
     "owned_in": "str | None",
@@ -677,6 +682,26 @@ AccountRemoved = typing.TypedDict("AccountRemoved", {
     "vendor": "str",
     "account_id": "str",
     "removed": "bool",
+})
+
+# AccountHalt is the body of POST /accounts/halt and POST /accounts/resume: the account's owner stops
+# it in every team, or lifts the stop (p2-master-switch.md). The seat speaks it on the owner's ask, and
+# then states it: Words, the owner's words as the seat received them, and Channel, where and when they
+# were given. The owner's own word carries neither.
+AccountHalt = typing.TypedDict("AccountHalt", {
+    "vendor": "str",
+    "account_id": "str",
+    "words": "typing.NotRequired[str]",
+    "channel": "typing.NotRequired[str]",
+})
+
+# AccountHalted is their answer: the account as the team resolves it, whether it stands halted, and who
+# spoke the word, "owner" or "seat".
+AccountHalted = typing.TypedDict("AccountHalted", {
+    "vendor": "str",
+    "account_id": "str",
+    "halted": "bool",
+    "as": "str",
 })
 
 # AccountNumber is the body of POST /accounts/number: the account's owner renumbers it to a free
@@ -8495,6 +8520,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/accounts/co-owners",
     "DELETE /w/{workspace}/api/v1/accounts/co-owners/{id}",
     "POST /w/{workspace}/api/v1/accounts/concurrency",
+    "POST /w/{workspace}/api/v1/accounts/halt",
     "POST /w/{workspace}/api/v1/accounts/label",
     "GET /w/{workspace}/api/v1/accounts/matrix",
     "POST /w/{workspace}/api/v1/accounts/move",
@@ -8504,6 +8530,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/accounts/remove",
     "POST /w/{workspace}/api/v1/accounts/reset",
     "POST /w/{workspace}/api/v1/accounts/restore",
+    "POST /w/{workspace}/api/v1/accounts/resume",
     "POST /w/{workspace}/api/v1/accounts/serve",
     "POST /w/{workspace}/api/v1/accounts/transfer",
     "POST /w/{workspace}/api/v1/actions",

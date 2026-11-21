@@ -386,7 +386,12 @@ brought it to the platform, as a `from: console user` line names them, sent when
 seat, when you hold, and whenever any account's verdict or rank moves. An account that reads
 `serves: false` and `excluded:unserving` is one its owner has not enabled for this team, and only
 its owner can. One that reads `excluded:removed` its owner removed from 2mw2lt: no team spends it
-until they restore it, so a launch pinned to it is withdrawn `launch-account-removed`. `labels` is `[{"member", "label"}]`: each member's own name for the account, the
+until they restore it, so a launch pinned to it is withdrawn `launch-account-removed`. One that reads
+`excluded:halted` its owner stopped in every team: a launch pinned to it is withdrawn
+`launch-account-halted`. You may stop or lift an account your team's owner owns only when they asked
+or confirmed it in so many words: `POST /accounts/halt` or `/accounts/resume` with `words`, their
+words as you received them, and `channel`, where and when they gave them. It is recorded as the
+seat's act on their behalf, never as theirs. `labels` is `[{"member", "label"}]`: each member's own name for the account, the
 member written as `owner` is. It is the whole fleet every
 time, so the last one is the answer. Every held session, you included, is also sent
 `data: {"kind": "usage", "account", "verdict", "tightest", "incentive", "label"}`: its own account's row
@@ -1875,10 +1880,14 @@ so the owner can see how it judges beside the rated judge that ran the round
 reaches a pull request. Cast nothing until #6499's legacy floor mapping is on `main`: before it, a
 legacy-tier round can still place an unrated model.
 
-**Find the pool.** The figures are the catalog's; the ratings are the ladder's:
+**Find the pool.** What each account serves and what it costs are the accounts'; the cards are
+still unlimited's catalog, until its 0.2.0 drops it
+(the boundary §9.7); the ratings
+are the ladder's:
 
 ```bash
-unlimited models --catalog   # offerings (free, until) and cards (intelligence, price, source)
+python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /accounts   # each account's routes, and their costs: class free, offer (with until) or metered
+unlimited models --catalog   # cards only (intelligence, price, source)
 python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /ladder   # a row's selector rates the models it matches at its rarity
 ```
 
@@ -1886,8 +1895,9 @@ A model is rated when a ladder row's selector matches it; its rung is that row's
 least first: uncommon, rare, epic, legendary. Of the unrated models, these may be cast (the owner's
 ruling, 2026-10-14), each for one rung:
 
-- **Free**: an offering marked `free` (its `until` is the promotion's last day, UTC), or an id ending
-  `-free` or `:free`. Its rung is the highest whose every rated model's `intelligence` it reaches;
+- **Free**: a route whose cost is `free`, or `offer` (its `until` is the promotion's end), or an id
+  ending `-free` or `:free`. `costs` is keyed by the route's id lowercased, with everything up to its
+  last `/` and any `[…]` window suffix dropped. Its rung is the highest whose every rated model's `intelligence` it reaches;
   uncommon when its card publishes none.
 - **Cost-effective**: a priced model with a published `intelligence`, at the highest rung where its
   intelligence per blended dollar is at or above that of every rated model of the rung with an index
