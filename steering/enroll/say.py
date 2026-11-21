@@ -61,7 +61,7 @@ def _on_go(session: str, token: str, this: str, text: str, target: str | None, i
         print(session_routes.say(session, token, this, text, target, inform=inform))
         return 0
     except session_routes.Refused as e:
-        if (stale := session_routes.outdated(e)) is not None:
+        if (stale := session_routes.unrepairable(e, session)) is not None:
             print(stale)
             return 1
         # A token Go no longer takes is the enrolment's to repair; sending the say again cannot.

@@ -148,7 +148,9 @@ def _on_go(held: dict, verb: str, rest: list[str], usage: str, retry: str | None
         # A sentence the server carries is printed as its words: what was refused, what it found,
         # what would succeed (doc 206 §6). The verb's grammar is the fallback a client composes
         # only when the server sent none — an older server, or a code its catalogue does not row.
-        if refusal.titled(e):
+        if (said := session_routes.unrepairable(e, held["session"])) is not None:
+            print(said)
+        elif refusal.titled(e):
             print(e)
         else:
             print(refusal.answered("card", e) if session_routes.settled(e) else refusal.retry(str(e)))

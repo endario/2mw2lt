@@ -117,7 +117,7 @@ def main(argv: list[str]) -> int:
         print(e if isinstance(e, session_routes.ConcludedClaim) else f"{e}: declare the work first, or give doing", file=sys.stderr)
         return 1
     except session_routes.Refused as e:
-        said = session_routes.outdated(e) or (refusal_mod.use("taking", str(e)) if session_routes.settled(e)
+        said = session_routes.unrepairable(e, session) or (refusal_mod.use("taking", str(e)) if session_routes.settled(e)
                                               else refusal_mod.retry(str(e)))
         reply = said
     except session_routes.Unsent as e:

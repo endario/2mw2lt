@@ -223,7 +223,7 @@ def _said(send, key: str | None):
         print(f"refused: this session does not hold the seat ({why})", file=sys.stderr)
     except session_routes.Refused as e:
         unsure = not session_routes.settled(e)
-        print(refusal.retry(str(e)) if unsure else f"refused: {e}", file=sys.stderr)
+        print(session_routes.unrepairable(e) or (refusal.retry(str(e)) if unsure else f"refused: {e}"), file=sys.stderr)
     except session_routes.Unsent as e:
         unsure = True
         print(refusal.retry(str(e)), file=sys.stderr)

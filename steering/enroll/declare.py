@@ -59,12 +59,14 @@ def main(argv: list[str]) -> int:
         return 1
     import refusal
     import session_routes
+    relayed = None
     try:
         reply = session_routes.declare_card(card, fact["name"], fact.get("anchors") or {}, token,
                                             repo=session_routes.card_repo(ws) if fact.get("anchors") else "",
                                             triage=fact.get("triage"), goal=fact.get("goal"), session=session)
     except session_routes.Refused as e:
-        reply = refusal.use("declare", f"{card}: {e}")
+        relayed = session_routes.unrepairable(e, session)
+        reply = relayed or refusal.use("declare", f"{card}: {e}")
     except session_routes.Unsent as e:
         reply = refusal.retry(str(e))
     print(reply)
@@ -80,7 +82,8 @@ def main(argv: list[str]) -> int:
         retry += f" --goal {goal['id']} --goal-why {shlex.quote(goal['why'])}"
         if goal.get("source"):
             retry += f" --goal-source {shlex.quote(goal['source'])}"
-    print(f"to retry this declaration under the same card, send it with {retry}", file=sys.stderr)
+    if not relayed:  # a retry rides the bearer the relay refused
+        print(f"to retry this declaration under the same card, send it with {retry}", file=sys.stderr)
     return 1
 
 

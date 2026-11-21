@@ -71,21 +71,25 @@ class Refused(Exception):
 
 
 def reconnect(e: Refused, reason: str | None = None, session: str = "") -> str:
-    """A refusal connecting again repairs, unless Go named this client older than its contract, or
-    the agent's relay refused it: connect inside a sandboxed launch sends on the same bearer the relay
-    refused, so only the seat, relaunching the session, can act on the relay's own cause."""
-    if e.remedy == "update-plugin":
-        return refusal.outdated(str(e))
-    if e.relay:
-        return refusal.refuse(f"{e}: its agent's relay refused it before the door, and connecting again sends the same bearer",
-                              hand_to=("the brain", f"blocked: {session or 'this session'} on its agent's relay refusing its bearer"))
-    return refusal.reconnect(reason or str(e))
+    """A refusal connecting again repairs, unless nothing the session sends can (`unrepairable`)."""
+    return unrepairable(e, session) or refusal.reconnect(reason or str(e))
 
 
 def outdated(e: Refused) -> str | None:
     """The refusal to give when Go named this client older than its contract, which no resend or
     reconnect repairs; None otherwise."""
     return refusal.outdated(str(e)) if e.remedy == "update-plugin" else None
+
+
+def unrepairable(e: Refused, session: str = "") -> str | None:
+    """The refusal to give when nothing this session sends can repair it; None otherwise. Go named
+    this client older than its contract, or the agent's relay settled a refusal before the door
+    (#10265): every line a sandboxed launch sends, connect's included, rides the bearer the relay
+    refused, so only the brain, relaunching the session, can act on the relay's own cause (#10457)."""
+    if e.relay and settled(e):
+        return refusal.refuse(f"{e}: its agent's relay refused it before the door, and every line this session sends rides the same bearer",
+                              hand_to=("the brain", f"blocked: {session or 'this session'} on its agent's relay refusing its bearer"))
+    return outdated(e)
 
 
 def _remedy(problem: dict) -> str:
@@ -153,7 +157,7 @@ def _refused(e: urllib.error.HTTPError, problem: dict) -> "Refused":
     title = problem.get("title")
     return Refused(e.code, problem.get("code") or "unexplained", problem.get("field") or "",
                    wait_seconds if isinstance(wait_seconds, int) else None, _request(e, problem), _remedy(problem),
-                   detail if isinstance(detail, str) and len(detail) <= 200 else "",
+                   (detail if len(detail) <= 200 else detail[:199] + "…") if isinstance(detail, str) else "",
                    title if isinstance(title, str) else "", relay)
 
 
@@ -376,10 +380,10 @@ def detach(session: str, token: str, key: str | None = None, handover: str = "")
     except Unsent as e:
         return refusal.retry(str(e))
     except Refused as e:
+        if (said := unrepairable(e, session)) is not None:
+            return said
         if e.code == "session-binding-moved":
             return _current_machine_refusal(e)
-        if e.remedy == "update-plugin":
-            return refusal.outdated(str(e))
         if e.code in INVALID_TOKEN:
             return refusal.reconnect(f"{session} can no longer act: its token is not valid")
         if e.status == 400 and handover:  # a handover Go does not take: sent again it fails again
@@ -390,7 +394,7 @@ def detach(session: str, token: str, key: str | None = None, handover: str = "")
     return f"detached: {session}"
 
 
-def checkpoint(token: str, body: dict) -> tuple[str, bool]:
+def checkpoint(token: str, body: dict, session: str = "") -> tuple[str, bool]:
     """The session records its checkpoint (`POST /checkpoints`), its text or the pointer to a note,
     keyed by its occurrence, so a resend under `--retry` is answered from the first: the answer,
     naming the checkpoint's own id, and whether it may have been recorded unanswered, which only a
@@ -404,10 +408,10 @@ def checkpoint(token: str, body: dict) -> tuple[str, bool]:
     except Unsent as e:
         return refusal.retry(str(e)), True
     except Refused as e:
+        if (said := unrepairable(e, session)) is not None:
+            return said, False
         if e.code == "session-binding-moved":
             return _current_machine_refusal(e), False
-        if e.remedy == "update-plugin":
-            return refusal.outdated(str(e)), False
         if e.code in INVALID_TOKEN:
             return refusal.reconnect("the session's token is not valid"), False
         if not settled(e):
@@ -466,10 +470,10 @@ def checkpoint_read(session: str, token: str, which: str) -> tuple[str, dict | N
     except Unsent as e:
         return refusal.retry(str(e)), None
     except Refused as e:
+        if (said := unrepairable(e, session)) is not None:
+            return said, None
         if e.code == "session-binding-moved":
             return _current_machine_refusal(e), None
-        if e.remedy == "update-plugin":
-            return refusal.outdated(str(e)), None
         if e.code in INVALID_TOKEN:
             return refusal.reconnect("the session's token is not valid"), None
         if not settled(e):
@@ -490,10 +494,10 @@ def acknowledge(session: str, token: str, directive: str) -> str:
     except Unsent as e:
         return refusal.retry(str(e))
     except Refused as e:
+        if (said := unrepairable(e, session)) is not None:
+            return said
         if e.code == "session-binding-moved":
             return _current_machine_refusal(e)
-        if e.remedy == "update-plugin":
-            return refusal.outdated(str(e))
         if e.code in INVALID_TOKEN:
             return refusal.reconnect(f"unknown, detached or stale token for {session}")
         if not settled(e):

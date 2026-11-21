@@ -202,7 +202,7 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
             reply = (f"cancelled: {gate}, withdrawn from {where}" if where
                      else refusal.retry(f"Go answered the withdrawal of {gate} without saying what it withdrew"))
         except session_routes.Refused as e:
-            reply = refusal.refuse(str(e), send="/2mw2lt:gate") if session_routes.settled(e) else refusal.retry(str(e))
+            reply = session_routes.unrepairable(e, session) or (refusal.refuse(str(e), send="/2mw2lt:gate") if session_routes.settled(e) else refusal.retry(str(e)))
         except session_routes.Unsent as e:
             reply = refusal.retry(str(e))
         print(display_reply(reply))
@@ -296,7 +296,7 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
             # A first reply that was lost leaves the commission made: Go names it, so its status can be read.
             reply = refusal.refuse(str(e), send=f"/2mw2lt:gate status {holding}")
         else:
-            reply = refusal.retry(str(e)) if uncertain else _settled_refusal(e)
+            reply = session_routes.unrepairable(e, session) or (refusal.retry(str(e)) if uncertain else _settled_refusal(e))
     except session_routes.Unsent as e:
         uncertain, reply = True, refusal.retry(str(e))
     print(display_reply(reply))
@@ -353,7 +353,7 @@ def go_read(ws: Path, session: str, flags, kind: str, what: str) -> int:
             pages += 1
             page = f"{path}&{urllib.parse.urlencode({'next': listed['next']})}" if listed.get("next") else None
     except session_routes.Refused as e:
-        reply = refusal.refuse(str(e), send="/2mw2lt:gate") if session_routes.settled(e) else refusal.retry(str(e))
+        reply = session_routes.unrepairable(e, session) or (refusal.refuse(str(e), send="/2mw2lt:gate") if session_routes.settled(e) else refusal.retry(str(e)))
         print(display_reply(reply), file=sys.stderr)
         return 1
     except session_routes.Unsent as e:
@@ -537,7 +537,7 @@ def go_carry(ws: Path, session: str, flags, pr: int, retry_id: str | None) -> in
                                        send=[("/2mw2lt:gate carry <n>",
                                               "once this checkout is fast-forwarded to the pull request's head")])
             else:
-                reply = refusal.retry(str(e)) if uncertain else _settled_refusal(e)
+                reply = session_routes.unrepairable(e, session) or (refusal.retry(str(e)) if uncertain else _settled_refusal(e))
         except session_routes.Unsent as e:
             uncertain, reply = True, refusal.retry(str(e))
         break

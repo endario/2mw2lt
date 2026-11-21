@@ -53,7 +53,7 @@ def main(argv: list[str]) -> int:
                                          fact["why"], token, how=fact.get("how", ""),
                                          source=fact.get("source", ""))
     except session_routes.Refused as e:
-        reply = refusal.use("declare", f"{verb} {fact['card']}: {e}")
+        reply = session_routes.unrepairable(e, session) or refusal.use("declare", f"{verb} {fact['card']}: {e}")
     except session_routes.Unsent as e:
         reply = refusal.retry(str(e))
     print(reply)

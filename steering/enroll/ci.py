@@ -364,7 +364,8 @@ def run(ws: Path, here: Path, repo: str, session: str, flags, picked: dict, retr
         return 0
     except (session_routes.Refused, session_routes.Unsent) as e:
         print(said)
-        print(display_reply(refusal.retry(f"its wait was not registered ({e}); read its verdict with ci.py {session} status {run_id}")))
+        relayed = session_routes.unrepairable(e, session) if isinstance(e, session_routes.Refused) else None
+        print(display_reply(relayed or refusal.retry(f"its wait was not registered ({e}); read its verdict with ci.py {session} status {run_id}")))
         return 1
 
 

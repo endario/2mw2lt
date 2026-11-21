@@ -194,7 +194,7 @@ def _record(ws: Path, session: str, token: str, body: dict, mirror_to: str | Non
     """Go records the checkpoint on the session's own token; a resend under `--retry` is its replay.
     Only text Go accepted, after its scan, is mirrored."""
     import session_routes
-    reply, unsure = session_routes.checkpoint(token, body)
+    reply, unsure = session_routes.checkpoint(token, body, session)
     print(reply)
     if not reply.startswith("checkpointed:"):
         # Last on stdout, so a reader of `2>&1 | tail -1` keeps the id (#3303).

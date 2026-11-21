@@ -249,6 +249,9 @@ def submit(held: dict, file: Path) -> int:
             # The seat moved between this client's check and Go's: the decision is sound, so the file stays.
             print(f"refused: this session no longer holds the seat ({e.code}); {file} is kept for the holder to submit")
             return 1
+        if (said := session_routes.unrepairable(e, held["session"])) is not None:
+            print(said)
+            return 1
         file.unlink(missing_ok=True)
         if e.code in STALE:
             print(f"refused: {e.code}: the goal moved since this command was prepared")
