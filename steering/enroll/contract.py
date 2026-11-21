@@ -278,6 +278,7 @@ AccountSpend = typing.TypedDict("AccountSpend", {
 AccountList = typing.TypedDict("AccountList", {
     "items": "list[ListedAccountUsage] | None",
     "vendor_models": "dict[str, list[AccountModel] | None] | None",
+    "ticks_required": "list[str] | None",
     "cost_words": "list[ModelCostWord] | None",
     "owns_team": "bool",
     "team_owner": "str | None",
