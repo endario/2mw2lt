@@ -180,8 +180,8 @@ MatrixCandidate = typing.TypedDict("MatrixCandidate", {
 })
 
 # MatrixForbidden says which rule forbids a cell: By is "owner" (the owner stopped the account for
-# the team), "host-vendor" or "host-account" (an entry of the host's routing.accounts_exclude), or
-# "login" (a rule a live login on the host reports itself). Until is when a timed rule ends.
+# the team), or "host-vendor" or "host-account" (an entry of the host's routing.accounts_exclude).
+# Until is when a timed rule ends.
 MatrixForbidden = typing.TypedDict("MatrixForbidden", {
     "by": "str",
     "until": "str | None",
