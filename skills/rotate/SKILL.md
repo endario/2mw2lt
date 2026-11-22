@@ -4,7 +4,7 @@ description: Rotate this session's steering enrolment token, for one that has be
 ---
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rotate.py" --doing "<what you are doing>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rotate.py" --doing "<what you are doing>"
 ```
 
 It detaches the enrolment and makes it again under the same name, which mints a fresh token on a
@@ -18,7 +18,7 @@ through the workspace's own stable launcher, not `${CLAUDE_PLUGIN_ROOT}`, the sa
 
 ```bash
 ws="${STEERING_WORKSPACE:-$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")}"
-python3 "$ws/.claude/steering-launch.py" exec hold --until-event <your session>
+"${STEERING_PYTHON:-python3}" "$ws/.claude/steering-launch.py" exec hold --until-event <your session>
 ```
 
 Start it again before you act on that frame. For another stream-holding harness, use the blocking

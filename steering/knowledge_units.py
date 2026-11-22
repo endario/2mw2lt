@@ -139,7 +139,8 @@ def _scope(scope) -> list[str]:
 def validate(texts: dict[str, str]) -> tuple[dict[str, dict], list[str]]:
     """The units among `texts` (path to text) by id, each header with its `path`, and every
     reason the set is refused: a malformed header, two files with one id, or a `superseded_by`
-    naming no active unit. A refused set is refused whole."""
+    naming no active unit. The guard refuses the set whole; the daemon's sync applies the same
+    reasons as skips, so one bad unit cannot stop the ones after it (#10557)."""
     units, why = {}, []
     for path in sorted(texts):
         h, bad = header(texts[path])

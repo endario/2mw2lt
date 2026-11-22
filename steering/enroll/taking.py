@@ -45,8 +45,8 @@ def main(argv: list[str]) -> int:
     card, repo = "", ""
     if "--card" in args:
         i = args.index("--card")
-        if i + 1 >= len(args) or not re.fullmatch(r"[0-9a-f]{24}", args[i + 1]):
-            return error("taking", "taking --card names a card id, as the cards read answers")
+        if i + 1 >= len(args) or not re.fullmatch(r"[0-9a-f]{1,24}", args[i + 1]):
+            return error("taking", "taking --card names a card id, as the cards read answers, or a unique prefix of one")
         card, args = args[i + 1], args[:i] + args[i + 2:]
     if not args or not args[0] or args[0].startswith("-") or any(c.isspace() for c in args[0]):
         return error("taking", "taking requires a session name")
@@ -94,7 +94,15 @@ def main(argv: list[str]) -> int:
             candidates = session_routes.executing_cards(session, token)
             named = None
             if card:
-                named = next((c for c in candidates if c.get("id") == card), None)
+                # A card id the platform prints is the wire id or a prefix of one: the session's own
+                # cards decide between them, and more than one matching is named back, fully (#10543).
+                hits = [c for c in candidates if str(c.get("id", "")).startswith(card)]
+                if len(hits) > 1:
+                    said = "; ".join(f"{c['id']} ({c['name']})" for c in hits)
+                    print(f"ambiguous: {card} is a prefix of {len(hits)} live cards {session} executes — "
+                          f"{said}; name one by more of its id", file=sys.stderr)
+                    return 1
+                named = hits[0] if hits else None
                 if named is None:
                     said = "; ".join(f"{c['id']} ({c['name']})" for c in candidates) or "none it executes"
                     print(f"card {card} is no live card this session executes: {said}. Have the seat make "

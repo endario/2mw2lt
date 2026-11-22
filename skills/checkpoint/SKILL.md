@@ -59,7 +59,7 @@ learned=$(mktemp)
 cat > "$learned" <<'JSON'
 [{"text": "<rule, and the mistake it prevents>", "scope": ["steering/"]}]
 JSON
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <your session> <boundary> --text-file <note file> [--card <card's wire id>] [--learned-file "$learned"] [--mirror <pull request or issue URL>]
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <your session> <boundary> --text-file <note file> [--card <card's wire id>] [--learned-file "$learned"] [--mirror <pull request or issue URL>]
 ```
 
 `--card` names the card the checkpoint is of, by its wire id, and the session must execute the card:
@@ -72,7 +72,7 @@ workspace's stable launcher, the one path every harness shares and a Codex sessi
 without a dialog:
 
 ```bash
-python3 <workspace>/.claude/steering-launch.py exec checkpoint <your session> <boundary> --text-file <note file> [--card <card's wire id>] [--learned-file "$learned"] [--mirror <pull request or issue URL>]
+"${STEERING_PYTHON:-python3}" <workspace>/.claude/steering-launch.py exec checkpoint <your session> <boundary> --text-file <note file> [--card <card's wire id>] [--learned-file "$learned"] [--mirror <pull request or issue URL>]
 ```
 
 The platform scans the note for credentials and keeps it for the workspace's retention.

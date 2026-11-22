@@ -46,8 +46,18 @@ def launcher_path(workspace: Path) -> Path:
     return Path(workspace) / ".claude" / LAUNCH_NAME
 
 
+# The interpreter the written hook commands resolve: the bundled one the agent exports to its
+# launched sessions, else PATH's python3 (#10540). An inherited variable survives the login shell
+# whose /etc/zprofile path_helper puts /usr/bin's python3 ahead of an inherited PATH — the reason
+# it is named here rather than prepended to PATH.
+PYTHON_FORM = '"${STEERING_PYTHON:-python3}"'
+# What `PYTHON_FORM` and its predecessor lex to as argv0: hook commands written before the
+# variable existed stay recognised as ours.
+_INTERPRETERS = ("python3", "${STEERING_PYTHON:-python3}")
+
+
 def command(workspace: Path, verb: str) -> str:
-    return f"python3 {shlex.quote(str(launcher_path(workspace)))} {verb}"
+    return f"{PYTHON_FORM} {shlex.quote(str(launcher_path(workspace)))} {verb}"
 
 
 def handler(workspace: Path, verb: str) -> dict:
@@ -75,9 +85,9 @@ def _command_path(h: object) -> str | None:
         parts = shlex.split(h["command"])
     except ValueError:
         return None
-    # `python3 <script>` and `python3 <launcher> <verb>` alike: the script is what identifies
-    # the handler, and the verb is which of the pack's entry points it asks for.
-    return parts[1] if len(parts) in (2, 3) and parts[0] == "python3" else None
+    # `<interpreter> <script>` and `<interpreter> <launcher> <verb>` alike: the script is what
+    # identifies the handler, and the verb is which of the pack's entry points it asks for.
+    return parts[1] if len(parts) in (2, 3) and parts[0] in _INTERPRETERS else None
 
 
 def siblings(sender: Path) -> tuple[Path, ...]:

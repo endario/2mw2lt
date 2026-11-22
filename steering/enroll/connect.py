@@ -248,8 +248,8 @@ def say_invocation(h: harness_mod.Harness, psession: str, session: str) -> str:
     because an install under a directory with a space in it would otherwise run something else,
     because an invocation that has to be repaired before it runs is worth less than none.
     """
-    return (f'python3 {shlex.quote(str(HERE / "say.py"))} --provider {h.provider} '
-            f'--provider-session {psession} {session} "<text>"')
+    return (f'"${{STEERING_PYTHON:-python3}}" {shlex.quote(str(HERE / "say.py"))} '
+            f'--provider {h.provider} --provider-session {psession} {session} "<text>"')
 
 
 def speaker_flags(argv: list[str], also: tuple[str, ...] = (), switches: tuple[str, ...] = ()) -> tuple[dict[str, str], list[str]] | None:
@@ -866,9 +866,10 @@ def main(argv: list[str]) -> int:
         h = harness_of(o.provider)
     except Refused as why:
         return error("connect", str(why))
-    # Claude, zcode, codex and Devin all load plugin hooks whose commands name `python3` bare; on a
-    # machine whose PATH resolves one under the floor they fail open on every call (#9888), so a
-    # connect that would leave them wired is refused before any work.
+    # Claude, zcode, codex and Devin all load plugin hooks whose commands resolve
+    # `${STEERING_PYTHON:-python3}`; on a machine whose resolved interpreter is under the floor
+    # they fail open on every call (#9888, #10540), so a connect that would leave them wired is
+    # refused before any work.
     if h.hooks or h.provider in ("codex", "devin"):
         if why := python_floor.on_path_refusal("run connect again"):
             print(why, file=sys.stderr)

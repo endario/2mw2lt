@@ -67,7 +67,7 @@ _LAUNCH = re.compile(r"^launch:\s*token\s+@lease(?:\s+(?P<harness>[a-z][a-z0-9-]
                      # A floor names the least rarity its model may have, in place of the model (#6499).
                      r"(?:\s+model\s+(?P<model>\S{1,128})|\s+floor\s+(?P<floor>uncommon|rare|epic|legendary))?"
                      r"(?:\s+thinking\s+(?P<thinking>[a-z]{1,32}))?(?:\s+effort\s+(?P<effort>low|medium|high|xhigh|max))?"
-                     r"(?:\s+(?P<window>window))?(?:\s+card\s+(?P<card>[0-9a-f]{24})"
+                     r"(?:\s+(?P<window>window))?(?:\s+card\s+(?P<card>[0-9a-f]{1,24})"
                      # Or the card by the issue it resolves, which the seat holds as a number.
                      r"|\s+resolves\s+(?P<repo>[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100})#(?P<issue>[1-9][0-9]{0,9}))?"
                      r"(?:\s+notify\s+(?P<notify>[A-Za-z0-9][A-Za-z0-9._-]{0,119}))?"
@@ -136,7 +136,7 @@ _ANSWER_USAGE = "answer: token @lease <episode> acted because <why>` or `answer:
 _REGROUP = re.compile(r"^regroup:\s*token\s+@lease\s+because\s+(?P<reason>\S.*?)\s*$", re.S)
 _REGROUP_USAGE = "regroup: token @lease because <why reconsider now>"
 # Acts no verb sees (doc 202 D16), recorded by the holder, never by a named actor in the prose.
-_INTERVENED = re.compile(r"^intervened:\s*token\s+@lease\s+(?P<card>[0-9a-f]{24})\s+(?P<cause>\S+)\s+(?P<why>\S.*?)\s*$", re.S)
+_INTERVENED = re.compile(r"^intervened:\s*token\s+@lease\s+(?P<card>[0-9a-f]{1,24})\s+(?P<cause>\S+)\s+(?P<why>\S.*?)\s*$", re.S)
 _INTERVENED_CAUSES = ("unheard", "stalled", "dead", "conflict", "queue-red", "ceiling", "stale-card", "release-red", "other")
 # Every lease verb `go_say` sends to Go, so a refusal of another names what this client takes.
 GO_VERBS = tuple(sorted({"authorship", "backlog", "cancel", "dispose", "floor", "intervened", "launch", "lift", "out-of-band", "promote", "relay", "roster",

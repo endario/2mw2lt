@@ -18,7 +18,7 @@ _LINE = re.compile(r"\Acheckpoint:\s*(?P<session>\S+)\s+token\s+\S+\s+json\s+(?P
 _NOTE = re.compile(r"https://github\.com/[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]+")
 _SHA = re.compile(r"[0-9a-f]{64}")
 _ID = re.compile(r"[A-Za-z0-9-]{16,64}")  # the client's occurrence id (`door.OCCURRENCE`)
-_CARD = re.compile(r"[0-9a-f]{24}")  # the card a handover names, by its wire id (Go's `ValidCardID`)
+_CARD = re.compile(r"[0-9a-f]{1,24}")  # the card a handover names, by its wire id or a prefix of one (Go's `ValidCardID`)
 _FIELDS = {"id", "boundary", "card", "text", "note", "note_sha256", "learned"}
 
 
@@ -61,7 +61,7 @@ def parse(text: str) -> dict | str:
         return f"boundary is one of {', '.join(BOUNDARIES)}"
     card = body.get("card")
     if card is not None and (not isinstance(card, str) or not _CARD.fullmatch(card)):
-        return "card is the 24-hex wire id of the card the checkpoint names"
+        return "card is the wire id of the card the checkpoint names, or a unique prefix of one"
     text, note = body.get("text"), body.get("note")
     if text is not None:
         # The platform keeps the text itself, and a mirror of it is posted only after, so it names no note.

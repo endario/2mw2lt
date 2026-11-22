@@ -13,7 +13,7 @@ is truncated. The [connect skill](SKILL.md) is the execution recipe.
 - No session export or descriptor: provide this harness's provider, session id and process id:
 
   ```bash
-  python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/connect.py" --provider <harness> --provider-session <id> --pid <pid>
+  "${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/connect.py" --provider <harness> --provider-session <id> --pid <pid>
   ```
 
   Codex instead uses `--provider codex --provider-session <thread-id>`, without `--pid`.
@@ -39,14 +39,14 @@ printed. For Codex without session exports, replace `<thread-id>` with the threa
 connection:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" --provider codex --provider-session <thread-id> <session> <issue>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" --provider codex --provider-session <thread-id> <session> branch
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/holds.py" --provider codex --provider-session <thread-id> <session> <branch>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/holds.py" --provider codex --provider-session <thread-id> <session> issue <issue>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/say.py" --provider codex --provider-session <thread-id> <session> "<what you want to say>"
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/say.py" --provider codex --provider-session <thread-id> --to <their session> <session> "<text>"
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" --provider codex --provider-session <thread-id> <session> review <pr>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" --provider codex --provider-session <thread-id> <session> status <commission-id>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" --provider codex --provider-session <thread-id> <session> <issue>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" --provider codex --provider-session <thread-id> <session> branch
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/holds.py" --provider codex --provider-session <thread-id> <session> <branch>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/holds.py" --provider codex --provider-session <thread-id> <session> issue <issue>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/say.py" --provider codex --provider-session <thread-id> <session> "<what you want to say>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/say.py" --provider codex --provider-session <thread-id> --to <their session> <session> "<text>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" --provider codex --provider-session <thread-id> <session> review <pr>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" --provider codex --provider-session <thread-id> <session> status <commission-id>
 ```
 
 Use the same prefix for gate `critic`, `cancel`, `pr` and `carry`. Keep any `say.py --retry=<id>`
@@ -64,7 +64,7 @@ open, without `--until-event`, and re-arms on tool expiry. When that tool is Mon
 
 ```bash
 ws="${STEERING_WORKSPACE:-$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")}"
-python3 "$ws/.claude/steering-launch.py" exec hold <session>
+"${STEERING_PYTHON:-python3}" "$ws/.claude/steering-launch.py" exec hold <session>
 ```
 
 A harness reached by injection skips this hold. Codex is that case. The agent retains its
@@ -126,7 +126,7 @@ before acting; the launcher resolves its path:
 
 ```bash
 ws="${STEERING_WORKSPACE:-$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")}"
-f=$(python3 "$ws/.claude/steering-launch.py" exec hold --frame-path <session>)
+f=$("${STEERING_PYTHON:-python3}" "$ws/.claude/steering-launch.py" exec hold --frame-path <session>)
 grep '^data: ' "$f" | tail -n 5 | python3 -c '
 import json, sys
 for line in sys.stdin.read().splitlines():

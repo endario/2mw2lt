@@ -18,7 +18,7 @@ To hand the seat on while you hold it, name an enrolled session; Go seats it at 
 stands at:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" post /steering/brain/attach <<'JSON'
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" post /steering/brain/attach <<'JSON'
 {"lease_token":"@lease","session":"<successor>"}
 JSON
 ```
@@ -26,7 +26,7 @@ JSON
 ## Take the role
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/promote.py"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/promote.py"
 ```
 
 No session name: it finds the enrollment minted for this session and the role is taken with
@@ -84,7 +84,7 @@ stable launcher instead, which re-resolves the current install on every call:
 
 ```bash
 ws="${STEERING_WORKSPACE:-$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")}"
-python3 "$ws/.claude/steering-launch.py" exec hold --until-event <session-name>
+"${STEERING_PYTHON:-python3}" "$ws/.claude/steering-launch.py" exec hold --until-event <session-name>
 ```
 
 It exits 0 on the first waking frame — a non-inform say, an envelope, a seat frame,
@@ -352,7 +352,7 @@ until you move it to that machine, named by one of its `registrations` in `rest.
 Only a machine stating the same OS login and hardware is taken (`rebind-other-node` otherwise):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post "/sessions/<you>/rebind" \
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post "/sessions/<you>/rebind" \
   --json '{"to": "<session>", "machine": "<machine registration>"}' --key <uuid>
 ```
 
@@ -363,14 +363,14 @@ conclude a card yourself when its unit is done and its executor still stands wit
 checkpoint. Each notice is
 a suggestion;
 Go wakes and keeps nothing for it. Who you can reach is
-`python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /sessions`, each row with its
+`"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /sessions`, each row with its
 `machine_name`, `account`, `vitals` (`model`, `effort`) and `standing` (its activity, whether
 it is stale, its keep and its cache), `null` when nothing has been read:
 delegate by those, and never
 ask a session its level, since it cannot read its own. Its account's verdict is the `fleet` row
 naming it in `sessions`.
 The cards are the board's, which a brain on any machine reads with
-`python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease "/cards?state=live"`, a hundred to
+`"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease "/cards?state=live"`, a hundred to
 a page; read on with `&next=<the page's next>`. Delegate to each session a notice frees, each
 session once. For each, take the highest-priority card with no present executor (one whose
 executor has left the board counts) that the session can carry, and that you have not already
@@ -423,8 +423,8 @@ in peak, record a bounded override with its why
 
 ```bash
 echo 'peak-override: token @lease <vendor> for builds|gates|both [until <time or duration>] because <why>' \
-  | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" say
-echo 'peak-override-end: token @lease <vendor> because <why>' | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" say
+  | "${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" say
+echo 'peak-override-end: token @lease <vendor> because <why>' | "${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" say
 ```
 
 With no `until` the override ends at the vendor's known window's end, and it may last at most
@@ -448,7 +448,7 @@ recording. Read its recent complete frames before responding to or following the
 
 ```bash
 ws="${STEERING_WORKSPACE:-$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")}"
-f=$(python3 "$ws/.claude/steering-launch.py" exec hold --frame-path <your session>)
+f=$("${STEERING_PYTHON:-python3}" "$ws/.claude/steering-launch.py" exec hold --frame-path <your session>)
 grep '^data: ' "$f" | tail -n 5 | python3 -c '
 import json, sys
 for line in sys.stdin.read().splitlines():
@@ -467,7 +467,7 @@ Speak to the owner whenever you have something to say: before they ask, about a 
 or again after you have answered it. Each send is one message.
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" post /steering/brain/reply <<'JSON'
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" post /steering/brain/reply <<'JSON'
 {"lease_token":"@lease","request":"<the say's id, when it is about one>","text":"..."}
 JSON
 ```
@@ -496,8 +496,8 @@ The seat repeated one fact to session after session; the bulletin is where such 
 Post it instead of saying it twice:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/bulletin.py" <session> post <key> "<text>" [--until +2h] [--standing] [--seat]
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/bulletin.py" <session> retract <key> "<reason>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/bulletin.py" <session> post <key> "<text>" [--until +2h] [--standing] [--seat]
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/bulletin.py" <session> retract <key> "<reason>"
 ```
 
 Retract what is wrong, with its reason. A standing line that has stood for weeks is a knowledge
@@ -513,7 +513,7 @@ naming who gave it. An ask raises a row in Needs You, so it is for a decision th
 next action; goal discovery's strategic questions belong to its room thread instead.
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" ask <your session> 'json {"question":"<one short question>","context":"<markdown: what is known, what each path costs>","options":[{"label":"<action>","description":"<its consequence>","recommended":true},{"label":"<action>","description":"<its consequence>"}],"allow_other":true}'
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" ask <your session> 'json {"question":"<one short question>","context":"<markdown: what is known, what each path costs>","options":[{"label":"<action>","description":"<its consequence>","recommended":true},{"label":"<action>","description":"<its consequence>"}],"allow_other":true}'
 ```
 
 ## Raise the owner
@@ -523,7 +523,7 @@ sends a notification to their phone, at most once in fifteen minutes. A session'
 you promote, raise the phone too and spend the same fifteen minutes.
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" post /steering/push/raise <<'JSON'
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" post /steering/push/raise <<'JSON'
 {"lease_token":"@lease","title":"Steering","text":"..."}
 JSON
 ```
@@ -552,7 +552,7 @@ short line, said aloud and shown, on the workspace's linked bodies — "the rele
 It is the seat's own voice; a worker has no such verb.
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" post /steering/body/speak <<'JSON'
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" post /steering/body/speak <<'JSON'
 {"lease_token":"@lease","text":"The release is out."}
 JSON
 ```
@@ -578,7 +578,7 @@ an answer, a nudge that is not a directive — speak to it by name on the enrolm
 session already has, not on the lease token:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/say.py" --to <their session> <your session> "<text>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/say.py" --to <their session> <your session> "<text>"
 ```
 
 It arrives on the stream that session holds, as
@@ -599,8 +599,8 @@ someone else posts in one, your stream carries `{"kind": "room", "room", "seq", 
 where to read, never what was said. Read it and speak in it on the lease token:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease "/rooms/<room>/messages"
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post "/rooms/<room>/messages" \
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease "/rooms/<room>/messages"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post "/rooms/<room>/messages" \
   --json '{"text": "…"}' --key <a key of your own for this message>
 ```
 
@@ -648,10 +648,10 @@ brain has the session run it as part of taking the work, and reads the registry 
 what:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <their session> <issue number>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <their session> branch [<name>]
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/holds.py" <their session> issue <number>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/holds.py" <their session> <branch>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <their session> <issue number>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <their session> branch [<name>]
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/holds.py" <their session> issue <number>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/holds.py" <their session> <branch>
 ```
 
 **Recording a claim is not taking exclusive hold of anything.** `taking.py` appends the claim and
@@ -684,8 +684,8 @@ asking you; for an issue it has taken with `taking.py` it joins that card and se
 brief need name only one of the two.
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease scope <name> <track> [<verb>:<n>[,<n>] ...] triage:<criticality>,<size>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease session <card> <session> executor
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease scope <name> <track> [<verb>:<n>[,<n>] ...] triage:<criticality>,<size>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease session <card> <session> executor
 ```
 
 Triage every card you scope (#6499): criticality (`critical`, `major`, `minor`, `trivial`) and size
@@ -705,8 +705,8 @@ Each rating is a rung, `none` to unrate a model the platform rates, or `platform
 platform's rating again. Read the ladder before you rate it:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /ladder
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post /ladder --key <a key of your own for this rating> \
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /ladder
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post /ladder --key <a key of your own for this rating> \
   --json '{"ratings": [{"selector": "\\bmimo-v2\\.6-pro\\b", "rarity": "rare", "model": "mimo-v2.6-pro"}], "why": "…"}'
 ```
 
@@ -717,7 +717,7 @@ their own account is theirs to change, and a launch waiting `excluded:unserving-
 `null` clears the word:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post /providers/models --key <a key of your own> \
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post /providers/models --key <a key of your own> \
   --json '{"vendor": "devin", "models": ["swe-2", "swe-2-flash"]}'
 ```
 
@@ -729,11 +729,11 @@ check and what satisfies it. `--dry-run` resolves the numbers and shows the befo
 sending nothing:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/accounts.py" list [vendor]
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/accounts.py" carry <vendor> <legacy number> <qualified number>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/accounts.py" remove <vendor> <number>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/accounts.py" restore <vendor> <number>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/accounts.py" number <vendor> <number> <to>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/accounts.py" list [vendor]
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/accounts.py" carry <vendor> <legacy number> <qualified number>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/accounts.py" remove <vendor> <number>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/accounts.py" restore <vendor> <number>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/accounts.py" number <vendor> <number> <to>
 ```
 
 The words stand where the grant does. `access` asks coordination what the seat's grant now
@@ -743,7 +743,7 @@ for this workspace's seat. A grant without it, or at the workspace's reach alone
 `delegation-revoked` naming `class` or `reach`; ask the owner, never widen a default:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/accounts.py" access
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/accounts.py" access
 ```
 
 A removed account's number is free to take: the seat removes it, and `number` hands it the number
@@ -752,7 +752,7 @@ accounts — carry each legacy number onto the qualified account that succeeded 
 number no successor claims, then `number` the survivors down — is dry-run first, then sent:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/accounts.py" number anthropic 5 4 --dry-run
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/accounts.py" number anthropic 5 4 --dry-run
 ```
 
 Delegating a card is also when you say what it waits on and which goal it serves. A goal is the
@@ -760,8 +760,8 @@ Ledger's own record, and a card joins it as `part-of <goal>`, by the goal's id.
 Name the plan's sentence as `--source` when an edge comes from one:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease link <card> requires <card>|requires <owner>/<name>#<n>|part-of <goal> [--source <where>] <why>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease unlink <card> requires|part-of <target> resolved|withdrawn <why>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease link <card> requires <card>|requires <owner>/<name>#<n>|part-of <goal> [--source <where>] <why>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease unlink <card> requires|part-of <target> resolved|withdrawn <why>
 ```
 
 A goal, or a card you declared major, owes an outcome brief before its first branch is pushed. Write it
@@ -771,7 +771,7 @@ brief. When the card adds the only fact that would show its outcome, state the b
 The CI backstop of #4283 would read:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease outcome <card> \
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease outcome <card> \
   need "CI on main runs only when a GitHub schedule slot fires, and GitHub delays or drops slots" \
   target "at least 0.95 of slots due get a run within 60 min; no slot runs twice" \
   window 7d starts rollout \
@@ -799,7 +799,7 @@ plan is missing, and that is the first thing to repair.
 reconstruction from messages:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease "/goals/<goal>/execution"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease "/goals/<goal>/execution"
 ```
 
 Each unit carries one `next_act` with its basis: `reconcile-plan`, `inspect-blocker`,
@@ -830,8 +830,8 @@ your intended order (`card`, `role` required, optional or excluded, and `stateme
 shows each beside your decision, and writes the exact body:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/goal.py" --lease prepare plan <goal> --policy <decision unit> --decision <file>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/goal.py" --lease submit <the file prepare printed>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/goal.py" --lease prepare plan <goal> --policy <decision unit> --decision <file>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/goal.py" --lease submit <the file prepare printed>
 ```
 
 A lost answer is the same `submit` again, answered from the first. A stale refusal names what moved
@@ -852,7 +852,7 @@ evidence, the goal over its criterion judgments — and submit it, never folding
 into a conclusion. Evidence is a card or a pull request, never a link:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/goal.py" --lease prepare judge <goal> <criterion>|goal <verdict> --evidence pull:<owner>/<name>#<n> because <why>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/goal.py" --lease prepare judge <goal> <criterion>|goal <verdict> --evidence pull:<owner>/<name>#<n> because <why>
 ```
 
 **A goal the owner drops on purpose is withdrawn, never rejected.** `rejected` says the outcome
@@ -863,7 +863,7 @@ set everywhere an accepted one does, owing no plan and no evidence. Only a goal 
 revision reopens the goal like any other:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/goal.py" --lease prepare judge <goal> goal withdrawn because <the owner's ruling>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/goal.py" --lease prepare judge <goal> goal withdrawn because <the owner's ruling>
 ```
 
 **Appoint a steward when relaying the goal is the work.** A goal whose cards keep coming back to
@@ -875,7 +875,7 @@ the highest rarity it may launch at, how many sessions it may run at once, and o
 accounts (`vendor/account`) and machines it may place on, and an `until`:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --put "/goals/<goal>/steward" --key "<new uuid>" \
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --put "/goals/<goal>/steward" --key "<new uuid>" \
   --json '{"steward": "<session>", "ceiling": "rare", "concurrency": 3, "until": "<RFC 3339 time>", "reason": "<why this goal, why this session>"}'
 ```
 
@@ -896,11 +896,11 @@ from either door. Every `say "…"` on this page sends a lease verb to the door 
 names, from whichever machine you are on, with the agent credential. It prints `id <id>` on
 stderr before it sends. It exits 0 on an answer, 1 on a refusal or on a door that never answered,
 and the text says which. A line whose answer was lost goes again as
-`printf '%s' "<line>" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" say --retry=<id>`, so the door answers it from its
+`printf '%s' "<line>" | "${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" say --retry=<id>`, so the door answers it from its
 record rather than taking it twice. `note:` and `effort:` keep no record, so they are sent once:
 
 ```bash
-say() { printf '%s' "$1" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" say; }
+say() { printf '%s' "$1" | "${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" say; }
 say "relay: token @lease to <their session> <the directive, with the context it needs>"
 ```
 
@@ -1457,8 +1457,8 @@ the directive to take it over, naming that checkpoint (`relay: token @lease to <
 it first; only after that announce, record the new holder, in this order:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease unsession <card> <old session>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease session <card> <new session> executor
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease unsession <card> <old session>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease session <card> <new session> executor
 ```
 
 The card takes its branch from the new holder's `on` when it is named, which is why the
@@ -1502,11 +1502,11 @@ Read the row, decide which is true, and write it as the seat:
 
 ```bash
 # the association was real and never written — the card lands on the next sweep
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease branch <card> <repo> <branch>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease branch <card> <repo> <branch>
 # the conclusion was premature — the card returns to live work
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease unconclude <card>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease unconclude <card>
 # the card no longer describes real work
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease retire <card> "<why>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease retire <card> "<why>"
 ```
 
 Ask the session named in the row before withdrawing its conclusion. It concluded on evidence
@@ -1519,17 +1519,17 @@ the cards placed on a low-confidence answer; confirming one in the lane it is al
 correction too, and the row folds once each is settled.
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reclassify <card> track <lane> "<why>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reclassify <card> track <lane> "<why>"
 # repository upkeep drawn in a product lane
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reclassify <card> track off-track "<why>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reclassify <card> track off-track "<why>"
 # a minor edit that earned a card by its gate, or back again
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reclassify <card> significance minor "<why>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reclassify <card> significance minor "<why>"
 # a card named wrongly, or whose name no longer says its work
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reclassify <card> name "<new name>" "<why>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reclassify <card> name "<new name>" "<why>"
 # the whole anchor set the card declares, replacing what it declared before
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reanchor <card> resolves:<n> advances:<n> "<why>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reanchor <card> resolves:<n> advances:<n> "<why>"
 # a card the keeper retired that is still real work
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reclassify <card> state live "<why>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease reclassify <card> state live "<why>"
 ```
 
 The keeper retires a card whose every branch is gone unmerged, with no open pull request and no
@@ -1671,7 +1671,7 @@ Before launching, read the machines Go reports for this workspace, every page, o
 seated session:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" /machines --all
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" /machines --all
 ```
 
 Each machine is keyed by a registration alias (`identity_scope: workspace-registration`): it joins
@@ -1693,7 +1693,7 @@ age out a week past their expiry. Take it off sooner, on the owner's behalf, wit
 the fleet lists for it:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post "/machines/<machine registration>/removal" \
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post "/machines/<machine registration>/removal" \
   --json '{"reason": "<why the host is gone>"}' --key <uuid>
 ```
 
@@ -1710,9 +1710,9 @@ holder asks it.
 Read a setting through the API, never over ssh or from a host's files. There are three places:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /settings
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --root /teams/<team>/settings
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --root /hosts/<host>/settings
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /settings
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --root /teams/<team>/settings
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --root /hosts/<host>/settings
 ```
 
 - **`/settings`** is the workspace's list. Its `team` is the `<team>` the workspace inherits from.
@@ -1732,9 +1732,9 @@ What each row tells you:
 You change what the owner's delegation grants, on the seat's delegated bearer, never over ssh:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --delegated --post --json '{"value": <json>, "version": <n>, "why": "<why>"}' --key <idempotency key> /settings/<key>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --root --delegated --post --json '{"value": <json>, "version": <n>, "why": "<why>"}' --key <idempotency key> /teams/<team>/settings/<key>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --root --delegated --post --json '{"value": <json>, "version": <n>, "why": "<why>"}' --key <idempotency key> /hosts/<host>/settings/<key>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --delegated --post --json '{"value": <json>, "version": <n>, "why": "<why>"}' --key <idempotency key> /settings/<key>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --root --delegated --post --json '{"value": <json>, "version": <n>, "why": "<why>"}' --key <idempotency key> /teams/<team>/settings/<key>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --root --delegated --post --json '{"value": <json>, "version": <n>, "why": "<why>"}' --key <idempotency key> /hosts/<host>/settings/<key>
 ```
 
 The body is the value, the `version` the row carried, and a `why` with a visible reason in it: your
@@ -1895,9 +1895,9 @@ still unlimited's catalog, until its 0.2.0 drops it
 are the ladder's:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /accounts   # each account's routes, and their costs: class free, offer (with until) or metered
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /accounts   # each account's routes, and their costs: class free, offer (with until) or metered
 unlimited models --catalog   # cards only (intelligence, price, source)
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /ladder   # a row's selector rates the models it matches at its rarity
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /ladder   # a row's selector rates the models it matches at its rarity
 ```
 
 A model is rated when a ladder row's selector matches it; its rung is that row's rarity. Rungs,
@@ -1919,7 +1919,7 @@ ruling, 2026-10-14), each for one rung:
 **Cast it** under a fresh key, the basis naming the rung and exactly one reason:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post /understudies/casts --key <uuid> \
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post /understudies/casts --key <uuid> \
   --json '{"model": "<model>", "tier": "<rung>", "rounds": 10, "basis": <basis>}'
 ```
 
@@ -1945,13 +1945,13 @@ last two understudies failed on its model or route sits out an hour; a calibrati
 itself at its rounds:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --delete /understudies/casts/<cast> --key <uuid>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --delete /understudies/casts/<cast> --key <uuid>
 ```
 
 **Read it to the owner** when they ask, or when a cast closes:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /understudies
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /understudies
 ```
 
 `models` holds each model's five observations as count of pairs with a 95% interval, and `rung` the
@@ -2067,7 +2067,7 @@ that are not there already, so they survive this session.
 ## Hand back
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" post /steering/brain/detach <<'JSON'
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" post /steering/brain/detach <<'JSON'
 {"lease_token":"@lease"}
 JSON
 ```

@@ -222,6 +222,38 @@ test('an envelope whose ack failed is read, and its replay submits no pointer', 
   expect(w.state.get('unsettled')).toEqual([{ ulid: 'U1', tries: 1 }])
 })
 
+// Every python child the module starts runs the interpreter STEERING_PYTHON names — the agent's
+// bundled one, which a login shell's path_helper cannot reorder away (#10540) — and plain
+// `python3` where the variable is not set.
+test('python children run the interpreter the environment names', async ($, on) => {
+  const w = world(on, {
+    proofEnv: { STEERING_PYTHON: '/agent/python/cpython-3.14.7/bin/python3' },
+    rounds: [{ lines: [line('e1', 'envelope', true)], code: 0, hold: never }],
+    recording: 'data: {"kind":"envelope","id":"e1","ulid":"01JENV"}\n',
+  })
+  await begin($)
+  await w.clock.settle()
+  await $.tool.call({ tool: TOOL } as never)
+  const ack = w.runs.find(argv => String(argv[1]).endsWith('/ack.py'))
+  expect(ack?.[0]).toBe('/agent/python/cpython-3.14.7/bin/python3')
+})
+
+// A variable naming nothing executable is read as absent — the same read workerpy.Exported and
+// launch.py's _steered give it — or a dead path after the export would spawn-fail every child.
+test('python children fall back to python3 when the named interpreter is not executable', async ($, on) => {
+  const w = world(on, {
+    proofEnv: { STEERING_PYTHON: '/agent/python/deleted/bin/python3' },
+    pyX: false,
+    rounds: [{ lines: [line('e1', 'envelope', true)], code: 0, hold: never }],
+    recording: 'data: {"kind":"envelope","id":"e1","ulid":"01JENV"}\n',
+  })
+  await begin($)
+  await w.clock.settle()
+  await $.tool.call({ tool: TOOL } as never)
+  const ack = w.runs.find(argv => String(argv[1]).endsWith('/ack.py'))
+  expect(ack?.[0]).toBe('python3')
+})
+
 // A receipt that does not arrive withholds nothing: the session reads the frame, and the receipt
 // goes again on the next call, where a refused call left it reading nothing while the daemon was
 // slow to take receipts (#7396).
@@ -1866,7 +1898,7 @@ test('a checkpoint from a session not connected, or at no known boundary, runs n
   const odd = await $.tool.call({ tool: CHECKPOINT_TOOL_NAME, boundary: '--retry=x', text: 'note' } as never)
   expect(String((odd as { deny?: string }).deny)).toContain('boundary is one of')
   const badCard = await $.tool.call({ tool: CHECKPOINT_TOOL_NAME, boundary: 'exit', text: 'note', card: 'card-9295' } as never)
-  expect(String((badCard as { deny?: string }).deny)).toContain('card is the 24-hex wire id')
+  expect(String((badCard as { deny?: string }).deny)).toContain('card is the wire id of the card the checkpoint names')
   w.enrolled = false
   const unconnected = await $.tool.call({ tool: CHECKPOINT_TOOL_NAME, boundary: 'exit', text: 'note' } as never)
   expect(String((unconnected as { deny?: string }).deny)).toContain('/2mw2lt:connect')

@@ -8,7 +8,10 @@
                                         --gh-account names the workspace's GitHub login when
                                         several signed-in logins can read the repository;
                                         --login names the GitHub account to sign in as, when it
-                                        is not the workspace's
+                                        is not the workspace's; --move-root moves this machine's
+                                        served root for the repository to this checkout even with
+                                        sessions live in the one it serves now, which the move
+                                        strands
     install.py --machine-only <owner>/<repo> [invite-code] [--team <id>] [--login <login>]
                                         install this login as a lent machine's service user
                                         (doc 209): no GitHub login and no checkout are read; an
@@ -796,6 +799,70 @@ def machine_port() -> int:
     return int(named) if named.isdecimal() else int(DEFAULT_AGENT_PORT)
 
 
+def live_sessions(port: int, root: Path) -> list[str] | None:
+    """The session names the agent on `port` holds or asserts reach for at `root`, or None where no
+    agent answers: the sessions moving the served root away from `root` would strand, as the agent
+    that serves them knows them (#10535). A port nothing listens on strands nothing."""
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/status")
+        with door_mod.send(req, 3) as r:
+            served = json.loads(r.read() or b"{}").get("served")
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ConnectionError,
+            http.client.HTTPException, ValueError, AttributeError, OSError):
+        return None
+    one = served.get(str(root)) if isinstance(served, dict) else None
+    if not isinstance(one, dict):
+        return []
+    names = set(one.get("held") or {}) | set(one.get("reached") or {})
+    return sorted(str(n) for n in names if n)
+
+
+def served_elsewhere(where: Path, repo: str, mine: Path) -> list[tuple[str, Path]]:
+    """The registry's entries serving `repo` from another checkout than `mine`, as (authority,
+    root): the served roots this install would move, one workspace at a time. A machine serves one
+    root per workspace, so a second clone of a served repository re-points it (#10535)."""
+    others: list[tuple[str, Path]] = []
+    if not where.exists():
+        return others
+    for path in sorted(where.glob("*.json")):
+        try:
+            entry = machine_workspaces.parse(path.read_text())
+        except (ValueError, OSError):
+            continue
+        if entry.root.resolve() == mine.resolve():
+            continue
+        if (origin_slug(entry.root, timeout=5) or "").lower() != repo.lower():
+            continue
+        others.append((path.stem, entry.root))
+    return others
+
+
+def move_served_root(root: Path, repo: str, chosen: bool) -> None:
+    """Say every served root this install moves, and refuse one with sessions live in it unless the
+    person chose the move (#10535): a re-point strands each session in the old checkout — the agent
+    stops serving its root — and may not do so silently."""
+    moves = served_elsewhere(machine_workspaces.directory(Path.home()), repo, root)
+    if not moves:
+        return
+    port = machine_port()
+    for authority, old in moves:
+        live = live_sessions(port, old)
+        if live is None:
+            say("machine", f"{authority}: no agent answers on 127.0.0.1:{port}, so nothing it holds in {old} "
+                           f"can be told live; moving the served root to {root}")
+            continue
+        if live and not chosen:
+            raise Stop(f"this machine serves {repo} from {old}, where {len(live)} session{'s are' if len(live) > 1 else ' is'} "
+                       f"live ({', '.join(live)}); installing here would move the served root to {root} and strand "
+                       "them. Let those sessions end first, or run install again with --move-root to move the "
+                       "served root anyway, stranding them")
+        if live:
+            say("machine", f"{authority}: moving the served root from {old} to {root}, stranding its live "
+                           f"sessions ({', '.join(live)})")
+        else:
+            say("machine", f"{authority}: no session is live in {old}; moving the served root to {root}")
+
+
 def go_installer(release: Path) -> Path | None:
     """The release's own `2mw2lt` when it has `install` (#6919), which installs with no Python
     environment. It is probed as the Go updater probes a subcommand: run bare, one that has it
@@ -1401,7 +1468,7 @@ def hook_python() -> None:
 
 def install(root: Path | None, codex: bool = False, team: str | None = None,
             gh_account: str | None = None, invite: str | None = None, login: str | None = None,
-            machine: str | None = None) -> int:
+            machine: str | None = None, move_root: bool = False) -> int:
     """`machine`, an `owner/name`, installs this login as a lent machine's service user (doc 209)
     in place of a checkout at `root`: the served root is made here, and no GitHub login is read.
     The login was only ever the sign-in's hint and the registry's pin for a full host's sessions;
@@ -1423,6 +1490,7 @@ def install(root: Path | None, codex: bool = False, team: str | None = None,
         service_plugin(Path.home())
     repo = repository(root)
     say("repository", repo)
+    move_served_root(root, repo, move_root)
     name = None if machine is not None else github_account(root, repo, gh_account)
     label = f"{socket.gethostname().split('.')[0]} as {getpass.getuser()}"
     bound = checkout_binding.id_at(root)
@@ -2138,6 +2206,7 @@ def main(argv: list[str]) -> int:
     merge = False
     codex = False
     machine = False
+    move_root = False
     team = None
     gh_account = None
     invite = None
@@ -2165,6 +2234,12 @@ def main(argv: list[str]) -> int:
             if action != "install":
                 return verb_help.error("install", "--codex is only for install")
             codex = True; i += 1; continue
+        if arg == "--move-root":
+            if action != "install":
+                return verb_help.error("install", "--move-root is only for install")
+            if move_root:
+                return verb_help.error("install", "move-root may appear once")
+            move_root = True; i += 1; continue
         if arg == "--team":
             if action != "install":
                 return verb_help.error("install", "--team is only for install")
@@ -2250,7 +2325,7 @@ def main(argv: list[str]) -> int:
         if action == "lanes":
             return adopt_lanes(root, merge, gh_account)
         return uninstall(root, machine) if action == "uninstall" else install(root, codex, team, gh_account, invite,
-                                                                            login, machine_only)
+                                                                              login, machine_only, move_root)
     except KeyboardInterrupt:
         raise Stop(f"stopped at {_at or action}; run {action} again to resume") from None
     except subprocess.TimeoutExpired as e:

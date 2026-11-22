@@ -36,7 +36,7 @@ _RAW_FORMS = {
     "withdraw": ["withdraw: token <lease token> <launch id>"],
     "cancel": ["cancel: token <lease token> <action id>"],
     "relay": ["relay: token <lease token> to <session>[@<epoch>] [checkpoint <checkpoint id>] <text>"],
-    "retire": ["retire: token <lease token> <worker> on <node>"],
+    "retire": ["retire: token <lease token> <session> [to <successor>] because <reason>"],
     "card": ["card: token <lease token> <verb> <args…>"],
     "effort": ["effort: token <lease token> <item> <level>"],
     "wake": ["wake: token <lease token> <session> because <reason>"],
@@ -99,7 +99,7 @@ _EXAMPLES = {
     "withdraw": ["withdraw: token <lease token> 00000000-0000-4000-8000-000000000001"],
     "cancel": ["cancel: token <lease token> 00000000-0000-4000-8000-000000000001"],
     "relay": ["relay: token <lease token> to violet@1 review the branch"],
-    "retire": ["retire: token <lease token> worker-1 on build"],
+    "retire": ["retire: token <lease token> violet to amber because amber took its card"],
     "card": ["card: token <lease token> reclassify 010101010101010101010101 state live"],
     "effort": ["effort: token <lease token> 3384 high"],
     "wake": ["wake: token <lease token> violet because review arrived"],
@@ -393,7 +393,7 @@ def _invocation(script: str, invocation: str | None) -> str:
     if invocation is not None:
         return invocation
     path = Path(__file__).with_name("enroll") / f"{script}.py"
-    return f"python3 {shlex.quote(str(path))}"
+    return f'"${{STEERING_PYTHON:-python3}}" {shlex.quote(str(path))}'
 
 
 def _example(script: str, invocation: str, example: str) -> str:

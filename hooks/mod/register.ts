@@ -138,13 +138,25 @@ async function moduleVersion($: EngineInterface): Promise<string> {
 // not for a module's children (#7069).
 const own = (ps: string) => ({ CLAUDE_CODE_SESSION_ID: ps })
 
+// The interpreter the agent exports to this session, then python3 when it exports none (#10540):
+// an inherited variable survives the login shell whose path_helper puts a system python3 first,
+// which a PATH prepend does not. A variable naming nothing executable is treated as absent — the
+// read every other resolution of the variable gives it — or a dead path would spawn-fail every
+// python child it should have let fall back.
+const py = async ($: EngineInterface): Promise<string> => {
+  const v = await $.env.get('STEERING_PYTHON')
+  if (!v) return 'python3'
+  const r = await $.process.run(['/bin/sh', '-c', 'test -x "$1"', 'sh', v], { cwd: root }).catch(() => undefined)
+  return r?.exitCode === 0 ? v : 'python3'
+}
+
 async function runOwn($: EngineInterface, argv: string[], stdin?: string) {
   return $.process.run(argv, { cwd: root, env: own(await $.session.id()), ...(stdin !== undefined ? { stdin } : {}) })
 }
 
 async function writeProofAtomic($: EngineInterface, path: string, raw: string): Promise<void> {
   const code = 'import sys;from pathlib import Path;sys.path.insert(0,sys.argv[1]);from atomic_file import write_atomic;write_atomic(Path(sys.argv[2]),sys.stdin.read(),0o600)'
-  const r = await runOwn($, ['python3', '-c', code, `${$.plugin.root}/steering`, path], raw)
+  const r = await runOwn($, [await py($), '-c', code, `${$.plugin.root}/steering`, path], raw)
   if (r.exitCode !== 0) throw new Error(`atomic model proof publication failed: ${r.stderr}`)
 }
 
@@ -152,7 +164,7 @@ async function writeProofAtomic($: EngineInterface, path: string, raw: string): 
 // release at `session.end` spends none of its 1.5 s on a child.
 async function claimPath($: EngineInterface, id: string): Promise<string> {
   if (claimed?.id === id) return claimed.path
-  const r = await runOwn($, ['python3', script($, 'hold.py'), '--claim-path', id])
+  const r = await runOwn($, [await py($), script($, 'hold.py'), '--claim-path', id])
   const path = r.exitCode === 0 ? r.stdout.trim() : ''
   if (path) claimed = { id, path }
   return path
@@ -191,7 +203,7 @@ async function startConnected($: EngineInterface, at: number) {
 
 // What the summariser keeps: rebrief.py's line, or the session alone when it gives none.
 async function keepLine($: EngineInterface, session: string): Promise<string> {
-  const r = await runOwn($, ['python3', script($, 'rebrief.py'), '--keep', session]).catch(() => undefined)
+  const r = await runOwn($, [await py($), script($, 'rebrief.py'), '--keep', session]).catch(() => undefined)
   return (r?.exitCode === 0 && r.stdout.trim()) || `Keep verbatim: steering session ${session}.`
 }
 
@@ -802,7 +814,7 @@ function refreshSeat($: EngineInterface, refresh: boolean): Promise<void> {
     // and a door that is down should cost the chain one retry budget, not two.
     const beside = refresh ? refreshBulletin($) : undefined
     const r = await runOwn($,
-      ['python3', script($, 'seat_section.py'), '--provider', 'claude', '--provider-session', await $.session.id()])
+      [await py($), script($, 'seat_section.py'), '--provider', 'claude', '--provider-session', await $.session.id()])
     if (r.exitCode !== 0 && r.exitCode !== 1) $.ui.log(`2mw2lt: seat_section.py exited ${r.exitCode}: ${r.stderr.trim()}`, { to: 'debug' })
     if (!(await $.state.get(SESSION)).value) return
     const { value: was = '' } = await $.state.get(SEAT)
@@ -819,7 +831,7 @@ async function refreshBulletin($: EngineInterface): Promise<void> {
   // mark would keep the changes from every process on this enrolment (plan unit 7b).
   if (teammate) return
   const r = await runOwn($,
-    ['python3', script($, 'bulletin.py'), '--provider', 'claude', '--provider-session', await $.session.id(), 'section'])
+    [await py($), script($, 'bulletin.py'), '--provider', 'claude', '--provider-session', await $.session.id(), 'section'])
   if (r.exitCode !== 0 && r.exitCode !== 1) $.ui.log(`2mw2lt: bulletin.py section exited ${r.exitCode}: ${r.stderr.trim()}`, { to: 'debug' })
   // An answer that arrives after the session disconnected is dropped, as the seat's is; and any
   // exit but 0 and 1 keeps the bytes it had — a door that cannot tell, or a child that broke, is
@@ -906,8 +918,8 @@ async function askHolder($: EngineInterface) {
 // with success is the call's error, in its own words.
 async function runSeatCall($: EngineInterface, call: SeatCall): Promise<{ result: string } | { deny: string }> {
   const speaker = ['--provider', 'claude', '--provider-session', await $.session.id()]
-  if (call.client === 'card') return answer(await runOwn($, ['python3', script($, 'card.py'), '--lease', ...speaker, ...call.argv]))
-  const argv = ['python3', script($, 'lease.py'), ...speaker,
+  if (call.client === 'card') return answer(await runOwn($, [await py($), script($, 'card.py'), '--lease', ...speaker, ...call.argv]))
+  const argv = [await py($), script($, 'lease.py'), ...speaker,
     ...(call.client === 'say' ? ['say'] : call.client === 'reply' ? ['post', '/steering/brain/reply'] : ['post', call.path])]
   return answer(call.client === 'post' ? await runOwn($, argv, call.stdin) : await resending($, argv, call.stdin))
 }
@@ -945,7 +957,7 @@ async function runCheckpoint($: EngineInterface, args: Record<string, unknown>):
         return { deny: 'refused: the lessons could not be written to a file for checkpoint.py; nothing was sent.' }
       }
     }
-    return answer(await resending($, ['python3', script($, 'checkpoint.py'), session, call.boundary,
+    return answer(await resending($, [await py($), script($, 'checkpoint.py'), session, call.boundary,
       ...(learned ? ['--learned-file', learned] : []), ...(call.mirror !== undefined ? ['--mirror', call.mirror] : []),
       ...(call.card !== undefined ? ['--card', call.card] : [])], call.text))
   } finally {
@@ -954,7 +966,7 @@ async function runCheckpoint($: EngineInterface, args: Record<string, unknown>):
 }
 
 async function sessionOf($: EngineInterface, session?: string): Promise<string | null> {
-  const r = await runOwn($, ['python3', script($, 'hold.py'), '--session-of', await $.session.id(), ...(session ? [session] : [])])
+  const r = await runOwn($, [await py($), script($, 'hold.py'), '--session-of', await $.session.id(), ...(session ? [session] : [])])
   if (r.exitCode !== 0) {
     $.ui.log(`2mw2lt: the enrolment lookup exited ${r.exitCode}: ${r.stderr.trim()}`, { to: 'debug' })
     return null
@@ -1011,7 +1023,7 @@ function stop(): string {
 
 async function framePath($: EngineInterface, session: string): Promise<string> {
   if (framesPath) return framesPath
-  const at = await runOwn($, ['python3', script($, 'hold.py'), '--frame-path', session]).catch(() => undefined)
+  const at = await runOwn($, [await py($), script($, 'hold.py'), '--frame-path', session]).catch(() => undefined)
   return at?.exitCode === 0 ? at.stdout.trim() : ''
 }
 
@@ -1177,7 +1189,7 @@ async function holdPolled($: EngineInterface, ps: string, session: string, gen: 
 // (#5661), so the loop answers by the admitted name from the next arm on.
 async function holdChild($: EngineInterface, ps: string, session: string, gen: number): Promise<Ended> {
   const held = $.process.spawn({
-    argv: ['python3', script($, 'hold.py'), '--wake', 'plugin', '--provider', 'claude', '--provider-session', ps, session],
+    argv: [await py($), script($, 'hold.py'), '--wake', 'plugin', '--provider', 'claude', '--provider-session', ps, session],
     cwd: root,
     env: own(ps),
   })
@@ -1369,7 +1381,7 @@ export const register: Register = on => {
       if ('refused' in call) return { deny: `refused: ${call.refused}` }
       const session = await sessionOf($)
       if (!session) return { deny: 'refused: this session is not connected to steering: run /2mw2lt:connect first.' }
-      const argv = ['python3', script($, 'timer.py'), session, ...call.argv]
+      const argv = [await py($), script($, 'timer.py'), session, ...call.argv]
       return answer(call.stdin !== undefined ? await resending($, argv, call.stdin) : await runOwn($, argv))
     })
   }
@@ -1408,8 +1420,8 @@ export const register: Register = on => {
     const unsettled: typeof owing = []
     for (const r of receipts) {
       const run = r.ulid !== undefined
-        ? await runOwn($, ['python3', script($, 'ack.py'), session, r.ulid])
-        : await runOwn($, ['python3', script($, 'hold.py'), '--read-say', session, r.say ?? ''])
+        ? await runOwn($, [await py($), script($, 'ack.py'), session, r.ulid])
+        : await runOwn($, [await py($), script($, 'hold.py'), '--read-say', session, r.say ?? ''])
       if (run.exitCode === 0) continue
       const what = r.ulid !== undefined ? `ack.py ${r.ulid}` : `hold.py --read-say ${r.say}`
       ackFailures.push(`${what} exited ${run.exitCode}${run.stderr.trim() ? `: ${run.stderr.trim()}` : ''}`)

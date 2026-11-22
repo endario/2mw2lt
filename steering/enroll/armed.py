@@ -72,9 +72,10 @@ def reason(session: str, ws: Path) -> str:
     """
     launcher = hooks.launcher_path(ws)
     if launcher.is_file():
-        cmd = f'python3 {shlex.quote(str(launcher))} exec hold --until-event {shlex.quote(session)}'
+        cmd = (f'{hooks.PYTHON_FORM} {shlex.quote(str(launcher))} exec hold --until-event '
+               f'{shlex.quote(session)}')
     else:
-        cmd = (f'python3 {shlex.quote(str(HERE / "hold.py"))} --until-event '
+        cmd = (f'{hooks.PYTHON_FORM} {shlex.quote(str(HERE / "hold.py"))} --until-event '
                f'{shlex.quote(session)}')
     return (f"This turn would end with no hold armed, and a Claude Code session is reachable "
             f"only while it holds its own stream: nothing outside it can wake it again. Arm "
@@ -168,7 +169,8 @@ def owed_announce(ws: Path, session: str, harness: str) -> dict | None:
     # workspace's stable launcher is, so only it spells the command (D9).
     launcher = hooks.launcher_path(ws)
     if launcher.is_file():
-        answer["why"] = answer["why"].replace("\n  verb ", f"\n  python3 {shlex.quote(str(launcher))} exec verb ")
+        answer["why"] = answer["why"].replace("\n  verb ",
+                                              f"\n  {hooks.PYTHON_FORM} {shlex.quote(str(launcher))} exec verb ")
     return answer
 
 

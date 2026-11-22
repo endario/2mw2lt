@@ -107,12 +107,12 @@ def _json_file(path: str, what: str):
 def _evidence(cited: list[str]) -> list[dict]:
     out = []
     for item in cited:
-        if item.startswith("card:") and re.fullmatch(r"[0-9a-f]{24}", item[5:]):
+        if item.startswith("card:") and re.fullmatch(r"[0-9a-f]{1,24}", item[5:]):
             out.append({"card": item[5:]})
         elif m := PULL.match(item):
             out.append({"pull": {"repo": m[1], "n": int(m[2])}})
         else:
-            raise ValueError(f"evidence {item!r} is neither card:<24-hex id> nor pull:<owner>/<name>#<n>")
+            raise ValueError(f"evidence {item!r} is neither card:<id or a prefix of one> nor pull:<owner>/<name>#<n>")
     return out
 
 

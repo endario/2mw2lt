@@ -7,13 +7,13 @@ If you leave work unfinished, checkpoint at `exit` first (`/2mw2lt:checkpoint`).
 answered `checkpointed:` with and the session name connect printed:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/disconnect.py" --handover <checkpoint id> <session>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/disconnect.py" --handover <checkpoint id> <session>
 ```
 
 With nothing to hand over:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/disconnect.py" <session>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/disconnect.py" <session>
 ```
 
 Keep the reach armed until `detached:` confirms the exit. Removing a worktree or stopping a
@@ -21,7 +21,7 @@ hold does not end the enrollment. Remove your worktree only after `detached:`, a
 outside it: a shell whose directory was removed cannot run `disconnect.py`. Bare invocation and `--help` show usage rather than leave:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/disconnect.py" --help
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/disconnect.py" --help
 ```
 
 Connect afterwards creates a fresh epoch. A still-running incarnation already bound under

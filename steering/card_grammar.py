@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from track_shape import bounded_text, valid_track
-from ulids import new_ulid, valid_ulid
+from ulids import new_ulid, valid_card_ref, valid_ulid
 from wire_instants import is_instant, now
 
 
@@ -77,8 +77,13 @@ def validate(fact: dict) -> str | None:
     state = fact.get("state")
     if state not in STATES:
         return f"unknown card state {state!r}"
-    if not valid_ulid(fact.get("card")):
-        return "card must be a ULID"
+    if state == "card-scoped":
+        # A scope's card is the caller's own minted id, so it arrives complete: a prefix cannot name
+        # a card that does not exist yet. Every other state names a card that does (#10543).
+        if not valid_ulid(fact.get("card")):
+            return "card must be a ULID"
+    elif not valid_card_ref(fact.get("card")):
+        return "card must be a card id, or a prefix of one"
     if state == "card-scoped":
         if not _text(fact.get("name")):
             return "name must be one line of at most 80 characters"
@@ -242,8 +247,10 @@ def _edge_refusal(fact: dict) -> str | None:
         if not (isinstance(fact["to_goal"], str) and _GOAL_ID.fullmatch(fact["to_goal"])):
             return "to_goal must be a UUID"
     elif "to_card" in fact:
-        if not valid_ulid(fact["to_card"]):
-            return "to_card must be a ULID"
+        if not valid_card_ref(fact["to_card"]):
+            return "to_card must be a card id, or a prefix of one"
+        # Go refuses a link a card draws to itself by the row it resolves to; a prefix equal to the
+        # card's own id is caught here, and a shorter one is Go's to judge.
         if fact["to_card"] == fact["card"]:
             return "a card does not link to itself"
     else:
@@ -582,8 +589,9 @@ _OUTCOME_KEYS = ("need", "reading", "target", "window", "uses", "starts", "basel
 
 
 def _to(word: str) -> dict:
-    """An edge's target as its argument names it: a card's id, `owner/name#n`, or a goal's id."""
-    if valid_ulid(word):
+    """An edge's target as its argument names it: a card's id or a unique prefix of one,
+    `owner/name#n`, or a goal's id."""
+    if valid_card_ref(word):
         return {"to_card": word}
     if _GOAL_ID.fullmatch(word):
         return {"to_goal": word}

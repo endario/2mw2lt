@@ -42,9 +42,9 @@ Read admitted sources, keeping each one's revision or time:
   cannot establish.
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /goals
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /rulings
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease "/cards?state=live"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /goals
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease /rulings
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease "/cards?state=live"
 ```
 
 Bound the first pass by the current undertaking and the decisions near at hand; expand only where a
@@ -94,7 +94,7 @@ never as the owner's words. Needs You is only for a decision that unblocks an ac
 linked to the thread; answering it settles that action, not the strategy.
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post "/rooms/<room>/messages" \
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post "/rooms/<room>/messages" \
   --json '{"text": "…", "reply_to": "<the opening message id>"}' --key <a key of your own>
 ```
 
@@ -127,9 +127,9 @@ policy, then send each as its own command, each on the seat's enrolment and its 
    `submit`. The import is fenced by the goal revision whose criteria the rows map to.
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post /rulings \
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post /rulings \
   --json '{"text": "<the decision>", "reason": "<source and why>"}' --key <key>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post /goals \
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" --lease --post /goals \
   --json '{"title": "…", "context": "…", "criteria": [{"statement": "…", "name": "…"}]}' --key <key>
 ```
 

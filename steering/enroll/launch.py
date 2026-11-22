@@ -4,8 +4,8 @@ own skill-driven commands share the same problem the hook was written to solve �
 frozen where it is invoked, moving under it while a long session runs (#1875) — so this is also
 the stable entry point they exec through:
 
-    python3 <workspace>/.claude/steering-launch.py observe|readout        (a hook, reads stdin)
-    python3 <workspace>/.claude/steering-launch.py exec hold|forge|checkpoint [args...]    (a direct run)
+    "${STEERING_PYTHON:-python3}" <workspace>/.claude/steering-launch.py observe|readout        (a hook, reads stdin)
+    "${STEERING_PYTHON:-python3}" <workspace>/.claude/steering-launch.py exec hold|forge|checkpoint [args...]    (a direct run)
 
 The account is resolved per invocation from the hook's own payload, or from `CLAUDE_CONFIG_DIR`
 for a direct run, because one workspace is worked by several accounts and each keeps its own
@@ -46,6 +46,18 @@ DIRECT = frozenset({"forge", "checkpoint"})
 # from a checkout has no plugin cache to search, and one whose account cannot be resolved has
 # no record to read; either way the pack that installed the launcher is still there.
 SOURCE = ""
+# The variable the agent exports to every session it launches, naming its bundled interpreter
+# (#10540): an inherited variable survives the login shell whose /etc/zprofile path_helper puts
+# /usr/bin's python3 ahead of an inherited PATH, which is why it is carried by name and not on
+# PATH. The command forms resolve `${STEERING_PYTHON:-python3}`; this file resolves the same.
+ENV_PYTHON = "STEERING_PYTHON"
+
+
+def _steered() -> str | None:
+    """The interpreter `STEERING_PYTHON` names when it is executable; a variable set but broken is
+    treated as absent, which is what the command forms' `:-python3` fallback says."""
+    target = os.environ.get(ENV_PYTHON)
+    return target if target and os.access(target, os.X_OK) else None
 
 
 def config_dir_of(transcript: str | None) -> Path | None:
@@ -159,7 +171,7 @@ def help_text(config: Path, invocation: str, topic: str | None = None) -> str:
 def error(reason: str) -> int:
     config = config_dir_of(None) or Path(os.environ.get("HOME", "~")).expanduser() / ".claude"
     print(f"error: {reason}", file=sys.stderr)
-    print(help_text(config, "python3 " + shlex.quote(str(Path(sys.argv[0]).resolve()))), file=sys.stderr)
+    print(help_text(config, '"${STEERING_PYTHON:-python3}" ' + shlex.quote(str(Path(sys.argv[0]).resolve()))), file=sys.stderr)
     return 2
 
 
@@ -214,16 +226,28 @@ def main_exec(argv: list[str]) -> int:
     if script is None:
         print(missing(name, config), file=sys.stderr)
         return 1
-    os.execv(sys.executable, [sys.executable, str(script), *rest])
+    python = _steered() or sys.executable
+    os.execv(python, [python, str(script), *rest])
 
 
 def main() -> int:
+    # python_floor.NEEDS, inlined: .claude holds this file alone, so it imports nothing. Run under
+    # an under-floor python3 — macOS's 3.9 is the one that reaches it — the interpreter the export
+    # names runs this file again instead; it survives the login shell that put python3 first
+    # (#10540). A variable naming this same interpreter ends there rather than looping.
+    if tuple(sys.version_info[:2]) < (3, 12):
+        steered = _steered()
+        if steered and os.path.realpath(steered) != os.path.realpath(sys.executable or ""):
+            try:
+                os.execv(steered, [steered, os.path.abspath(__file__), *sys.argv[1:]])
+            except OSError:
+                pass
     argv = sys.argv[1:]
     config = config_dir_of(None) or Path(os.environ.get("HOME", "~")).expanduser() / ".claude"
     topic_help = (len(argv) == 2 and argv[1] in ("-h", "--help") and
                   argv[0] in (*ENTRY, "exec"))
     if not argv or argv in (["-h"], ["--help"]) or topic_help:
-        print(help_text(config, "python3 " + shlex.quote(str(Path(sys.argv[0]).resolve())), argv[0] if topic_help else None))
+        print(help_text(config, '"${STEERING_PYTHON:-python3}" ' + shlex.quote(str(Path(sys.argv[0]).resolve())), argv[0] if topic_help else None))
         return 0
     if argv[:1] == ["exec"]:
         return main_exec(argv[1:])
@@ -259,7 +283,8 @@ def main() -> int:
     finally:
         if fd > 2:
             os.close(fd)
-    os.execv(sys.executable, [sys.executable, str(script), *sys.argv[2:]])
+    python = _steered() or sys.executable
+    os.execv(python, [python, str(script), *sys.argv[2:]])
 
 
 if __name__ == "__main__":

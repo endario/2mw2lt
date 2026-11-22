@@ -14,15 +14,46 @@ import sys
 # (the owner's ruling, 2026-11-16 — no backward compatibility with an older one).
 NEEDS = (3, 12)
 
+# The variable the agent exports to every session it launches, naming its bundled interpreter
+# (#10540): the command forms resolve `${STEERING_PYTHON:-python3}`, and this module resolves the
+# same interpreter so what the forms run is what is checked. A variable survives the login shells
+# macOS path_helper reorders; a PATH prepend does not.
+ENV = "STEERING_PYTHON"
+
 
 def _sentence(found: tuple) -> str:
     return (f"2mw2lt needs Python {NEEDS[0]}.{NEEDS[1]} or later; this is {found[0]}.{found[1]}. "
             "Install a newer one (`brew install python` on macOS) and run it again.")
 
 
+def reexec() -> None:
+    """Re-run the calling script under the interpreter `STEERING_PYTHON` names when this one is
+    under the floor. That is what lets a bare `python3` command form still work on a machine whose
+    PATH python3 is macOS's 3.9 (#10540): the agent's export survives the login shell the PATH
+    reorder happens in. A form that is not a file on argv — `-c`, `-m`, a REPL — is left to the
+    refusal, and a variable that names this same interpreter or nothing executable is treated as
+    absent, which ends the chain at this refusal rather than looping it."""
+    import os
+    if tuple(sys.version_info[:2]) >= NEEDS:
+        return
+    target = os.environ.get(ENV)
+    if not target or not os.access(target, os.X_OK):
+        return
+    if not sys.argv or sys.argv[0] in ("", "-c", "-m"):
+        return
+    try:
+        if os.path.realpath(target) == os.path.realpath(sys.executable or ""):
+            return
+        os.execv(target, [target] + sys.argv)
+    except OSError:
+        return
+
+
 def require(found=None) -> None:
     found = tuple((found or sys.version_info)[:2])
     if found < NEEDS:
+        if found == tuple(sys.version_info[:2]):
+            reexec()
         sys.exit(_sentence(found))
     try:
         import ssl  # noqa: F401
@@ -49,14 +80,16 @@ def hook(*, blocking: bool, found=None) -> None:
 
 
 def on_path() -> tuple[tuple[int, ...] | None, str]:
-    """The `python3` a hook command resolves on PATH: (its version, its path), or (None, why it
-    could not be asked). The hook commands name it bare, so install and connect check this
-    interpreter rather than the one running them (#9888)."""
+    """The interpreter a hook command resolves — `STEERING_PYTHON` where the environment names
+    one, else the `python3` PATH resolves (#10540): (its version, its path), or (None, why it
+    could not be asked). Install and connect check this interpreter rather than the one running
+    them (#9888)."""
+    import os
     import shutil
     import subprocess
-    exe = shutil.which("python3")
-    if exe is None:
-        return None, "PATH names no python3"
+    exe = os.environ.get(ENV) or shutil.which("python3")
+    if not exe:
+        return None, f"{ENV} names no interpreter and PATH names no python3"
     try:
         run = subprocess.run([exe, "-c", "import sys; print('%d.%d.%d' % sys.version_info[:3])"],
                              capture_output=True, text=True, timeout=10)
@@ -72,17 +105,18 @@ def on_path() -> tuple[tuple[int, ...] | None, str]:
 
 def path_why(found: tuple | None, exe: str, again: str) -> str:
     need = f"{NEEDS[0]}.{NEEDS[1]}"
+    form = f"`${{{ENV}:-python3}}`"
     if found is None:
-        return (f"2mw2lt's hooks run `python3`, and {exe}; install Python {need} or later "
+        return (f"2mw2lt's hooks run {form}, and {exe}; install Python {need} or later "
                 f"(`brew install python` on macOS), then {again}.")
-    return (f"2mw2lt's hooks run `python3`, which here is {exe} at {'.'.join(str(v) for v in found)}, "
-            f"and the workspace needs Python {need} or later. Install a newer one "
-            f"(`brew install python` on macOS), then {again}.")
+    return (f"2mw2lt's hooks run {form}, which here resolves to {exe} at "
+            f"{'.'.join(str(v) for v in found)}, and the workspace needs Python {need} or later. "
+            f"Install a newer one (`brew install python` on macOS), then {again}.")
 
 
 def on_path_refusal(again: str = "run this again") -> str | None:
-    """Why the `python3` the hooks will run is refused — the version found, the one needed and the
-    fix — or None when it meets the floor."""
+    """Why the interpreter the hooks will run is refused — the version found, the one needed and
+    the fix — or None when it meets the floor."""
     found, exe = on_path()
     if found is None or tuple(found[:2]) < NEEDS:
         return path_why(found, exe, again)

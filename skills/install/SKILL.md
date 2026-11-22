@@ -14,14 +14,14 @@ root shown for this loaded skill wherever commands name `${CLAUDE_PLUGIN_ROOT}`.
 With no supplied arguments, execute on the current workspace explicitly:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" .
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" .
 ```
 
 When arguments were supplied, replace `.` with that path and its flags; quote a path containing
 spaces. For example:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" "<repository-path>" --codex
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" "<repository-path>" --codex
 ```
 
 An invitation code (`2MW-` and four groups of four) is passed through as given, beside the path or
@@ -33,13 +33,13 @@ that signs in decides which team the workspace lands in. When the person means t
 GitHub account, pass `--login <login>`.
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" . 2MW-7KQ4-XN2D-9HTB-M3PC
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" . 2MW-7KQ4-XN2D-9HTB-M3PC
 ```
 
 Bare invocation and `--help` show usage without installing:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" --help
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" --help
 ```
 
 It needs Python 3.11 or later. An older `python3` stops at once with a line saying so: the person
@@ -118,6 +118,12 @@ Other stops, and what to do; one not listed here names its own remedy:
   read the repository. Run again with one of the logins the line names.
 - **`<checkout> is bound to <workspace>, which serves …`**: the checkout's origin moved away from
   the repository its workspace serves. Run `install.py uninstall` here, then install again.
+- **`this machine serves <repository> from <root>, where <n> sessions are live (…)… run install
+  again with --move-root`**: this is a second clone of a repository this machine already serves
+  from another checkout, and sessions are working there. Installing would move the machine's
+  served root to this clone and strand them. Let those sessions end first, or — only if the move
+  is wanted — run the engine again with `--move-root`, which strands them; their holders then run
+  `/2mw2lt:connect` again from this checkout.
 - **`GitHub refused <repository> to <login> (…)`**: no signed-in login reads the repository, and
   GitHub refused the logins the line names, such as for an organization's SAML single sign-on,
   saying why for each. Settle that login's access to the organization, or run `gh auth login` as a
@@ -187,7 +193,7 @@ The workspace works without lanes, and its board says it has none yet. Give it l
    every unit the index reaches:
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/steering/knowledge_units.py" --index <index> .
+   "${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/knowledge_units.py" --index <index> .
    ```
 
 6. Commit it all on a branch `2mw2lt/tracks`, push it, and open a pull request with
@@ -195,14 +201,14 @@ The workspace works without lanes, and its board says it has none yet. Give it l
    now. Ask the engine how it would merge:
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" lanes .
+   "${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" lanes .
    ```
 
    Its last line is `{pr, url, head, method, auto}`. Ask with your question tool: *merge #<pr>
    now by <method>, so the board has its lanes before install ends*, or *not yet*. On merge:
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" lanes . --merge
+   "${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" lanes . --merge
    ```
 
    It merges as the workspace's GitHub login, never past a branch rule, then waits up to two
@@ -314,7 +320,7 @@ the foreman keeps answering on the fleet.
 ## Uninstall
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" uninstall $ARGUMENTS
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" uninstall $ARGUMENTS
 ```
 
 It removes what the install added on this machine:
@@ -348,14 +354,14 @@ re-run answers that it is retired already. What an install added on this machine
 `uninstall`'s to remove.
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" delete <team>/<workspace>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" delete <team>/<workspace>
 ```
 
 `create` makes the workspace on the platform at that address — the repository
 `<team>/<workspace>` in the team `<team>` — and joins no machine to it:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" create <team>/<workspace>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/install.py" create <team>/<workspace>
 ```
 
 A plain `install` in a repository creates its workspace the same way when it is missing, then

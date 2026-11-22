@@ -27,7 +27,7 @@ VERBS = ("announce", "blocked", "wait", "done", "recommend", "ask")
 WAIT_CANCEL = re.compile(r"cancel (?P<id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
 # `wait: <session> --card <card> for ...`: the card the wait is for, which a session executing
 # several names (doc 200 D8).
-WAIT_CARD = re.compile(r"--card (?P<card>[0-9a-f]{24}) (?P<rest>.+)", re.S)
+WAIT_CARD = re.compile(r"--card (?P<card>[0-9a-f]{1,24}) (?P<rest>.+)", re.S)
 
 
 def wait_card(text: str) -> tuple[str | None, str | None]:
@@ -83,7 +83,7 @@ from verb_help import _invocation as help_invocation, error, help_requested, scr
 # An announce on Go: a branch in another of the team's repositories names it (#7517). A --card
 # binds the word to that card without a branch (doc 203 D2), and `as` is optional beside one, as
 # the due read's runnable line spells it.
-ANNOUNCE = re.compile(r"(?:--card (?P<card>[0-9a-f]{24}))?"
+ANNOUNCE = re.compile(r"(?:--card (?P<card>[0-9a-f]{1,24}))?"
                       r"(?:\s*as (?P<agent>\S+/\S+)(?: on (?P<branch>\S+)(?: in (?P<repo>[^/\s]+/[^/\s]+))?)?)?"
                       r"(?:\s+doing (?P<work>.+))?")
 
@@ -111,11 +111,20 @@ def _on_go(ws: Path, verb: str, session: str, text: str, retry_id: str | None) -
         except session_routes.Refused as e:
             unsure = not session_routes.settled(e)
             print(display_reply(session_routes.unrepairable(e, session) or (refusal.retry(str(e)) if unsure else refusal.answered(verb, e))), file=sys.stderr)
-            if e.code in ("done-card-required", "wait-card-required"):
-                # A done or a wait is one card's (doc 199 §3, doc 200 D8): Go names each the session holds.
+            multi = {
+                # A done or a wait is one card's (doc 199 §3, doc 200 D8), and a word's own card is
+                # named back when a prefix its cards share answers several (#10543): Go names each.
+                "done-card-required": ("say done for the one whose part is finished",
+                                       f'verb.py done {session} --card <id> "<result>"'),
+                "wait-card-required": ("name the card the wait is for", f"verb.py wait {session} --card <id> for ..."),
+                "announce-card-required": ("name the card the word is about",
+                                           f'verb.py announce {session} --card <id> doing "<work>"'),
+                "blocked-card-required": ("name the card that blocks it",
+                                          f'verb.py blocked {session} --card <id> on "<blocker>"'),
+            }
+            if e.code in multi:
                 cards = "\n".join(f"  {c}" for c in e.detail.split("; ") if c) or "  (see connect's card: line)"
-                act, form = ("say done for the one whose part is finished", f"verb.py done {session} --card <id> \"<result>\"") \
-                    if verb == "done" else ("name the card the wait is for", f"verb.py wait {session} --card <id> for ...")
+                act, form = multi[e.code]
                 print(f"this session holds more than one card; {act}:\n{cards}\n  {form}", file=sys.stderr)
         except session_routes.Unsent as e:
             unsure = True

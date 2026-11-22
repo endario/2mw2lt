@@ -19,6 +19,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 import machine_harness as harness  # noqa: E402
+import hooks  # noqa: E402
 from process_probe import Undetermined  # noqa: E402
 import runtime_id  # noqa: E402
 from local_workspace import required_workspace_root  # noqa: E402
@@ -233,9 +234,10 @@ def main(argv: list[str]) -> int:
     if not answer.startswith("bound:"):
         if "not an observed candidate" in answer:
             print(f"steering has seen no observation from this incarnation: check the hooks "
-                  f"(python3 {HERE / 'hooks.py'} show {ws}) and run this again.", file=sys.stderr)
+                  f"({hooks.PYTHON_FORM} {HERE / 'hooks.py'} show {ws}) and run this again.",
+                  file=sys.stderr)
         elif "that incarnation is bound to" in answer:
-            print(f"restart this session, then run python3 {HERE / 'bind.py'} {session}",
+            print(f'restart this session, then run {hooks.PYTHON_FORM} {HERE / "bind.py"} {session}',
                   file=sys.stderr)
         return 1
     print(f"STEERING_RUNTIME_ID={rid}")

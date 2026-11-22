@@ -26,7 +26,7 @@ export type HoldPoll = { status: number; text: string; hold?: Promise<void> } | 
 
 export function world(on: On, { version = '2.1.290', rounds = [] as Round[], recording = '', keep = 'Keep verbatim: steering session s1; branch b; checkpoint https://github.com/example-org/example-repo/pull/1.\n',
                          agent = false, polls = [] as (Poll | Promise<Poll>)[], posts = [] as (number | Promise<number>)[], holdPolls = [] as (HoldPoll | Promise<HoldPoll>)[], deleteHangs = false, holdRoute = false, enrolled = true, submitRejects = false, submitDrops = false, storesSubmits = false, ackFails = false, readFails = false, usageFails = false, engineState = false,
-                         proofEnv = {} as Record<string, string>,
+                         proofEnv = {} as Record<string, string>, pyX = true,
                          // The engine's own answer to `$.session.usage({ breakdown })`: the window it measures
                          // against, the token count it auto-compacts at, and who settled the window.
                          context = { point: 167_000 as number | undefined, raw: 200_000, source: 'auto', model: 'claude-test' } } = {}) {
@@ -225,6 +225,11 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
       }
       const out = w.leaseOut.shift() ?? 'relayed: 01AB to amber'
       return { value: { exitCode: /^(REJECTED|refused)/.test(out) ? 1 : 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    // py()'s executability probe of the interpreter STEERING_PYTHON names (#10540): a dead
+    // answer makes the python children fall back to python3.
+    if (e.argv[0] === '/bin/sh' && e.argv[1] === '-c' && e.argv[2] === 'test -x "$1"') {
+      return { value: { exitCode: pyX ? 0 : 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     if (e.argv[0] === 'mktemp') {
       return { value: { exitCode: 0, stdout: '/tmp/tmp.lessons\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }

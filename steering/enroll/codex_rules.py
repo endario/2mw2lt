@@ -34,15 +34,22 @@ def launcher(workspace: Path) -> str:
     return str(shared(workspace) / ".claude" / "steering-launch.py")
 
 
-def render(workspace: Path) -> str:
-    """The rules granting the direct-run verbs through workspace's launcher."""
+def render(workspace: Path, steered: str | None = None) -> str:
+    """The rules granting the direct-run verbs through workspace's launcher: `python3` always,
+    the literal `${STEERING_PYTHON:-python3}` the command forms print, and the interpreter
+    `steered` names when the connecting session carries one (#10540). Codex's execpolicy matches
+    the words it is asked before a shell expands them, so every spelling a worker can reach —
+    the form's own token, what it resolves to, and the fallback — is granted the same verbs."""
 
-    def rule(verb: str, why: str) -> str:
-        pattern = json.dumps(["python3", launcher(workspace), "exec", verb])
+    def rule(exe: str, verb: str, why: str) -> str:
+        pattern = json.dumps([exe, launcher(workspace), "exec", verb])
         return f"prefix_rule(pattern = {pattern}, decision = \"allow\", justification = {json.dumps(why)})\n"
 
-    return (rule("forge", "2mw2lt: the forge verb checks every word of a worker's own pull request and issue writes")
-            + rule("checkpoint", "2mw2lt: the checkpoint verb saves a worker's own state on its own enrolment"))
+    grants = (("forge", "2mw2lt: the forge verb checks every word of a worker's own pull request and issue writes"),
+              ("checkpoint", "2mw2lt: the checkpoint verb saves a worker's own state on its own enrolment"))
+    return "".join(rule(exe, verb, why)
+                   for exe in ["python3", "${STEERING_PYTHON:-python3}"] + ([steered] if steered else [])
+                   for verb, why in grants)
 
 
 def path_for(workspace: Path, home: Path | None = None) -> Path:
@@ -56,7 +63,7 @@ def write(workspace: Path, home: Path | None = None) -> str:
     """Write workspace's rule when it differs, and say which: a written rule reaches only a session
     Codex starts after it."""
     path = path_for(workspace, home)
-    text = render(workspace)
+    text = render(workspace, os.environ.get("STEERING_PYTHON") or None)
     try:
         if path.read_text() == text:
             return f"forge grant: in place, run as python3 {launcher(workspace)} exec forge <gh words> or exec checkpoint <save>"

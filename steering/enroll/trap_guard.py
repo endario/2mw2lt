@@ -542,10 +542,17 @@ def forge_grant(payload, environ=None) -> dict | None:
         return None
     tool = payload.get("tool_input")
     command = tool.get("command") if isinstance(tool, dict) else None
+    # The command forms' interpreter word is `"${STEERING_PYTHON:-python3}"` (#10540): read it the
+    # way the shell resolves it, which is what the grant means by python3.
+    if isinstance(command, str):
+        command = command.replace("${STEERING_PYTHON:-python3}", "python3", 1)
+    environ = os.environ if environ is None else environ
     words = literal_words(command) if isinstance(command, str) else None
+    if words and environ.get("STEERING_PYTHON") == words[0]:
+        words[0] = "python3"
     if not words or len(words) < 2 or words[0] not in ("gh", "python3"):
         return None
-    repo = grant_repo(payload, os.environ if environ is None else environ)
+    repo = grant_repo(payload, environ)
     if repo is None:
         return None
     cwd = payload.get("cwd") if isinstance(payload.get("cwd"), str) else None

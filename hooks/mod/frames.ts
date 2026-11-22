@@ -417,7 +417,7 @@ export const CHECKPOINT_TOOL = {
                  items: { type: 'object', properties: { text: { type: 'string' }, scope: { type: 'array', items: { type: 'string' } } },
                           required: ['text', 'scope'], additionalProperties: false } },
       mirror: { type: 'string', description: 'A GitHub pull request or issue URL to post the note on.' },
-      card: { type: 'string', pattern: '^[0-9a-f]{24}$', description: "The card this checkpoint is of, by its 24-hex wire id; the session must execute the card. A handover naming its card is what a launch onto the card takes it over by." },
+      card: { type: 'string', pattern: '^[0-9a-f]{1,24}$', description: "The card this checkpoint is of, by its wire id or a unique prefix of one; the session must execute the card. A handover naming its card is what a launch onto the card takes it over by." },
     },
     required: ['boundary', 'text'],
     additionalProperties: false,
@@ -430,7 +430,7 @@ export function checkpointCall(args: Record<string, unknown>): { boundary: strin
   if (typeof text !== 'string' || text === '') return { refused: 'text is required' }
   if (learned !== undefined && !Array.isArray(learned)) return { refused: 'learned is a list' }
   if (mirror !== undefined && (typeof mirror !== 'string' || mirror === '')) return { refused: 'mirror is a URL' }
-  if (card !== undefined && (typeof card !== 'string' || !/^[0-9a-f]{24}$/.test(card))) return { refused: 'card is the 24-hex wire id of the card the checkpoint names' }
+  if (card !== undefined && (typeof card !== 'string' || !/^[0-9a-f]{1,24}$/.test(card))) return { refused: 'card is the wire id of the card the checkpoint names, or a unique prefix of one' }
   return { boundary, text, ...(learned !== undefined ? { learned: JSON.stringify(learned) } : {}), ...(mirror !== undefined ? { mirror } : {}), ...(card !== undefined ? { card } : {}) }
 }
 

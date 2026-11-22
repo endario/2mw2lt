@@ -9,7 +9,7 @@ Run this now, before anything else, from the wired repository or its worktree; n
 connected until it has run:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/connect.py" --current
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/connect.py" --current
 ```
 
 The reply names your session, account, binding and `repo:`, the workspace's repository for `gh -R`, and `card:`, the card you execute now: after leaving and
@@ -21,7 +21,7 @@ stored enrollment credential themselves.
 If work is already assigned, name it at connection:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/connect.py" --current --doing "<work>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/connect.py" --current --doing "<work>"
 ```
 
 With no work, connect without `--doing`, hold your reach, and wait for the brain to delegate to you.
@@ -31,7 +31,7 @@ new incarnation bound.
 A harness without session exports needs its provider/session flags. Codex uses:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/connect.py" --provider codex --provider-session <thread-id>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/connect.py" --provider codex --provider-session <thread-id>
 ```
 
 When connect needed explicit provider/session flags, prefix `taking.py`, `holds.py`, `say.py`
@@ -45,7 +45,7 @@ Other provider/PID forms and binding refusals are in
 [connection recovery](stream-reference.md#connection-recovery). For usage without connecting:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/connect.py" --help
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/connect.py" --help
 ```
 
 ## Keep your reach open
@@ -87,14 +87,14 @@ long session.
 
 ```bash
 ws="${STEERING_WORKSPACE:-$(dirname "$(git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --path-format=absolute --git-common-dir)")}"
-python3 "$ws/.claude/steering-launch.py" exec hold --until-event <session>
+"${STEERING_PYTHON:-python3}" "$ws/.claude/steering-launch.py" exec hold --until-event <session>
 ```
 
 When it exits, read every printed frame, including buffered informs. Acknowledge each envelope,
 then re-arm the same hold **before doing the work**:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ack.py" <session> <directive id>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ack.py" <session> <directive id>
 ```
 
 A `say` needs no acknowledgement. A `seat` frame means load `/2mw2lt:brain`. Read a directive's
@@ -117,7 +117,7 @@ always one command away:
 
 ```bash
 ws="${STEERING_WORKSPACE:-$(dirname "$(git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --path-format=absolute --git-common-dir)")}"
-python3 "$ws/.claude/steering-launch.py" exec hold --plugin-state "$CLAUDE_CODE_SESSION_ID"
+"${STEERING_PYTHON:-python3}" "$ws/.claude/steering-launch.py" exec hold --plugin-state "$CLAUDE_CODE_SESSION_ID"
 ```
 
 ## Work and report
@@ -138,12 +138,12 @@ Run issue-taking from the workspace, and branch-taking/announce from the worktre
 work in. Use the account from connect's reply:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> <issue>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> branch [--card <id>]
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" announce <session> as <account> on <branch> doing "<work>"
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" blocked <session> on "<blocker>"
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" wait <session> [--card <id>] for merged <pr>  # or for verdict <pr>, or for at <YYYY-MM-DDTHH:MMZ>: told once it holds, instead of polling
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" done <session> [--card <id>] "<result>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> <issue>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> branch [--card <id>]
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" announce <session> as <account> on <branch> doing "<work>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" blocked <session> on "<blocker>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" wait <session> [--card <id>] for merged <pr>  # or for verdict <pr>, or for at <YYYY-MM-DDTHH:MMZ>: told once it holds, instead of polling
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" done <session> [--card <id>] "<result>"
 ```
 
 `done` is one card's: say it for each card when its part is finished, never because a branch
@@ -181,8 +181,8 @@ its session executes that no anchor places, and a declaration naming that card w
 the `resolves:` or `advances:` anchors it lacks:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/declare.py" <session> "<work>" resolves:<issue> triage:<criticality>,<size>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/declare.py" <session> --card <card> "<work>" advances:<issue> triage:<criticality>,<size>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/declare.py" <session> "<work>" resolves:<issue> triage:<criticality>,<size>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/declare.py" <session> --card <card> "<work>" advances:<issue> triage:<criticality>,<size>
 ```
 
 Triage says how much breaks if the work is wrong (`critical`, `major`, `minor`, `trivial`) and how
@@ -197,7 +197,7 @@ than its triage, meaning more breaks, or less can be undone, if it is wrong and 
 raise its floor yourself, and the seat is told your why:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease retier <card> <stage> <floor> "<why>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease retier <card> <stage> <floor> "<why>"
 ```
 
 You may only raise (`retier-lowered` otherwise), and only the stage you began
@@ -208,8 +208,8 @@ or to contribute to a goal, say so; end the edge when it no longer holds. The br
 board's links too, but you know your own card's edges first:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/edge.py" <session> link <card> requires <card>|requires <owner>/<name>#<n>|part-of <goal> [--source <where>] "<why>"
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/edge.py" <session> unlink <card> requires|part-of <target> resolved|withdrawn "<why>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/edge.py" <session> link <card> requires <card>|requires <owner>/<name>#<n>|part-of <goal> [--source <where>] "<why>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/edge.py" <session> unlink <card> requires|part-of <target> resolved|withdrawn "<why>"
 ```
 
 A prerequisite you discover while building is yours to declare the moment you know it, on the card
@@ -239,8 +239,8 @@ holds, route health, standing cautions — and every session reads it. It is inf
 direction. When you would otherwise tell a second session the same fact, post it once instead:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/bulletin.py" <session> post <key> "<text>" [--until <UTC time | +2h>]
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/bulletin.py" <session> read [--all]
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/bulletin.py" <session> post <key> "<text>" [--until <UTC time | +2h>]
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/bulletin.py" <session> read [--all]
 ```
 
 A plain session posts to everyone with an `until` within 24 hours; the seat and the owner may post
@@ -258,9 +258,9 @@ text and a delivery id, and you answer with that exact id — `acted` or `consid
 `because`. A harness without the typed tools runs the same client:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/timer.py" <session> list
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/timer.py" <session> lodge --json-file <file | ->
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/timer.py" <session> history <timer id>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/timer.py" <session> list
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/timer.py" <session> lodge --json-file <file | ->
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/timer.py" <session> history <timer id>
 ```
 
 `--seat` on a mutation sends it on the seat's route at the generation you hold, and grants
@@ -277,10 +277,10 @@ To say something — a question, an answer, anything that should not wait for th
 
 ```bash
 # to the brain, from any machine, without knowing who holds it
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/say.py" <your session> "<what you want to say>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/say.py" <your session> "<what you want to say>"
 
 # to another session, by the name the registry shows
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/say.py" --to <their session> <your session> "<text>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/say.py" --to <their session> <your session> "<text>"
 ```
 
 For a peer's FYI that needs no new turn, add `--inform` immediately after `say.py`: it waits
@@ -320,7 +320,7 @@ single-choice options as answer buttons; `multi: true` waits for a combined subm
 `allow_other: true` keeps a custom answer available. The client signs with your stored token:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" ask <session> 'json {"question":"Which release window should we use?","context":"Friday allows a watched rollout; Monday delays the repair.","options":[{"label":"Release Friday","description":"Use the watched rollout window.","recommended":true},{"label":"Wait until Monday","description":"Delay the repair until next week."}],"allow_other":true}'
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" ask <session> 'json {"question":"Which release window should we use?","context":"Friday allows a watched rollout; Monday delays the repair.","options":[{"label":"Release Friday","description":"Use the watched rollout window.","recommended":true},{"label":"Wait until Monday","description":"Delay the repair until next week."}],"allow_other":true}'
 ```
 
 Use a plain-text ask only for an open-ended answer. Choices written inside prose are not
@@ -329,7 +329,7 @@ rendered as buttons, and the word “recommend” in prose does not mark an opti
 For a proposal the brain should triage:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" recommend <session> "<proposal>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" recommend <session> "<proposal>"
 ```
 
 `registered: ask …` means the question is registered, not answered. The answer returns as a
@@ -358,7 +358,7 @@ is your branch, and `gh pr comment -R <repo> <n>`. Never an auto or admin merge,
 a push to `main`.
 
 **Codex** is granted these through one verb, which checks every word and runs `gh` with exactly them:
-`python3 <launcher> exec forge pr create -R <repo> --draft --head <your branch> …`, and the same for `pr edit`,
+`"${STEERING_PYTHON:-python3}" <launcher> exec forge pr create -R <repo> --draft --head <your branch> …`, and the same for `pr edit`,
 `pr comment`, `issue create` and `issue comment`, spelled as connect's `forge grant:` line spells it. A refusal names its reason and runs nothing. A rule connect has
 just written reaches the next session; until then Codex asks. `pr ready` and `pr merge` are not in it.
 
@@ -378,10 +378,10 @@ is the nightly's and a release's — `--all` and `all` are refused, and the nigh
 A failure only a loaded run shows is a defect in that guard, to fix: every guard passes under load.
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ci.py" <session> run --merge-scope  # what your paths name; the step before ready or merge
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ci.py" <session> run --shards rest1,mac  # the parts your change reads; --conformance from a Mac
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ci.py" <session> status <run>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ci.py" <session> log <run> [--guard <label>]
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ci.py" <session> run --merge-scope  # what your paths name; the step before ready or merge
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ci.py" <session> run --shards rest1,mac  # the parts your change reads; --conformance from a Mac
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ci.py" <session> status <run>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/ci.py" <session> log <run> [--guard <label>]
 ```
 
 `run` refuses a head you have not pushed, and an omitted part runs none of it. `run --merge-scope`
@@ -400,10 +400,10 @@ proven by the queue's group and the nightly, not by any dispatch.
 From the branch's worktree:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> branch [--card <id>]
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <session> critic <design-path>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <session> review <pr>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <session> status <commission-id>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <session> branch [--card <id>]
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <session> critic <design-path>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <session> review <pr>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <session> status <commission-id>
 ```
 
 Load `/2mw2lt:gate` for the round/ceiling, cancellation, publication and pass-carry rules.
@@ -427,7 +427,7 @@ A handover that hands a card over names it — `--card <its wire id>` — for th
 onto the card takes it over by (#9295):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <session> handover --text-file <note-file> [--card <wire id>]
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <session> handover --text-file <note-file> [--card <wire id>]
 ```
 
 A harness whose shell has no `CLAUDE_PLUGIN_ROOT` — Codex, and every harness besides Claude
@@ -435,7 +435,7 @@ Code — runs the same verb through the workspace's stable launcher, which its C
 with no dialog:
 
 ```bash
-python3 <workspace>/.claude/steering-launch.py exec checkpoint <session> handover --text-file <note-file> [--card <wire id>]
+"${STEERING_PYTHON:-python3}" <workspace>/.claude/steering-launch.py exec checkpoint <session> handover --text-file <note-file> [--card <wire id>]
 ```
 
 When your card's plan will hand tasks to other builders, as its brief names them, write it before
@@ -452,14 +452,14 @@ when the brain requests it. If you leave work unfinished, record `exit`, then di
 the checkpoint it answered:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <session> exit --text-file <note-file>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/disconnect.py" --handover <checkpoint id> <session>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/checkpoint.py" <session> exit --text-file <note-file>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/disconnect.py" --handover <checkpoint id> <session>
 ```
 
 With nothing to hand over, leave explicitly:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/disconnect.py" <session>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/disconnect.py" <session>
 ```
 
 Leaving ends the enrollment; removing a worktree does not. Keep your hold armed until you

@@ -14,7 +14,7 @@ stands per day: anything that asks again that day joins it, and one answer settl
 plan changed — ask for one with why:
 
 ```bash
-printf '%s' "regroup: token @lease because <what shifted>" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" say
+printf '%s' "regroup: token @lease because <what shifted>" | "${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" say
 ```
 
 It prints `id <id>` first and answers with the regroup and its episode. The id names this request:

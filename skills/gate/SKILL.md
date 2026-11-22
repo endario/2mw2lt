@@ -11,9 +11,9 @@ If connect needed explicit `--provider`/`--provider-session`, keep those flags i
 `taking.py` or `gate.py`, for every gate action. For Codex without session exports:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" --provider codex --provider-session <thread-id> <your session> branch
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" --provider codex --provider-session <thread-id> <your session> review <pr number>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" --provider codex --provider-session <thread-id> <your session> status <commission id>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" --provider codex --provider-session <thread-id> <your session> branch
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" --provider codex --provider-session <thread-id> <your session> review <pr number>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" --provider codex --provider-session <thread-id> <your session> status <commission id>
 ```
 
 Replace `<thread-id>` with the thread id used to connect, and keep that prefix for `critic`,
@@ -23,13 +23,13 @@ shows the same rule for speech and holds.
 For the client's forms and flag examples, without commissioning:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" --help
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" --help
 ```
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <your session> branch
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> review <pr number>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> critic <doc path>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/taking.py" <your session> branch
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> review <pr number>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> critic <doc path>
 ```
 
 `commissioned: <id> review round <n>, admitted` — a reviewer from a vendor that wrote none of the
@@ -111,7 +111,7 @@ A harness that holds no stream, Codex, is never sent that frame. It asks instead
 text, or `pending: …` while the run is out:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> status <commission id>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> status <commission id>
 ```
 
 When every eligible reviewer is busy, the commission waits instead of being refused: you are
@@ -138,7 +138,7 @@ judged. After pushing the round's own fixes past `ship it`, carry the pass to th
 the branch's worktree:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> carry <pr number>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> carry <pr number>
 ```
 
 After `ship it`, never rebase. To bring the branch up to date, merge `origin/main` into the passed
@@ -174,14 +174,14 @@ Discovered the artifact a round is running against is wrong before it answers? W
 this succeeds only while the run is still out, refused as too late otherwise:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> cancel <commission id>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> cancel <commission id>
 ```
 
 Whether a pull request was ever gated, by any session on this workspace, and where each review
 ended and was published (#1986):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> pr <pr number>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> pr <pr number>
 ```
 
 Opening your card's draft pull request, and editing or commenting on your own, is the owner's
@@ -212,7 +212,7 @@ git fetch origin && merged=$(git merge-tree --write-tree origin/main <head sha>)
 After that call succeeds, merge from the branch's worktree:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> merge <pr number> --head <head sha>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/gate.py" <your session> merge <pr number> --head <head sha>
 ```
 
 It marks a draft ready, joins the base's merge queue on exactly that head and reads the entry back
@@ -237,12 +237,12 @@ To read where its gates stand now, ask the daemon. Go does not read a pull reque
 or checks.
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" "/gates?repo=<owner>/<name>&pr=<pr number>" </dev/null
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" "/gates?repo=<owner>/<name>&pr=<pr number>" </dev/null
 ```
 
 `REJECTED … does not hold <branch>` — claim it with `taking.py`, above. `unresolved: …` — no
 reviewer could take it; report the blocker rather than reviewing your own work:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" blocked <your session> on "<gate blocker>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/verb.py" blocked <your session> on "<gate blocker>"
 ```

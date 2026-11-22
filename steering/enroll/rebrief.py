@@ -19,6 +19,7 @@ import python_floor  # noqa: E402
 python_floor.hook(blocking=False)  # SessionStart and SessionEnd: a hook never fails them
 
 import hashlib
+import hooks  # noqa: E402
 import json
 import os
 import subprocess
@@ -64,7 +65,7 @@ def remember(ws: Path, session: str, boundary: str, *, checkpoint: str | None = 
 def _where(last: dict, session: str) -> str:
     """Where the last checkpoint is read: its note, or the command that prints its text."""
     if last.get("checkpoint"):
-        return f"`python3 {HERE / 'checkpoint.py'} {session} read {last['checkpoint']}`"
+        return f"`{hooks.PYTHON_FORM} {HERE / 'checkpoint.py'} {session} read {last['checkpoint']}`"
     return last["note"]
 
 

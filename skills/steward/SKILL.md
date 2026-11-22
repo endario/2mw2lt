@@ -17,8 +17,8 @@ enrolment under a new epoch, so do not disconnect mid-goal; hand it back instead
 Every command below runs from this workspace. `say` is the lease client the brain uses:
 
 ```bash
-say() { printf '%s' "$1" | python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" say; }
-rest() { python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" "$@"; }
+say() { printf '%s' "$1" | "${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/lease.py" say; }
+rest() { "${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/rest.py" "$@"; }
 ```
 
 ## Read your bounds
@@ -50,7 +50,7 @@ Each unit you launch runs on a card of its own. When the goal's units all advanc
 issue names none of them, so mint a card for the unit, born part of your goal:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease scope "<unit name>" <track> advances:<n> triage:<criticality>,<size> --goal <goal> --goal-why "<the unit it is>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease scope "<unit name>" <track> advances:<n> triage:<criticality>,<size> --goal <goal> --goal-why "<the unit it is>"
 ```
 
 The card is yours, not your own work: nobody executes it until the launch that names it starts its
@@ -62,8 +62,8 @@ write the decision to a file (`purpose`, `selections` in order with `card`, `rol
 `associations`, an optional `cutoff`), then
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/goal.py" --lease prepare plan <goal> --policy <decision unit> --decision <file>
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/goal.py" --lease submit <the file prepare printed>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/goal.py" --lease prepare plan <goal> --policy <decision unit> --decision <file>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/goal.py" --lease submit <the file prepare printed>
 ```
 
 A card you minted by mistake leaves the plan as `excluded`; retiring it is the brain's.
@@ -115,7 +115,7 @@ Refusals name the bound you met:
 When a card proves harder or easier than its floor:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease retier <card> <stage> <floor> <why>
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/card.py" --lease retier <card> <stage> <floor> <why>
 ```
 
 The new floor is at or below your ceiling.
@@ -163,7 +163,7 @@ your stewardship ends lapses rather than arriving under your name.
 Ask each worker in its brief to report to you, not the brain:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/steering/enroll/say.py" --to <you> <their session> "<report>"
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/enroll/say.py" --to <you> <their session> "<report>"
 ```
 
 Report the goal's progress to the brain at the points it asked for, with `say.py <you> "<report>"`.
