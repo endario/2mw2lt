@@ -151,6 +151,15 @@ only what the head changes beyond Git's replay of the pass, and a floor the seri
 down a rung; sent before GitHub delivers the head it names, it is refused `head-not-observed`, so send
 it again a few seconds later. Run `carry` rather than commissioning another round.
 
+A head dominated by recorded data (eval results, LFS pointers) is reviewed with `review <pr number>
+--without-recorded`: the workspace's owner names those paths in the `review.exclude` setting, and
+the round's reviewer reads the diff without them, so it does not wait on a diff that large. The
+round runs at the series' own rung and spends a round of its ceiling; its status names the mode,
+and its published review says how many files it left out and under which paths, so the verdict is
+not read as covering them. It is refused when the workspace names no such paths, when no changed file is under them, and
+when all are. A path in both `review.exclude` and `review.light.full` is left out. It cannot be
+combined with `--resolution`.
+
 For new coordination migrations, follow the repository convention.
 Resolve duplicate versions before the first round; renaming a migration after a pass costs a round.
 Commission another round when judgment warrants it. A docs-only

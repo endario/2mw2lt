@@ -1968,6 +1968,8 @@ test('seatCall: word fields are one word, enums hold, and unknown fields are ref
     { client: 'card', argv: ['scope', 'The work', 'rt', 'resolves:12', 'major'] })
   expect(seatCall('card_scope', { name: 'The work', track: 'rt', criticality: 'major', size: 'L' })).toEqual(
     { client: 'card', argv: ['scope', 'The work', 'rt', 'triage:major,L'] })
+  expect(seatCall('card_scope', { name: 'The work', track: 'rt', executor: 'violet' })).toEqual(
+    { client: 'card', argv: ['scope', 'The work', 'rt', '--executor', 'violet'] })
   expect(resendId('done')).toBeNull()
 })
 

@@ -1374,6 +1374,8 @@ def _card_write(fact: dict, repo: str) -> tuple[str, dict] | None:
             body["triage"] = fact["triage"]
         if fact.get("goal"):
             body["goal"] = fact["goal"]
+        if fact.get("executor"):
+            body["executor"] = fact["executor"]
         return "/cards", body
     if state in ("card-branch", "card-unbranch"):
         # An ending carries the reason every ending records; Go refuses its absence.

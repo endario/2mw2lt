@@ -97,7 +97,9 @@ def main(argv: list[str]) -> int:
                 named = next((c for c in candidates if c.get("id") == card), None)
                 if named is None:
                     said = "; ".join(f"{c['id']} ({c['name']})" for c in candidates) or "none it executes"
-                    print(f"card {card} is no live card this session executes: {said}", file=sys.stderr)
+                    print(f"card {card} is no live card this session executes: {said}. Have the seat make "
+                          f"it this session's executor (card_session {card} {session} executor), or name "
+                          f"a card it does execute", file=sys.stderr)
                     return 1
             elif len(candidates) > 1:
                 # Without a named card the claim binds to whichever card was engaged last, which

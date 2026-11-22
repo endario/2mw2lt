@@ -1136,6 +1136,15 @@ Its `because` names what made neither fit. Go records it beside the session's st
 notices that standing raised and the cards it still executed, for audit:
 `rest.py '/retires?since=<RFC 3339>'`.
 
+The actions still only offered — never delivered to a machine, so safe to withdraw — are listed
+with `rest.py --lease /actions`, and one is cancelled with `say "cancel: token @lease <action id>"`.
+An ask that came back `action-open` refused was NOT queued: do not resubmit it blindly — read
+`/actions` first, since what still stands is what your retry would supersede. A machine can
+refuse an admitted retire outright; the platform's own repeated asks back off (a minute, then
+five) and stop after three, so an `automatic retirement stopped` notice means the retry budget
+is spent, not that the session ended. Before asking again yourself, verify the target is still
+the session you meant and has fresh cause — a refusal is evidence, not a pause.
+
 A launched session stays headless in tmux. Name `window` only when the owner must view or
 interact with it; otherwise leave it out. To show one already running, on the machine it runs on:
 `tmux -L 2mw2lt-launch attach -t =<tmux session>`, with `-CC` before `attach` in iTerm2.

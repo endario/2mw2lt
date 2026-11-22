@@ -39,19 +39,24 @@ RUNGS = ("uncommon", "rare", "epic", "legendary")
 
 def gate_flags(argv: list[str]) -> tuple[list[str], str] | None:
     """The arguments without `--floor`, `--why`, `--exclude`, `--judge`, `--effort`, `--final` and
-    `--resolution`, and
+    `--resolution`, `--without-recorded`, and
     what they add to a commission's line (doc 127): the least rarity the round's judge may have and why
     it was asked for (#6499), vendors that wrote the branch though no session held it (doc 161 §6), a
     judge the owner or the brain asked for (5907 slice-2 D3), the effort the round runs at in place of
-    its floor's (#7851), a round declared final, and a round on the resolution alone (#8286). A floor needs its reason, and a reason its floor;
+    its floor's (#7851), a round declared final, a round on the resolution alone (#8286), and a round without the
+    workspace's recorded data (#10514; one scope, so not with `--resolution`). A floor needs its reason, and a reason its floor;
     an effort is named once, by `--effort` or a pin's `@effort`, or both agree."""
-    rest, floor, why, exclude, judge, effort, final, resolution = [], "", "", "", "", "", "", ""
+    rest, floor, why, exclude, judge, effort, final, resolution, recorded = [], "", "", "", "", "", "", "", ""
     it = iter(argv)
     for a in it:
         if a == "--resolution":
             if resolution:
                 return None
             resolution = " resolution"
+        elif a == "--without-recorded":
+            if recorded:
+                return None
+            recorded = " without-recorded"
         elif a == "--final":
             if final:
                 return None
@@ -86,12 +91,12 @@ def gate_flags(argv: list[str]) -> tuple[list[str], str] | None:
             effort = f" effort {named}"
         else:
             rest.append(a)
-    if bool(floor) != bool(why):
+    if bool(floor) != bool(why) or resolution and recorded:
         return None
     pinned = (parse_judge(judge[len(" judge "):]) or {}).get("effort") if judge else None
     if effort and pinned and pinned != effort[len(" effort "):]:
         return None
-    return rest, floor + why + exclude + judge + effort + final + resolution
+    return rest, floor + why + exclude + judge + effort + final + resolution + recorded
 
 
 # A judge pin is `<vendor>[/<model>][@<effort>]`: no empty field, no whitespace, nothing past the
@@ -173,6 +178,8 @@ def _settled_refusal(e) -> str:
                                           "where a merge adapted the passed change: a round on that adaptation alone"),
                                          ("gate: review <repo> <branch> pr <n> token <t>",
                                           "to commission a round on this head, and carry its pass once it ships")])
+    if e.code == "without-recorded-none":
+        return refusal.refuse(str(e), send=[("/2mw2lt:gate review <n>", "to commission a whole round, which reads the same files")])
     if refusal.titled(e):
         # The server's own sentence where its catalogue carries one (doc 206 §6).
         return str(e)
@@ -215,17 +222,21 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
     why = re.search(r" why (\S+)", extra)
     judge = re.search(r" judge (\S+)", extra)
     effort = re.search(r" effort (\S+)", extra)
-    final = " final" in extra
-    resolution = " resolution" in extra
+    # The valued flags come out first: a `--why` value is free text, and `final`, `resolution` or
+    # `without-recorded` in it is a reason, not a flag.
     rest = extra
-    for piece in (floor[0] if floor else "", why[0] if why else "", f" judge {judge[1]}" if judge else "", effort[0] if effort else "",
-                  " final" if final else "", " resolution" if resolution else ""):
+    for piece in (floor[0] if floor else "", why[0] if why else "", f" judge {judge[1]}" if judge else "", effort[0] if effort else ""):
+        rest = rest.replace(piece, "", 1)
+    final = " final" in rest
+    resolution = " resolution" in rest
+    recorded = " without-recorded" in rest
+    for piece in (" final" if final else "", " resolution" if resolution else "", " without-recorded" if recorded else ""):
         rest = rest.replace(piece, "", 1)
     if rest.strip():
-        print(f"a {kind} on a Go workspace takes --floor, --why, --judge, --effort, --final and --resolution only, so far", file=sys.stderr)
+        print(f"a {kind} on a Go workspace takes --floor, --why, --judge, --effort, --final, --resolution and --without-recorded only, so far", file=sys.stderr)
         return 1
-    if resolution and kind != "review":
-        print("--resolution is a review's: a critique reads its whole design", file=sys.stderr)
+    if (resolution or recorded) and kind != "review":
+        print(f"{'--resolution' if resolution else '--without-recorded'} is a review's: a critique reads its whole design", file=sys.stderr)
         return 1
     here = Path.cwd()
     repo = checkout_slug(here, timeout=5)
@@ -256,6 +267,10 @@ def go_gate(ws: Path, session: str, flags, kind: str, what: str, extra: str, ret
             # Go proves the resolution at this head, forcing the replay as for a carry, for the
             # commits this checkout did not make.
             body.update(scope="resolution", **replayed(here, at))
+        elif recorded:
+            # Go reads the workspace's recorded paths and leaves them out of what the reviewer reads; it
+            # proves nothing of history, so no replay evidence travels.
+            body["scope"] = "without-recorded"
     if floor:
         body["floor"], body["why"] = floor[1], unquote(why[1])
     if judge:

@@ -87,6 +87,8 @@ def validate(fact: dict) -> str | None:
             return "track must name a lane"
         if fact.get("by") is not None and not _text(fact.get("by"), 120):
             return "by must name who declared it"
+        if fact.get("executor") is not None and not _text(fact.get("executor"), 120):
+            return "executor must name a session"
         units = fact.get("units")
         if units is not None and not (isinstance(units, list) and all(
                 isinstance(u, list) and len(u) == 2 and u[0] in ("d", "s", "b") and _text(u[1], 120)
@@ -265,7 +267,7 @@ def _edge_refusal(fact: dict) -> str | None:
 
 def scoped(name: str, track: str | None, units: list | None = None, card: str | None = None,
            anchors: dict | None = None, by: str | None = None, major: bool = False,
-           triage: dict | None = None, goal: dict | None = None) -> dict:
+           triage: dict | None = None, goal: dict | None = None, executor: str | None = None) -> dict:
     """A card, minted. `card` is the client's id for a new one, or an existing one's to re-scope.
 
     `units` is omitted rather than written empty: a card that has not said what its blocks are
@@ -273,9 +275,12 @@ def scoped(name: str, track: str | None, units: list | None = None, card: str | 
     the first while the second would erase it. `major` is the brain's declaration (doc 148 §5),
     so it is written only when true: a session's `declare:` never passes it, and absence reads
     as ordinary. `goal` is the goal the card is born contributing to (#7005), written only when
-    one is named, as the link's `part-of` would carry it.
+    one is named, as the link's `part-of` would carry it. `executor` names the session that runs
+    it where that is not the caller (#10516).
     """
     fact = {"state": "card-scoped", "card": card or new_ulid(), "name": name}
+    if executor is not None:
+        fact["executor"] = executor
     if track is not None:
         fact["track"] = track
     if by is not None:
@@ -370,6 +375,32 @@ def _goal(args: list[str]) -> tuple[dict | None, list[str], str | None]:
     return goal, rest, None
 
 
+# The flag a birth's executor names (#10516): the session that runs it, where that is not the
+# caller.
+_EXECUTOR = "--executor"
+
+
+def _executor(args: list[str]) -> tuple[str | None, list[str], str | None]:
+    """The arguments with --executor pulled out of them, its value, and the refusal one earned."""
+    rest, named = [], None
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == _EXECUTOR:
+            if i + 1 == len(args):
+                return None, [], f"{arg} needs a session"
+            if named is not None:
+                return None, [], f"{arg} twice"
+            named = args[i + 1]
+            i += 2
+            continue
+        if arg.startswith(_EXECUTOR):
+            return None, [], f"unknown executor option {arg!r}"
+        rest.append(arg)
+        i += 1
+    return named, rest, None
+
+
 def correction_value_refusal(field: str, after: object) -> str | None:
     """Why `after` is not a value `field` takes, naming the values it does, or None. A track is not
     here: the lanes a workspace names are its own, so its door judges them."""
@@ -404,10 +435,13 @@ def built(verb: str, rest: list[str]) -> tuple[list[dict], str | None]:
             goal, tail, wrong = _goal(rest[4:])
             if wrong:
                 return [], wrong
+            executor, tail, wrong = _executor(tail)
+            if wrong:
+                return [], wrong
             weight, tail = _weight(tail)
             tri, tail = _triage(tail)
             made = scoped(rest[2], rest[3], card=rest[1], anchors=_anchors(tail), major=weight,
-                          triage=tri, goal=goal)
+                          triage=tri, goal=goal, executor=executor)
             refusal = validate(made)
             return ([], refusal) if refusal else ([made], None)
         if verb == "rescope" and len(rest) >= 3:

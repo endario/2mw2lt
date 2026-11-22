@@ -25,7 +25,7 @@ def main(argv: list[str], local=None, prog: str = "card.py") -> int:
     """`local(token, verb, rest, usage)` is the writer a caller holding the ledger passes, for
     `--token -`; it answers None when the ledger is not this machine's."""
     usage = ("usage: card.py --lease scope [--card <ulid>] <name> <track> [<verb>:<n>[,<n>] ...] [major]\n"
-             "              [--goal <uuid> --goal-why <reason> [--goal-source <source>]]\n"
+             "              [--executor <session>] [--goal <uuid> --goal-why <reason> [--goal-source <source>]]\n"
              "       card.py --lease rescope <card> <name> <track> [<verb>:<n>[,<n>] ...] [major]\n"
              "       card.py --lease branch <card> <repo> <branch>\n"
              "       card.py --lease unbranch <card> <repo> <branch> [<why>]  (Go requires the why)\n"
@@ -160,6 +160,8 @@ def _on_go(held: dict, verb: str, rest: list[str], usage: str, retry: str | None
         # The retry repeats the whole birth: a resend under the card without its goal is another
         # declaration, refused (#7005).
         retry = f"--card {rest[1]}"
+        if fact.get("executor"):
+            retry += f" --executor {shlex.quote(fact['executor'])}"
         if fact.get("goal"):
             retry += f" --goal {fact['goal']['id']} --goal-why {shlex.quote(fact['goal']['why'])}"
             if fact["goal"].get("source"):

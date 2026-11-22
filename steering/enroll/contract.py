@@ -1000,6 +1000,21 @@ ParkReceiptAnswer = typing.TypedDict("ParkReceiptAnswer", {
     "replayed": "bool",
 })
 
+# PendingActions is the seat's read of its workspace's actions still only offered, the ones a
+# new ask would supersede or a cancellation withdraws (#10512).
+PendingActions = typing.TypedDict("PendingActions", {
+    "actions": "list[PendingAction] | None",
+})
+
+# PendingAction is one offered action's name on the list: what was asked, of which session, and
+# until when. The machine's body and its outcome's reason are the offer's, not the seat's read.
+PendingAction = typing.TypedDict("PendingAction", {
+    "id": "str",
+    "kind": "str",
+    "session": "str",
+    "deadline": "str",
+})
+
 # SlashCommand is one command a session's harness reports, classed by its adapter (#8432,
 # decisions 3 and 4). Its fields keep the agent's order and none is omitted when empty: the list's
 # hash is taken over encoding/json's marshalling of it, so the agent and coordination marshal the
@@ -3251,6 +3266,15 @@ GateBrief = typing.TypedDict("GateBrief", {
     "lifted": "GateLifted | None",
     "required_checks": "list[str] | None",
     "resolution": "typing.NotRequired[GateResolution | None]",
+    "excluded": "typing.NotRequired[GateExcluded | None]",
+})
+
+# GateExcluded is the workspace's recorded-data paths as they stood when a round was commissioned,
+# and how many of the head's changed files lay under them: the reviewer's diff is without those files
+# (documentation/architecture/go-recorded-data-review-design.md).
+GateExcluded = typing.TypedDict("GateExcluded", {
+    "paths": "list[str] | None",
+    "files": "int",
 })
 
 # GateResolution is the patch from Git's replay of the passed change at Source onto Base, from Via
@@ -3273,6 +3297,7 @@ GateContext = typing.TypedDict("GateContext", {
     "required_checks": "list[str] | None",
     "knowledge": "typing.NotRequired[str]",
     "resolution": "typing.NotRequired[GateResolution | None]",
+    "excluded": "typing.NotRequired[GateExcluded | None]",
 })
 
 # GatePlanRow is one plan table row whose label names the pull request's unit.
@@ -4253,6 +4278,32 @@ KnowledgeUnits = typing.TypedDict("KnowledgeUnits", {
     "source": "KnowledgeSource",
     "stale": "bool",
     "drift": "KnowledgeDrift | None",
+})
+
+# KnowledgeSyncState answers GET /knowledge/sync: where the workspace's knowledge stands against the
+# repository it follows. Behind is true while the mirror has verified a commit the knowledge has not
+# applied; Mirror says how far the fetch got, Applied what the knowledge holds, and Drift why a sync
+# that saw the verified commit did not apply it.
+KnowledgeSyncState = typing.TypedDict("KnowledgeSyncState", {
+    "repo": "str",
+    "path": "str",
+    "behind": "bool",
+    "mirror": "KnowledgeMirror | None",
+    "applied": "str | None",
+    "seen": "str | None",
+    "applied_at": "str | None",
+    "drift": "KnowledgeDrift | None",
+})
+
+# KnowledgeMirror is the team's mirror of the repository: the commit it last verified, the tip the
+# last forge read observed, when it last tried a fetch, how that went, and whether a fetch is wanted.
+KnowledgeMirror = typing.TypedDict("KnowledgeMirror", {
+    "verified": "str | None",
+    "verified_at": "str | None",
+    "observed": "str | None",
+    "attempted_at": "str | None",
+    "failure": "str | None",
+    "wanted": "bool",
 })
 
 KnowledgeSyncBody = typing.TypedDict("KnowledgeSyncBody", {})
@@ -5758,6 +5809,30 @@ Releases = typing.TypedDict("Releases", {
     "tails": "list[ReleaseRangeDTO] | None",
     "open": "list[ReleasePullDTO] | None",
     "red": "typing.NotRequired[list[ReleaseRedDTO] | None]",
+    "runs": "list[ReleaseRunDTO] | None",
+})
+
+# ReleaseRunDTO is one run of the workspace's release workflow as the record keeps it: GitHub's own
+# status and conclusion, never folded away, with Stage the desk's read of them (queued, running,
+# passed, failed or cancelled), its jobs done of total and its failed jobs' names once its read
+# filled them, and the tag a release observed on its head, empty while none matches one.
+ReleaseRunDTO = typing.TypedDict("ReleaseRunDTO", {
+    "repository": "str",
+    "run": "int",
+    "workflow": "str",
+    "event": "str",
+    "head_branch": "str",
+    "head": "str",
+    "url": "str",
+    "status": "str",
+    "conclusion": "typing.NotRequired[str]",
+    "stage": "str",
+    "jobs_done": "int | None",
+    "jobs_total": "int | None",
+    "failed_jobs": "list[str] | None",
+    "started_at": "typing.NotRequired[str | None]",
+    "ended_at": "typing.NotRequired[str | None]",
+    "tag": "typing.NotRequired[str]",
 })
 
 # ReleaseRedDTO is a red streak as CI's read states it, and when it was raised.
@@ -7232,6 +7307,7 @@ CardCreateBody = typing.TypedDict("CardCreateBody", {
     "track": "typing.NotRequired[str]",
     "triage": "typing.NotRequired[TriageBody | None]",
     "goal": "typing.NotRequired[GoalContributionBody | None]",
+    "executor": "typing.NotRequired[str]",
 })
 
 # GoalContributionBody names the goal a card is born contributing to: its UUID, the caller's
@@ -8533,6 +8609,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/accounts/resume",
     "POST /w/{workspace}/api/v1/accounts/serve",
     "POST /w/{workspace}/api/v1/accounts/transfer",
+    "GET /w/{workspace}/api/v1/actions",
     "POST /w/{workspace}/api/v1/actions",
     "POST /w/{workspace}/api/v1/actions/{action}/cancel",
     "GET /w/{workspace}/api/v1/board",
@@ -8634,6 +8711,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/interventions",
     "GET /w/{workspace}/api/v1/knowledge/brief",
     "GET /w/{workspace}/api/v1/knowledge/contracts",
+    "GET /w/{workspace}/api/v1/knowledge/sync",
     "POST /w/{workspace}/api/v1/knowledge/syncs",
     "GET /w/{workspace}/api/v1/knowledge/units",
     "GET /w/{workspace}/api/v1/knowledge/units/{id}",
@@ -8815,7 +8893,7 @@ PAGINATION = {
     "GET /w/{workspace}/api/v1/intents": {"parameter":"next","collection":"intents"},
     "GET /w/{workspace}/api/v1/launches/ended": {"parameter":"before","collection":"items"},
     "GET /w/{workspace}/api/v1/machines": {"parameter":"cursor","collection":"items"},
-    "GET /w/{workspace}/api/v1/releases": {"parameter":"next","collection":"releases","first":["tails","open"]},
+    "GET /w/{workspace}/api/v1/releases": {"parameter":"next","collection":"releases","first":["tails","open","runs"]},
     "GET /w/{workspace}/api/v1/rooms/{room}/messages": {"parameter":"cursor","collection":"items","stop":"head","drop_query":["before"]},
     "GET /w/{workspace}/api/v1/rulings": {"parameter":"next","collection":"rulings"},
     "GET /w/{workspace}/api/v1/sessions/{session}/history": {"parameter":"before","collection":"events"},
