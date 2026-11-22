@@ -1135,11 +1135,13 @@ AgentUndeliveredAnswer = typing.TypedDict("AgentUndeliveredAnswer", {
 })
 
 # AgentEndedBody asks which named sessions or discovered runtimes ended on this machine.
-# Runtime candidates require an ended epoch in this workspace; an unknown process grants no cleanup.
+# Runtime candidates require an ended epoch. Marked sessions also require the conversation to be
+# free of live enrolments across runtimes.
 AgentEndedBody = typing.TypedDict("AgentEndedBody", {
     "uplink": "str",
     "sessions": "typing.NotRequired[list[str] | None]",
     "runtimes": "typing.NotRequired[list[str] | None]",
+    "marked_sessions": "typing.NotRequired[list[str] | None]",
 })
 
 # AgentEndedAnswer names ended epochs on the asking machine in this workspace.

@@ -144,13 +144,27 @@ def _on_go(ws: Path, verb: str, session: str, text: str, retry_id: str | None) -
         repo = m["repo"] or (session_routes.card_repo(ws) if m["branch"] else "")
         harness, _, account = (m["agent"] or "").partition("/")
         doing = (m["work"] or "").strip()
-        if m["branch"] and not doing:
-            # The branch claim: the announce takes the executed card's title as its doing.
+        if m["branch"]:
+            # The branch claim: the announce takes the card's title as its doing, a doing with no
+            # card declares the card first, and what bound, or why nothing did, is said. A named
+            # card is the session's own when one of its cards answers the prefix, Go's to judge else.
+            card = None
+            if m["card"]:
+                hits = said(lambda: [c for c in session_routes.executing_cards(session, token)
+                                     if str(c.get("id", "")).startswith(m["card"])])
+                if hits is False:
+                    return 1
+                card = hits[0] if len(hits) == 1 else {"id": m["card"], "name": doing}
+                if not (doing or card["name"]):
+                    print(f"announce carries no doing, and no live card of this session's answers {m['card']} "
+                          "to take it from: declare the work first, or give doing", file=sys.stderr)
+                    return 1
             key = retry_id or occurrence()
             print(f"id {key}", file=sys.stderr)
             try:
                 answer = said(lambda: session_routes.announce_branch(
-                    session, token, m["branch"], ws, key, harness=harness, account=account, repo=repo), key)
+                    session, token, m["branch"], ws, key, harness=harness, account=account, repo=repo,
+                    card=card, doing=doing), key)
             except ValueError as e:
                 print(e if isinstance(e, session_routes.ConcludedClaim) else f"{e}: declare the work first, or give doing", file=sys.stderr)
                 return 1
@@ -163,9 +177,6 @@ def _on_go(ws: Path, verb: str, session: str, text: str, retry_id: str | None) -
             body["harness"], body["account"] = harness, account
         if m["card"]:
             body["card"] = m["card"]
-        if m["branch"]:
-            body["branch"] = m["branch"]
-            body["repo"] = repo
         if not doing:
             card = said(lambda: session_routes.executing_card(session, token))
             if card is False:

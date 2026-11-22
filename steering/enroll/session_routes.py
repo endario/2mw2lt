@@ -917,9 +917,12 @@ def raise_need(token: str, key: str, body: dict) -> dict:
 
 def announce_branch(session: str, token: str, branch: str, ws: Path, key: str,
                     harness: str = "", account: str = "", card: dict | None = None,
-                    resolved: dict | None = None, repo: str = "") -> str:
+                    resolved: dict | None = None, repo: str = "", doing: str = "") -> str:
     """A branch claim is an announce (the brain's ruling, 2026-10-08): the doing defaults to the
-    executed card's title, and the repository names the branch, which binds it to the card. A card
+    executed card's title, and the repository names the branch, which binds it to the card. A
+    `doing` given by a session that executes no live card declares the card it names first, its id
+    the workspace's, session's, repository's and branch's own so a rerun replays it, and the claim binds to it:
+    a launch naming no card otherwise leaves its worker unable to claim a branch or gate. A card
     given (`card`, one this session executes as the cards read answers) is named to the claim,
     which binds the branch to it over the card the session engaged last (#5352); `resolved` is the
     same read's answer handed in so the cards are read once, naming no card to the claim. `repo`
@@ -929,6 +932,14 @@ def announce_branch(session: str, token: str, branch: str, ws: Path, key: str,
     doing, `Refused` or `Unsent` as a write does."""
     named = card is not None
     card = card or resolved or executing_card(session, token)
+    if card is None and doing:
+        repo = repo or card_repo(ws)
+        wire = _own_key("announce.card", _base(), session, repo, branch)[:24]
+        # A card's name is one line of at most 80 characters, as Go holds it; the doing stays whole.
+        name = " ".join(doing.split())
+        name = name if len(name) <= 80 else name[:79].rstrip() + "…"
+        declare_card(wire, name, {}, token)
+        card, named = {"id": wire, "name": name}, True
     if card is None:
         concluded = concluded_executing(session, token)
         if concluded:
@@ -936,7 +947,7 @@ def announce_branch(session: str, token: str, branch: str, ws: Path, key: str,
                 f"{c.get('id')} ({c.get('name')}) is concluded, so a branch cannot be claimed on it" for c in concluded)
                 + ": the seat can unconclude it, or declare a new card")
         raise ValueError(f"no live card of {session}'s names doing to announce")
-    body: dict = {"state": "announce", "doing": card["name"], "branch": branch, "repo": repo or card_repo(ws)}
+    body: dict = {"state": "announce", "doing": doing or card["name"], "branch": branch, "repo": repo or card_repo(ws)}
     if named:
         body["card"] = card["id"]
     if harness:
