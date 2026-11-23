@@ -6,7 +6,10 @@ harness exports, the enrollment minted for it is found by that, and the name on 
 attachment is the one the door resolves from its credential. Naming the holder by hand is
 how one session came to show two identities (#193).
 
-The seat is Go's, taken only while it is vacant (go-unit8-seat-design.md §2). The session is
+The seat is Go's, taken only while it is vacant (go-unit8-seat-design.md §2), or, with
+`--take-over`, from its holder when Go admits it; the brain skill passes it only when the person
+typed the skill.
+The session is
 NOT answerable when this returns. Only a held stream makes it so, so the session holds its stream
 at the local agent — the recipe in
 `skills/brain/SKILL.md` — for as long as it keeps the seat.
@@ -27,7 +30,7 @@ from local_workspace import required_workspace_root  # noqa: E402
 import hooks  # noqa: E402
 import session_routes  # noqa: E402
 
-USAGE = "usage: promote.py"
+USAGE = "usage: promote.py [--take-over]"
 
 
 def refuse(why: str) -> None:
@@ -63,9 +66,10 @@ def enrollment(ws: Path) -> dict:
 
 
 def main(argv: list[str]) -> int:
-    if argv:
+    if argv not in ([], ["--take-over"]):
         print(USAGE, file=sys.stderr)
         return 2
+    take_over = argv == ["--take-over"]
 
     # The enrolment `connect.py` stored for this session lives in the workspace this session
     # runs in.
@@ -86,8 +90,11 @@ def main(argv: list[str]) -> int:
         seat = session_routes.read_seat(token)
         holder = seat.get("holder")
         if holder is not None and holder != session:
-            refuse(f"{holder} holds the seat; the owner hands it on from the "
-                   f"console, or {holder} hands it on itself")
+            if not take_over:
+                refuse(f"{holder} holds the seat; the owner hands it on from the "
+                       f"console, or {holder} hands it on itself")
+            session_routes.seat_take(session, token, int(seat["generation"]))
+            print(f"took the seat over from {holder}", file=sys.stderr)
         if holder is None:
             session_routes.seat_acquire(session, token, int(seat["vacancy_generation"]))
     except session_routes.Refused as e:

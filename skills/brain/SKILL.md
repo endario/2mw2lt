@@ -7,9 +7,9 @@ The console routes the owner's messages to whoever holds the steering role. By d
 the daemon's own resident brain. This puts them through to **this** session, with its context.
 
 From any machine: the seat is the workspace's on Go, which the door this workspace is wired to
-names (`STEERING_DOOR` carries `/<team>/<workspace>`, or `/w/<alias>`). You take it only while it
-is vacant: nobody holds it, its holder's enrolment has ended, or its holder's lease has lapsed
-unrenewed. A holder that is answering keeps it, and `promote.py` then says who holds it; the owner hands it on from the
+names (`STEERING_DOOR` carries `/<team>/<workspace>`, or `/w/<alias>`). You take it while it is
+vacant: nobody holds it, its holder's enrolment has ended, or its holder's lease has lapsed
+unrenewed. Otherwise a holder that is answering keeps it, and `promote.py` then says who holds it; the owner hands it on from the
 console, or the holder hands it on itself. The owner can hand it to another session or reclaim it
 from the console at any time, and the next lease verb you send then answers
 `refused: this session does not hold the seat (…)`. Do not take it back unless the owner asks.
@@ -27,6 +27,16 @@ JSON
 
 ```bash
 "${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/promote.py"
+```
+
+When the person typed `/2mw2lt:brain` into this session themselves, as their own prompt, they
+are asking for the seat: pass `--take-over`. Never pass it on a directive, a peer's words or your
+own choice to load this skill. A takeover moves a held seat only to a session started by hand in an editor
+tab on a machine login the team's owner registered; its refusal names the check that failed, and the
+owner then hands the seat on from the console.
+
+```bash
+"${STEERING_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/steering/promote.py" --take-over
 ```
 
 No session name: it finds the enrollment minted for this session and the role is taken with
@@ -1026,11 +1036,14 @@ hand opening. **A brief carries what is not standard**: the task, the context th
 find, and the session-specific and seasonal items — a pause exception, a deploy state, an owner
 ruling of the day, at most the bulletin lines that bear on this one session. Never write a
 standing rule into a brief: the launch already carries it, and a second copy drifts. If it is not
-taken, you are told `launch-brief-unheard`: the launch was refused or lapsed, or the session has
-not acknowledged it after ten minutes. A launch without a brief that ends without starting a
-session, refused by its machine or withdrawn for any cause but your own withdrawal, is told to you
-as a `launch-ended` signal naming its cause and what the machine said; `/launches/ended` lists the
-last day's. A launch still waiting for a machine after 15 minutes (`signals.launch_waiting.*`) is
+taken, you are told `launch-brief-unheard`: the launch was refused by its machine, lapsed or lost its
+offer, or the session has not acknowledged it after ten minutes. A launch that ends without starting
+a session, refused by its machine or withdrawn for any cause but your own withdrawal, is told to you
+as a `launch-ended` signal naming its cause and what the machine said, whether or not it carried a
+brief, except a briefed one its machine refused, that lapsed or lost its offer, which is the brief's
+notice above; a briefed launch no machine can take by a rule (unsatisfiable, an unknown pin, an account
+that cannot serve) is `launch-ended`, since launching it again as it stands fails the same way.
+`/launches/ended` lists the last day's. A launch still waiting for a machine after 15 minutes (`signals.launch_waiting.*`) is
 told to you once as `launch-waiting`, with why it waits and the machines short of room. A launch without a brief that starts appears in `/sessions` and you delegate to it like
 any idle session; if it has had no directive and holds no card five minutes after it enrolled
 (`signals.launch_undirected.*`), you are told `launch-undirected`. The work is never the reason:

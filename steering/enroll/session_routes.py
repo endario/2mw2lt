@@ -599,6 +599,13 @@ def seat_acquire(session: str, token: str, vacancy_generation: int) -> dict:
                 _own_key("seat.acquire", session, str(vacancy_generation)), SESSION_CARRIER, token)
 
 
+def seat_take(session: str, token: str, generation: int) -> dict:
+    """The owner's hand-opened session takes the seat over from its holder, naming the generation it
+    saw held. Raises `Refused` or `Unsent`."""
+    return post(f"/sessions/{session}/seat/takeover", {"generation": generation},
+                _own_key("seat.take", session, str(generation)), SESSION_CARRIER, token)
+
+
 def seat_hand(session: str, token: str, generation: int, to: str, to_epoch: int) -> dict:
     """The holder hands the seat to the session `to`, standing at `to_epoch`. Raises `Refused` or `Unsent`."""
     return post(f"/sessions/{session}/seat/handover", {"generation": generation, "to": to, "to_epoch": to_epoch},

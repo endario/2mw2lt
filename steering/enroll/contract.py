@@ -2426,6 +2426,12 @@ SeatHandover = typing.TypedDict("SeatHandover", {
     "to_epoch": "int",
 })
 
+# SeatTakeover is the body of POST /sessions/{session}/seat/takeover: the generation the candidate
+# saw held.
+SeatTakeover = typing.TypedDict("SeatTakeover", {
+    "generation": "int",
+})
+
 # SeatGeneration is the body of a release: the generation the caller holds.
 SeatGeneration = typing.TypedDict("SeatGeneration", {
     "generation": "int",
@@ -8806,6 +8812,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/handover",
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/release",
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/renewal",
+    "POST /w/{workspace}/api/v1/sessions/{session}/seat/takeover",
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/timers",
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/timers/answers",
     "POST /w/{workspace}/api/v1/sessions/{session}/seat/timers/{timer}/changes",
