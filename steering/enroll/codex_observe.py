@@ -24,6 +24,8 @@ import runtime_id  # noqa: E402
 import spool  # noqa: E402
 import supervision  # noqa: E402
 import verb_help  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import app_hook  # noqa: E402
 from local_workspace import workspace_root  # noqa: E402
 
 
@@ -199,6 +201,8 @@ def main() -> int:
         hook = {}
     if not isinstance(hook, dict):
         hook = {}
+    if app_hook.is_app(hook):
+        return 0  # the Antigravity app sets PLUGIN_ROOT too; its turn end is not Codex's to record
     try:
         out = handle(hook)
     except Exception:

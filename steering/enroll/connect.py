@@ -33,6 +33,7 @@ import hooks  # noqa: E402
 import python_floor  # noqa: E402
 import checkout_binding  # noqa: E402
 import holder  # noqa: E402
+from holder import note as holder_note  # noqa: E402
 from verb_help import current_args, error, help_requested, script_help  # noqa: E402
 
 # What this module's import does not pay for (#9342): `door` (with urllib, ssl and http.client
@@ -678,26 +679,6 @@ def plugin_line(provider: str | None, mine_file: Path = HERE.parent.parent / "ve
         return (f"plugin: {mine} is behind the orchestrator's {release}"
                 + (f"; update it: {fix}" if fix else ""))
     return f"plugin: {mine}"
-
-
-def holder_note(ws: Path, psession: str | None, provider: str | None = None,
-                plugin_root: Path = HERE.parent.parent) -> str:
-    """What the `plugin:` line adds about the plugin's module: with a fresh holder claim the model
-    arms no hold of its own (#3872 D2). Without one, a Claude session of a plugin that ships a
-    module says so, because a process fetched its plugins when it started and never loads a module
-    that arrived after (#4551)."""
-    if not psession:
-        return ""
-    if holder.fresh(ws, psession):
-        return "; the plugin holds this session's stream, so arm no hold" + (
-            "; read frames with the plugin's frames tool" if provider == "zcode" else "")
-    if provider == "zcode":
-        return ("; the plugin's frames server holds no stream here yet (it starts with the "
-                "session: restart it if the plugin was installed after), so arm no hold")
-    if provider == "claude" and (plugin_root / "mods.json").is_file():
-        return ("; the plugin's module holds no stream here (this process may have started before the "
-                "plugin gained it: restart it or --resume), so arm a hold")
-    return ""
 
 
 def plugin_out(line: str, note: str) -> tuple[str | None, str | None]:

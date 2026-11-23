@@ -26,6 +26,7 @@ import subprocess
 import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import app_hook  # noqa: E402
 from shell_words import (ASSIGNMENT, SHELLS, Unresolvable, assigned as _assigned,  # noqa: E402
                          command_name as _command_name, expand as _expand, segments as _segments,
                          heredocs, shell_script as _shell_script)
@@ -214,14 +215,13 @@ def main() -> int:
             return 0
         return verb_help.error("delete_guard", f"unexpected arguments: {' '.join(argv)}")
     try:
-        payload = json.load(sys.stdin)
-        refusal = verdict(payload) if isinstance(payload, dict) else None
+        raw = json.load(sys.stdin)
+        refusal = verdict(app_hook.claude(raw)) if isinstance(raw, dict) else None
     except Exception:
         return 0
     if refusal is None:
         return 0
-    print(refusal, file=sys.stderr)
-    return 2
+    return app_hook.refuse(raw, refusal)
 
 
 if __name__ == "__main__":

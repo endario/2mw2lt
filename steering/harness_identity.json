@@ -78,11 +78,13 @@
       "name": "antigravity",
       "delivery": "injected-reach",
       "can": [
-        "prompt-steering"
+        "prompt-steering",
+        "turn-end-gate"
       ],
       "session_env": [
         "ANTIGRAVITY_CONVERSATION_ID"
       ],
+      "turn_end_gate": true,
       "session_runtime": true
     }
   ]

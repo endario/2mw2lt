@@ -147,3 +147,23 @@ def describe(ws: Path, psession: str) -> str | None:
     or nothing when the plugin's module is not live for this session."""
     hold = state(ws, psession)
     return said(hold) if hold is not None else unstarted(ws, psession)
+
+
+def note(ws: Path, psession: str | None, provider: str | None = None,
+         plugin_root: Path = Path(__file__).resolve().parent.parent.parent) -> str:
+    """What the `plugin:` line adds about the plugin's module: with a fresh holder claim the model
+    arms no hold of its own (#3872 D2). Without one, a Claude session of a plugin that ships a
+    module says so, because a process fetched its plugins when it started and never loads a module
+    that arrived after (#4551)."""
+    if not psession:
+        return ""
+    if fresh(ws, psession):
+        return "; the plugin holds this session's stream, so arm no hold" + (
+            "; read frames with the plugin's frames tool" if provider == "zcode" else "")
+    if provider == "zcode":
+        return ("; the plugin's frames server holds no stream here yet (it starts with the "
+                "session: restart it if the plugin was installed after), so arm no hold")
+    if provider == "claude" and (plugin_root / "mods.json").is_file():
+        return ("; the plugin's module holds no stream here (this process may have started before the "
+                "plugin gained it: restart it or --resume), so arm a hold")
+    return ""

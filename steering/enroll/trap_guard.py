@@ -30,6 +30,7 @@ import subprocess
 import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import app_hook  # noqa: E402
 from shell_words import (ASSIGNMENT, SHELLS, Unresolvable, assigned, command_name, expand, heredocs,  # noqa: E402
                          segments, shell_script)
 
@@ -576,26 +577,26 @@ def main() -> int:
             return 0
         return verb_help.error("trap_guard", f"unexpected arguments: {' '.join(argv)}")
     try:
-        payload = json.load(sys.stdin)
+        raw = json.load(sys.stdin)
+        payload = app_hook.claude(raw) if isinstance(raw, dict) else raw
         if granting:
             if grant := merge_grant(payload, argv[1]):
-                print(json.dumps(grant))
+                app_hook.granted(raw, grant)
             return 0
         # A tree's grant file is read by the script itself, so the grant rides the release of the
         # script that knows it (#7467): an older script beside newer settings ignores the file and
         # only loses the grant, where the flag it did not know refused every call.
         if (repo := granted_repo(payload)) and (grant := merge_grant(payload, repo)):
-            print(json.dumps(grant))
+            app_hook.granted(raw, grant)
             return 0
         why = verdict(payload) if isinstance(payload, dict) else None
         if why is None:
             if grant := forge_grant(payload):
-                print(json.dumps(grant))
+                app_hook.granted(raw, grant)
             return 0
     except Exception:
         return 0
-    print(why, file=sys.stderr)
-    return 2
+    return app_hook.refuse(raw, why)
 
 
 if __name__ == "__main__":

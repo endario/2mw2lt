@@ -2580,10 +2580,11 @@ BrainRequestBody = typing.TypedDict("BrainRequestBody", {
     "launch": "typing.NotRequired[BrainLaunch | None]",
 })
 
-# BrainLaunch is where a word to a vacant seat asks the brain to run: an Anthropic account, a machine
-# by the name its census reports, a model and an effort. Each is optional, and none is a vendor or a
-# harness: the seat host is Claude Code's stream-json loop (doc 208).
+# BrainLaunch is where a word to a vacant seat asks the brain to run: the harness it runs in, an
+# account of that harness's vendor, a machine by the name its census reports, a model and an effort.
+# Each is optional (doc 208).
 BrainLaunch = typing.TypedDict("BrainLaunch", {
+    "harness": "typing.NotRequired[str]",
     "account": "typing.NotRequired[str]",
     "machine_name": "typing.NotRequired[str]",
     "model": "typing.NotRequired[str]",

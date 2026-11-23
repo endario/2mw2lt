@@ -36,6 +36,7 @@ import shlex
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
+import app_hook  # noqa: E402
 import holder  # noqa: E402
 import hooks  # noqa: E402
 import verb_help  # noqa: E402
@@ -96,9 +97,10 @@ def main() -> int:
     if argv:
         return verb_help.error("armed", f"unexpected arguments: {' '.join(argv)}")
     try:
-        hook = json.load(sys.stdin)
+        raw = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
         return DONE
+    hook = app_hook.claude(raw) if isinstance(raw, dict) else raw
     if not isinstance(hook, dict) or already_blocked(hook):
         return DONE
     psession = hook.get("session_id")
@@ -133,7 +135,7 @@ def main() -> int:
         why = announce["why"]
     else:
         return DONE
-    json.dump({"decision": "block", "reason": why}, sys.stdout)
+    json.dump(app_hook.stop(raw, why), sys.stdout)
     return DONE
 
 

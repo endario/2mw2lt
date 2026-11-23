@@ -81,8 +81,15 @@ holds no stream here may mean this process fetched its plugins before the module
 long-lived brain stays that way until it is restarted or resumed
 (#4551); resume it so the plugin holds the stream, since a hold armed by hand revokes the plugin's (#5641). While you hold the seat
 the plugin also places the knowledge's standing decisions last in your system prompt, so a compaction
-does not lose them; any other harness reads them with `seat_section.py`. The
-rest of this section is for a harness the plugin does not hold.
+does not lose them; any other harness reads them with `seat_section.py`.
+
+**When `promote.py` says your harness is reached by injection, arm nothing here either.** The
+Antigravity app is one such harness: a directive or a say is posted into your conversation
+as a message opening `steering directive <id>` or `steering say <key>`, which starts a turn when you are
+idle and steers the one you are in otherwise. Run a directive's receipt line before anything else;
+a say is acknowledged by nothing. Read the standing decisions with `seat_section.py` when you take
+the seat and again after a compaction. The rest of this section is for a harness that holds its own
+stream.
 
 Hold your stream as a background command whose end wakes the session — in Claude Code, Bash
 with `run_in_background`. The brain holds this for as long as it runs the fleet, often the whole

@@ -9,10 +9,6 @@ how one session came to show two identities (#193).
 The seat is Go's, taken only while it is vacant (go-unit8-seat-design.md §2), or, with
 `--take-over`, from its holder when Go admits it; the brain skill passes it only when the person
 typed the skill.
-The session is
-NOT answerable when this returns. Only a held stream makes it so, so the session holds its stream
-at the local agent — the recipe in
-`skills/brain/SKILL.md` — for as long as it keeps the seat.
 """
 from __future__ import annotations
 
@@ -29,6 +25,7 @@ from bind import records  # noqa: E402
 from local_workspace import required_workspace_root  # noqa: E402
 import hooks  # noqa: E402
 import session_routes  # noqa: E402
+import holder as plugin_holder  # noqa: E402
 
 USAGE = "usage: promote.py [--take-over]"
 
@@ -38,7 +35,7 @@ def refuse(why: str) -> None:
     raise SystemExit(1)
 
 
-def enrollment(ws: Path) -> dict:
+def enrollment(ws: Path) -> tuple[dict, "machine_harness.Harness"]:
     """The stored enrollment this session may attach under — its own, and no other.
 
     The provider session the harness exports is the identity; `connect.py` writes it beside
@@ -50,14 +47,18 @@ def enrollment(ws: Path) -> dict:
     # The harness's own answer, never the inherited variable: a session started inside another
     # carries the parent's `CLAUDE_CODE_SESSION_ID` and must not attach under it (#6500).
     import machine_harness
-    psession = (machine_harness.of("claude").session_id() or "").strip()
+    try:
+        harness = machine_harness.identify()
+    except machine_harness.NotIdentified as why:
+        refuse(f"{why}. The role is taken from the session that connected.")
+    psession = (harness.session_id() or "").strip()
     known = records(ws)
     if not known:
         refuse(f"{ws} holds no enrollment. The role is taken by a session steering knows: "
                f"run /2mw2lt:connect first.")
     mine = [r for r in known.values() if psession and r.get("provider_session") == psession]
     if len(mine) == 1:
-        return mine[0]
+        return mine[0], harness
     whose = psession or "this harness exports no session id"
     refuse(f"no enrollment in {ws} was minted for this session ({whose}); it holds "
            f"{', '.join(sorted(known))}. Run /2mw2lt:connect. If a stored token predates "
@@ -84,7 +85,7 @@ def main(argv: list[str]) -> int:
         hooks.repin(ws)
     except Exception as e:
         print(f"launcher refresh skipped: {e}", file=sys.stderr)
-    rec = enrollment(ws)
+    rec, harness = enrollment(ws)
     session, token = rec["session"], rec["token"]
     try:
         seat = session_routes.read_seat(token)
@@ -104,6 +105,14 @@ def main(argv: list[str]) -> int:
                f"which reads the seat before taking it")
     print(f"SESSION={session}")
     print(f"\nSeated as {session}.")
+    if not harness.holds:
+        print(f"{harness.provider} is reached by injection, so arm no hold.")
+        return 0
+    # Connect's own note on the plugin's hold, where it says to arm none (#4520, #5641).
+    note = plugin_holder.note(ws, (harness.session_id() or "").strip(), harness.provider).removeprefix("; ")
+    if note.endswith("arm no hold"):
+        print(note[:1].upper() + note[1:] + ".")
+        return 0
     print("Not answerable yet. Hold your stream at the local agent before the daemon will "
           "route to you — the recipe is in the /2mw2lt:brain skill, and the stream has to "
           "stay open for as long as you hold the role.")

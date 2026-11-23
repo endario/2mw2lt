@@ -49,6 +49,15 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -z \"${PLUGIN_ROOT:-}\" ] || [ -z \"${ANTIGRAVITY_CONVERSATION_ID:-}\" ]; then exit 0; fi; exec \"${STEERING_PYTHON:-python3}\" \"${PLUGIN_ROOT}/steering/enroll/armed.py\"",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PreToolUse": [
