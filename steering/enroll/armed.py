@@ -109,7 +109,7 @@ def main() -> int:
         # a session whose cwd has left the project reaches a different common root, finds no
         # record there, and would be let go every turn while dark.
         anchor = os.environ.get("CLAUDE_PROJECT_DIR") or hook.get("cwd") or os.getcwd()
-        ws = workspace_root(Path(anchor), timeout=1.0)
+        ws = workspace_root(Path(anchor), timeout=2.0)
         # The enrolment minted for *this* provider session, and no other. `own_enrolment` would
         # fall back to a name the workspace holds for somebody else, which in a workspace with
         # more than one session refuses a stranger's turn and names another session's hold.

@@ -136,7 +136,7 @@ def main() -> int:
         return finish()
     anchor = Path(os.environ.get("CLAUDE_PROJECT_DIR") or hook.get("cwd") or os.getcwd())
     try:
-        ws = workspace_root(anchor, timeout=1.0)
+        ws = workspace_root(anchor, timeout=2.0)
     except Exception:
         return finish()
     try:

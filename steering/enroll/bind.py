@@ -70,7 +70,7 @@ def ancestry(limit: int = 8) -> list[str]:
         entry, ppid, why = "", None, ""
         for attempt in range(PS_ATTEMPTS):
             try:
-                r = subprocess.run(["ps", "-o", "ppid=,args=", "-p", str(pid)], capture_output=True, text=True, timeout=1.0)
+                r = subprocess.run(["ps", "-o", "ppid=,args=", "-p", str(pid)], capture_output=True, text=True, timeout=runtime_id.PS_PATIENT)
             except (OSError, subprocess.TimeoutExpired) as e:
                 why = f"{type(e).__name__}: {e}"
             else:

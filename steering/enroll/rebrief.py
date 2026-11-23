@@ -170,7 +170,7 @@ def keep(session: str, cwd: Path) -> str:
         branch = ""
     try:
         from local_workspace import workspace_root
-        ws = workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or cwd), timeout=1.0)
+        ws = workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or cwd), timeout=2.0)
         last = _last(ws, session) if ws else None
     except Exception:  # noqa: BLE001 — what cannot be read is said to be unknown
         last = None
@@ -190,7 +190,7 @@ def main() -> int:
         from bind import records
         from local_workspace import workspace_root
         ws = workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()),
-                            timeout=1.0)
+                            timeout=2.0)
         text = context(payload, ws, records(ws)) if ws else None
     except Exception:  # noqa: BLE001 — a hook never fails the start it is attached to
         return 0

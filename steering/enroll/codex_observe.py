@@ -170,7 +170,7 @@ def handle(hook: dict, *, workspace: Path | None = None, plugin_data: Path | Non
         try:
             named_cwd = hook.get("cwd")
             cwd = Path(named_cwd) if isinstance(named_cwd, str) and named_cwd else Path.cwd()
-            ws = workspace or workspace_root(cwd, timeout=0.5)
+            ws = workspace or workspace_root(cwd, timeout=2.0)
             if spool.admit(ws, o) is not None:
                 return {}
             why = "spool-full"

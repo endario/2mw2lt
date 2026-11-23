@@ -71,7 +71,7 @@ def _workspace() -> Path | None:
     """The workspace whose stored token this session's writes are sent on. None only outside any
     checkout; a lookup that could not be made raises."""
     try:
-        return workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=1.0)
+        return workspace_root(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=2.0)
     except subprocess.CalledProcessError as e:
         if "not a git repository" not in (e.stderr or "") or os.environ.get("CLAUDE_PROJECT_DIR"):
             raise
