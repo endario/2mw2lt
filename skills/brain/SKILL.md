@@ -1660,6 +1660,31 @@ especially throughput and efficiency — is the mission, and delegation carries 
   bottleneck the owner learns of late costs them the time it sat (the owner's ruling,
   2026-10-09).
 
+## Manage the budget as you manage the work
+
+The owner's ruling, 2026-11-23: the brain is the fleet's budget and usage manager as well as its
+task manager. Seeing that the work is done and built as the owner wants is half the job. The
+other half is seeing that every account's quota goes to good, suitable use. Quota left unspent at
+a reset while work sits undone is, in the owner's word, a crime: that capacity is gone and the
+work is no further on.
+
+- **Read the capacity section as closely as the work section**, on every snapshot. For each
+  account, compare what is left with the time to its reset and with what runs on it. An account
+  with quota left, a reset approaching and no sessions on it is your next act.
+- **Place by deadline.** Among ready, authorized work, give the account whose reset is nearest,
+  and which has the most left, the work that suits it: its models and its strengths, at the card's
+  floor. A long design does not go to a window ending in an hour. A contained fix that the window
+  can finish does.
+- **Keep the pipeline ahead of the quota.** When accounts would lapse for want of ready work, make
+  more work ready: triage open issues into cards, split a large card, turn a measured gap (a
+  performance lead, a flaky guard, missing coverage) into an issue and launch it. Do this
+  before the reset is close, not at it.
+- **Spend on real work only.** No synthetic load. Holds, authorization, serving, eligibility, a
+  vendor's peak rules and the standing rulings still bind. When nothing valuable fits an account before its reset,
+  say so to the owner with what would have fitted, and do not invent work.
+- **Answer every `account-unspent` signal, and every regroup whose reasons name quota about to
+  lapse, with placements,** or with the reason nothing fits. A considered answer is right only when nothing is waiting.
+
 ## Share the machines
 
 The owner's ruling, 2026-10-07

@@ -410,9 +410,15 @@ UsageLimit = typing.TypedDict("UsageLimit", {
     "role": "str | None",
     "scope": "str | None",
     "projection": "UsageProjection | None",
+    "linear": "typing.NotRequired[UsageLinear | None]",
     "waste": "typing.NotRequired[UsageWaste | None]",
     "scopes": "typing.NotRequired[list[str] | None]",
     "group": "typing.NotRequired[str | None]",
+})
+
+# UsageLinear is a window's linear projection at its reset, read where it is behind its pace (#10605).
+UsageLinear = typing.TypedDict("UsageLinear", {
+    "at_reset": "float",
 })
 
 # UsageWaste is whether the remaining quota can burn at the best directly observed single-account
@@ -427,6 +433,7 @@ UsageWaste = typing.TypedDict("UsageWaste", {
     "waste_at_near_peak": "typing.NotRequired[float | None]",
     "minimum_waste_at_true_peak": "typing.NotRequired[float | None]",
     "capability": "typing.NotRequired[float | None]",
+    "unspent": "typing.NotRequired[float | None]",
     "basis": "typing.NotRequired[UsageWasteBasis | None]",
 })
 
@@ -465,6 +472,7 @@ AccountVerdict = typing.TypedDict("AccountVerdict", {
     "window": "typing.NotRequired[str]",
     "used": "typing.NotRequired[float | None]",
     "at_reset": "typing.NotRequired[list[float] | None]",
+    "projection": "typing.NotRequired[str]",
     "resets_at": "typing.NotRequired[str | None]",
     "exhausts_at": "typing.NotRequired[str | None]",
     "exhausts_by": "typing.NotRequired[str]",
@@ -5526,6 +5534,7 @@ PlacementWaste = typing.TypedDict("PlacementWaste", {
     "state": "str",
     "trigger": "typing.NotRequired[str]",
     "waste_at_near_peak": "typing.NotRequired[float | None]",
+    "unspent": "typing.NotRequired[float | None]",
 })
 
 # PlacementPeak is a candidate's retained peak evidence as its placement reads answer it (#7503):
