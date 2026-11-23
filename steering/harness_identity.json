@@ -73,6 +73,17 @@
       ],
       "session_binding": "lock-rows",
       "turn_end_gate": true
+    },
+    {
+      "name": "antigravity",
+      "delivery": "injected-reach",
+      "can": [
+        "prompt-steering"
+      ],
+      "session_env": [
+        "ANTIGRAVITY_CONVERSATION_ID"
+      ],
+      "session_runtime": true
     }
   ]
 }

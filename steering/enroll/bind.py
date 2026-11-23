@@ -91,9 +91,9 @@ def ancestry(limit: int = 8) -> list[str]:
     return out
 
 
-def identity(pid: int, provider: str) -> str | None:
-    """The runtime id of `pid`, derived the way `observe.py` and `readout.py` derive it."""
-    return runtime_id.derive(provider, pid=pid, timeout=runtime_id.PS_PATIENT)
+def identity(pid: int, provider: str, psession: str | None = None) -> str | None:
+    """The runtime id of `pid` serving `psession`."""
+    return harness.of(provider).runtime(pid, psession, runtime_id.PS_PATIENT)
 
 
 def identified() -> str:
@@ -150,7 +150,7 @@ def incarnation_of(psession: str | None = None, pid: int | None = None,
         raise Refused(f"no live {provider} harness process for {psession}: "
                       + "pass --pid <the harness process>, one of\n" + "\n".join(ancestry()),
                       check="incarnation-process-missing")
-    rid = identity(pid, provider)
+    rid = identity(pid, provider, psession)
     if rid is None:
         raise Refused(f"no runtime id for pid {pid}: it is not the harness process, or this node has no id",
                       check="incarnation-runtime-missing")

@@ -205,6 +205,18 @@ class Harness:
     live_workers: Callable[..., tuple[list[dict], list[str]]] | None = None
 
     @property
+    def session_runtime(self) -> bool:
+        """One process of this harness serves many sessions, so its runtime id names the session
+        as well as the process, as the Go registry declares (`SessionRuntime`)."""
+        return any(e["name"] == self.provider and e.get("session_runtime") for e in IDENTITY)
+
+    def runtime(self, pid: int, psession: str | None, timeout: float) -> str | None:
+        """The runtime id of `pid` serving `psession`."""
+        import runtime_id
+        return runtime_id.derive(self.provider, pid=pid, timeout=timeout,
+                                 session=psession if self.session_runtime else None)
+
+    @property
     def exports(self) -> bool:
         """This harness tells its own process which session it is, so nothing has to be typed."""
         return self.session_id is not None
@@ -632,6 +644,47 @@ def _devin_loaded(psession: str) -> bool:
     return _devin_pid(psession) is not None
 
 
+# The desktop app's hub serves every Antigravity conversation; a tool child is told its
+# conversation by `ANTIGRAVITY_CONVERSATION_ID` and hangs off the hub (10357 RECORD T1, T7).
+def _antigravity_process(argv: list[str]) -> str | None:
+    args = _command(argv, "language_server")
+    if args is None or "--standalone" not in args:
+        return None
+    return "shared" if (_flag(args, "--subclient_type") == "hub"
+                        and _flag(args, "--override_ide_name") == "antigravity") else None
+
+
+def _flag(args: list[str], name: str) -> str | None:
+    for i, a in enumerate(args):
+        if a.startswith(name + "="):
+            return a[len(name) + 1:]
+        if a == name and i + 1 < len(args):
+            return args[i + 1]
+    return None
+
+
+def _antigravity_process_names() -> tuple[str, ...]:
+    return "language_server",
+
+
+def _antigravity_pid(_psession: str) -> int | None:
+    """The hub this process hangs off: its nearest ancestor that is the app's hub. The
+    conversation is the environment's to name; the hub is what serves it."""
+    import runtime_id
+    for pid in runtime_id.ancestor_pids():
+        argv = runtime_id.process_argv(pid)
+        if argv and _antigravity_process(argv):
+            return pid
+    return None
+
+
+def _antigravity_loaded(psession: str) -> bool:
+    """A conversation is served while a hub this process hangs off serves it, and the hub keeps
+    its record (RECORD C1)."""
+    return (_antigravity_pid(psession) is not None
+            and (Path.home() / ".gemini" / "antigravity" / "brain" / psession).is_dir())
+
+
 CENSUS_REGISTRY_LIMIT = 256
 CENSUS_RECORD_BYTES = 65536
 CENSUS_BUDGET_SECONDS = 5.0
@@ -842,6 +895,13 @@ HARNESSES = {h.provider: h for h in (
             session_id=_session_of("devin"), harness_pid=_devin_pid,
             delivery="inject", loaded=_devin_loaded,
             process_kind=_devin_process, process_names=_devin_process_names),
+    # The desktop app holds the seat (10357 design §3.1): a conversation is told its id by
+    # environment and reached by injection; its runtime id names the conversation as well as the
+    # hub every conversation shares.
+    Harness("antigravity", agent="antigravity", config=".gemini/antigravity",
+            session_id=_session_of("antigravity"), harness_pid=_antigravity_pid,
+            delivery="inject", loaded=_antigravity_loaded,
+            process_kind=_antigravity_process, process_names=_antigravity_process_names),
 )}
 
 

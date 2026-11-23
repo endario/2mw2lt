@@ -46,7 +46,7 @@ def witness(ws: Path, h: harness_mod.Harness, psession: str, runtime: str) -> No
     pid = h.harness_pid(served) if h.harness_pid else None
     if not pid:
         refuse(ws, "witness-process-missing", f"no process serving {served} could be identified")
-    derived = runtime_id.derive(h.provider, pid=pid, timeout=runtime_id.PS_PATIENT)
+    derived = h.runtime(pid, served, runtime_id.PS_PATIENT)
     if derived is None:
         refuse(ws, "witness-runtime-missing", f"no runtime id for the process serving {served}")
     if derived != runtime:

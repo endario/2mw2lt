@@ -453,10 +453,12 @@ def hook_parent(timeout: float = 1.0) -> int:
     return claude_pid(os.environ.get("CLAUDE_CODE_SESSION_ID"), timeout) or os.getppid()
 
 
-def derive(provider: str = "claude", pid: int | None = None, timeout: float = 1.0) -> str | None:
+def derive(provider: str = "claude", pid: int | None = None, timeout: float = 1.0,
+           session: str | None = None) -> str | None:
     """The id of the process `pid` (default: the Claude process this hook runs under) as an
     incarnation, or None when its start time cannot be read — an observation then carries no
-    runtime id."""
+    runtime id. `session` names the session too, for a harness whose one process serves many
+    (`proc.DeriveSession`, its Go twin)."""
     pid = hook_parent(timeout) if pid is None else pid
     try:
         start = process_start(pid, timeout)
@@ -465,7 +467,8 @@ def derive(provider: str = "claude", pid: int | None = None, timeout: float = 1.
         return None
     if not start or not node:
         return None
-    return f"{provider}:{node}:{hashlib.sha256(f'{pid}|{start}'.encode()).hexdigest()}"
+    parts = f"{pid}|{start}|{session}" if session else f"{pid}|{start}"
+    return f"{provider}:{node}:{hashlib.sha256(parts.encode()).hexdigest()}"
 
 
 if __name__ == "__main__":
