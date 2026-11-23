@@ -186,6 +186,45 @@ test('a key that appears after the session connected is found, and rows flow', a
   expect(events(w).map(e => [e.kind, e.turn.state])).toEqual([['turn', 'completed'], ['turn', 'started']])
 })
 
+// An ended launch's bearer is refused for good (the agent logged one such poll every five seconds for
+// hours), and a restarting agent answers it too until it re-binds the bearers it adopts: after a run of
+// them the poll slows to once a minute and is never abandoned, so a restarted agent is found again.
+const NO_LAUNCH = { status: 401, text: JSON.stringify({ refused: "this route needs the agent's key or a launch's bearer: the bearer is no launch's this agent holds", retry: false }) }
+test('a poll the agent refuses as no launch\'s bearer slows after a bounded run and follows again once answered', async ($, on) => {
+  const w = world(on, { agent: true, rounds: [HELD], polls: [...Array.from({ length: 20 }, () => NO_LAUNCH), { watch: true, cursor: 'c1' }] })
+  await begin($)
+  await w.clock.advance(60_000)
+  expect(polls(w).length).toBeLessThan(12)            // eight quick tries, then a minute apart
+  await w.clock.advance(20 * 60_000)
+  expect(polls(w).length).toBeGreaterThan(20)         // the agent answers at last: the poll never gave up
+  await w.clock.advance(50)
+  expect(events(w).map(e => e.kind)).toEqual(['turn'])  // and its watch was applied
+})
+
+test('a refusal run is consecutive: a good answer between resets it', async ($, on) => {
+  const w = world(on, { agent: true, rounds: [HELD], polls: [...Array.from({ length: 5 }, () => NO_LAUNCH), { watch: false }, ...Array.from({ length: 30 }, () => NO_LAUNCH)] })
+  await begin($)
+  await w.clock.advance(60_000)
+  expect(polls(w).length).toBeGreaterThan(12)         // 5 + 1 + a fresh run of 8 before it slows
+})
+
+test('refusals that are not the ended launch\'s bearer never stop the poll', async ($, on) => {
+  const other = { status: 401, text: '{"refused":"the agent\'s key it carries is not this agent\'s","retry":false}' }
+  const w = world(on, { agent: true, rounds: [HELD], polls: Array.from({ length: 30 }, () => other) })
+  await begin($)
+  await w.clock.advance(120_000)
+  expect(polls(w).length).toBeGreaterThanOrEqual(25)    // still five seconds apart, never a minute
+})
+
+// Only a refusal of the bearer counts toward the slow poll: a run broken by any other failure starts over.
+test('a failure that is not the bearer\'s refusal breaks the run of them', async ($, on) => {
+  const other = { status: 503, text: 'starting' }
+  const w = world(on, { agent: true, rounds: [HELD], polls: [...Array.from({ length: 7 }, () => NO_LAUNCH), other, ...Array.from({ length: 40 }, () => NO_LAUNCH)] })
+  await begin($)
+  await w.clock.advance(70_000)
+  expect(polls(w).length).toBeGreaterThanOrEqual(14)    // seven, the break, and a fresh eight before it slows
+})
+
 // A batch taken while an earlier one is still out learns of that one's loss before it is numbered.
 test('a batch sent behind one the agent refused opens with a gap over the refused one\'s seqs', async ($, on) => {
   let refuse!: (status: number) => void

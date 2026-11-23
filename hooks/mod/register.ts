@@ -537,6 +537,11 @@ const SURFACE_SEQ = { plugin: '2mw2lt', key: 'surfaceSeq' } as const
 const BATCH_MS = 5
 const RETRY_MS = 250
 const RETRY_CAP_MS = 5000
+// A poll the agent refuses as a bearer no launch holds, this many times in a row, is retried once a
+// minute instead: an ended launch's bearer never returns, and a restarting agent re-binds the
+// bearers it adopts only after its start work, which can outlast any short bound.
+const UNBOUND_LIMIT = 8
+const UNBOUND_SLOW_MS = 60_000
 const outbox = new surface.Outbox()
 // A burst of thinking sent per chunk fell behind (spike A): a step's text and thinking leave at most
 // this often, and at the step's end.
@@ -629,7 +634,9 @@ function sendBatch($: EngineInterface) {
 async function pollSurface($: EngineInterface, workspace: string, session: string, gen: number) {
   let cursor = ''
   let wait = RETRY_MS
+  let unbound = 0
   while (gen === following) {
+    let refused = false   // this round's failure is the agent's refusal of the bearer
     try {
       // Restoring the sequence is part of connecting: a transient state read must retry too.
       if (outbox.seq === undefined) {
@@ -651,7 +658,11 @@ async function pollSurface($: EngineInterface, workspace: string, session: strin
       const r = await $.http.fetch(`${agent.base}/steering/surface/poll?session=${encodeURIComponent(session)}&producer=${encodeURIComponent(producer)}&after=${encodeURIComponent(cursor)}`,
         { headers: agentHeaders(agent) })
       if (gen !== following) return
-      if (!r.ok) throw new Error(`the agent answered ${r.status}: ${r.text.slice(0, 200)}`)
+      if (!r.ok) {
+        refused = r.status === 401 && r.text.includes("bearer is no launch's")
+        throw new Error(`the agent answered ${r.status}: ${r.text.slice(0, 200)}`)
+      }
+      unbound = 0
       const answer = JSON.parse(r.text) as { watch?: unknown; cursor?: unknown; commands?: unknown }
       const was = watching
       watching = answer.watch === true
@@ -671,12 +682,14 @@ async function pollSurface($: EngineInterface, workspace: string, session: strin
       surfaceSaid = ''
     } catch (err) {
       if (gen !== following) return
+      unbound = refused ? unbound + 1 : 0
       surfaceRefused($, `the live view's poll failed: ${String(err)}`)
       listOwed = true
       if (watching && outbox.seq !== undefined) outbox.lost(session, outbox.seq)   // rows go unseen until it answers
       watching = false
       agent = undefined                  // read again: a restarted agent may hold a new key
-      await new Promise<void>(resolve => { $.clock.after(wait, resolve) })
+      const pause = unbound >= UNBOUND_LIMIT ? UNBOUND_SLOW_MS : wait
+      await new Promise<void>(resolve => { $.clock.after(pause, resolve) })
       wait = Math.min(wait * 2, RETRY_CAP_MS)
     }
   }
