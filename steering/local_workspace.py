@@ -336,6 +336,44 @@ def agent_request(anchor: Path, path: str, body: dict | None, timeout: float | N
         headers={"Content-Type": "application/json", **auth, **workspace_header(str(anchor))})
 
 
+def launch_process(timeout: float = 5.0) -> dict:
+    """What this sandboxed launch's agent placed it as: its `runtime`, the `pid` of the process its
+    start placed where it named one, and once it is enrolled `session` and `psession`. Its cage runs
+    no ps and reads no other process's information, so its session asks rather than walk its
+    ancestry. OSError saying why when the agent will not say."""
+    import json
+    import urllib.error
+    import urllib.request
+    bearer = os.environ.get("STEERING_LAUNCH_BEARER")
+    if not bearer:
+        raise OSError("this session is no sandboxed launch, so no agent placed it")
+    port = agent_port(Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()), timeout=timeout)
+    if not port.isdigit():
+        raise OSError("a sandboxed launch's session asks its agent, and STEERING_AGENT_PORT names none")
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/steering/launch-process",
+                                 headers={"Authorization": f"Bearer {bearer}"})
+
+    # Loopback, never a proxy's, and never redirected: the bearer leaves for its agent alone.
+    class Unredirected(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *_):
+            return None
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), Unredirected())
+    try:
+        with opener.open(req, timeout=timeout) as answered:
+            said = json.loads(answered.read())
+    except urllib.error.HTTPError as e:
+        try:
+            why = json.loads(e.read()).get("refused")
+        except (OSError, ValueError, AttributeError):
+            why = None
+        raise OSError(f"its agent would not say which process it placed ({e.code}): {why or 'no reason given'}") from None
+    except ValueError:
+        raise OSError("its agent named the process it placed in an answer that is not JSON") from None
+    if not isinstance(said, dict) or not isinstance(said.get("runtime"), str) or not said["runtime"]:
+        raise OSError("its agent answered without naming the runtime it placed")
+    return said
+
+
 def agent_port(anchor: Path, timeout: float | None = None) -> str:
     """The port the agent serving this workspace records, before an environment override.
 

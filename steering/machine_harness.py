@@ -936,7 +936,10 @@ def here() -> list[Harness]:
     resolves the session from the registry row of the Claude process above it (#6500), and the
     inherited variable names it only where none does. A variable no row vouches for that names the
     session another harness answers is that harness's echo, not a second session: ZCode 3.18 exports
-    CLAUDE_CODE_SESSION_ID set to its own id."""
+    CLAUDE_CODE_SESSION_ID set to its own id. A sandboxed launch's cage lists no process to claim
+    from: it is the harness whose runtime its agent witnessed."""
+    if os.environ.get("STEERING_LAUNCH_BEARER"):
+        return _placed_harness()
     claims = [(h, *getattr(h.session_id, "claim", lambda: (h.session_id(), False))())
               for h in HARNESSES.values() if h.exports]
     claims = [c for c in claims if c[1] is not None]
@@ -946,6 +949,37 @@ def here() -> list[Harness]:
         # second one: two different sessions answering still refuse.
         claims = [c for c in claims if not (c[2] and c[1] in vouched)]
     return [h for h, _, _ in claims]
+
+
+def _placed_harness() -> list[Harness]:
+    """The harness of the process a sandboxed launch's agent placed, or none, saying why in
+    `launch_unplaced`. A session nested in the launch is told apart only by a session variable it
+    exports: one of a harness that exports none is taken for the launch's."""
+    global launch_unplaced
+    from local_workspace import launch_process
+    try:
+        placed = launch_process()
+    except OSError as why:
+        launch_unplaced = str(why)
+        return []
+    h = of_runtime(placed.get("runtime"))
+    if h is None:
+        launch_unplaced = "its agent placed a runtime no registered harness names"
+        return []
+    # A session started inside the launch inherits its bearer, and exports a session of its own the
+    # agent never enrolled: it is not the launch's, and the cage cannot tell which it is.
+    enrolled = placed.get("psession")
+    for entry in IDENTITY if enrolled else ():
+        for name in entry.get("session_env", ()):
+            exported = os.environ.get(name)
+            if exported and exported != enrolled:
+                launch_unplaced = (f"{name} names session {exported}, not the launch's {enrolled}: a session "
+                                   "started inside a sandboxed launch is not the launch's")
+                return []
+    return [h]
+
+
+launch_unplaced = ""
 
 
 class NotIdentified(Exception):
@@ -963,6 +997,8 @@ def identify() -> Harness:
     if len(found) > 1:
         raise NotIdentified("more than one harness says this is its session ("
                             + ", ".join(h.provider for h in found) + ")")
+    if not found and launch_unplaced:
+        raise NotIdentified(f"this sandboxed launch's harness is unknown: {launch_unplaced}")
     if not found and zcode_unbound:
         raise NotIdentified(f"this zcode session names no session: {zcode_unbound}")
     if not found:

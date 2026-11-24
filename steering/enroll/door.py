@@ -162,9 +162,8 @@ def launch_bearer() -> str | None:
     return os.environ.get(LAUNCH_BEARER) or None
 
 
-def relay_base() -> str:
-    """The agent relay a launch's door routes are sent to: what follows a route's workspace is
-    appended, and the agent adds the machine's credential to the routes it relays."""
+def _agent_base() -> str:
+    """The loopback address of the agent that placed this sandboxed launch."""
     parent = str(Path(__file__).resolve().parent.parent)
     if parent not in sys.path:
         sys.path.insert(0, parent)
@@ -174,7 +173,13 @@ def relay_base() -> str:
     if not port.isdigit():
         raise OSError("a sandboxed launch's session reaches its door through its agent, and "
                       "STEERING_AGENT_PORT names none")
-    return f"http://127.0.0.1:{port}/steering/relay"
+    return f"http://127.0.0.1:{port}"
+
+
+def relay_base() -> str:
+    """The agent relay a launch's door routes are sent to: what follows a route's workspace is
+    appended, and the agent adds the machine's credential to the routes it relays."""
+    return _agent_base() + "/steering/relay"
 
 
 def _to_door(url: str) -> bool:

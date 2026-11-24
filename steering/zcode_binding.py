@@ -37,6 +37,12 @@ def binding_path(ws: Path, pid) -> Path:
     return ws / ".claude" / "steering-holders" / f"{pid}.binding.json"
 
 
+def enrol_failed_path(ws: Path, pid) -> Path:
+    """Where a sandboxed launch's hook leaves why its session was not enrolled, beside its binding, for
+    the launch's start to read when the hook could not tell the agent (zcode.EnrolFailedPath)."""
+    return binding_path(ws, pid).with_name(f"{pid}.enrol-failed")
+
+
 def _write(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     atomic_file.write_atomic(path, json.dumps(payload), 0o600)
@@ -84,7 +90,9 @@ def publish(ws: Path, psession: str, cwd: str, pid: int | None = None, at: float
 
 
 def reap(path: Path, cutoff: float) -> None:
-    """Removes every binding beside path whose payload's `at` is older than cutoff, or unreadable."""
+    """Removes every binding beside path that is unreadable, or whose payload's `at` is older than
+    cutoff and whose process is gone. A quiet session fires no hook for hours, and its agent reads
+    its binding to refuse its conversation to another launch."""
     for old in path.parent.glob("*.binding.json"):
         if old == path:
             continue
@@ -94,11 +102,37 @@ def reap(path: Path, cutoff: float) -> None:
             at = None
         # the payload's `at` is the truth, not the file's mtime: a binding is written when its
         # hook fires, and an unreadable one serves nobody.
-        if not isinstance(at, (int, float)) or at < cutoff:
+        if not isinstance(at, (int, float)) or (at < cutoff and not _alive(old.name.split(".", 1)[0])):
             try:
                 old.unlink()
             except OSError:
                 pass
+    # A launch's hook leaves why it was not enrolled for its start (hook_glue.launch_failed), which may
+    # read it after the process has gone: it is kept past the process for as long as a binding is.
+    for note in path.parent.glob("*.enrol-failed"):
+        try:
+            stale = note.stat().st_mtime < cutoff
+        except OSError:
+            continue
+        if stale and not _alive(note.name.split(".", 1)[0]):
+            try:
+                note.unlink()
+            except OSError:
+                pass
+
+
+def _alive(pid: str) -> bool:
+    """Whether pid names a process that has not exited. Signalling none, it asks the kernel alone, which
+    a cage answers too: a process outside it is refused (EPERM), not unknown (ESRCH)."""
+    if not _SAFE_PID.match(pid):
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
 
 
 def resolve(ws: Path, cwd: str | None = None, at: float | None = None, entry: str | None = None,
@@ -140,6 +174,16 @@ def _zcode_pid(chain=None, entry: str | None = None) -> int:
     `ZCODE_APP_CLI_ENTRY` the runtime exports); the first such ancestor from this process
     upward is the session's own zcode process.
     """
+    if chain is None and os.environ.get("STEERING_LAUNCH_BEARER"):
+        # A sandboxed launch's cage runs no ps: its agent says which process it placed.
+        from local_workspace import launch_process
+        try:
+            pid = launch_process().get("pid")
+        except OSError as why:
+            raise Refused(f"this sandboxed launch's zcode process is unknown: {why}") from None
+        if not isinstance(pid, int) or pid <= 1:
+            raise Refused("this sandboxed launch's agent names no process its start placed")
+        return pid
     want = entry or os.environ.get("ZCODE_APP_CLI_ENTRY")
     for pid, cmdline in (chain() if chain is not None else _walk()):
         # The runtime retitles itself `zcode-cli`, and it is the parent of every hook, the

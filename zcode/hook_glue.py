@@ -8,8 +8,8 @@ get none), so every event publishes the binding the rest of the glue resolves by
 rides the event boundaries: mid-turn as PostToolUse context, at a turn's end as a Stop
 continuation (the harness bounds continuations at three, measured), and on a person's next
 prompt as UserPromptSubmit context. A dark session is the platform's to wake — no hook or
-server can. Every failure exits 0 with no output: a hook that answers nothing costs a pointer,
-never a turn.
+server can. A failure exits 0: a hook that answers nothing costs a pointer, never a turn. A
+sandboxed launch's SessionStart says why its session is not enrolled, in the session and on stderr.
 """
 from __future__ import annotations
 
@@ -86,6 +86,85 @@ def psession_of(payload: dict) -> str | None:
     return env or None
 
 
+LAUNCH_BEARER = "STEERING_LAUNCH_BEARER"
+ENROL_WAIT = 20.0   # with observe's 6s, inside the SessionStart hook's own 30s
+ENROL_FAILED_MAX = 1024   # what the agent reads of it (zcode.EnrolFailedMax)
+
+
+def enrol_launch(ws: Path, psession: str) -> str | None:
+    """A sandboxed launch names no conversation before its first turn, whose SessionStart holds the
+    turn until this hook returns: so the hook asks its agent, on the launch's bearer,
+    to enrol the session the binding it just published names, and the connect that turn carries
+    finds its session enrolled. None once enrolled, or for a launch with no bearer; otherwise why
+    not, which the session is told."""
+    bearer = os.environ.get(LAUNCH_BEARER)
+    if not bearer:
+        return None
+    import urllib.error
+    import urllib.request
+    from local_workspace import agent_port
+    port = agent_port(ws)
+    if not port.isdigit():
+        return "this sandboxed launch's agent could not be asked to enrol it: STEERING_AGENT_PORT names no port"
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/steering/launch-enrolment",
+                                 data=json.dumps({"session": psession}).encode(), method="POST",
+                                 headers={"Authorization": f"Bearer {bearer}", "Content-Type": "application/json"})
+    # Loopback, never a proxy's: a host's system proxy captures it (502). Never redirected either:
+    # urllib would carry the bearer to wherever a redirect points.
+    class Unredirected(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *_):
+            return None
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), Unredirected())
+    asking = "this sandboxed launch's agent could not be asked to enrol it: "
+    try:
+        with opener.open(req, timeout=ENROL_WAIT) as answered:
+            raw = answered.read()
+    except urllib.error.HTTPError as err:
+        if 300 <= err.code < 400:
+            return f"{asking}it answered a redirect ({err.code}), which the bearer is never sent after"
+        try:
+            said = json.loads(err.read())
+        except OSError as read:
+            return f"this sandboxed launch's agent refused to enrol it ({err.code}), and its reason could not be read: {error_kind(read)}"
+        except ValueError:
+            return f"this sandboxed launch's agent refused to enrol it ({err.code}), with a reason that is not JSON"
+        why = said.get("refused") if isinstance(said, dict) else None
+        return f"this sandboxed launch's agent refused to enrol it ({err.code}): {why or 'it gave no reason'}"
+    except urllib.error.URLError as err:
+        cause = err.reason if isinstance(err.reason, BaseException) else None
+        return asking + (error_kind(cause) if cause else "its address could not be reached")
+    except OSError as err:
+        return asking + error_kind(err)
+    try:
+        enrolled = json.loads(raw).get("session")
+    except (ValueError, AttributeError):
+        enrolled = None
+    if not isinstance(enrolled, str) or not enrolled:
+        return "this sandboxed launch's agent answered without naming the session it enrolled"
+    return None
+
+
+def launch_failed(why: str) -> str | None:
+    """Says why a sandboxed launch's hook could not have its session enrolled, in ZCode's log of the
+    hook's stderr, and answers it for the session; None, saying nothing, outside such a launch, where
+    a hook that answers nothing costs a pointer only."""
+    if not os.environ.get(LAUNCH_BEARER):
+        return None
+    why = "2mw2lt: this sandboxed launch's session is not enrolled: " + why
+    print(why, file=sys.stderr)
+    # The start waits for a hold, and its agent may never have heard: the reason is left beside the
+    # binding, under the served root, for the start to end on. Keyed by the parent as the binding is.
+    served = os.environ.get("STEERING_WORKSPACE")
+    if served:
+        try:
+            path = zcode_binding.enrol_failed_path(Path(served), os.getppid())
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            path.write_text(why[:ENROL_FAILED_MAX])
+        except Exception as err:
+            print("2mw2lt: why could not be left for the launch's start: " + error_kind(err), file=sys.stderr)
+    return why
+
+
 def say(what: dict) -> None:
     sys.stdout.write(json.dumps(what) + "\n")
     sys.stdout.flush()
@@ -122,9 +201,14 @@ def main(argv: list[str] | None = None) -> int:
         except ValueError:
             payload = None
         event = event_of(payload) if isinstance(payload, dict) else None
+        if invoked == ["SessionStart"] and event not in (None, "SessionStart") and os.environ.get(LAUNCH_BEARER):
+            say({"additionalContext": launch_failed(f"the hook was invoked for SessionStart and given a {event}")})
+            return 0
         if event is None:
             if proving:
                 proof_failed("the SessionStart's input could not be read")
+            if invoked == ["SessionStart"] and (said := launch_failed("the SessionStart's input could not be read")):
+                say({"additionalContext": said})
             return 0
         # A restricted launch waits on this SessionStart's proof: each step that keeps it from being
         # published says why, so the launch is refused at once rather than at its deadline. No other
@@ -134,7 +218,11 @@ def main(argv: list[str] | None = None) -> int:
         if psession is None:
             if proving:
                 proof_failed("the SessionStart named no session")
+            if event == "SessionStart" and (said := launch_failed("the SessionStart named no session")):
+                say({"additionalContext": said})
             return 0
+        # Why a sandboxed launch's session is not enrolled: its SessionStart alone asks.
+        unenrolled, starting = None, event == "SessionStart"
         cwd = payload.get("cwd") or os.environ.get("ZCODE_PROJECT_DIR") or os.getcwd()
         try:
             ws = workspace_root(Path(cwd), timeout=1.0)
@@ -142,9 +230,13 @@ def main(argv: list[str] | None = None) -> int:
             ws = None                       # outside a workspace the glue has nothing to say
             if proving:
                 proof_failed("the session's workspace could not be read: " + error_kind(err))
+            if starting:
+                unenrolled = launch_failed("the session's workspace could not be read: " + error_kind(err))
         else:
             if ws is None and proving:
                 proof_failed("the session's directory is in no workspace")
+            if ws is None and starting:
+                unenrolled = launch_failed("the session's directory is in no workspace")
         if ws is not None:
             proof = None
             if proving:
@@ -155,16 +247,25 @@ def main(argv: list[str] | None = None) -> int:
                         proof_failed(f"the SessionStart named no {key}")
                         break
             try:
-                zcode_binding.publish(ws, psession, str(cwd), proof=proof)
+                # A sandboxed launch's cage runs no ps to walk ancestors with, and a hook is a direct
+                # child of zcode-cli (measured, 4.0.0-49): its parent is the session's process, which
+                # its agent checks outside the cage is the runtime the launch registered.
+                parent = os.getppid() if os.environ.get(LAUNCH_BEARER) else None
+                zcode_binding.publish(ws, psession, str(cwd), pid=parent, proof=proof)
             except Exception as err:
                 # The observation below stands on its own.
                 if proving:
                     proof_failed("the binding could not be published: " + error_kind(err))
+                if starting:
+                    unenrolled = launch_failed("the binding could not be published: " + error_kind(err))
             # Whatever follows, the proof's step is over: a later failure never speaks for it.
             proving = False
+        if starting and ws is not None and unenrolled is None:
+            if (refused := enrol_launch(ws, psession)) is not None:
+                unenrolled = launch_failed(refused)
         notice = observe(["--provider", "zcode"], payload)
-        if event == "SessionStart" and ws is not None:
-            notice = "\n".join(x for x in (trailer(payload), notice) if x) or None
+        if starting:
+            notice = "\n".join(x for x in (unenrolled, trailer(payload) if ws is not None else None, notice) if x) or None
         if ws is None or event not in ("UserPromptSubmit", "PostToolUse", "Stop"):
             if notice:
                 say({"additionalContext": notice})
@@ -189,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
         # A hook that answers nothing costs a pointer only — and, proving, says what stopped it.
         if proving:
             proof_failed("the hook failed: " + error_kind(err))
+        if invoked == ["SessionStart"] and (said := launch_failed("the hook failed: " + error_kind(err))):
+            say({"additionalContext": said})
     return 0
 
 

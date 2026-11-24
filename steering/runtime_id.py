@@ -459,6 +459,8 @@ def derive(provider: str = "claude", pid: int | None = None, timeout: float = 1.
     incarnation, or None when its start time cannot be read — an observation then carries no
     runtime id. `session` names the session too, for a harness whose one process serves many
     (`proc.DeriveSession`, its Go twin)."""
+    if os.environ.get("STEERING_LAUNCH_BEARER"):
+        return _placed_runtime(provider, pid, timeout)
     pid = hook_parent(timeout) if pid is None else pid
     try:
         start = process_start(pid, timeout)
@@ -469,6 +471,33 @@ def derive(provider: str = "claude", pid: int | None = None, timeout: float = 1.
         return None
     parts = f"{pid}|{start}|{session}" if session else f"{pid}|{start}"
     return f"{provider}:{node}:{hashlib.sha256(parts.encode()).hexdigest()}"
+
+
+# Why a sandboxed launch's runtime id was not answered, for the refusal that follows (bind).
+unwitnessed = ""
+
+
+def _placed_runtime(provider: str, pid: int | None, timeout: float) -> str | None:
+    """A sandboxed launch's runtime id, as its agent witnessed it outside the cage, which lists no
+    process and reads none's birth: the process the launch's start placed, or None, saying why in
+    `unwitnessed`. A pid asked for is the placed one only where the agent names it."""
+    global unwitnessed
+    unwitnessed = ""
+    from local_workspace import launch_process
+    try:
+        placed = launch_process(timeout)
+    except OSError as why:
+        unwitnessed = str(why)
+        return None
+    runtime = placed["runtime"]
+    if not runtime.startswith(provider + ":"):
+        unwitnessed = f"its agent placed {runtime.split(':', 1)[0]}, not {provider}"
+    elif pid is not None and pid != placed.get("pid"):
+        unwitnessed = (f"its agent placed process {placed['pid']}, not {pid}" if "pid" in placed
+                       else f"its agent names no process its start placed, so it vouches for none, {pid} among them")
+    else:
+        return runtime
+    return None
 
 
 if __name__ == "__main__":

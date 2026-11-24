@@ -56,7 +56,8 @@
         "plugin-held",
         "rehome",
         "self-observed",
-        "model-proof"
+        "model-proof",
+        "sandboxed"
       ],
       "session_binding": "hook-binding"
     },

@@ -64,7 +64,10 @@ def ancestry(limit: int = 8) -> list[str]:
     """This process and its forebears as `<pid> <command>`, for an operator picking a `--pid`.
 
     An ancestor that is gone when listed (exit 1, no output) ends the walk; a listing that
-    failed some other way is retried, then carried as `<pid> not listed: <why>`."""
+    failed some other way is retried, then carried as `<pid> not listed: <why>`. A sandboxed
+    launch's cage lists none."""
+    if os.environ.get("STEERING_LAUNCH_BEARER"):
+        return ["    (a sandboxed launch's cage lists no process; its agent names the one it placed)"]
     out, pid = [], os.getpid()
     for _ in range(limit):
         entry, ppid, why = "", None, ""
@@ -133,6 +136,10 @@ def incarnation_of(psession: str | None = None, pid: int | None = None,
     mine, its_pid = h.whoami()
     exports = h.exports
     psession = psession or mine or ""
+    if not psession and provider == "zcode" and harness.zcode_unbound:
+        # Its binding was looked for and refused: that reason, not a missing export, is why.
+        raise Refused(f"this zcode session names no session: {harness.zcode_unbound}",
+                      check="incarnation-session-missing")
     if not psession:
         # Every argument this names is one both commands accept. A message that asks for a flag
         # the entry point rejects is a dead end, and that is what the owner walked into (#543).
@@ -151,6 +158,8 @@ def incarnation_of(psession: str | None = None, pid: int | None = None,
                       + "pass --pid <the harness process>, one of\n" + "\n".join(ancestry()),
                       check="incarnation-process-missing")
     rid = identity(pid, provider, psession)
+    if rid is None and runtime_id.unwitnessed and os.environ.get("STEERING_LAUNCH_BEARER"):
+        raise Refused(f"no runtime id for pid {pid}: {runtime_id.unwitnessed}", check="incarnation-runtime-missing")
     if rid is None:
         raise Refused(f"no runtime id for pid {pid}: it is not the harness process, or this node has no id",
                       check="incarnation-runtime-missing")

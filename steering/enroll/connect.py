@@ -455,6 +455,8 @@ def hand_over_pane(ws: Path, provider: str, psession: str, rid: str, pid: int, p
     its own process tree: the terminal's `TMUX`/`TMUX_PANE` name the pane where the harness
     hands them down, and the harness pid's ancestry finds it on the default server where not."""
     import targeting
+    if os.environ.get("STEERING_LAUNCH_BEARER"):
+        return None     # its agent hands the pane it placed over (handOverLaunch); the cage lists no tree
     # `TMUX` names the server to search, never the pane itself: a harness started from a
     # terminal inside a pane (`code .`) inherits a `TMUX_PANE` its own process is not in, and a
     # pane handed over that way would take precedence over its real route (doc 118 §3.1).
