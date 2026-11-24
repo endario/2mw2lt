@@ -78,7 +78,9 @@
       "name": "antigravity",
       "delivery": "injected-reach",
       "can": [
+        "brain-role",
         "prompt-steering",
+        "model-proof",
         "turn-end-gate"
       ],
       "session_env": [

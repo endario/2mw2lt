@@ -2582,7 +2582,6 @@ BrainRequestBody = typing.TypedDict("BrainRequestBody", {
 
 # BrainLaunch is where a word to a vacant seat asks the brain to run: the harness it runs in, an
 # account of that harness's vendor, a machine by the name its census reports, a model and an effort.
-# Each is optional (doc 208).
 BrainLaunch = typing.TypedDict("BrainLaunch", {
     "harness": "typing.NotRequired[str]",
     "account": "typing.NotRequired[str]",
