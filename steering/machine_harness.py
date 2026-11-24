@@ -279,18 +279,25 @@ def _session_of(name: str):
     if not names and not binding:
         return None
 
-    def read() -> str | None:
+    def claim() -> tuple[str | None, bool]:
+        """The session, and whether it is only this harness's variable with no row of its own
+        vouching for it: an echo, as ZCode 3.18 exports CLAUDE_CODE_SESSION_ID set to its own id."""
         named = _env(*names)() if names else None
         if named is not None and rows:
             under = HARNESSES[name].config_dir() / rows
             for pid in runtime_id.ancestor_pids():
                 sid = runtime_id.serving_session(pid, under)
                 if sid is not None:
-                    return sid
+                    return sid, False
+            return named, True
         if named is not None or not binding:
-            return named
-        return _BINDINGS[binding]()
+            return named, False
+        return _BINDINGS[binding](), False
+
+    def read() -> str | None:
+        return claim()[0]
     read.names = names
+    read.claim = claim
     return read
 
 
@@ -927,8 +934,18 @@ def here() -> list[Harness]:
     whose enrolment is being asked for — the caller has to name it. A Claude session started
     inside another Claude session answers as its own wherever an ancestor answers: its harness
     resolves the session from the registry row of the Claude process above it (#6500), and the
-    inherited variable names it only where none does."""
-    return [h for h in HARNESSES.values() if h.exports and h.session_id() is not None]
+    inherited variable names it only where none does. A variable no row vouches for that names the
+    session another harness answers is that harness's echo, not a second session: ZCode 3.18 exports
+    CLAUDE_CODE_SESSION_ID set to its own id."""
+    claims = [(h, *getattr(h.session_id, "claim", lambda: (h.session_id(), False))())
+              for h in HARNESSES.values() if h.exports]
+    claims = [c for c in claims if c[1] is not None]
+    vouched = {sid for _, sid, echo in claims if not echo}
+    if len(claims) > 1:
+        # Another harness's session id echoed in this harness's variable is that session, not a
+        # second one: two different sessions answering still refuse.
+        claims = [c for c in claims if not (c[2] and c[1] in vouched)]
+    return [h for h, _, _ in claims]
 
 
 class NotIdentified(Exception):

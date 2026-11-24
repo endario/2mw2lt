@@ -266,10 +266,12 @@ hear first — see [Read the blocked-on line, the ledger and escalations](#read-
   pressure where the host reports it (40% by default), else by five-minute load per core (150%). It
   names the basis and threshold, the load, the work it holds (`workers`, absent when its census
   could not say, and `gate_runs`), and the busiest processes in two fields: `processes`, each with
-  the session its command line marker (`sess_<id>`) named or the `commission` of the live gate run it
-  belongs to, and `unattributed`, the share neither named — which may still be a session's, since only ZCode's command lines carry the marker. End
-  what congests it before its work starves: the marked sessions' strays first, then look through the
-  fleet's sessions for the unattributed share before looking at the host itself.
+  the `steering_session` it descends from (`via` its process's `ancestry`, or the `environment`
+  variable its harness declares), the ZCode provider session its command line marker (`sess_<id>`)
+  named, or the `commission` of the live gate run it belongs to; and `unattributed`, the share none
+  named — one with a `harness` descends from that app's shared process, whose session it did not
+  say. End what congests it before its work starves: the named sessions' strays first, then that
+  app's sessions, then the fleet's, before looking at the host itself.
 - **`machine-launch-failing`**, a signal: a machine's launches keep failing the same way — 3 of one
   kind in a row inside an hour by default (`signals.machine_launch_failing.*`), once per spell and
   re-told at most once an hour. Its facts name the machine, `failures` (the count), `kind` in plain

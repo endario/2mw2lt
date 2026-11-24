@@ -72,7 +72,19 @@
         "history"
       ],
       "session_binding": "lock-rows",
-      "turn_end_gate": true
+      "turn_end_gate": true,
+      "model_efforts": [
+        {
+          "model": "fusion",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ]
     },
     {
       "name": "antigravity",
@@ -87,7 +99,35 @@
         "ANTIGRAVITY_CONVERSATION_ID"
       ],
       "turn_end_gate": true,
-      "session_runtime": true
+      "session_runtime": true,
+      "model_efforts": [
+        {
+          "model": "gemini-4-hydrogen",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        },
+        {
+          "model": "gemini-4-neon",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        },
+        {
+          "model": "gemini-4-argon",
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      ]
     }
   ]
 }

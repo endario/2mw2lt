@@ -238,11 +238,13 @@ AccountRule = typing.TypedDict("AccountRule", {
 })
 
 # AccountCapability is an observation a candidate lacks for its spend intent, rather than a
-# configured ban. ObservedAt is the report's own time where the source carries one.
+# configured ban. ObservedAt is the report's own time where the source carries one, and Cause why it
+# lacks it, as a code safe for whoever asked to read, where the source says.
 AccountCapability = typing.TypedDict("AccountCapability", {
     "kind": "str",
     "target": "str",
     "observed_at": "typing.NotRequired[str | None]",
+    "cause": "typing.NotRequired[str]",
 })
 
 # AccountOffering is one model a candidate could or could not spend, with the rule or capability
@@ -2950,6 +2952,18 @@ CardBriefSaidDTO = typing.TypedDict("CardBriefSaidDTO", {
 CardBriefBudgetDTO = typing.TypedDict("CardBriefBudgetDTO", {
     "act": "str",
     "left": "int",
+})
+
+# CensusCheck is a word a machine's census leads an unlaunchable harness's cause with, which
+# coordination publishes as a capability's cause to whoever asked for the harness (execution's
+# censusCause). Three are coordination's own, said where a machine's report gives no check to
+# publish. The contract carries every one to the machine, which
+# leads its causes with them, and to the desk, which says each in words.
+CensusCheck = typing.TypedDict("CensusCheck", {
+    "code": "str",
+    "harnesses": "typing.NotRequired[list[str] | None]",
+    "machine": "bool",
+    "meaning": "str",
 })
 
 # CheckoutCensus is one checkout as its machine last read it. A reported checkout is filed under
