@@ -791,10 +791,23 @@ def agent_answers(port: int, root: Path) -> bool:
 
 
 def machine_port() -> int:
-    """The port the machine's one agent job listens on, or the default when it has none yet."""
+    """The machine job's port, or a free listener port for its first install."""
     doc = agentjob.load(agentjob.job_path(agentjob.jobs_directory(Path.home()), agentjob.MACHINE_LABEL))
     if doc is None:
-        return int(DEFAULT_AGENT_PORT)
+        # Keep the listener below the normal ephemeral range: outbound connections can otherwise
+        # briefly claim its port while activation has the agent stopped.
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            first = 20000 + probe.getsockname()[1] % 10000
+        for offset in range(10000):
+            candidate = 20000 + (first - 20000 + offset) % 10000
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+                try:
+                    listener.bind(("127.0.0.1", candidate))
+                except OSError:
+                    continue
+                return candidate
+        raise Stop("no free loopback port below the ephemeral range for the machine agent")
     named = str((doc.get("EnvironmentVariables") or {}).get("STEERING_AGENT_PORT") or "") if isinstance(doc, dict) else ""
     return int(named) if named.isdecimal() else int(DEFAULT_AGENT_PORT)
 

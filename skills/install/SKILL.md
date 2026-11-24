@@ -299,7 +299,7 @@ an admin, with `_2mw2lt` already made:
    approves, the team's owner, at their own desk. Its last line is `{workspace, door, port, root}`.
    It drafts no lanes, and no session connects from it: each sandboxed session connects in its own
    clone.
-4. **At boot**, once: `sudo bash "<its plugin root>/steering/host/mac-agent-boot.sh" _2mw2lt`.
+4. **At boot**, once: `sudo bash "${CLAUDE_PLUGIN_ROOT}/skills/install/mac-agent-boot.sh" _2mw2lt`.
    This writes the one file outside the service home.
 
 Its own stops: **`… runs as root`**, **`HOME is …`** (run it with `sudo -H`), **`… only macOS
