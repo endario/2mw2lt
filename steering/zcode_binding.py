@@ -74,7 +74,17 @@ def publish(ws: Path, psession: str, cwd: str, pid: int | None = None, at: float
         proof_at = proof.get("proof_at")
         record["proof_at"] = proof_at if isinstance(proof_at, (int, float)) and not isinstance(proof_at, bool) else now
     _write(path, record)
-    cutoff = (reap_at if reap_at is not None else now) - BINDING_FRESH
+    # The binding stands once written: reaping is housekeeping the next hook repeats, so its failure
+    # never reads as a publication that failed — a SessionStart's proof among it.
+    try:
+        reap(path, (reap_at if reap_at is not None else now) - BINDING_FRESH)
+    except Exception:
+        pass
+    return path
+
+
+def reap(path: Path, cutoff: float) -> None:
+    """Removes every binding beside path whose payload's `at` is older than cutoff, or unreadable."""
     for old in path.parent.glob("*.binding.json"):
         if old == path:
             continue
@@ -89,7 +99,6 @@ def publish(ws: Path, psession: str, cwd: str, pid: int | None = None, at: float
                 old.unlink()
             except OSError:
                 pass
-    return path
 
 
 def resolve(ws: Path, cwd: str | None = None, at: float | None = None, entry: str | None = None,

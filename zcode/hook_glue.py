@@ -34,6 +34,31 @@ import zcode_binding  # noqa: E402
 POINTER = ("A steering frame is waiting. Call mcp__plugin_2mw2lt_frames__frames to read it.")
 
 
+def proof_failed(why: str) -> None:
+    """Writes why a restricted SessionStart could not publish its model proof where the launch reads it,
+    whole or not at: the launch refuses on it at once rather than waiting out its deadline (#9799). The
+    reason names a kind and a step, never a value read from the session or its error's text. The first
+    reason said stands: a later catch-all never hides the step that failed."""
+    target = Path(os.environ["STEERING_MODEL_PROOF"]) / "zcode-hook-error.json"
+    if target.exists():
+        return
+    staged = target.with_name(f".{target.name}.{os.getpid()}")
+    try:
+        staged.write_text(json.dumps({"error": why}))
+        os.replace(staged, target)
+    except OSError as err:
+        # Nowhere the launch reads is left to say it; ZCode keeps a hook's stderr in its own log.
+        print(f"2mw2lt: the model proof's failure could not be written ({type(err).__name__}): {why}", file=sys.stderr)
+
+
+def error_kind(err: BaseException) -> str:
+    """An error by its kind, and an OS error's reason, never its message: a message may carry a path or a value."""
+    why = type(err).__name__
+    if isinstance(err, OSError) and err.strerror:
+        why += ": " + err.strerror
+    return why
+
+
 def trailer(payload: dict) -> str | None:
     """The commit trailer naming the model this session runs on, from the SessionStart payload's
     `model` (`<provider>/<model>`, the only event that carries it). ZCode credits no model itself,
@@ -84,31 +109,59 @@ def observe(argv: list[str], payload: dict) -> str | None:
     return notice if isinstance(notice, str) and notice else None
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    # The event a hook command names in its own argv, as hooks.json writes SessionStart's: what the
+    # glue was invoked for before any input is read, so an input that cannot be read still names
+    # the step a restricted launch's proof failed at.
+    invoked = (sys.argv[1:] if argv is None else argv)[:1]
+    proving = False
     try:
-        payload = json.load(sys.stdin)
-        if not isinstance(payload, dict):
-            return 0
-        event = event_of(payload)
+        proving = invoked == ["SessionStart"] and bool(os.environ.get("STEERING_MODEL_PROOF"))
+        try:
+            payload = json.load(sys.stdin)
+        except ValueError:
+            payload = None
+        event = event_of(payload) if isinstance(payload, dict) else None
         if event is None:
+            if proving:
+                proof_failed("the SessionStart's input could not be read")
             return 0
+        # A restricted launch waits on this SessionStart's proof: each step that keeps it from being
+        # published says why, so the launch is refused at once rather than at its deadline. No other
+        # event speaks for the proof, so none can mask one already published.
+        proving = event == "SessionStart" and bool(os.environ.get("STEERING_MODEL_PROOF"))
         psession = psession_of(payload)
         if psession is None:
+            if proving:
+                proof_failed("the SessionStart named no session")
             return 0
         cwd = payload.get("cwd") or os.environ.get("ZCODE_PROJECT_DIR") or os.getcwd()
         try:
             ws = workspace_root(Path(cwd), timeout=1.0)
-        except Exception:
+        except Exception as err:
             ws = None                       # outside a workspace the glue has nothing to say
+            if proving:
+                proof_failed("the session's workspace could not be read: " + error_kind(err))
+        else:
+            if ws is None and proving:
+                proof_failed("the session's directory is in no workspace")
         if ws is not None:
+            proof = None
+            if proving:
+                proof = {key: payload[key] for key in ("model", "source")
+                         if isinstance(payload.get(key), str) and payload[key].strip()}
+                for key in ("model", "source"):
+                    if key not in proof:
+                        proof_failed(f"the SessionStart named no {key}")
+                        break
             try:
-                proof = None
-                if event == "SessionStart" and os.environ.get("STEERING_MODEL_PROOF"):
-                    proof = {key: payload[key] for key in ("model", "source")
-                             if isinstance(payload.get(key), str) and payload[key].strip()}
                 zcode_binding.publish(ws, psession, str(cwd), proof=proof)
-            except Exception:
-                pass                        # the observation below stands on its own
+            except Exception as err:
+                # The observation below stands on its own.
+                if proving:
+                    proof_failed("the binding could not be published: " + error_kind(err))
+            # Whatever follows, the proof's step is over: a later failure never speaks for it.
+            proving = False
         notice = observe(["--provider", "zcode"], payload)
         if event == "SessionStart" and ws is not None:
             notice = "\n".join(x for x in (trailer(payload), notice) if x) or None
@@ -132,8 +185,10 @@ def main() -> int:
         if event == "Stop":
             out["continue"] = True          # bounded by the harness at three (measured)
         say(out)
-    except Exception:
-        pass                                # a hook that answers nothing costs a pointer only
+    except Exception as err:
+        # A hook that answers nothing costs a pointer only — and, proving, says what stopped it.
+        if proving:
+            proof_failed("the hook failed: " + error_kind(err))
     return 0
 
 

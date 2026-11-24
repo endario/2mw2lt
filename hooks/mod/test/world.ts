@@ -87,7 +87,8 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
     state: new Map<string, unknown>(),
     failSurfaceRestore: false,
     // The next read of this key is answered with what it held when asked, once `release` runs.
-    holdNextGet: undefined as { key: string; release: Promise<void> } | undefined,
+    // The next read of key waits for release, after skip reads of it go by.
+    holdNextGet: undefined as { key: string; release: Promise<void>; skip?: number } | undefined,
     context,
     usageCalls: 0,
     stepUsage: 0,
@@ -134,7 +135,8 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
     const value = w.state.get(e.key)
     const version = versions.get(e.key) ?? 0
     const held = w.holdNextGet
-    if (held?.key === e.key) { w.holdNextGet = undefined; await held.release }
+    if (held?.key === e.key && held.skip) held.skip--
+    else if (held?.key === e.key) { w.holdNextGet = undefined; await held.release }
     return { value: { value, version } } as never
   })
   // A set whose ifVersion is not the key's version writes nothing, as the engine's does.
@@ -167,6 +169,9 @@ export function world(on: On, { version = '2.1.290', rounds = [] as Round[], rec
   on('http.fetch', async ($, e) => {
     const method = e.init?.method ?? 'GET'
     w.fetches.push({ url: e.url, method, headers: { ...e.init?.headers }, body: e.init?.body })
+    // The turn the agent is told (#10725) is answered at once: the statuses a test queues are its
+    // live-view batches' and receipts'.
+    if (method === 'POST' && e.url.endsWith('/steering/surface/turn')) return { value: { status: 200, ok: true, headers: {}, text: '{}' } }
     if (method === 'POST') {
       const status = await (w.posts.shift() ?? 202)
       return { value: { status, ok: status >= 200 && status < 300, headers: {}, text: status < 300 ? '{}' : '{"refused":"no"}' } }

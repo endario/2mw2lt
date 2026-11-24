@@ -8,7 +8,9 @@ import type { Poll } from './world'
 // The live view's half in the module (#4823): what reaches the machine agent, and when.
 
 const HELD = { lines: [], code: 0 as const, hold: never }
-const posted = (w: ReturnType<typeof world>) => w.fetches.filter(f => f.method === 'POST')
+// What the live view sends: the turn the agent is told (#10725) is no part of it, read apart.
+const posted = (w: ReturnType<typeof world>) => w.fetches.filter(f => f.method === 'POST' && !f.url.endsWith('/steering/surface/turn'))
+const toldTurns = (w: ReturnType<typeof world>) => w.fetches.filter(f => f.method === 'POST' && f.url.endsWith('/steering/surface/turn')).map(f => JSON.parse(f.body!))
 const events = (w: ReturnType<typeof world>) => posted(w).flatMap(f => (JSON.parse(f.body ?? '{}') as { events: any[] }).events ?? [])
 const rowsOf = (w: ReturnType<typeof world>) => events(w).filter(e => e.kind === 'row').map(e => e.row)
 // The surface channel's own polls: the hold's frames polls ride the same agent beside them (#7838).
@@ -55,7 +57,8 @@ test('a watched session\'s rows arrive in order with rising seq', async ($, on) 
   expect(got.map(e => e.seq)).toEqual([1, 2, 3, 4, 5])
   // The watch began on an idle session, and is told so before anything else.
   expect(got[0]).toEqual({ v: 1, session: 's1', seq: 1, kind: 'turn', turn: { state: 'completed' } })
-  expect(got[1]).toEqual({ v: 1, session: 's1', seq: 2, kind: 'turn', turn: { state: 'started' } })
+  // A started turn names itself by the engine's id, which the live view's stop is fenced to (#10725).
+  expect(got[1]).toEqual({ v: 1, session: 's1', seq: 2, kind: 'turn', turn: { state: 'started', id: 't1' } })
   expect(got.slice(2).map(e => e.row)).toEqual([
     { id: 'u1', role: 'user', origin: 'person', blocks: [{ type: 'text', text: 'list the files' }] },
     { id: 'u2', role: 'assistant', origin: 'model', blocks: [{ type: 'tool-use', id: 'toolu_1', tool: 'Bash', input: { command: 'ls' } }] },
@@ -79,6 +82,22 @@ test('a watched session\'s rows arrive in order with rising seq', async ($, on) 
 // The agent advertises the session's rows live only while the conversation its hold pins is polling
 // (plan 1b.1): the poll names the conversation it asks for, the one the events name as their
 // producer, read again at each poll so a conversation that changed under the module is not the old.
+test('a watch-opening snapshot read across a newer start is dropped, never shown after it (#10725)', async ($, on) => {
+  const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true, cursor: 'c1' }] })
+  let release!: () => void
+  // The poll's own turn tell reads the turn first; the snapshot's read after it is held.
+  w.holdNextGet = { key: 'turn', skip: 1, release: new Promise<void>(r => { release = r }) }
+  await begin($)
+  await w.clock.settle()
+  await $.turn.start({ turnId: 't1', text: 'one' })
+  await $.turn.complete({ turnId: 't1', text: '', answer: '', durationMs: 1, reason: 'answer' } as never)
+  await $.turn.start({ turnId: 't2', text: 'two' })
+  release()
+  await w.clock.advance(50)
+  const turns = events(w).filter(e => e.kind === 'turn')
+  expect(turns.at(-1)).toMatchObject({ kind: 'turn', turn: { state: 'started', id: 't2' } })
+})
+
 test('the poll names its producer', async ($, on) => {
   let second!: (p: { watch: boolean; cursor: string }) => void
   const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true, cursor: 'c1' }, new Promise(r => { second = r })] })
@@ -461,13 +480,14 @@ const stops = (w: ReturnType<typeof world>) => posted(w).filter(f => f.url.endsW
 const sleeping = (task: string, byAbort: boolean) => ({ stdout: '', stderr: '', interrupted: false, backgroundTaskId: task, ...(byAbort ? { backgroundedByTurnAbort: true } : {}) })
 
 // The poll after the first is answered with the desk's interrupt while turn t1 runs.
-async function interrupting($: any, on: any, opts: { turn?: boolean } = {}) {
+async function interrupting($: any, on: any, opts: { turn?: boolean; pressed?: string } = {}) {
   let second!: (p: { watch: boolean; cursor: string; commands: unknown[] }) => void
   const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true, cursor: 'c1' }, new Promise(r => { second = r })] })
   await begin($)
   await w.clock.settle()
   if (opts.turn !== false) await $.turn.start({ turnId: 't1', text: 'sleep 40' })
-  second({ watch: true, cursor: 'c1', commands: [deskInterrupt] })
+  const command = opts.pressed === undefined ? deskInterrupt : { kind: 'interrupt', body: { ...deskInterrupt.body, turn: opts.pressed } }
+  second({ watch: true, cursor: 'c1', commands: [command] })
   await w.clock.settle()
   return w
 }
@@ -511,6 +531,24 @@ test('an aborted turn that does not end within the wait is reported as possibly 
   await w.clock.settle()
   expect(stops(w)).toEqual([{ session: 's1', producer: 'ps-1', id: 'interrupt-1', interrupted: true, stopped: [], unstopped: [], unseen: true, told: true }])
   expect(w.appends).toEqual([`from: ${FROM}\n\nYour turn was interrupted from the desk. A command it was running may not have been ended. Do not carry on with it; wait for what you are asked next.`])
+})
+
+// #10725: a stop pressed against a turn stops that turn alone, checked where the abort is, and the
+// agent is told the turn by the engine's id so a reading names it.
+test('a desk interrupt pressed against an ended turn aborts nothing, and the one pressed against the running turn aborts it', async ($, on) => {
+  const stale = await interrupting($, on, { pressed: 't0' })
+  await stale.clock.advance(50)
+  expect(stale.aborts).toEqual([])
+  expect(stops(stale)).toEqual([{ session: 's1', producer: 'ps-1', id: 'interrupt-1', refused: 'superseded: the turn the stop was pressed against has ended', superseded: 'turn' }])
+  const told = toldTurns(stale)
+  expect(told.map(({ seq: _, ...t }) => t)).toContainEqual({ session: 's1', producer: 'ps-1', turn: 't1' })
+  // Every tell carries an order that only grows, so the agent drops one that arrives late.
+  expect(told.every((t, i) => i === 0 || t.seq > told[i - 1].seq)).toBe(true)
+})
+
+test('a desk interrupt pressed against the running turn aborts it', async ($, on) => {
+  const w = await interrupting($, on, { pressed: 't1' })
+  expect(w.aborts).toEqual(['t1'])
 })
 
 test('a desk interrupt with no turn running is refused, and nothing is aborted', async ($, on) => {

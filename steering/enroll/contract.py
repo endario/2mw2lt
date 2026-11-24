@@ -777,6 +777,8 @@ ActionBody = typing.TypedDict("ActionBody", {
     "reason": "str",
     "interrupt_working": "typing.NotRequired[bool]",
     "answer": "typing.NotRequired[SeatDialogAnswer | None]",
+    "turn": "typing.NotRequired[str]",
+    "seat_generation": "typing.NotRequired[int | None]",
 })
 
 # SeatDialogAnswer is the seat's answer to the dialog a Need of the session names (doc 212): it denies
@@ -904,6 +906,7 @@ ActRead = typing.TypedDict("ActRead", {
     "landed": "typing.NotRequired[str]",
     "why": "typing.NotRequired[str]",
     "refused": "typing.NotRequired[str]",
+    "superseded": "typing.NotRequired[str]",
     "result": "typing.NotRequired[str]",
     "winner": "typing.NotRequired[str]",
     "winner_why": "typing.NotRequired[str]",
@@ -984,6 +987,23 @@ InterruptReceipt = typing.TypedDict("InterruptReceipt", {
     "uplink": "str",
     "interrupt": "str",
     "result": "typing.Any",
+})
+
+# InterruptStandsRequest asks, on the uplink that carried it, whether an interrupt may still be
+# applied by the seat's holding it was pressed against (#10725).
+InterruptStandsRequest = typing.TypedDict("InterruptStandsRequest", {
+    "uplink": "str",
+    "interrupt": "str",
+})
+
+# InterruptStandsAnswer is that holding's word: Stands, or Why it does not. Moved says the seat itself
+# has changed hands, been vacated or moved on a generation since the stop was pressed: only then is
+# the stop superseded, and any other Why is a stop no longer to be applied for another reason.
+InterruptStandsAnswer = typing.TypedDict("InterruptStandsAnswer", {
+    "interrupt": "str",
+    "stands": "bool",
+    "moved": "typing.NotRequired[bool]",
+    "why": "typing.NotRequired[str]",
 })
 
 # InterruptReceiptAnswer is the state the interrupt took on that answer.
@@ -1264,6 +1284,7 @@ SessionReading = typing.TypedDict("SessionReading", {
     "model": "str",
     "vendor": "str",
     "turn": "str",
+    "turn_id": "typing.NotRequired[str]",
     "stop_reason": "str",
     "effort": "str",
     "context_window": "int | None",
@@ -1624,6 +1645,8 @@ MachineAction = typing.TypedDict("MachineAction", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "turn": "typing.NotRequired[str]",
+    "seat_generation": "typing.NotRequired[int | None]",
     "attachments": "typing.NotRequired[list[Attachment] | None]",
     "name": "typing.NotRequired[str]",
     "args": "typing.NotRequired[str]",
@@ -1690,6 +1713,8 @@ StreamWake = typing.TypedDict("StreamWake", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "turn": "typing.NotRequired[str]",
+    "seat_generation": "typing.NotRequired[int | None]",
     "attachments": "typing.NotRequired[list[Attachment] | None]",
     "name": "typing.NotRequired[str]",
     "args": "typing.NotRequired[str]",
@@ -1765,6 +1790,8 @@ StreamControl = typing.TypedDict("StreamControl", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "turn": "typing.NotRequired[str]",
+    "seat_generation": "typing.NotRequired[int | None]",
     "attachments": "typing.NotRequired[list[Attachment] | None]",
     "name": "typing.NotRequired[str]",
     "args": "typing.NotRequired[str]",
@@ -1815,6 +1842,8 @@ StreamRehome = typing.TypedDict("StreamRehome", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "turn": "typing.NotRequired[str]",
+    "seat_generation": "typing.NotRequired[int | None]",
     "attachments": "typing.NotRequired[list[Attachment] | None]",
     "name": "typing.NotRequired[str]",
     "args": "typing.NotRequired[str]",
@@ -1865,6 +1894,8 @@ StreamPark = typing.TypedDict("StreamPark", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "turn": "typing.NotRequired[str]",
+    "seat_generation": "typing.NotRequired[int | None]",
     "attachments": "typing.NotRequired[list[Attachment] | None]",
     "name": "typing.NotRequired[str]",
     "args": "typing.NotRequired[str]",
@@ -1915,6 +1946,8 @@ StreamPrompt = typing.TypedDict("StreamPrompt", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "turn": "typing.NotRequired[str]",
+    "seat_generation": "typing.NotRequired[int | None]",
     "attachments": "typing.NotRequired[list[Attachment] | None]",
     "name": "typing.NotRequired[str]",
     "args": "typing.NotRequired[str]",
@@ -1965,6 +1998,8 @@ StreamAnswer = typing.TypedDict("StreamAnswer", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "turn": "typing.NotRequired[str]",
+    "seat_generation": "typing.NotRequired[int | None]",
     "attachments": "typing.NotRequired[list[Attachment] | None]",
     "name": "typing.NotRequired[str]",
     "args": "typing.NotRequired[str]",
@@ -2015,6 +2050,8 @@ StreamInterrupt = typing.TypedDict("StreamInterrupt", {
     "text": "typing.NotRequired[str]",
     "mode": "typing.NotRequired[str]",
     "from": "typing.NotRequired[str]",
+    "turn": "typing.NotRequired[str]",
+    "seat_generation": "typing.NotRequired[int | None]",
     "attachments": "typing.NotRequired[list[Attachment] | None]",
     "name": "typing.NotRequired[str]",
     "args": "typing.NotRequired[str]",
@@ -6092,10 +6129,12 @@ SessionPart = typing.TypedDict("SessionPart", {
 })
 
 # SessionTurn is a turn starting or completing; Reason (answered, interrupted, error) says how it
-# completed.
+# completed, and ID is the reach's own name for a turn that started, where its producer knows it:
+# what a stop pressed in the live view against that turn is fenced to (#10725).
 SessionTurn = typing.TypedDict("SessionTurn", {
     "state": "str",
     "reason": "typing.NotRequired[str]",
+    "id": "typing.NotRequired[str]",
 })
 
 # SessionAsk is a permission or a question the harness waits on: the tool's input, which for a
@@ -6197,11 +6236,13 @@ AgentSurfaceAnswer = typing.TypedDict("AgentSurfaceAnswer", {
 # SessionLiveState is whether the machine holding a watched session took its watch, told to the
 # browser as it changes and as a stream opens; Reason is the check that found an offline one so.
 # Turn is the session's turn as the events relayed so far say, idle or running, absent while they
-# have not said; Asks are the asks those events left open.
+# have not said, and TurnID the name the running turn's start gave it, absent where it gave none
+# (#10725); Asks are the asks those events left open.
 SessionLiveState = typing.TypedDict("SessionLiveState", {
     "machine": "str",
     "reason": "typing.NotRequired[str]",
     "turn": "typing.NotRequired[str]",
+    "turn_id": "typing.NotRequired[str]",
     "asks": "typing.NotRequired[list[str] | None]",
 })
 
@@ -6482,6 +6523,7 @@ SessionVitals = typing.TypedDict("SessionVitals", {
     "active_at": "str | None",
     "turn": "str | None",
     "turn_since": "str | None",
+    "turn_id": "typing.NotRequired[str | None]",
     "model": "str | None",
     "model_maker": "typing.NotRequired[str | None]",
     "effort": "str | None",
@@ -8500,6 +8542,7 @@ WorkerCensusBody = typing.TypedDict("WorkerCensusBody", {
     "harness_commands": "typing.NotRequired[dict[str, str]]",
     "harness_models": "typing.NotRequired[dict[str, dict[str, list[str] | None] | None]]",
     "launches": "typing.NotRequired[list[str] | None]",
+    "fresh_proofs": "typing.NotRequired[list[str] | None]",
     "harness_preferences": "typing.NotRequired[dict[str, str]]",
     "no_account": "typing.NotRequired[list[LauncherNoAccount] | None]",
     "unlaunchable": "typing.NotRequired[list[HarnessUnlaunchable] | None]",
@@ -8865,6 +8908,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/steering/agent/injected",
     "POST /w/{workspace}/steering/agent/injection",
     "POST /w/{workspace}/steering/agent/interrupt",
+    "POST /w/{workspace}/steering/agent/interrupt/stands",
     "POST /w/{workspace}/steering/agent/judges",
     "POST /w/{workspace}/steering/agent/key",
     "POST /w/{workspace}/steering/agent/launch",

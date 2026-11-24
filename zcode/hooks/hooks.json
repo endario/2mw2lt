@@ -1,7 +1,7 @@
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [ { "type": "command", "command": "\"${STEERING_PYTHON:-python3}\" ${ZCODE_PLUGIN_ROOT}/zcode/hook_glue.py", "timeout": 8 } ] }
+      { "hooks": [ { "type": "command", "command": "\"${STEERING_PYTHON:-python3}\" ${ZCODE_PLUGIN_ROOT}/zcode/hook_glue.py SessionStart", "timeout": 8 } ] }
     ],
     "UserPromptSubmit": [
       { "hooks": [ { "type": "command", "command": "\"${STEERING_PYTHON:-python3}\" ${ZCODE_PLUGIN_ROOT}/zcode/hook_glue.py", "timeout": 8 } ] }

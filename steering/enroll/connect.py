@@ -823,6 +823,52 @@ def repo_line(ws: Path) -> str:
     return f"repo: {mine[0]['repo']}"
 
 
+GH_REACH_TIMEOUT = 8.0
+
+
+def gh_reach_line(repo: str, timeout: float = GH_REACH_TIMEOUT) -> str | None:
+    """A line when the `gh` this session would run cannot reach the repository `repo_line` named,
+    naming that gh by its resolved path, so a wrapper shows as one; a `gh reach: not checked:` line
+    when the check could not complete; `None` when gh reads it. A session started by hand inherits
+    whichever login gh has active. No remedy is offered, as a forge wrapper replaces `GH_TOKEN`
+    with its own and no one fix holds for every gh this meets. gh's stderr is never echoed: it may
+    carry a token's neighbourhood and is not ours to relay.
+
+    A rate limit is silent: it says nothing about this login's reach and clears by itself."""
+    import shutil  # noqa: E402
+    import subprocess  # noqa: E402
+    prefix = "repo: "
+    if not repo.startswith(prefix) or repo.startswith("repo: unknown ("):
+        return None
+    slug = repo[len(prefix):]
+    gh = shutil.which("gh")
+    if gh is None:
+        return "gh reach: not checked: no gh on PATH"
+    try:
+        done = subprocess.run([gh, "api", "--hostname", "github.com", f"repos/{slug}"],
+                              capture_output=True, text=True, errors="replace", timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return f"gh reach: not checked: {gh} timed out after {timeout:g}s"
+    except (OSError, ValueError) as e:
+        return f"gh reach: not checked: {gh} could not be run ({type(e).__name__})"
+    if done.returncode == 0:
+        return None
+    said = done.stderr or ""
+    # gh with no login at all answers locally, exit 4 and "gh auth login", never an HTTP status.
+    if done.returncode == 4 or "gh auth login" in said:
+        return f"gh: {gh} is not signed in to GitHub"
+    if re.search(r"\(HTTP 404\)|Could not resolve to a Repository", said):
+        return f"gh: {gh} cannot see {slug}"
+    if "rate limit" in said.lower():
+        return None
+    if re.search(r"\(HTTP 40[13]\)|Bad credentials", said):
+        return f"gh: {gh} is refused by GitHub for {slug}"
+    if re.search(r"dial tcp|i/o timeout|no such host|connection (refused|reset)|\bEOF\b|TLS handshake|"
+                 r"Could not resolve host|network is unreachable", said, re.I):
+        return f"gh reach: not checked: network failure reaching GitHub from {gh}"
+    return f"gh reach: not checked: {gh} exited {done.returncode}"
+
+
 def forge_grant(ws: Path) -> tuple[str, bool]:
     """A Codex session's forge grant, written: the launcher its rule names, which a Codex install
     made before the rule did not write, then the rule. The line to print, and whether it warns."""
@@ -895,7 +941,11 @@ def main(argv: list[str]) -> int:
     if acct:
         print(f"account: {acct}")
     print(f"speak: {say_invocation(h, psession, session)}")
-    print(repo_line(ws))
+    repo = repo_line(ws)
+    print(repo)
+    unseen = gh_reach_line(repo)
+    if unseen:
+        print(unseen, file=sys.stderr)
     print(card_line(ws, session, psession))
     # The onboarding, on every entry route alike (#9153): the standing rules first, then the
     # knowledge index and the bulletin a launch's brief also carries, so a session started any

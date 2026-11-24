@@ -430,6 +430,32 @@ function sendCommandReceipts($: EngineInterface): Promise<void> {
   return commandSending
 }
 
+// The agent is told the turn the session runs, by the engine's own id, at each start and end and as
+// a poll begins: it is what a reading reports as turn_id, and an interrupt pressed against it carries
+// it, which this module checks before it aborts anything (#10725). A tell that is lost leaves the
+// agent an id that no longer matches, so a stop is refused rather than applied to another turn.
+//
+// Each tell reads the turn as it stands when it is sent, and carries an order that only grows, so a
+// slow end's tell that arrives after the next turn's start is dropped by the agent, never kept.
+let turnSaid = 0
+// How many turn starts and ends this module has shown: a watch-opening snapshot read across one is
+// stale (#10725).
+let turnsShown = 0
+async function tellTurn($: EngineInterface) {
+  const at = agent
+  if (!at || !watched) return
+  turnSaid = Math.max(turnSaid + 1, Date.now() * 1000)
+  const seq = turnSaid
+  const { value: turn = '' } = await $.state.get(TURN)
+  try {
+    const r = await $.http.fetch(`${at.base}/steering/surface/turn`,
+      { method: 'POST', headers: agentHeaders(at), body: JSON.stringify({ session: watched, producer: await $.session.id(), turn, seq }) })
+    if (!r.ok) throw new Error(`the agent answered ${r.status}: ${r.text.slice(0, 200)}`)
+  } catch (err) {
+    $.ui.log(`2mw2lt: the agent was not told the turn: ${String(err)}`, { to: 'debug' })
+  }
+}
+
 // The turn a desk interrupt is stopping: the background tasks its abort left running, gathered as
 // their calls return, and its end, by which every call of it has.
 let stopping: { turn: string; moved: string[]; ended: () => void } | undefined
@@ -440,7 +466,10 @@ const STOP_WAIT_MS = 3000
 async function interrupt($: EngineInterface, session: string, body: unknown) {
   const p = surface.interrupting(body)
   const { value: turn = '' } = await $.state.get(TURN)
+  // A stop pressed against a turn stops that turn alone: checked here, where the abort is (#10725).
+  const pressed = 'refused' in p ? '' : p.turn
   const outcome: surface.Stopping = 'refused' in p ? { refused: p.refused }
+    : pressed && pressed !== turn ? { refused: 'superseded: the turn the stop was pressed against has ended', superseded: 'turn' }
     : !turn ? { refused: 'no turn of the session is running' }
     : stopping ? { refused: 'another interrupt is stopping the turn' }
     : await stopTurn($, turn, p.from)
@@ -652,6 +681,8 @@ async function pollSurface($: EngineInterface, workspace: string, session: strin
       // An agent not yet started is retried as one that stopped: its key appears when it starts.
       if (!agent) throw new Error(`no key for the agent serving ${workspace}`)
       void sendCommandReceipts($)
+      // A new agent, or one that missed a tell, learns the turn as each poll begins.
+      void tellTurn($)
       // The producer, as the events name it: the agent advertises this session's rows only while
       // the conversation its hold pins is the one polling.
       const producer = await $.session.id()
@@ -668,9 +699,13 @@ async function pollSurface($: EngineInterface, workspace: string, session: strin
       watching = answer.watch === true
       // A watch beginning has no word of the turn until the next one starts or ends: it is told
       // the turn as it stands.
+      // A turn's own start or end shown while the snapshot was read is newer than it, so the snapshot
+      // is dropped rather than shown after it: the view keeps the turn that runs, by its name (#10725).
       if (watching && !was) {
+        const seen = turnsShown
         const stored = busyNow ?? (await $.state.get(BUSY)).value === true
-        show($, surface.turnNow(busyNow ?? stored))
+        const named = (await $.state.get(TURN)).value ?? ''
+        if (turnsShown === seen) show($, surface.turnNow(busyNow ?? stored, named))
       }
       if (typeof answer.cursor === 'string') cursor = answer.cursor
       if (listOwed) {
@@ -1510,11 +1545,17 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('turn.start', async ($, e, next) => {
-    if (e.agentId === undefined) show($, { kind: 'turn', turn: { state: 'started' } })
+    if (e.agentId === undefined) {
+      turnsShown++
+      show($, { kind: 'turn', turn: { state: 'started', id: e.turnId } })
+    }
     // A subagent's turn starts inside ours, and the run is the outer turn's.
     busyNow = true
     await $.state.set(BUSY, true)
-    if (e.agentId === undefined) await $.state.set(TURN, e.turnId)
+    if (e.agentId === undefined) {
+      await $.state.set(TURN, e.turnId)
+      void tellTurn($)
+    }
     if (e.agentId === undefined) await tellBulletins($).catch(err => $.ui.log(`2mw2lt: the bulletin turn broke: ${String(err)}`, { to: 'debug' }))
     return next(e)
   })
@@ -1524,12 +1565,16 @@ export const register: Register = on => {
       const command = stamping
       stamping = undefined
       streaming.end()
+      turnsShown++
       show($, { kind: 'turn', turn: { state: 'completed', reason: surface.turnReason(e.reason) } })
       busyNow = false
       await $.state.set(BUSY, false)
       await $.state.set(TURN, '')
-      if (command) void reportCommand($, command.session, command.act, e.reason === 'answer'
-        ? { landed: 'completed' } : { refused: `the command's turn ended: ${e.reason}` })
+      // The command's receipt goes first: the turn's end is told after it, and a lost tell leaves
+      // only an id no stop matches.
+      const receipt = command ? reportCommand($, command.session, command.act, e.reason === 'answer'
+        ? { landed: 'completed' } : { refused: `the command's turn ended: ${e.reason}` }) : Promise.resolve()
+      void receipt.finally(() => tellTurn($))
       echoing.length = 0                                           // an echo that never came is not the next run's
       if (stopping?.turn === e.turnId) stopping.ended()
       // A plugin reloaded in the turn changes the list.

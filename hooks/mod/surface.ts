@@ -9,7 +9,9 @@ type Append = Args<'session.append'>
 export type Block = { type: 'text' | 'thinking' | 'tool-use' | 'tool-result'; id?: string; text?: string; tool?: string; input?: unknown; error?: true }
 // `replaces` is the key of the streamed block a response row takes the place of (#8282).
 export type Row = { id?: string; role: 'user' | 'assistant' | 'tool-result' | 'system'; origin: string; act?: string; replaces?: string; blocks: Block[] }
-export type Turn = { state: 'started' | 'completed'; reason?: 'answered' | 'interrupted' | 'error' }
+// A started turn names itself by the engine's id where the module knows it, which a stop pressed in
+// the live view is fenced to (#10725).
+export type Turn = { state: 'started' | 'completed'; reason?: 'answered' | 'interrupted' | 'error'; id?: string }
 export type Ask = { id: string; kind: 'permission' | 'question'; tool?: string; options?: string[] }
 export type Settled = { ask: string; by: string; answer?: unknown }
 // What one streamed block grew by since the last send. It leaves as written: the block's row is scanned.
@@ -29,7 +31,9 @@ export type Landing = { landed: 'new-turn' | 'running-turn' | 'queued'; why?: st
 // What an interrupt did, as the agent's receipt says it: the turn stopped, the background tasks
 // the stop left running ended or not with why, whether the turn's end came too late to see them
 // all, and whether the model was told; or why it did not.
-export type Stopping = { interrupted: true; stopped: string[]; unstopped: string[]; unseen: boolean; told: boolean } | { refused: string }
+// A refusal whose turn the stop was pressed against has ended says so typed, as `superseded`, which
+// the desk words apart from a refusal (#10725).
+export type Stopping = { interrupted: true; stopped: string[]; unstopped: string[]; unseen: boolean; told: boolean } | { refused: string; superseded?: 'turn' }
 export type Event = { v: 1; session: string; seq: number } & (Payload | { kind: 'gap'; gap: { from: number; to: number } })
 
 export const DEFAULT_PORT = '9990'
@@ -167,10 +171,12 @@ export function prompted(body: unknown): { id: string; text: string; from: strin
 
 // The interrupt an `interrupt` asks the module to carry out: its act's id, and who asked, as the
 // from: line names them. Without a speaker, why not, and the id when there was one.
-export function interrupting(body: unknown): { id: string; from: string } | { id?: string; refused: string } {
-  const b = (typeof body === 'object' && body !== null ? body : {}) as { id?: unknown; from?: unknown }
+export function interrupting(body: unknown): { id: string; from: string; turn: string } | { id?: string; refused: string } {
+  const b = (typeof body === 'object' && body !== null ? body : {}) as { id?: unknown; from?: unknown; turn?: unknown }
   const id = typeof b.id === 'string' && b.id ? b.id : undefined
-  if (id && typeof b.from === 'string' && b.from) return { id, from: b.from }
+  // The turn it was pressed against, by the engine's id, "" where none was named (#10725).
+  const turn = typeof b.turn === 'string' ? b.turn : ''
+  if (id && typeof b.from === 'string' && b.from) return { id, from: b.from, turn }
   return { ...(id ? { id } : {}), refused: 'the agent\'s interrupt named nobody who asked for it' }
 }
 
@@ -194,7 +200,8 @@ export function firstText(content: readonly { type: string; [field: string]: unk
 
 // The turn as it stands, told to a watch that begins between a turn's start and end: running, or
 // idle, which the view reads from a completed turn that carries no reason.
-export const turnNow = (busy: boolean): Payload => ({ kind: 'turn', turn: { state: busy ? 'started' : 'completed' } })
+export const turnNow = (busy: boolean, id = ''): Payload =>
+  ({ kind: 'turn', turn: busy ? { state: 'started', ...(id ? { id } : {}) } : { state: 'completed' } })
 
 // The event has no refusal: a turn the model refused ended without its answer, as an error's did.
 export function turnReason(reason: Args<'turn.complete'>['reason']): NonNullable<Turn['reason']> {
