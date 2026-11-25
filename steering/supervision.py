@@ -1,6 +1,7 @@
 """Supervision (doc 15 §6): the Claude adapter's allow-list and the attention reducer."""
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -37,6 +38,12 @@ FLOORS: dict[str, tuple[int, ...]] = {
 # allow one act, and this is the argument that says which (#812).
 ASK_KEYS = ("command", "file_path", "path", "url", "pattern")
 ASK_OPTIONS = 8  # labels kept from one question; the tool offers four and an "Other"
+
+
+def input_digest(hook: dict) -> str:
+    """A call's tool and input as the call record, the ask and the deciding hook's poll name it."""
+    call = {"tool": hook.get("tool_name"), "input": hook.get("tool_input")}
+    return hashlib.sha256(json.dumps(call, sort_keys=True).encode()).hexdigest()
 
 
 def always_rules(suggestions: object) -> list:
@@ -177,6 +184,10 @@ def observe(hook: dict, occurrence: str, observed_at: str, source_version: str, 
     # An ask whose "always allow" the desk may offer: the suggestions' shape is the one a deciding
     # hook can echo as the dialog's own option 2 (#4823 unit 3.6). Added beside the ask fields, not
     # within them, so a sink that knows it not still reads the ask.
+    if event == "PermissionRequest" or event == "PreToolUse" and hook.get("tool_name") == "AskUserQuestion":
+        # The digest of the call's input, which the agent holds the ask to: a deciding hook that
+        # names another call is never handed its decision (#10840). A digest, never the input.
+        o["ask_input"] = input_digest(hook)
     if event == "PermissionRequest" and always_rules(hook.get("permission_suggestions")):
         o["ask_always"] = True
     return o

@@ -91,6 +91,7 @@
       "name": "antigravity",
       "delivery": "injected-reach",
       "can": [
+        "resume",
         "brain-role",
         "prompt-steering",
         "model-proof",

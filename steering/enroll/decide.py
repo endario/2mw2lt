@@ -3,7 +3,7 @@
 (#4823, design §6.1 and §8.2). The terminal draws its dialog while this waits, and whichever
 answers first wins (spike B). It long-polls this machine's agent for the ask's decision:
 
-  GET /steering/surface/ask?session=<the hook's session_id>&ask=<the call's tool_use_id>
+  GET /steering/surface/ask?session=<the hook's session_id>&ask=<the call's tool_use_id>&input=<its digest>&hook=<this hook's id>
 
 and the agent answers one of
 
@@ -30,6 +30,7 @@ import os
 import socket
 import time
 import urllib.parse
+import uuid
 
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
@@ -155,7 +156,9 @@ def wait(ws: Path, hook: dict, ask: str, deadline: float) -> dict | None:
     """Poll the agent until it decides, says the ask settled, or cannot be reached. An answer the
     hook cannot apply is refused back to the agent and the poll goes on, so a corrected answer
     reaches the dialog while it stands."""
-    query = urllib.parse.urlencode({"session": hook["session_id"], "ask": ask})
+    # The hook's own id: the agent hands a decision again only to the hook it handed it to (#10840).
+    query = urllib.parse.urlencode({"session": hook["session_id"], "ask": ask,
+                                    "input": supervision.input_digest(hook), "hook": uuid.uuid4().hex})
     try:
         req = local_workspace.agent_request(ws, f"/steering/surface/ask?{query}", None, timeout=1.0)
     except Exception as e:
