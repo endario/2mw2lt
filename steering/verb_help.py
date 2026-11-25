@@ -31,7 +31,7 @@ _RAW_FORMS = {
     "ack": ["ack: <ulid> token <t>"],
     "say": ["say: <session> [to <target>] token <t> <text>"],
     "note": ["note: token <lease token> <text>"],
-    "launch": ["launch: token <lease token> [vendor <vendor>] floor <rarity> [thinking <level>] [effort <level>] [window] [card <card>|resolves <owner>/<name>#<n>] [notify <session>] [harness <harness>] because <reason> [<newline> brief: [checkpoint <checkpoint id>] <directive>]",
+    "launch": ["launch: token <lease token> [on <node>] [vendor <vendor>] floor <rarity> [thinking <level>] [effort <level>] [window] [card <card>|resolves <owner>/<name>#<n>] [notify <session>] [harness <harness>] because <reason> [<newline> brief: [checkpoint <checkpoint id>] <directive>]",
                "launch: token <lease token> [<harness>] [on <node>] [vendor <vendor>] [account <n>] model <model> [thinking <level>] [effort <level>] [window] [card <card>|resolves <owner>/<name>#<n>] [notify <session>] because <reason> [<newline> brief: [checkpoint <checkpoint id>] <directive>]"],
     "withdraw": ["withdraw: token <lease token> <launch id>"],
     "cancel": ["cancel: token <lease token> <action id>"],

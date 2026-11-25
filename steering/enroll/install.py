@@ -1505,7 +1505,9 @@ def install(root: Path | None, codex: bool = False, team: str | None = None,
     say("repository", repo)
     move_served_root(root, repo, move_root)
     name = None if machine is not None else github_account(root, repo, gh_account)
-    label = f"{socket.gethostname().split('.')[0]} as {getpass.getuser()}"
+    # The approval page shows a service user as one (device-code.ts SERVICE_MARK), so its approver
+    # knows a lent machine is asking, not a person's own login.
+    label = f"{socket.gethostname().split('.')[0]} as {getpass.getuser()}" + (" (service user)" if machine is not None else "")
     bound = checkout_binding.id_at(root)
     door = recorded_door(root, bound) if bound else None
     if door:
@@ -1854,6 +1856,11 @@ def _remove_local(root: Path, bound: str | None, held: Path | None) -> None:
                            "takes it down")
 
 
+# A hang guard for `ps` and `pgrep`, never a speed bound: a lookup that times out is a gate run
+# left judging, and a loaded machine stalls one for seconds.
+PROCESS_LOOKUP_TIMEOUT = 60
+
+
 def _gate_run_pids(runs: Path) -> list[tuple[int, str]]:
     """The live gate-run processes a run directory's records name: detached from the agent, they
     outlive the workspace they were commissioned for, delivering to a door that now refuses them.
@@ -1870,10 +1877,17 @@ def _gate_run_pids(runs: Path) -> list[tuple[int, str]]:
         if pid <= 1:
             continue
         try:
-            command = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True,
-                                     text=True, timeout=5).stdout
-        except (OSError, subprocess.TimeoutExpired):
+            looked = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True,
+                                    text=True, timeout=PROCESS_LOOKUP_TIMEOUT)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            say("agent", f"gate run {pid} could not be looked up, so it may still be judging: {e}")
             continue
+        # A pid that has gone exits 1 and says nothing; any other failure is the lookup's own.
+        if looked.returncode != 0 and (looked.returncode != 1 or looked.stderr.strip()):
+            say("agent", f"gate run {pid} could not be looked up, so it may still be judging: "
+                         f"ps exited {looked.returncode}: {looked.stderr.strip()}")
+            continue
+        command = looked.stdout
         if "gate-run" in command or "gate_child" in command or "gate-child" in command:
             pids.append((pid, command.strip()))
     return pids
@@ -1892,10 +1906,17 @@ def _stop_gate_runs_by_binary(base: Path) -> int:
     if not base.is_dir():
         return 0
     try:
-        found = subprocess.run(["pgrep", "-f", re.escape(str(base)) + r".*gate-run"], capture_output=True,
-                               text=True, timeout=10).stdout.split()
-    except (OSError, subprocess.TimeoutExpired):
+        looked = subprocess.run(["pgrep", "-f", re.escape(str(base)) + r".*gate-run"], capture_output=True,
+                                text=True, timeout=PROCESS_LOOKUP_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        say("machine", f"gate runs from this machine's release could not be looked up, so any may still be judging: {e}")
         return 0
+    # pgrep exits 1 when nothing matches; any other failure is the lookup's own.
+    if looked.returncode not in (0, 1):
+        say("machine", "gate runs from this machine's release could not be looked up, so any may still be judging: "
+                       f"pgrep exited {looked.returncode}: {looked.stderr.strip()}")
+        return 0
+    found = looked.stdout.split()
     pids = [pid for pid in (int(n) for n in found if n.isdigit()) if pid != os.getpid() and _alive(pid)]
     return _terminate(pids)
 

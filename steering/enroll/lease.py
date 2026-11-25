@@ -311,8 +311,8 @@ def _go_launch(rec: dict, line: str, key: str) -> tuple[int, str, bool]:
         return 2, refusal.use("launch", "a launch names a model or a floor"), False
     if harness == "claude" and not (m["model"] or m["floor"]):
         return 2, refusal.use("launch", "a claude launch names its vendor's model or a floor; its effort, left out, is the placed model's rarity's: legendary low, epic medium, rare high, uncommon max"), False
-    if m["floor"] and (m["machine"] or m["quoted"] or m["machine_name"] or m["account"]):
-        return 2, refusal.use("launch", "a floor is placed by the platform: leave out on and account, or name the model"), False
+    if m["floor"] and m["account"]:
+        return 2, refusal.use("launch", "a floor is placed across accounts by the platform: leave out account, or name the model"), False
     body = {k: m[k] for k in ("machine", "machine_name", "vendor", "account", "model", "floor", "thinking", "effort", "notify") if m[k]}
     if harness:
         body["harness"] = harness
