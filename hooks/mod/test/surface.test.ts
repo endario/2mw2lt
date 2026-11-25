@@ -1,6 +1,6 @@
 import { test, expect } from 'claude-code/testing'
 import { POINTER } from '../frames'
-import { Outbox, Streaming, agentOf, eventOf, ownNote, OWN_NOTE } from '../surface'
+import { Outbox, Streaming, agentOf, eventOf, interruptNote, ownNote, OWN_NOTE, PLATFORM_FROM } from '../surface'
 import { SLICE } from './rows-slice'
 import { world, line, begin, never, AGENT } from './world'
 import type { Poll } from './world'
@@ -480,13 +480,14 @@ const stops = (w: ReturnType<typeof world>) => posted(w).filter(f => f.url.endsW
 const sleeping = (task: string, byAbort: boolean) => ({ stdout: '', stderr: '', interrupted: false, backgroundTaskId: task, ...(byAbort ? { backgroundedByTurnAbort: true } : {}) })
 
 // The poll after the first is answered with the desk's interrupt while turn t1 runs.
-async function interrupting($: any, on: any, opts: { turn?: boolean; pressed?: string } = {}) {
+async function interrupting($: any, on: any, opts: { turn?: boolean; pressed?: string; from?: string } = {}) {
   let second!: (p: { watch: boolean; cursor: string; commands: unknown[] }) => void
   const w = world(on, { agent: true, rounds: [HELD], polls: [{ watch: true, cursor: 'c1' }, new Promise(r => { second = r })] })
   await begin($)
   await w.clock.settle()
   if (opts.turn !== false) await $.turn.start({ turnId: 't1', text: 'sleep 40' })
-  const command = opts.pressed === undefined ? deskInterrupt : { kind: 'interrupt', body: { ...deskInterrupt.body, turn: opts.pressed } }
+  const body = { ...deskInterrupt.body, ...(opts.from ? { from: opts.from } : {}), ...(opts.pressed === undefined ? {} : { turn: opts.pressed }) }
+  const command = { kind: 'interrupt', body }
   second({ watch: true, cursor: 'c1', commands: [command] })
   await w.clock.settle()
   return w
@@ -531,6 +532,33 @@ test('an aborted turn that does not end within the wait is reported as possibly 
   await w.clock.settle()
   expect(stops(w)).toEqual([{ session: 's1', producer: 'ps-1', id: 'interrupt-1', interrupted: true, stopped: [], unstopped: [], unseen: true, told: true }])
   expect(w.appends).toEqual([`from: ${FROM}\n\nYour turn was interrupted from the desk. A command it was running may not have been ended. Do not carry on with it; wait for what you are asked next.`])
+})
+
+// #10884: the platform's own recovery of a turn that took no step is no person at the desk, and no
+// hold: the model is told why the turn ended and to carry on with its card.
+test('the platform\'s own interrupt of a stuck turn tells the model to carry on, not to wait', async ($, on) => {
+  const w = await interrupting($, on, { from: PLATFORM_FROM })
+  await aborted($, w, sleeping('bg-1', true))
+  expect(w.appends).toHaveLength(1)
+  const note = w.appends[0]
+  expect(note).toContain(`from: ${PLATFORM_FROM}`)
+  expect(note).toContain('taken no step for a while')
+  expect(note).toContain('The command it was running was ended.')
+  expect(note).toContain('Carry on with your card')
+  expect(note).toContain('re-check whatever you were waiting on')
+  expect(note).not.toContain('from the desk')
+  expect(note).not.toContain('wait for what you are asked next')
+})
+
+test('interruptNote keeps the desk wording for a person, the seat and a steward, and not for the platform', () => {
+  const desk = (from: string) => interruptNote(from, 0, 0)
+  const held = 'Your turn was interrupted from the desk. Do not carry on with it; wait for what you are asked next.'
+  for (const from of ['console user alice, member of the team', 'the brain, session s-brain, on the owner\'s behalf',
+    'session s-steward, steward of goal g1, within the seat\'s bounds', 'the workspace capability']) {
+    expect(desk(from)).toBe(`from: ${from}\n\n${held}`)
+  }
+  const platform = interruptNote(PLATFORM_FROM, 2, 1, true)
+  expect(platform).toBe(`from: the platform's own\n\nYour turn was ended because it had taken no step for a while; nobody at the desk stopped it. The 2 commands it was running were ended. A command it was running could not be ended and may still be running. A command it was running may not have been ended. Carry on with your card: re-check whatever you were waiting on, and do not wait to be asked.`)
 })
 
 // #10725: a stop pressed against a turn stops that turn alone, checked where the abort is, and the

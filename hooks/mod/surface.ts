@@ -180,15 +180,23 @@ export function interrupting(body: unknown): { id: string; from: string; turn: s
   return { ...(id ? { id } : {}), refused: 'the agent\'s interrupt named nobody who asked for it' }
 }
 
-// What the model reads after a stop from the desk, under the from: line naming who stopped it: a
-// plugin's abort leaves no interruption marker, and a model never told picks the work up again at
-// its next turn (spike A).
+// The from: line the daemon words its own interrupt with (coordination `interruptSenderInTx`): the
+// platform's stuck-turn recovery (#8251), which no person pressed.
+export const PLATFORM_FROM = "the platform's own"
+
+// What the model reads after a stop, under the from: line naming who stopped it: a plugin's abort
+// leaves no interruption marker, and a model never told picks the work up again at its next turn
+// (spike A). A person's or the seat's stop from the desk tells it to wait; the platform's own recovery
+// of a turn that took no step is not a hold, so it tells the session to carry on with its card (#10884).
 export function interruptNote(from: string, stopped: number, unstopped: number, unseen = false): string {
   const ended = stopped === 1 ? ' The command it was running was ended.'
     : stopped > 1 ? ` The ${stopped} commands it was running were ended.` : ''
   const left = unstopped === 1 ? ' A command it was running could not be ended and may still be running.'
     : unstopped > 1 ? ` ${unstopped} commands it was running could not be ended and may still be running.` : ''
   const unknown = unseen ? ' A command it was running may not have been ended.' : ''
+  if (from === PLATFORM_FROM) {
+    return `from: ${from}\n\nYour turn was ended because it had taken no step for a while; nobody at the desk stopped it.${ended}${left}${unknown} Carry on with your card: re-check whatever you were waiting on, and do not wait to be asked.`
+  }
   return `from: ${from}\n\nYour turn was interrupted from the desk.${ended}${left}${unknown} Do not carry on with it; wait for what you are asked next.`
 }
 
