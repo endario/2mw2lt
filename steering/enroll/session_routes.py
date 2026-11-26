@@ -685,7 +685,7 @@ def declare_card(card: str, name: str, anchors: dict, token: str, repo: str = ""
     repository, as `card_repo` reads it; `goal`, a birth's `{id, why, source?}`, contributes the
     card to its goal in the same command (#7005). A card `session` already executes is joined
     instead of declared beside — the one the declaration names (`--card`), the one carrying every
-    named anchor, or, when none are named, the one live card it executes (#7634, #9509, #9568: an
+    named anchor or resolving an issue the declaration resolves, or, when none are named, the one live card it executes (#7634, #9509, #9568: an
     anchor-less declaration is how the take's card was twinned, and a named one how the scoped
     card was refused `card-exists` where its issue should have anchored it): its triage is the
     declaration's, and a goal, which joins a card only by an edge, is refused naming it — save on
@@ -717,15 +717,17 @@ def declare_card(card: str, name: str, anchors: dict, token: str, repo: str = ""
 def _join_own_card(session: str, minted: str, anchors: dict, repo: str, token: str,
                    triage: dict | None, goal: dict | None) -> str:
     """The line for a declaration that joined the live card `session` already executes — the one
-    carrying every anchor it names, or, when it names none, the only one — or "" when there is
-    none to join. The card a retry of this very declaration minted is no card to join: it falls
+    carrying every anchor it names, or one resolving an issue the declaration resolves, or, when
+    it names none, the only one — or "" when there is none to join. A card resolving the same issue
+    is the issue's work, so the declaration's other anchors join it rather than mint a twin beside
+    it (#10896: a take's card resolving the issue, then a declaration resolving it and advancing
+    another). The card a retry of this very declaration minted is no card to join: it falls
     through to the post, which Go answers replayed."""
     wanted = {(verb, n) for verb, ns in anchors.items() for n in ns}
     held = [c for c in executing_cards(session, token) if c["id"] != minted]
     if wanted:
-        held = [c for c in held if wanted <= {
-            (a.get("verb"), a.get("n")) for a in c.get("anchors") or []
-            if not a.get("ended") and str(a.get("repo")).lower() == repo.lower()}]
+        resolved = {k for k in wanted if k[0] == "resolves"}
+        held = [c for c in held if wanted <= (have := _standing_anchors(c, repo)) or resolved & have]
     if not held:
         return ""
     ids = ", ".join(c["id"] for c in held)
@@ -735,19 +737,27 @@ def _join_own_card(session: str, minted: str, anchors: dict, repo: str, token: s
                                   f"an anchor-less declaration cannot say which is the work's card",
                                   hand_to=("the brain", f"say: {session} token <t> which of {ids} does the new work belong to, "
                                                        f"or have it declared with its issue's resolves:<n>"))
-        return refusal.refuse(f"not declared: {session} already executes {len(held)} live cards carrying these anchors ({ids})",
+        return refusal.refuse(f"not declared: {session} already executes {len(held)} live cards for these anchors ({ids})",
                               hand_to=("the brain", f"say: {session} token <t> which of {ids} is my card for these anchors"))
     joined = held[0]["id"]
     if goal:
-        return refusal.refuse(f"not declared: {session} already executes {joined}, which {'carries these anchors' if wanted else 'is the only live card it executes'}; "
+        return refusal.refuse(f"not declared: {session} already executes {joined}, which {'is its card for these anchors' if wanted else 'is the only live card it executes'}; "
                               f"a goal joins a card by an edge: edge.py {session} link {joined} part-of {goal['id']} <why>",
                               send="/2mw2lt:connect")
+    if not wanted <= _standing_anchors(held[0], repo):
+        return _anchor_own_card(held[0], session, anchors, repo, token, triage)
     if triage:
         write(f"/cards/{joined}/triage",
               {**triage, "why": f"declared by {session} on the card it already executes"},
               _own_key("declare.triage", joined, triage["criticality"], triage["size"]), SESSION_CARRIER, token)
     return f"bound: {joined}, the card {session} already executes for these anchors" if wanted else \
         f"bound: {joined}, the only live card {session} executes"
+
+
+def _standing_anchors(card: dict, repo: str) -> set:
+    """The card's standing anchors in `repo`, each as (verb, n)."""
+    return {(a.get("verb"), a.get("n")) for a in card.get("anchors") or []
+            if not a.get("ended") and str(a.get("repo")).lower() == repo.lower()}
 
 
 def _anchor_own_card(card: dict, session: str, anchors: dict, repo: str, token: str,
@@ -763,8 +773,7 @@ def _anchor_own_card(card: dict, session: str, anchors: dict, repo: str, token: 
     send from the record."""
     joined = card["id"]
     wanted = {(verb, n) for verb, ns in anchors.items() for n in ns}
-    have = {(a.get("verb"), a.get("n")) for a in card.get("anchors") or []
-            if not a.get("ended") and str(a.get("repo")).lower() == repo.lower()}
+    have = _standing_anchors(card, repo)
     added = sorted(wanted - have)
     for verb, n in added:
         write(f"/cards/{joined}/associations", {"anchor": {"verb": verb, "repo": repo, "n": n}},

@@ -76,6 +76,16 @@
       "turn_end_gate": true,
       "model_efforts": [
         {
+          "model": "swe-2-1",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        {
           "model": "fusion",
           "efforts": [
             "low",

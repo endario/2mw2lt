@@ -6328,7 +6328,7 @@ SessionList = typing.TypedDict("SessionList", {
 # Harness is the provider its incarnation runs. Account is the one its machine reports its
 # directory spends, else the one its bind named, nil when neither names one. Status is
 # what the session last said, at the epoch it said it, or nil when it has said nothing. Observed is
-# what its machine saw this epoch run, newest first. Cards are the live cards it executes at this
+# what its machine saw this epoch run, newest first; a session that is no longer enrolled lists only the newest, the one every surface of the desk reads (#10894). Cards are the live cards it executes at this
 # epoch, by wire id, first engaged first; CardsDone are those of them it said done for, its part
 # finished (doc 199 §3). CardsBlockedOn are those cards' blocked-on lines (doc 202 D4,
 # work.BlockedOn), aligned with Cards, so one session's row says what it waits on — the gate its
@@ -6338,6 +6338,12 @@ SessionList = typing.TypedDict("SessionList", {
 # that hold, or nil while one does. Vitals is this epoch's latest reading, nil before its first.
 # MachineState is the liveness of the session's own machine login, apart from its presence: a
 # harness that still holds its stream on a machine whose agent is gone can be spoken to, not woken.
+#
+# Lean says the row is a history row: one the `gone=1` list carries for a session no longer enrolled.
+# It is listed with what the history draws of it — its name, machine, harness, status, reading, newest
+# observed model and rarity — and not with what only its card reads: Account, Origin, Checkpoint and
+# Gate are nil on it whatever the session holds. GET sessions/{session} reads the session's full row,
+# which is never lean (#10910).
 ListedSession = typing.TypedDict("ListedSession", {
     "name": "str",
     "epoch": "int",
@@ -6357,7 +6363,7 @@ ListedSession = typing.TypedDict("ListedSession", {
     "cards_blocked_on": "list[BlockedOnDTO] | None",
     "account": "ListedAccount | None",
     "vitals": "SessionVitals | None",
-    "origin": "SessionOrigin",
+    "origin": "SessionOrigin | None",
     "standing": "SessionStanding | None",
     "checkpoint": "ListedCheckpoint | None",
     "gate": "ListedGate | None",
@@ -6365,6 +6371,7 @@ ListedSession = typing.TypedDict("ListedSession", {
     "stewards": "list[ListedSteward] | None",
     "capabilities": "list[str] | None",
     "mine": "bool",
+    "lean": "bool",
 })
 
 # ListedSteward is one goal a session stewards: its id and its current title.
@@ -8841,6 +8848,7 @@ ROUTES = frozenset({
     "POST /w/{workspace}/api/v1/seat/release",
     "GET /w/{workspace}/api/v1/sessions",
     "POST /w/{workspace}/api/v1/sessions",
+    "GET /w/{workspace}/api/v1/sessions/{session}",
     "GET /w/{workspace}/api/v1/sessions/{session}/acts/{act}",
     "GET /w/{workspace}/api/v1/sessions/{session}/acts/{act}/attachments/{n}",
     "POST /w/{workspace}/api/v1/sessions/{session}/answers",
