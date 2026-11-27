@@ -233,7 +233,11 @@ hear first — see [Read the blocked-on line, the ledger and escalations](#read-
   `trigger: manual-burn`, vendor/account, start, effective end, current sessions and launches placed in
   the last hour. An offer on a model ending within a day, with nothing run on it since it began, uses
   the kind too, once per account/model/end, with `reason: offer-ending`, the model, its end and since
-  when it went unused. Place ready, authorized work by vendor before the end, in proportion to capacity
+  when it went unused. An account whose metered windows are exhausted while it still serves free models
+  with places left uses the kind too, once per account/exhaustion, with `reason: free-idle`, its free
+  models, idle places and the exhaustion's end: free work runs at full use (#10948), so fill those places.
+  A blue or underspent notice names the account's idle free models too, as `free_models`.
+  Place ready, authorized work by vendor before the end, in proportion to capacity
   that would otherwise be wasted; say when nothing fits. No synthetic load, and neither blue nor a
   manual burn overrides hold, authorization, serving or eligibility guards.
 - **`account-reset`**, a signal from `account <subject>`: an account's spent window rolled over and
