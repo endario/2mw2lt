@@ -260,6 +260,11 @@ hear first — see [Read the blocked-on line, the ledger and escalations](#read-
   (`signals.machine_disk_low.*`), told again as the free share halves past that, and each day it
   stays low. It names what is free of what. Have it freed before builds there fail: a build cache
   is the usual cause.
+- **`machine-checkout-git-accumulating`**, a signal: a served checkout has no effective git
+  maintenance and its object database stands past the housekeeping bounds (`signals.machine_checkout_git_accumulating.*`).
+  It names the loose objects and bytes, packs, the maintenance booleans and when they were read.
+  Compact the checkout and restore either git-owned maintenance or the owner-managed compaction
+  that pinned it off; raise its thresholds when the shape is intentional.
 - **`machine-overloaded`**, a signal: a machine running our sessions or gate runs has stayed
   congested for a sustained spell (`signals.machine_overloaded.*`, 15 minutes by default), once per
   spell. Congested is judged apart from placement's `overload_cpu`: by the kernel's five-minute CPU
