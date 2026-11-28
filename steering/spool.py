@@ -41,6 +41,10 @@ def write_atomic(path: Path, data: str | bytes, mode: int | None = None, *, over
     atomic_file.write_atomic(path, data, mode, overwrite=overwrite, observe=_blocking)
 
 
+def write_atomic_at(dir_fd: int, name: str, data: str | bytes, mode: int | None = None) -> None:
+    atomic_file.write_atomic_at(dir_fd, name, data, mode)
+
+
 def ensure_dir(d: Path) -> None:
     """Create a directory durably: on first use its parent's entry for it is synced too."""
     if d.is_dir():

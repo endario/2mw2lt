@@ -4506,8 +4506,10 @@ LaunchRead = typing.TypedDict("LaunchRead", {
 # LaunchAttempt is one offer of a launch: the machine, by the name it reported or else its hardware,
 # how the offer stands, what its agent answered once it did and why it refused, and what it was
 # offered to start: the vendor and account it spends, the account's team number where it has one, and
-# the harness, model and effort, each null where it named none. Offered, Delivered and Settled are
-# when the offer was made, taken by its machine and answered or ended.
+# the harness, model and effort, each null where it named none. HarnessWhy is the placement's fixed
+# words for why a fallback did not start the vendor's own harness, never the machine's free census
+# text. Offered, Delivered and Settled are when the offer was made, taken by its machine and answered
+# or ended.
 LaunchAttempt = typing.TypedDict("LaunchAttempt", {
     "machine": "str",
     "state": "str",
@@ -4518,6 +4520,7 @@ LaunchAttempt = typing.TypedDict("LaunchAttempt", {
     "account_number": "int | None",
     "team_owner_label": "str | None",
     "harness": "str | None",
+    "harness_why": "str | None",
     "model": "str | None",
     "effort": "str | None",
     "offered": "str | None",

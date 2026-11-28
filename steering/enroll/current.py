@@ -125,6 +125,11 @@ def newer(release: str, mine: str) -> bool:
     a tell against an unreadable release states no version worth acting on."""
     def keyed(v: str) -> tuple[int, ...] | None:
         parts = v.split(".")
-        return tuple(int(p) for p in parts) if parts and all(p.isdigit() for p in parts) else None
+        if not parts or not all(p.isdigit() for p in parts):
+            return None
+        try:
+            return tuple(int(p) for p in parts)
+        except ValueError:
+            return None  # isdigit admits numerals int rejects, and Python caps long digit strings
     a, b = keyed(release), keyed(mine)
     return a is not None and b is not None and a > b

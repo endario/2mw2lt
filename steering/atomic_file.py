@@ -41,3 +41,25 @@ def write_atomic(path: Path, data: str | bytes, mode: int | None = None,
         tmp.unlink(missing_ok=True)
         raise
     fsync_dir(path.parent, observe=observe)
+
+def write_atomic_at(dir_fd: int, name: str, data: str | bytes, mode: int | None = None) -> None:
+    """The same durable whole-file publication relative to a directory the caller already holds
+    open, for stores whose parent must not be resolved again (#10857)."""
+    tmp = f".{name}.{os.getpid()}.{os.urandom(4).hex()}.tmp"
+    try:
+        fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                     0o666 if mode is None else mode, dir_fd=dir_fd)
+        with os.fdopen(fd, "wb") as f:
+            if mode is not None:
+                os.fchmod(f.fileno(), mode)
+            f.write(data.encode() if isinstance(data, str) else data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+    except BaseException:
+        try:
+            os.unlink(tmp, dir_fd=dir_fd)
+        except FileNotFoundError:
+            pass
+        raise
+    os.fsync(dir_fd)

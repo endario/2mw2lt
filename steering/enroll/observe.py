@@ -13,10 +13,12 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 import python_floor  # noqa: E402
 python_floor.hook(blocking=False)  # every admitted event runs it; on PreToolUse a 2 would block the call it only notes
 
+import contextlib
 import fcntl
 import hashlib
 import json
 import os
+import stat
 import subprocess
 import time
 import urllib.error
@@ -42,16 +44,109 @@ import current  # noqa: E402
 BUDGET = 4.0  # seconds, end to end
 
 
-def claude_version(ws: Path, deadline: float) -> str:
-    """`claude --version`, cached in the spool directory for a day; on a cache miss the lookup
-    gets what is left of the budget minus what admission needs, never more than one second."""
-    cache = spool.spool_dir(ws) / ".claude-version"
+def observe_cache_dir(ws: Path) -> Path:
+    """The observe hook's own cache directory: beside the spool, never in it, since a sandboxed
+    launch's cage is denied the spool (#10265) while the rest of the workspace's `.claude` stays
+    writable. The directory ignores itself, as `steering-pretool` does, so no wired workspace's
+    `git add` takes the hook's runtime state in. A symlinked `.claude` is refused rather than
+    followed, and every entry is a hint a writable session can shape, never authority."""
+    return ws / ".claude" / "steering-observe-cache"
+
+
+def observe_cache(ws: Path, name: str) -> Path:
+    return observe_cache_dir(ws) / name
+
+
+def _child_dir(parent: int, name: str, create: bool) -> int:
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     try:
-        if time.time() - cache.stat().st_mtime < 86400:
-            cached = cache.read_text().strip()
-            if supervision._version(cached) >= supervision.MIN_VERSION:
-                return cached  # anything else — empty, torn, below the floor — is a miss
-    except OSError:
+        return os.open(name, flags, dir_fd=parent)
+    except FileNotFoundError:
+        if not create:
+            raise
+    try:
+        os.mkdir(name, 0o700, dir_fd=parent)
+    except FileExistsError:
+        pass  # a real directory wins the race; a symlink is refused by the open below
+    return os.open(name, flags, dir_fd=parent)
+
+
+@contextlib.contextmanager
+def observe_cache_fd(ws: Path, create: bool = False):
+    """The cache directory held open as an fd after a no-follow walk. Operations relative to
+    it cannot be redirected by a caged writer replacing either directory afterwards."""
+    root = os.open(ws, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        claude = _child_dir(root, ".claude", create)
+        try:
+            cache = _child_dir(claude, "steering-observe-cache", create)
+        finally:
+            os.close(claude)
+    finally:
+        os.close(root)
+    try:
+        yield cache
+    finally:
+        os.close(cache)
+
+
+def open_cache_file_at(dfd: int, name: str, *, create: bool = False):
+    """A cache file as its own regular inode, never the target of a planted link. `O_NOFOLLOW`
+    decides at the open, so replacement afterwards cannot move this handle."""
+    flags = (os.O_RDWR if create else os.O_RDONLY) | os.O_NOFOLLOW | os.O_NONBLOCK
+    if create:
+        flags |= os.O_CREAT
+    fd = os.open(name, flags, 0o600, dir_fd=dfd)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+            raise OSError("the observe cache entry is not one regular file")
+        return os.fdopen(fd, "r+" if create else "r")
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def write_cache_atomic(dfd: int, name: str, data: str) -> None:
+    spool.write_atomic_at(dfd, name, data, mode=0o600)
+
+
+def read_cache_file_at(dfd: int, name: str) -> str:
+    with open_cache_file_at(dfd, name) as file:
+        return file.read()
+
+
+def read_cache_file(ws: Path, name: str) -> str:
+    with observe_cache_fd(ws) as dfd:
+        return read_cache_file_at(dfd, name)
+
+
+def ensure_cache_ignore(dfd: int) -> None:
+    try:
+        if read_cache_file_at(dfd, ".gitignore") == "*\n":
+            return
+    except (OSError, UnicodeError):
+        pass
+    write_cache_atomic(dfd, ".gitignore", "*\n")
+
+
+def write_cache(ws: Path, name: str, data: str) -> None:
+    with observe_cache_fd(ws, create=True) as dfd:
+        ensure_cache_ignore(dfd)
+        write_cache_atomic(dfd, name, data)
+
+
+def claude_version(ws: Path, deadline: float) -> str:
+    """`claude --version`, cached beside the spool for a day; on a cache miss the lookup
+    gets what is left of the budget minus what admission needs, never more than one second."""
+    try:
+        with observe_cache_fd(ws) as dfd, open_cache_file_at(dfd, ".claude-version") as file:
+            age = time.time() - os.fstat(file.fileno()).st_mtime
+            if 0 <= age < 86400:
+                cached = file.read().strip()
+                if supervision._version(cached) >= supervision.MIN_VERSION:
+                    return cached  # anything else — empty, torn, below the floor — is a miss
+    except (OSError, UnicodeError):
         pass
     v = os.environ.get("STEERING_CLAUDE_VERSION")
     if not v:
@@ -61,12 +156,10 @@ def claude_version(ws: Path, deadline: float) -> str:
         except (OSError, subprocess.TimeoutExpired, IndexError):
             return "0.0.0"  # below the floor, so the event is not admitted — and never cached
     try:  # published atomically: a hook killed mid-write must not leave a truncated cache behind
-        cache.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        spool.write_atomic(cache, v)
+        write_cache(ws, ".claude-version", v)
     except OSError:
         pass
     return v
-
 
 # The variable each non-Claude hook runtime this adapter admits states its version in, read
 # from the hook's own env rather than by running the CLI inside the hook's budget. The registry
@@ -314,21 +407,22 @@ def received_notice(ws: Path, o: dict, notice: str | None, now: float) -> str | 
     if not notice or o.get("event") not in ("UserPromptSubmit", "PostToolUse"):
         return None
     key = json.dumps([o.get("source"), o.get("session"), o.get("runtime_id")]).encode()
-    stamp = spool.spool_dir(ws) / (".notice-" + hashlib.sha256(key).hexdigest())
+    stamp = ".notice-" + hashlib.sha256(key).hexdigest()
     try:
-        stamp.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with stamp.open("a+") as file:
-            fcntl.flock(file, fcntl.LOCK_EX)
-            file.seek(0)
-            try:
-                previous = float(file.read())
-            except ValueError:
-                previous = None
-            if o["event"] != "UserPromptSubmit" and previous is not None and 0 <= now - previous < 300:
-                return None
-            file.seek(0)
-            file.truncate()
-            file.write(str(now))
+        with observe_cache_fd(ws, create=True) as dfd:
+            ensure_cache_ignore(dfd)
+            with open_cache_file_at(dfd, stamp, create=True) as file:
+                fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                file.seek(0)
+                try:
+                    previous = float(file.read())
+                except (ValueError, UnicodeError):
+                    previous = None
+                if o["event"] != "UserPromptSubmit" and previous is not None and 0 <= now - previous < 300:
+                    return None
+                file.seek(0)
+                file.truncate()
+                file.write(str(now))
     except OSError:
         pass  # The notice still reaches the session when its local window cannot be kept.
     return notice
@@ -393,16 +487,15 @@ def answer_in(r, unstated: str | None = "") -> tuple[str | None, str | None]:
 
 
 def keep_release(ws: Path, release: str | None) -> None:
-    """The spool's copy of the release the door last stated: written when an answer names one,
+    """The hook cache's copy of the release the door last stated: written when an answer names one,
     dropped when a readable answer names none, so a build that stamps no release leaves nothing
     stale behind to tell against (#7185). An answer that could not be read keeps what is there."""
     try:
-        cache = spool.spool_dir(ws) / ".release"
         if release:
-            cache.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            spool.write_atomic(cache, release)
+            write_cache(ws, ".release", release)
         elif release == "":
-            cache.unlink()
+            with observe_cache_fd(ws) as dfd:
+                os.unlink(".release", dir_fd=dfd)
     except OSError:
         pass  # a stale cached release names a release still ahead of this pack
 
@@ -422,8 +515,8 @@ def behind_notice(ws: Path, o: dict, notice: str | None) -> str | None:
     if not fix or not mine:
         return notice
     try:
-        release = (spool.spool_dir(ws) / ".release").read_text().strip()
-    except OSError:
+        release = read_cache_file(ws, ".release").strip()
+    except (OSError, UnicodeError):
         return notice
     if not current.newer(release, mine):
         return notice
@@ -444,17 +537,16 @@ def behind_notice(ws: Path, o: dict, notice: str | None) -> str | None:
         row = launched.get(name)
         if isinstance(row, dict) and name != row.get("tmux"):
             return notice
-    mark = spool.spool_dir(ws) / (".plugin-told-" + hashlib.sha256(
-        json.dumps([o.get("source"), psession, o.get("runtime_id")]).encode()).hexdigest())
+    mark = ".plugin-told-" + hashlib.sha256(
+        json.dumps([o.get("source"), psession, o.get("runtime_id")]).encode()).hexdigest()
     try:
-        told = mark.read_text().strip()
-    except OSError:
+        told = read_cache_file(ws, mark).strip()
+    except (OSError, UnicodeError):
         told = None  # no mark yet: this is the first tell at this version
     if told == mine:
         return notice
     try:
-        mark.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        spool.write_atomic(mark, mine)
+        write_cache(ws, mark, mine)
     except OSError:
         pass  # a missed mark costs a repeat, never a silence
     line = (f"This session's plugin is behind: it runs {mine} while the release is {release}. "
