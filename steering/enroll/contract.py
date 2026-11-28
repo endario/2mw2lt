@@ -418,9 +418,11 @@ UsageLimit = typing.TypedDict("UsageLimit", {
     "group": "typing.NotRequired[str | None]",
 })
 
-# UsageLinear is a window's linear projection at its reset, read where it is behind its pace (#10605).
+# UsageLinear is a window's linear projection at its reset, read where it is behind its pace (#10605)
+# or has no projection of its own (#11014).
 UsageLinear = typing.TypedDict("UsageLinear", {
     "at_reset": "float",
+    "behind": "typing.NotRequired[bool]",
 })
 
 # UsageWaste is whether the remaining quota can burn at the best directly observed single-account
