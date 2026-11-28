@@ -5022,7 +5022,8 @@ MachineReportAnswer = typing.TypedDict("MachineReportAnswer", {
 # in GiB. Live and Held are the image records the agent holds, said whether or not sandboxing is
 # enabled, since turning it off leaves the images that exist in place; Held names each image kept
 # until it is disposed of, at most SandboxHeldMax of them, and HeldTotal counts every image held,
-# named or not; a census that leaves it out holds no more than it names. ReadAt is when the agent
+# named or not; a census that leaves it out holds no more than it names. HeldBytes is the disk every
+# kept image on the machine takes, of whichever workspace, since the disk is shared. ReadAt is when the agent
 # read those records, apart from the worker census, and orders one report against another. An
 # agent says the field only when it read every record, so leaving it out keeps what was said. A
 # machine-local fact, as KitTool is: it keys nothing and composes with nothing across machines.
@@ -5032,6 +5033,7 @@ MachineSandbox = typing.TypedDict("MachineSandbox", {
     "live": "typing.NotRequired[int]",
     "held": "typing.NotRequired[list[SandboxHeld]]",
     "held_total": "typing.NotRequired[int]",
+    "held_bytes": "typing.NotRequired[int]",
     "read_at": "str",
 })
 
